@@ -6,7 +6,8 @@
 
 - 暴露健康检查和运行状态。
 - 查询 target markets、eligible markets、orderbook 快照、持仓、open orders 和组合分配。
-- 触发受控人工操作，例如执行 reconcile 和通用 order `replace`。
+- 查询体育扫尾候选和直播状态快照。
+- 触发受控人工操作，例如执行 reconcile、通用 order `replace` 和候选人工确认。
 - 做 HTTP 参数校验和响应序列化；默认仅在受控环境暴露，不提供应用层鉴权。
 
 ## 允许依赖
@@ -23,6 +24,7 @@
 - 不直接写 Market Registry、Orderbook Cache、Position State。
 - 不在 HTTP handler 中执行慢数据库全表扫描或报表生成。
 - 不绕过 Risk Manager 暴露 FAK BUY 入口。
+- 候选人工确认必须重新构建入场计划并经过 `TradingService -> RiskManager -> OrderExecutor`。
 - 不与 Order Executor 共用交易主链路线程池。
 
 ## 接口调用链

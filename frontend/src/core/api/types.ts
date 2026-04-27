@@ -248,6 +248,68 @@ export interface FillRecord {
   confirmed_at: string | null
 }
 
+export interface CandidateRecord {
+  candidate_id?: string | null
+  trace_id?: string | null
+  condition_id?: string | null
+  market_slug?: string | null
+  event_slug?: string | null
+  event_title?: string | null
+  token_id: string
+  outcome?: string | null
+  ready_to_trade?: boolean
+  accepted?: boolean
+  action?: string | null
+  execution_permission?: string | null
+  reason?: string | null
+  market_type?: string | null
+  side?: string | null
+  line?: string | null
+  best_ask?: string | null
+  total_score?: number | string | null
+  seconds_remaining?: number | string | null
+  game_status?: string | null
+  confirmable: boolean
+  allocation?: JsonValue
+  intent?: JsonValue
+  payload?: JsonValue
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface SportsLiveStateRecord {
+  condition_id?: string | null
+  market_slug?: string | null
+  event_slug?: string | null
+  metadata?: JsonObject
+  source?: string | null
+  updated_at?: string | null
+}
+
+export interface ConfirmCandidateRequest {
+  condition_id?: string
+  market_slug?: string
+  token_id: string
+  operator?: string
+  note?: string
+  trace_id?: string
+}
+
+export interface ConfirmCandidateResult {
+  trace_id?: string | null
+  status: string
+  reason?: string | null
+  condition_id?: string | null
+  market_slug?: string | null
+  token_id?: string | null
+  order_id?: string | null
+  trade_id?: string | null
+  candidate?: CandidateRecord | null
+  review?: JsonValue
+  payload?: JsonValue
+  raw_response?: JsonValue
+}
+
 export interface AuditEventRecord {
   trace_id: string | null
   event_id: string | null

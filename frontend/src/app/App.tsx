@@ -8,6 +8,9 @@ const DashboardPage = lazy(() =>
 const MarketsPage = lazy(() =>
   import('../features/markets/MarketsPage').then((module) => ({ default: module.MarketsPage })),
 )
+const CandidatesPage = lazy(() =>
+  import('../features/candidates/CandidatesPage').then((module) => ({ default: module.CandidatesPage })),
+)
 const OrdersPage = lazy(() =>
   import('../features/orders/OrdersPage').then((module) => ({ default: module.OrdersPage })),
 )
@@ -28,6 +31,7 @@ export const App = () => {
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/markets" element={<MarketsPage />} />
+          <Route path="/candidates" element={<CandidatesPage />} />
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/positions" element={<PositionsPage />} />
           <Route path="/audit" element={<AuditPage />} />

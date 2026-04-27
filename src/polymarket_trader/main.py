@@ -53,6 +53,7 @@ from polymarket_trader.runtime import (
     trading_gate_reason,
 )
 from polymarket_trader.runtime.account_state import AccountStateStore
+from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.discovery_runner import (
     FullMarketDiscoveryState,
     MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS,
@@ -96,6 +97,7 @@ class RuntimeComponents:
     persistence_repository: DatabasePersistenceRepository
     persistence_worker: PersistenceWorker
     account_state_store: AccountStateStore
+    entry_metadata_store: EntryMetadataStore
     order_executor: PolymarketOrderExecutor
     market_ws_worker: MarketWsWorker
     user_ws_worker: UserWsWorker
@@ -154,6 +156,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         persistence_capacity=settings.persistence_event_queue_max_size,
     )
     registry = MarketRegistry()
+    entry_metadata_store = EntryMetadataStore()
     outbox = LocalOutbox(max_size=settings.persistence_event_queue_max_size)
     event_bus.bind_persistence_sink(build_domain_event_outbox_sink(outbox))
     db_session_factory = build_session_factory(settings.database_url)
@@ -228,6 +231,17 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         event_bus=event_bus,
         account_state_store=account_state_store,
     )
+
+    def entry_metadata_for_event(event, _snapshot):
+        market = None
+        if event.condition_id is not None:
+            market = registry.get_by_condition_id(event.condition_id)
+        if market is None and event.token_id is not None:
+            market = registry.get_by_token_id(event.token_id)
+        if market is None and event.market_slug is not None:
+            market = registry.get_by_slug(event.market_slug)
+        return entry_metadata_store.metadata_for_event(event, market=market)
+
     trading_decision_worker = TradingDecisionWorker(
         event_bus=event_bus,
         trading_decision_service=trading_decision_service,
@@ -239,6 +253,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         max_total_usdc=settings.max_total_usdc,
         max_open_orders=settings.max_open_orders,
         order_retry_limit=settings.order_retry_limit,
+        entry_metadata_provider=entry_metadata_for_event,
     )
     reconcile_service = ReconcileService(extension_hooks=extension.hooks)
     reconcile_worker = ReconcileWorker(
@@ -294,6 +309,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         persistence_repository=persistence_repository,
         persistence_worker=persistence_worker,
         account_state_store=account_state_store,
+        entry_metadata_store=entry_metadata_store,
         order_executor=order_executor,
         market_ws_worker=market_ws_worker,
         user_ws_worker=user_ws_worker,

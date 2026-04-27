@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from decimal import Decimal
+from typing import Mapping
 
 from polymarket_trader.domain.allocation import (
     Allocation,
@@ -452,6 +453,7 @@ def _sports_tail_entry_gate(
         now=context.now,
     )
     metadata = _sports_tail_evaluation_metadata(evaluation)
+    metadata.update(_sports_tail_confirmation_metadata(context.metadata))
 
     if not evaluation.accepted:
         return (
@@ -459,6 +461,8 @@ def _sports_tail_entry_gate(
             market_snapshot.best_ask or config.entry_no_price_max,
             metadata,
         )
+    if evaluation.action == TailAction.MANUAL_CONFIRM and _sports_tail_manual_confirmed(context.metadata):
+        return None, _sports_tail_price_cap(config, context.market, token_id), metadata
     if evaluation.action != TailAction.AUTO_EXECUTE:
         return (
             ExtensionDecision.skip(
@@ -506,8 +510,11 @@ def _sports_tail_allocation_gate(
         now=context.now,
     )
     metadata = _sports_tail_evaluation_metadata(evaluation)
+    metadata.update(_sports_tail_confirmation_metadata(context.metadata))
     if not evaluation.accepted:
         return evaluation.reason, metadata
+    if evaluation.action == TailAction.MANUAL_CONFIRM and _sports_tail_manual_confirmed(context.metadata):
+        return "", metadata
     if evaluation.action != TailAction.AUTO_EXECUTE:
         return f"sports_tail_{evaluation.action.value}", metadata
     return "", metadata
@@ -522,6 +529,20 @@ def _sports_tail_evaluation_metadata(evaluation: SportsTailEvaluation) -> dict[s
     if evaluation.execution_permission is not None:
         metadata["sports_execution_permission"] = evaluation.execution_permission.value
     return metadata
+
+
+def _sports_tail_manual_confirmed(metadata: Mapping[str, object]) -> bool:
+    return bool(metadata.get("sports_tail_manual_confirmed"))
+
+
+def _sports_tail_confirmation_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
+    confirmed = _sports_tail_manual_confirmed(metadata)
+    result: dict[str, object] = {"sports_tail_manual_confirmed": confirmed}
+    for key in ("sports_tail_confirmed_by", "sports_tail_confirm_reason"):
+        value = metadata.get(key)
+        if value:
+            result[key] = value
+    return result
 
 
 def _is_focus_snapshot(

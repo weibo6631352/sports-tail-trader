@@ -23,6 +23,10 @@
 | `GET` | `/workers` | worker 健康与调度状态 |
 | `GET` | `/metrics` | 当前指标快照 |
 | `GET` | `/audit-events` | 审计事件分页查询 |
+| `GET` | `/candidates` | 体育扫尾候选分页查询 |
+| `GET` | `/candidates/live-states` | 体育直播状态快照分页查询 |
+| `POST` | `/candidates/live-states` | 写入体育直播状态快照 |
+| `POST` | `/candidates/confirm` | 人工确认体育扫尾候选 |
 | `GET` | `/allocations` | 资金分配分页查询 |
 | `GET` | `/markets` | 市场分页查询 |
 | `GET` | `/markets/detail` | 单 market 详情 |
@@ -42,6 +46,11 @@
 - 直接下 BUY 单
 - 直接撤任意单
 - 直接暂停/恢复 market
+
+说明：
+
+- `/candidates/confirm` 不是直连交易客户端入口；它会重新构建入场计划，并继续经过 `TradingService -> RiskManager -> OrderExecutor`。
+- `/candidates/live-states` 只写入入场 metadata 所需的直播事实，不判断套利、不改变策略阈值。
 
 ## 2. 通用返回
 
@@ -287,7 +296,157 @@
 - 上游 Polymarket 暂时不可用时返回 `502 market_orderbook_upstream_unavailable`。
 - 若运行时没有可用 `clob_client`，返回 `503 clob_client_unavailable`。
 
-### 3.7 `GET /markets/midpoint`
+### 3.7 `GET /candidates`
+
+用途：
+
+- 查询当前体育扫尾候选。
+- 用于管理台展示候选原因、执行权限和人工确认状态。
+
+查询参数：
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `limit` | `int` | `100` | `1..500` |
+| `offset` | `int` | `0` | `>=0` |
+| `condition_id` | `str` | `null` | 按 market 条件过滤 |
+| `token_id` | `str` | `null` | 按 token 过滤 |
+| `market_slug` | `str` | `null` | 按 market slug 过滤 |
+
+单项关键字段：
+
+- `candidate_id`
+- `trace_id`
+- `condition_id`
+- `market_slug`
+- `event_slug`
+- `token_id`
+- `outcome`
+- `ready_to_trade`
+- `accepted`
+- `confirmable`
+- `reason`
+- `action`
+- `execution_permission`
+- `market_type`
+- `side`
+- `best_ask`
+- `seconds_remaining`
+- `payload`
+
+说明：
+
+- 候选来自运行时 registry、orderbook 热态和 `EntryMetadataStore`，不查外部直播 API。
+- 服务端只返回策略已识别的非 reject 体育候选；前端不能自行复写确认条件。
+- `confirmable` 是人工确认按钮的唯一事实来源。
+
+### 3.8 `GET /candidates/live-states`
+
+用途：
+
+- 查询已写入运行时的直播状态 metadata。
+- 用于确认策略当前读取到的比分、阶段、剩余时间和更新时间。
+
+查询参数：
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `limit` | `int` | `100` | `1..500` |
+| `offset` | `int` | `0` | `>=0` |
+
+单项结构：
+
+```json
+{
+  "condition_id": "condition-sample",
+  "market_slug": null,
+  "event_slug": null,
+  "metadata": {
+    "sports_tail_game": {
+      "league": "NBA",
+      "home_score": 102,
+      "away_score": 94,
+      "period": "Q4",
+      "seconds_remaining": 90,
+      "status": "live",
+      "observed_at": "2026-04-27T00:00:00+00:00"
+    }
+  },
+  "source": "manual",
+  "updated_at": "2026-04-27T00:00:00+00:00"
+}
+```
+
+### 3.9 `POST /candidates/live-states`
+
+用途：
+
+- 写入一条体育直播状态 metadata。
+- 供外部直播状态适配器或人工校验工具更新运行时事实。
+
+请求体：
+
+```json
+{
+  "condition_id": "condition-sample",
+  "market_slug": null,
+  "event_slug": null,
+  "source": "manual",
+  "sports_tail_game": {
+    "league": "NBA",
+    "home_name": "NYK",
+    "away_name": "BOS",
+    "home_score": 102,
+    "away_score": 94,
+    "period": "Q4",
+    "seconds_remaining": 90,
+    "status": "live",
+    "observed_at": "2026-04-27T00:00:00+00:00"
+  }
+}
+```
+
+约束：
+
+- `condition_id`、`market_slug`、`event_slug` 三者至少给一个。
+- API 只负责写入 store，不触发下单。
+
+### 3.10 `POST /candidates/confirm`
+
+用途：
+
+- 人工确认一个 `manual_confirm` 候选。
+- 确认时重新读取 orderbook 和账户快照，重新构建入场计划。
+- 通过 `TradingService` 执行风控和订单提交。
+
+请求体：
+
+```json
+{
+  "condition_id": "condition-sample",
+  "market_slug": null,
+  "token_id": "token-sample",
+  "operator": "manual",
+  "note": "score_verified",
+  "trace_id": "optional-trace-id"
+}
+```
+
+响应重点：
+
+- `status`
+- `trace_id`
+- `reason`
+- `candidate`
+- `review`
+
+说明：
+
+- 如果候选仍未满足策略、价格、流动性或风控条件，返回 `failed` 和具体原因。
+- 如果订单执行器返回 `failed` 或 `rejected`，响应状态为 `failed`。
+- `no_fill`、`live`、`partial_fill` 和 `full_fill` 等非拒绝结果由 `review.order_result.status` 表达。
+
+### 3.11 `GET /markets/midpoint`
 
 用途：
 
@@ -324,7 +483,7 @@
 - 上游 Polymarket 暂时不可用时返回 `502 market_midpoint_upstream_unavailable`。
 - 若运行时没有可用 `clob_client`，返回 `503 clob_client_unavailable`。
 
-### 3.8 `GET /markets/prices-history`
+### 3.12 `GET /markets/prices-history`
 
 用途：
 
@@ -359,7 +518,7 @@
 - 上游 Polymarket 暂时不可用时返回 `502 market_prices_history_upstream_unavailable`。
 - 若运行时没有可用 `clob_client`，返回 `503 clob_client_unavailable`。
 
-### 3.9 `GET /orders`
+### 3.13 `GET /orders`
 
 用途：
 
@@ -406,7 +565,7 @@
 - `open_only=false` 且存在 DB session factory 时，走仓储快照查询。
 - `open_only=false` 但运行时没有 DB session factory 时，仍然回退运行态 open orders。
 
-### 3.10 `GET /fills`
+### 3.14 `GET /fills`
 
 用途：
 
@@ -445,7 +604,7 @@
 - 有 DB session factory 时读仓储快照。
 - 没有 DB session factory 时回退运行态 fills。
 
-### 3.11 `GET /positions`
+### 3.15 `GET /positions`
 
 用途：
 
@@ -477,7 +636,7 @@
 - `confirmation_status`
 - `updated_at`
 
-### 3.12 `GET /portfolio`
+### 3.16 `GET /portfolio`
 
 用途：
 
@@ -503,7 +662,7 @@
 - `available_usdc` 直接等于 `balance_usdc`。
 - 若仓储可用，会补 `recent_allocations`；否则返回空数组。
 
-### 3.13 `GET /audit-events`
+### 3.17 `GET /audit-events`
 
 用途：
 
@@ -545,7 +704,7 @@
 
 - `payload` 为脱敏后的审计载荷，可包含入场计划 metadata、候选原因、执行权限、风控结果和事件输入等复盘信息。
 
-### 3.14 `GET /allocations`
+### 3.18 `GET /allocations`
 
 用途：
 
@@ -581,7 +740,7 @@
 - 有 DB session factory 时返回已落库分配快照。
 - 没有 DB session factory 时返回空分页结果。
 
-### 3.15 `GET /workers`
+### 3.19 `GET /workers`
 
 用途：
 
@@ -595,7 +754,7 @@
 - `scheduler`
 - `workers`
 
-### 3.16 `GET /metrics`
+### 3.20 `GET /metrics`
 
 用途：
 
@@ -608,7 +767,7 @@
 - `queue_depths`
 - `metrics`
 
-### 3.17 `GET /outbox/pending`
+### 3.21 `GET /outbox/pending`
 
 用途：
 

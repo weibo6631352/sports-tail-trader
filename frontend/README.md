@@ -7,7 +7,7 @@
 - `src/app/`：应用壳体、provider、路由。
 - `src/core/api/`：HTTP client、DTO、资源访问函数。
 - `src/shared/`：布局、通用组件、格式化工具。
-- `src/features/`：总览、市场、订单、持仓、审计、操作。
+- `src/features/`：总览、市场、候选、订单、持仓、审计、操作。
 - `src/extensions/`：扩展展示注册表和具体扩展展示实现。
 
 约束：
@@ -15,6 +15,7 @@
 - 通用页面不能直接依赖某个具体业务扩展目录。
 - 扩展相关展示必须通过 `src/extensions/registry.ts` 挂接。
 - 前端不直接连接 Polymarket，只访问后端 Admin API。
+- 人工确认类操作只调用后端受控 API，前端不复写策略确认条件。
 
 ## 开发命令
 

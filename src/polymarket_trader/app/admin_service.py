@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Callable, Literal, Sequence, cast
+from typing import Any, Callable, Literal, Mapping, Sequence, cast
 from uuid import uuid4
 
 from polymarket_trader.app.admin_operations import (
@@ -10,11 +10,23 @@ from polymarket_trader.app.admin_operations import (
 from polymarket_trader.app.admin_order_control import AdminOrderController
 from polymarket_trader.app.admin_runtime_view import AdminRuntimeView
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable, page_payload
-from polymarket_trader.app.order_projection import normalize_order_id
+from polymarket_trader.app.order_projection import AccountStateProjector, normalize_order_id
+from polymarket_trader.app.trading_decision_service import TradingDecisionService
 from polymarket_trader.app.trading_service import TradingService
+from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.order import Order
+from polymarket_trader.domain.order import Order, OrderResultStatus
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
+from polymarket_trader.workers.trading_decision_event_payloads import (
+    TRADING_DECISION_WORKER_ORIGIN,
+    serialize_allocation,
+    serialize_allocation_plan,
+    serialize_intent,
+    serialize_plan_metadata,
+    serialize_review,
+    snapshot_allowance,
+    snapshot_balance,
+)
 from polymarket_trader.infra.db import (
     AllocationRepository,
     AuditEventRepository,
@@ -597,6 +609,195 @@ class AdminService:
             trace_id=trace_id,
         )
 
+    async def upsert_sports_live_state(
+        self,
+        *,
+        sports_tail_game: Mapping[str, Any],
+        condition_id: str | None = None,
+        market_slug: str | None = None,
+        event_slug: str | None = None,
+        source: str = "manual",
+    ) -> dict[str, Any]:
+        """写入体育直播状态 metadata，不触发交易判断。"""
+
+        store = self._entry_metadata_store()
+        if store is None:
+            return {"status": "failed", "reason": "entry_metadata_store_unavailable"}
+        record = store.upsert(
+            condition_id=condition_id,
+            market_slug=market_slug,
+            event_slug=event_slug,
+            source=source,
+            metadata={"sports_tail_game": dict(sports_tail_game)},
+        )
+        return {"status": "ok", "record": record.as_payload()}
+
+    async def list_sports_live_states(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """分页返回当前运行时保存的体育直播状态 metadata。"""
+
+        store = self._entry_metadata_store()
+        records = () if store is None else store.records()
+        page = self._slice_sequence(records, limit=limit, offset=offset)
+        return page_payload(page, serializer=lambda record: record.as_payload())
+
+    async def list_sports_tail_candidates(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        condition_id: str | None = None,
+        token_id: str | None = None,
+        market_slug: str | None = None,
+    ) -> dict[str, Any]:
+        """从热态 market、orderbook 与直播 metadata 投影体育扫尾候选。"""
+
+        candidates: list[dict[str, Any]] = []
+        account = self._account_snapshot()
+        for market in self._registry_snapshot().markets:
+            if condition_id is not None and market.condition_id != condition_id:
+                continue
+            if market_slug is not None and market.market_slug != market_slug:
+                continue
+            for outcome in market.outcomes:
+                if token_id is not None and outcome.token_id != token_id:
+                    continue
+                orderbook = self._market_ws_snapshot(outcome.token_id)
+                if orderbook is None:
+                    continue
+                plan = self._build_entry_plan_for_admin(
+                    market=market,
+                    token_id=outcome.token_id,
+                    orderbook=orderbook,
+                    account=account,
+                )
+                metadata = dict(plan.metadata or {})
+                if "sports_tail_reason" not in metadata:
+                    continue
+                if metadata.get("sports_tail_action") == "reject":
+                    continue
+                candidates.append(self._candidate_payload(market, outcome.token_id, plan))
+        page = self._slice_sequence(candidates, limit=limit, offset=offset)
+        return page_payload(page, serializer=lambda item: item)
+
+    async def confirm_sports_tail_candidate(
+        self,
+        *,
+        condition_id: str | None = None,
+        token_id: str,
+        market_slug: str | None = None,
+        operator: str = "manual",
+        note: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """人工确认体育扫尾候选，并经交易服务和风控提交。"""
+
+        trace_id = trace_id or uuid4().hex
+        market = self._resolve_market(
+            condition_id=condition_id,
+            market_slug=market_slug,
+            token_id=token_id,
+        )
+        if market is None:
+            return {"status": "failed", "trace_id": trace_id, "reason": "market_not_found"}
+        if token_id not in market.token_ids:
+            return {
+                "status": "failed",
+                "trace_id": trace_id,
+                "reason": "token_not_found",
+                "market": self._serializer().market(market),
+            }
+        orderbook = self._market_ws_snapshot(token_id)
+        if orderbook is None:
+            return {
+                "status": "failed",
+                "trace_id": trace_id,
+                "reason": "orderbook_unavailable",
+                "market": self._serializer().market(market),
+            }
+
+        account = self._account_snapshot()
+        metadata = self._entry_metadata_for_market(market)
+        candidate_plan = self._build_entry_plan_for_admin(
+            market=market,
+            token_id=token_id,
+            orderbook=orderbook,
+            account=account,
+            trace_id=trace_id,
+            metadata=metadata,
+        )
+        candidate = self._candidate_payload(market, token_id, candidate_plan)
+        if not candidate["confirmable"]:
+            return {
+                "status": "failed",
+                "trace_id": trace_id,
+                "reason": "candidate_not_confirmable",
+                "candidate": candidate,
+            }
+
+        metadata.update(
+            {
+                "sports_tail_manual_confirmed": True,
+                "sports_tail_confirmed_by": operator,
+                "sports_tail_confirm_reason": note or "manual_confirm",
+            }
+        )
+        plan = self._build_entry_plan_for_admin(
+            market=market,
+            token_id=token_id,
+            orderbook=orderbook,
+            account=account,
+            trace_id=trace_id,
+            metadata=metadata,
+        )
+        if not plan.ready_to_trade or plan.intent is None:
+            return {
+                "status": "failed",
+                "trace_id": trace_id,
+                "reason": plan.reason or "entry_plan_not_ready",
+                "candidate": self._candidate_payload(market, token_id, plan),
+            }
+
+        review = await self._trading_service().review_intent(
+            plan.intent,
+            market=market,
+            orderbook=orderbook,
+            position=account.get_position(market.condition_id, token_id),
+            open_orders=account.open_orders_for_market(market.condition_id, token_id),
+            allocation_plan=plan.allocation_plan,
+            classification_passed=True,
+            balance_usdc=snapshot_balance(account),
+            allowance_usdc=snapshot_allowance(account),
+            max_order_usdc=self._settings_value("max_order_usdc"),
+            max_market_usdc=self._settings_value("max_market_usdc"),
+            max_total_usdc=self._settings_value("max_total_usdc"),
+            max_open_orders=self._settings_value("max_open_orders"),
+            order_retry_limit=self._settings_value("order_retry_limit"),
+            operation="admin_confirm_entry",
+        )
+        self._project_manual_entry_result(review, snapshot=account)
+        await self._publish_candidate_confirmation_review(market=market, plan=plan, review=review)
+        order_result = review.order_result
+        failed = (
+            order_result is None
+            or order_result.status in {OrderResultStatus.FAILED, OrderResultStatus.REJECTED}
+        )
+        return {
+            "status": "failed" if failed else "ok",
+            "trace_id": trace_id,
+            "reason": (
+                review.risk_decision.reason
+                if review.risk_decision is not None and not review.risk_decision.passed
+                else (order_result.reason if order_result is not None else "")
+            ),
+            "candidate": self._candidate_payload(market, token_id, plan),
+            "review": self._serializer().review(review),
+        }
+
     def _serializer(self) -> AdminSerializer:
         return AdminSerializer(
             account_snapshot_provider=self._account_snapshot,
@@ -615,6 +816,126 @@ class AdminService:
             resolve_market=self._resolve_market,
             trading_service=self._trading_service,
             find_open_order=self._find_open_order,
+        )
+
+    def _build_entry_plan_for_admin(
+        self,
+        *,
+        market: Market,
+        token_id: str,
+        orderbook: OrderbookSnapshot,
+        account: AccountSnapshot,
+        trace_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ):
+        settings = getattr(self.runtime, "settings", None)
+        return self._trading_decision_service().build_entry_plan(
+            market=market,
+            orderbook=orderbook,
+            # 候选投影和人工确认属于受控操作入口，不使用自动入场开关截断候选生成；
+            # 仓位、挂单、余额仍显式传入，并在确认提交前继续经过 RiskManager。
+            account_snapshot=None,
+            token_id=token_id,
+            trace_id=trace_id,
+            portfolio_budget_usdc=getattr(settings, "portfolio_budget_usdc", Decimal("0")),
+            available_usdc=account.available_usdc,
+            max_order_usdc=getattr(settings, "max_order_usdc", Decimal("0")),
+            max_market_usdc=getattr(settings, "max_market_usdc", Decimal("0")),
+            max_total_usdc=getattr(settings, "max_total_usdc", Decimal("0")),
+            positions=account.positions,
+            open_orders=account.open_orders,
+            metadata=metadata if metadata is not None else self._entry_metadata_for_market(market),
+        )
+
+    def _candidate_payload(self, market: Market, token_id: str, plan) -> dict[str, Any]:
+        metadata = dict(plan.metadata or {})
+        outcome = market.get_outcome_by_token_id(token_id)
+        action = str(metadata.get("sports_tail_action") or "")
+        execution_permission = metadata.get("sports_execution_permission")
+        return {
+            "candidate_id": f"{plan.trace_id}:{market.condition_id}:{token_id}",
+            "trace_id": plan.trace_id,
+            "condition_id": market.condition_id,
+            "market_slug": market.market_slug,
+            "event_slug": market.event_slug,
+            "token_id": token_id,
+            "outcome": None if outcome is None else outcome.outcome,
+            "ready_to_trade": plan.ready_to_trade,
+            "accepted": bool(action and action != "reject"),
+            "confirmable": (
+                execution_permission == "manual_confirm"
+                and action == "manual_confirm"
+                and not bool(metadata.get("sports_tail_manual_confirmed"))
+            ),
+            "reason": str(metadata.get("sports_tail_reason") or plan.reason or ""),
+            "action": action,
+            "execution_permission": execution_permission,
+            "market_type": metadata.get("market_type"),
+            "side": metadata.get("side"),
+            "line": metadata.get("line"),
+            "best_ask": metadata.get("best_ask"),
+            "total_score": metadata.get("total_score"),
+            "seconds_remaining": metadata.get("seconds_remaining"),
+            "game_status": metadata.get("game_status"),
+            "allocation": None if plan.allocation is None else {
+                "target_budget_usdc": decimal_text(plan.allocation.target_budget_usdc),
+                "buy_budget_usdc": decimal_text(plan.allocation.buy_budget_usdc),
+                "reason": plan.allocation.reason,
+                "release_reason": plan.allocation.release_reason,
+            },
+            "intent": None if plan.intent is None else serialize_intent(plan.intent),
+            "payload": jsonable(metadata),
+        }
+
+    def _entry_metadata_for_market(self, market: Market) -> dict[str, Any]:
+        store = self._entry_metadata_store()
+        if store is None:
+            return {}
+        return store.metadata_for(
+            condition_id=market.condition_id,
+            market_slug=market.market_slug,
+            event_slug=market.event_slug,
+        )
+
+    def _project_manual_entry_result(self, review, *, snapshot: AccountSnapshot) -> None:
+        account_state = getattr(self.runtime, "account_state_store", None)
+        if account_state is None or review.order_result is None:
+            return
+        projector = AccountStateProjector(account_state)
+        projector.apply_buy_result(review.order_result, snapshot=snapshot)
+        projector.apply_result_flags(review.order_result, snapshot=snapshot)
+
+    async def _publish_candidate_confirmation_review(self, *, market: Market, plan, review) -> None:
+        event_bus = getattr(self.runtime, "event_bus", None)
+        if event_bus is None or plan.intent is None:
+            return
+        await event_bus.publish(
+            OutboxPriority.P3,
+            DomainEvent(
+                trace_id=plan.trace_id,
+                event_type=(
+                    DomainEventType.RISK_CHECK_PASSED
+                    if review.risk_decision is not None and review.risk_decision.passed
+                    else DomainEventType.RISK_CHECK_FAILED
+                ),
+                event_id=uuid4().hex,
+                market_slug=market.market_slug,
+                event_slug=market.event_slug,
+                condition_id=market.condition_id,
+                token_id=plan.intent.token_id,
+                reason="" if review.risk_decision is None else review.risk_decision.reason,
+                payload={
+                    "origin": "admin_candidate_confirm",
+                    "entry_origin": TRADING_DECISION_WORKER_ORIGIN,
+                    "operator": jsonable((plan.metadata or {}).get("sports_tail_confirmed_by")),
+                    "confirm_reason": jsonable((plan.metadata or {}).get("sports_tail_confirm_reason")),
+                    "allocation_plan": serialize_allocation_plan(plan),
+                    "allocation": serialize_allocation(plan),
+                    "plan_metadata": serialize_plan_metadata(plan),
+                    "intent": serialize_intent(plan.intent),
+                    "review": serialize_review(review),
+                },
+            ),
         )
 
     def _account_snapshot(self) -> AccountSnapshot:
@@ -652,6 +973,19 @@ class AdminService:
         if trading_service is None:
             raise RuntimeError("trading_service unavailable")
         return trading_service
+
+    def _trading_decision_service(self) -> TradingDecisionService:
+        trading_decision_service = getattr(self.runtime, "trading_decision_service", None)
+        if trading_decision_service is None:
+            raise RuntimeError("trading_decision_service unavailable")
+        return trading_decision_service
+
+    def _entry_metadata_store(self) -> Any | None:
+        return getattr(self.runtime, "entry_metadata_store", None)
+
+    def _settings_value(self, name: str) -> Any:
+        settings = getattr(self.runtime, "settings", None)
+        return None if settings is None else getattr(settings, name, None)
 
     def _resolve_market(
         self,

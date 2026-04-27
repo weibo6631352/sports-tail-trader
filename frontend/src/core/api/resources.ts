@@ -3,6 +3,9 @@ import type {
   AllocationRecord,
   AuditEventRecord,
   CancelReplaceSellPayload,
+  CandidateRecord,
+  ConfirmCandidateRequest,
+  ConfirmCandidateResult,
   FillRecord,
   MarketView,
   MetricsPayload,
@@ -17,6 +20,7 @@ import type {
   ReadyPayload,
   ReconcileResult,
   RuntimePayload,
+  SportsLiveStateRecord,
   WorkersPayload,
 } from './types'
 
@@ -52,6 +56,12 @@ export const adminApi = {
     apiClient.get<PageResponse<PositionRecord>>(`/positions${buildSearch(params)}`),
   listFills: (params: Record<string, unknown>) =>
     apiClient.get<PageResponse<FillRecord>>(`/fills${buildSearch(params)}`),
+  listCandidates: (params: Record<string, unknown>) =>
+    apiClient.get<PageResponse<CandidateRecord>>(`/candidates${buildSearch(params)}`),
+  listSportsLiveStates: (params: Record<string, unknown>) =>
+    apiClient.get<PageResponse<SportsLiveStateRecord>>(`/candidates/live-states${buildSearch(params)}`),
+  confirmCandidate: (payload: ConfirmCandidateRequest) =>
+    apiClient.post<ConfirmCandidateResult>('/candidates/confirm', payload),
   listAuditEvents: (params: Record<string, unknown>) =>
     apiClient.get<PageResponse<AuditEventRecord>>(`/audit-events${buildSearch(params)}`),
   listOutboxPending: (params: Record<string, unknown>) =>

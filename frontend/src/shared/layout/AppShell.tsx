@@ -19,6 +19,7 @@ interface AppShellProps {
 const navigation = [
   { to: '/', label: '总览' },
   { to: '/markets', label: '市场' },
+  { to: '/candidates', label: '候选' },
   { to: '/orders', label: '订单' },
   { to: '/positions', label: '持仓' },
   { to: '/audit', label: '审计' },

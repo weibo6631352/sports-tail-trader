@@ -3,14 +3,19 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
+from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
+from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
-from polymarket_trader.domain.order import OrderSide, OrderStatus, OrderType
+from polymarket_trader.domain.order import OrderResult, OrderResultStatus, OrderSide, OrderStatus, OrderType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.order import Order
+from polymarket_trader.runtime.account_state import AccountStateStore
+from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.workers.trading_decision_worker import TradingDecisionWorker
 from polymarket_trader.extension_api import ExtensionContext
@@ -218,6 +223,77 @@ def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -
     assert plan.metadata["sports_execution_permission"] == "manual_confirm"
 
 
+def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
+    market = _moneyline_market()
+    orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
+    service = TradingDecisionService(
+        extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+    )
+
+    plan = service.build_entry_plan(
+        market=market,
+        orderbook=orderbook,
+        token_id="home",
+        trace_id="trace-manual-confirmed",
+        portfolio_budget_usdc=Decimal("10"),
+        available_usdc=Decimal("10"),
+        max_order_usdc=Decimal("10"),
+        max_market_usdc=Decimal("10"),
+        max_total_usdc=Decimal("10"),
+        metadata={
+            "sports_tail_manual_confirmed": True,
+            "sports_tail_confirmed_by": "operator-1",
+            "sports_tail_confirm_reason": "score_verified",
+            "sports_tail_game": _moneyline_live_game(),
+        },
+    )
+
+    assert plan.ready_to_trade is True
+    assert plan.intent is not None
+    assert plan.intent.token_id == "home"
+    assert plan.metadata is not None
+    assert plan.metadata["sports_tail_manual_confirmed"] is True
+    assert plan.metadata["sports_tail_confirmed_by"] == "operator-1"
+    assert plan.metadata["sports_tail_confirm_reason"] == "score_verified"
+
+
+def test_admin_live_state_store_projects_manual_candidate_and_confirmation() -> None:
+    result = asyncio.run(_run_admin_manual_candidate_flow())
+
+    candidates = result["candidates"]
+    confirmation = result["confirmation"]
+    live_states = result["live_states"]
+
+    assert live_states["total"] == 1
+    assert candidates["total"] == 1
+    candidate = candidates["items"][0]
+    assert candidate["condition_id"] == "moneyline-condition"
+    assert candidate["token_id"] == "home"
+    assert candidate["action"] == "manual_confirm"
+    assert candidate["execution_permission"] == "manual_confirm"
+    assert candidate["confirmable"] is True
+
+    assert confirmation["status"] == "ok"
+    assert confirmation["candidate"]["ready_to_trade"] is True
+    assert confirmation["candidate"]["confirmable"] is False
+    assert confirmation["candidate"]["intent"]["token_id"] == "home"
+    assert confirmation["review"]["submitted"] is True
+    assert confirmation["review"]["risk_decision"]["passed"] is True
+    assert confirmation["review"]["order_result"]["status"] == "no_fill"
+
+
+def test_admin_confirmation_refuses_non_confirmable_candidate() -> None:
+    result = asyncio.run(_run_admin_auto_candidate_confirmation_attempt())
+
+    assert result["candidates"]["total"] == 1
+    candidate = result["candidates"]["items"][0]
+    assert candidate["action"] == "auto_execute"
+    assert candidate["confirmable"] is False
+    assert result["confirmation"]["status"] == "failed"
+    assert result["confirmation"]["reason"] == "candidate_not_confirmable"
+    assert result["confirmation"]["candidate"]["confirmable"] is False
+
+
 def test_worker_publishes_skipped_plan_metadata_for_candidate_replay() -> None:
     result = asyncio.run(_run_worker_without_live_game_state())
 
@@ -339,6 +415,20 @@ def _moneyline_market() -> Market:
     )
 
 
+def _moneyline_live_game() -> dict[str, object]:
+    return {
+        "league": "NBA",
+        "home_name": "NYK",
+        "away_name": "BOS",
+        "home_score": 102,
+        "away_score": 94,
+        "period": "Q4",
+        "seconds_remaining": 90,
+        "status": "live",
+        "observed_at": "2026-04-27T00:00:00+00:00",
+    }
+
+
 def _spreads_market() -> Market:
     return Market(
         condition_id="spreads-condition",
@@ -365,6 +455,138 @@ def _orderbook(token_id: str, best_ask: Decimal) -> OrderbookSnapshot:
         received_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
         condition_id="condition",
     )
+
+
+class _MarketWs:
+    def __init__(self, snapshots: dict[str, OrderbookSnapshot]) -> None:
+        self._snapshots = snapshots
+
+    def snapshot(self, token_id: str) -> OrderbookSnapshot | None:
+        return self._snapshots.get(token_id)
+
+
+class _NoFillExecutor:
+    async def submit(self, intent) -> OrderResult:
+        return OrderResult(
+            trace_id=intent.trace_id,
+            condition_id=intent.condition_id,
+            token_id=intent.token_id,
+            status=OrderResultStatus.NO_FILL,
+            intent=intent,
+            market_slug=intent.market_slug,
+            side=intent.side,
+            order_type=intent.order_type,
+            price=intent.price,
+            requested_amount_usdc=intent.amount_usdc,
+            reason="unit_test_no_fill",
+        )
+
+
+async def _run_admin_manual_candidate_flow() -> dict[str, object]:
+    market = _moneyline_market()
+    orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
+    registry = MarketRegistry()
+    registry.upsert(market)
+    market_ws = _MarketWs({"home": orderbook})
+    account_state = AccountStateStore()
+    account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+    service = AdminService(
+        runtime=SimpleNamespace(
+            settings=SimpleNamespace(
+                portfolio_budget_usdc=Decimal("10"),
+                max_order_usdc=Decimal("10"),
+                max_market_usdc=Decimal("10"),
+                max_total_usdc=Decimal("10"),
+                max_open_orders=10,
+                order_retry_limit=2,
+            ),
+            registry=registry,
+            market_ws_worker=market_ws,
+            account_state_store=account_state,
+            entry_metadata_store=EntryMetadataStore(),
+            trading_decision_service=TradingDecisionService(
+                extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+                registry=registry,
+                orderbook_reader=market_ws.snapshot,
+            ),
+            trading_service=TradingService(executor=_NoFillExecutor()),
+            event_bus=None,
+        )
+    )
+
+    await service.upsert_sports_live_state(
+        sports_tail_game=_moneyline_live_game(),
+        condition_id=market.condition_id,
+        source="unit_test",
+    )
+    return {
+        "live_states": await service.list_sports_live_states(limit=10, offset=0),
+        "candidates": await service.list_sports_tail_candidates(limit=10, offset=0),
+        "confirmation": await service.confirm_sports_tail_candidate(
+            condition_id=market.condition_id,
+            token_id="home",
+            operator="operator-1",
+            note="score_verified",
+        ),
+    }
+
+
+async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
+    market = _totals_market()
+    orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
+    registry = MarketRegistry()
+    registry.upsert(market)
+    market_ws = _MarketWs({"over": orderbook})
+    account_state = AccountStateStore()
+    account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+    service = AdminService(
+        runtime=SimpleNamespace(
+            settings=SimpleNamespace(
+                portfolio_budget_usdc=Decimal("10"),
+                max_order_usdc=Decimal("10"),
+                max_market_usdc=Decimal("10"),
+                max_total_usdc=Decimal("10"),
+                max_open_orders=10,
+                order_retry_limit=2,
+            ),
+            registry=registry,
+            market_ws_worker=market_ws,
+            account_state_store=account_state,
+            entry_metadata_store=EntryMetadataStore(),
+            trading_decision_service=TradingDecisionService(
+                extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+                registry=registry,
+                orderbook_reader=market_ws.snapshot,
+            ),
+            trading_service=TradingService(executor=_NoFillExecutor()),
+            event_bus=None,
+        )
+    )
+
+    await service.upsert_sports_live_state(
+        sports_tail_game={
+            "league": "NHL",
+            "home_name": "TB",
+            "away_name": "MON",
+            "home_score": 3,
+            "away_score": 2,
+            "period": "P3",
+            "seconds_remaining": 420,
+            "status": "live",
+            "observed_at": "2026-04-27T00:00:00+00:00",
+        },
+        condition_id=market.condition_id,
+        source="unit_test",
+    )
+    return {
+        "candidates": await service.list_sports_tail_candidates(limit=10, offset=0),
+        "confirmation": await service.confirm_sports_tail_candidate(
+            condition_id=market.condition_id,
+            token_id="over",
+            operator="operator-1",
+            note="should_not_submit",
+        ),
+    }
 
 
 async def _run_worker_without_live_game_state():

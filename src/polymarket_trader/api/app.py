@@ -10,6 +10,7 @@ from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.api.routes import (
     allocations,
     audit_events,
+    candidates,
     fills,
     health,
     markets,
@@ -62,6 +63,7 @@ def create_app(*, runtime: Any | None = None, admin_service: AdminService | None
     app.include_router(health.router)
     app.include_router(runtime_route.router)
     app.include_router(audit_events.router)
+    app.include_router(candidates.router)
     app.include_router(allocations.router)
     app.include_router(markets.router)
     app.include_router(orders.router)

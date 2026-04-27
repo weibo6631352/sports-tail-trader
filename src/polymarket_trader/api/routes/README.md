@@ -7,6 +7,7 @@
 - `health.py`：暴露 `/health` 和 `/ready`。
 - `runtime.py`：暴露 `/runtime`、`/workers`、`/metrics`。
 - `audit_events.py`：暴露 `/audit-events`。
+- `candidates.py`：体育扫尾候选、直播状态快照和人工确认入口。
 - `allocations.py`：暴露 `/allocations`。
 - `markets.py`：market 列表、详情、orderbook、midpoint、价格历史查询。
 - `orders.py`：订单查询和通用 order replace 入口。
@@ -31,6 +32,7 @@
 - 签名、下单、撤单。
 - 持有交易状态锁。
 - 直接查询 Polymarket API。
+- 绕过 TradingService、RiskManager 或 OrderExecutor 执行候选确认。
 
 ## 输入与输出
 
