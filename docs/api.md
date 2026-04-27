@@ -179,7 +179,7 @@
 - `account`
 - `event_bus`
 - `persistence`
-- `markets`
+- `market_sample`
 - `portfolio`
 
 说明：
@@ -187,7 +187,9 @@
 - `settings` 已脱敏，测试里已覆盖 `wallet_private_key -> "***"`。
 - `market_discovery.query_cursors` / `completed_query_names` 用于观察远端 discovery 多 query 分页状态。
 - `sports_live_sync` 用于观察外部直播状态同步 worker 的启用状态、最近成功时间、错误、匹配数量和触发的入场重放信号数量。
-- `markets[].market.fees` 输出：
+- `/runtime` 只返回 `market_sample` / `registry.market_sample` 作为轻量运行时样本；`registry.market_count` 表示全量计数。
+- 完整市场分页只能使用 `/markets`，不能从 `/runtime` 推断全量市场列表。
+- `market_sample[].market.fees` 输出：
   - `enabled`
   - `maker_base_fee_bps`
   - `taker_base_fee_bps`

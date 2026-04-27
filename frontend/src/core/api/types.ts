@@ -68,12 +68,14 @@ export interface RuntimePayload {
   sports_live_sync?: JsonValue
   registry: {
     market_count: number
-    markets: JsonValue[]
+    market_sample: JsonValue[]
+    market_sample_limit?: number
+    markets_truncated?: boolean
   }
   account: JsonObject
   event_bus: JsonValue
   persistence: JsonValue
-  markets: MarketView[]
+  market_sample: MarketView[]
   portfolio: JsonObject
 }
 

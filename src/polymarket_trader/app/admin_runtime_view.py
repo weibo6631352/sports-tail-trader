@@ -68,14 +68,14 @@ class AdminRuntimeView:
             "sports_live_sync": self._sports_live_sync_snapshot(),
             "registry": {
                 "market_count": len(registry.markets),
-                "markets": [jsonable(market) for market in market_sample],
+                "market_sample": [jsonable(market) for market in market_sample],
                 "market_sample_limit": _RUNTIME_MARKET_SAMPLE_LIMIT,
                 "markets_truncated": markets_truncated,
             },
             "account": self._serializer().account_snapshot(account),
             "event_bus": jsonable(self._event_bus_snapshot()),
             "persistence": jsonable(self._persistence_snapshot()),
-            "markets": market_sample,
+            "market_sample": market_sample,
             "portfolio": self._serializer().portfolio_snapshot(account),
         }
 

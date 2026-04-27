@@ -71,7 +71,7 @@ def test_orderbook_event_is_skipped_before_sizing_when_market_is_paused() -> Non
     asyncio.run(run())
 
 
-def test_orderbook_events_are_rate_limited_before_sizing() -> None:
+def test_orderbook_events_are_not_dropped_by_decision_worker() -> None:
     async def run() -> None:
         account_state = _open_entry_gate()
         decision_service = _CountingDecisionService()
@@ -83,12 +83,12 @@ def test_orderbook_events_are_rate_limited_before_sizing() -> None:
         await worker.process_event(_orderbook_event(event_id="event-orderbook-1"))
         await worker.process_event(_orderbook_event(event_id="event-orderbook-2"))
 
-        assert decision_service.calls == 1
+        assert decision_service.calls == 2
 
     asyncio.run(run())
 
 
-def test_explicit_entry_signals_bypass_orderbook_rate_limit() -> None:
+def test_explicit_entry_signals_are_not_rate_limited() -> None:
     async def run() -> None:
         account_state = _open_entry_gate()
         decision_service = _CountingDecisionService()

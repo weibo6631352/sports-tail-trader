@@ -6,7 +6,7 @@ from enum import IntEnum
 from itertools import count
 from typing import Any, Callable
 
-from polymarket_trader.domain.events import OutboxPriority
+from polymarket_trader.domain.events import DomainEventType, OutboxPriority
 
 
 # 这里不另起一套同义枚举，直接复用域内优先级定义，避免队列和 outbox 之间出现两套语义。
@@ -101,6 +101,7 @@ class EventBus:
         self._persistence_queue: asyncio.Queue[Any] = asyncio.Queue(
             maxsize=self._persistence_capacity,
         )
+        self._trading_pending_events: dict[str, Any] = {}
         self._retained: dict[QueueLane, list[_RetainedEvent]] = {
             QueueLane.MAINTENANCE: [],
             QueueLane.PERSISTENCE: [],
@@ -121,7 +122,14 @@ class EventBus:
             self._mirror_to_outbox(outbox_priority, event)
             return
         if lane == QueueLane.TRADING:
-            await self._trading_queue.put((next(self._sequence), event))
+            key = self._trading_event_key(event)
+            if key in self._trading_pending_events:
+                self._trading_pending_events[key] = event
+                self._mirror_to_outbox(outbox_priority, event)
+                self._wake.set()
+                return
+            await self._trading_queue.put((next(self._sequence), key))
+            self._trading_pending_events[key] = event
             self._mirror_to_outbox(outbox_priority, event)
             self._wake.set()
             return
@@ -153,9 +161,13 @@ class EventBus:
             await self._wake.wait()
 
     async def next_trading_event(self) -> Any:
-        _, event = await self._trading_queue.get()
-        await self._flush_retained_best_effort()
-        return event
+        while True:
+            _, key = await self._trading_queue.get()
+            event = self._trading_pending_events.pop(key, None)
+            if event is None:
+                continue
+            await self._flush_retained_best_effort()
+            return event
 
     async def next_maintenance_event(self) -> Any:
         _, event = await self._maintenance_queue.get()
@@ -177,7 +189,7 @@ class EventBus:
 
     def snapshot(self) -> QueueDepthSnapshot:
         return QueueDepthSnapshot(
-            trading_queue_depth=self._trading_queue.qsize(),
+            trading_queue_depth=self.trading_queue_depth(),
             maintenance_queue_depth=self._maintenance_queue.qsize(),
             persistence_queue_depth=self._persistence_queue.qsize(),
             trading_queue_capacity=self._trading_capacity,
@@ -190,7 +202,7 @@ class EventBus:
         )
 
     def trading_queue_depth(self) -> int:
-        return self._trading_queue.qsize()
+        return len(self._trading_pending_events)
 
     def maintenance_queue_depth(self) -> int:
         return self._maintenance_queue.qsize()
@@ -240,6 +252,16 @@ class EventBus:
         except Exception:
             return
 
+    def _trading_event_key(self, event: Any) -> str:
+        event_type = str(getattr(event, "event_type", ""))
+        merge_key = getattr(event, "merge_key", None)
+        if event_type == DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED.value and merge_key:
+            return str(merge_key)
+        event_id = getattr(event, "event_id", None)
+        if event_id:
+            return str(event_id)
+        return f"event:{id(event)}"
+
     def _queue_for_lane(self, lane: QueueLane) -> asyncio.Queue[Any]:
         if lane == QueueLane.MAINTENANCE:
             return self._maintenance_queue
@@ -249,13 +271,26 @@ class EventBus:
 
     def _pop_next_ready(self) -> Any | None:
         # P0 必须先出队，P2 / P3 只能在 trading 为空时被消费，避免维护流反向抢占交易流。
-        for queue in (self._trading_queue, self._maintenance_queue, self._persistence_queue):
+        trading_event = self._pop_trading_event_nowait()
+        if trading_event is not None:
+            return trading_event
+        for queue in (self._maintenance_queue, self._persistence_queue):
             try:
                 _, event = queue.get_nowait()
                 return event
             except asyncio.QueueEmpty:
                 continue
         return None
+
+    def _pop_trading_event_nowait(self) -> Any | None:
+        while True:
+            try:
+                _, key = self._trading_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return None
+            event = self._trading_pending_events.pop(key, None)
+            if event is not None:
+                return event
 
 
 def _normalize_outbox_priority(priority: EventPriority | int | str) -> int:
