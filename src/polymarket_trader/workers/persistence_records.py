@@ -93,6 +93,14 @@ class PersistenceRecordBuilder:
         return records
 
     def _build_audit_record(self, event: OutboxEvent, payload: Mapping[str, Any]) -> dict[str, Any]:
+        audit_payload = dict(payload)
+        audit_payload.update(
+            {
+                "idempotency_key": event.idempotency_key,
+                "priority": event.priority,
+                "retry_count": event.retry_count,
+            }
+        )
         audit = AuditEvent(
             event_title=str(event.event_type),
             trace_id=event.trace_id,
@@ -104,11 +112,7 @@ class PersistenceRecordBuilder:
             reason=event.reason or "",
             created_at=event.created_at,
             raw_response=event.raw_response_summary,
-            payload={
-                "idempotency_key": event.idempotency_key,
-                "priority": event.priority,
-                "retry_count": event.retry_count,
-            },
+            payload=audit_payload,
         )
         record = audit.to_payload()
         record["idempotency_key"] = _kind_idempotency_key("audit", event)

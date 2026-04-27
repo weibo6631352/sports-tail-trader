@@ -31,6 +31,7 @@ from polymarket_trader.workers.trading_decision_event_payloads import (
     serialize_allocation,
     serialize_allocation_plan,
     serialize_intent,
+    serialize_plan_metadata,
     serialize_review,
     serialize_snapshot,
     snapshot_allowance,
@@ -42,6 +43,7 @@ from polymarket_trader.workers.trading_decision_worker_result import TradingDeci
 
 PositionsProvider = Callable[[], Iterable[Position]]
 OpenOrdersProvider = Callable[[], Iterable[Order]]
+EntryMetadataProvider = Callable[[DomainEvent, AccountSnapshot | None], Mapping[str, object] | None]
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -68,6 +70,7 @@ class TradingDecisionWorker:
         allowance_usdc: Decimal | None = None,
         max_open_orders: int | None = None,
         order_retry_limit: int | None = None,
+        entry_metadata_provider: EntryMetadataProvider | None = None,
     ) -> None:
         self._event_bus = event_bus
         if trading_decision_service is None:
@@ -86,6 +89,7 @@ class TradingDecisionWorker:
         self._allowance_usdc = allowance_usdc
         self._max_open_orders = max_open_orders
         self._order_retry_limit = order_retry_limit
+        self._entry_metadata_provider = entry_metadata_provider
         self._market_lifecycle: dict[str, MarketLifecycle] = {}
         self._order_result_processor = TradingOrderResultProcessor(
             host=self,
@@ -149,6 +153,7 @@ class TradingDecisionWorker:
             open_orders=(
                 snapshot.open_orders if snapshot is not None else tuple(self._open_orders_provider())
             ),
+            metadata=self._entry_metadata(event, snapshot),
         )
         if plan.market is None or plan.orderbook is None or event.token_id != plan.orderbook.token_id:
             return None
@@ -184,7 +189,11 @@ class TradingDecisionWorker:
                     "origin": TRADING_DECISION_WORKER_ORIGIN,
                     "reason": "entry_paused",
                     "account_snapshot": serialize_snapshot(snapshot),
+                    "allocation_plan": serialize_allocation_plan(plan),
+                    "allocation": serialize_allocation(plan),
+                    "plan_metadata": serialize_plan_metadata(plan),
                 },
+                priority=OutboxPriority.P3,
             )
             self._transition_market(plan.market, MarketLifecycle.PAUSED if plan.market else None)
             return TradingDecisionWorkerResult(
@@ -196,12 +205,30 @@ class TradingDecisionWorker:
             )
 
         if not plan.ready_to_trade or plan.intent is None or plan.market is None or plan.orderbook is None:
+            skipped = await self._publish(
+                DomainEventType.SKIPPED,
+                trace_id=plan.trace_id,
+                market_slug=event.market_slug,
+                condition_id=event.condition_id,
+                token_id=event.token_id,
+                reason=plan.reason or "entry_not_ready",
+                payload={
+                    "entry_event_id": event.event_id,
+                    "origin": TRADING_DECISION_WORKER_ORIGIN,
+                    "reason": plan.reason or "entry_not_ready",
+                    "allocation_plan": serialize_allocation_plan(plan),
+                    "allocation": serialize_allocation(plan),
+                    "plan_metadata": serialize_plan_metadata(plan),
+                },
+                priority=OutboxPriority.P3,
+            )
             self._transition_market(plan.market, MarketLifecycle.WATCHING_ORDERBOOK if plan.market else None)
             return TradingDecisionWorkerResult(
                 entry_event=event,
                 plan=plan,
                 review=None,
-                emitted_event=None,
+                emitted_event=skipped,
+                emitted_events=(skipped,),
                 state_after=self._state_for_market(plan.market),
             )
 
@@ -242,6 +269,7 @@ class TradingDecisionWorker:
                 "origin": TRADING_DECISION_WORKER_ORIGIN,
                 "allocation_plan": serialize_allocation_plan(plan),
                 "allocation": serialize_allocation(plan),
+                "plan_metadata": serialize_plan_metadata(plan),
                 "intent": serialize_intent(plan.intent),
                 "review": serialize_review(review),
             },
@@ -316,6 +344,7 @@ class TradingDecisionWorker:
         token_id: str | None,
         reason: str = "",
         payload: Mapping[str, object] | None = None,
+        priority: OutboxPriority = OutboxPriority.P0,
     ) -> DomainEvent:
         payload_dict: dict[str, object] = {"origin": TRADING_DECISION_WORKER_ORIGIN}
         if payload is not None:
@@ -332,8 +361,30 @@ class TradingDecisionWorker:
             payload=payload_dict,
         )
         if self._event_bus is not None:
-            await self._event_bus.publish(OutboxPriority.P0, event)
+            await self._event_bus.publish(priority, event)
         return event
+
+    def _entry_metadata(
+        self,
+        event: DomainEvent,
+        snapshot: AccountSnapshot | None,
+    ) -> dict[str, object]:
+        """构造入场策略 metadata。
+
+        Worker 只合并事件事实和外部 provider 提供的补充事实，不解释具体策略字段。
+        """
+
+        metadata: dict[str, object] = dict(event.payload)
+        if self._entry_metadata_provider is None:
+            return metadata
+        try:
+            extra_metadata = self._entry_metadata_provider(event, snapshot)
+        except Exception as exc:
+            metadata["entry_metadata_provider_error"] = str(exc)
+            return metadata
+        if extra_metadata:
+            metadata.update(dict(extra_metadata))
+        return metadata
 
     def _snapshot(self) -> AccountSnapshot | None:
         if self._account_state_store is not None:

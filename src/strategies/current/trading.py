@@ -18,8 +18,19 @@ from polymarket_trader.domain.market import TradingStatus
 from polymarket_trader.extension_api import EntryCandidate, EntrySizing, ExtensionContext, ExtensionDecision
 
 from strategies.current.allocation import AllocationMarketSnapshot, equal_weight_plan
-from strategies.current.config import CurrentStrategyConfig
-from strategies.current.outcomes import is_primary_token
+from strategies.current.config import CurrentStrategyConfig, sports_tail_policy_from_config
+from strategies.current.outcomes import (
+    describe_sports_market,
+    is_primary_token,
+    target_for_token,
+)
+from strategies.current.sports_tail import (
+    SportsMarketSnapshot,
+    SportsTailEvaluation,
+    TailAction,
+    evaluate_tail_opportunity,
+    live_game_state_from_metadata,
+)
 from strategies.current.universe import select_market
 
 
@@ -80,16 +91,26 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
 
     eligible_snapshots: list[AllocationMarketSnapshot] = []
     skipped_allocations: dict[tuple[str, str], Allocation] = {}
+    sizing_metadata: dict[str, object] = {}
     for snapshot in candidate_snapshots:
+        price_cap = _sports_tail_price_cap(config, snapshot.market, snapshot.token_id)
         buyable_liquidity_usdc = _ask_depth_notional(
             snapshot.orderbook,
-            price_cap=config.entry_no_price_max,
+            price_cap=price_cap,
         )
         skip_reason = _allocation_skip_reason(
             config,
             snapshot,
             buyable_liquidity_usdc=buyable_liquidity_usdc,
         )
+        if not skip_reason and _is_focus_snapshot(context, snapshot):
+            skip_reason, sports_metadata = _sports_tail_allocation_gate(
+                config,
+                context,
+                snapshot,
+                buyable_liquidity_usdc=buyable_liquidity_usdc,
+            )
+            sizing_metadata.update(sports_metadata)
         if skip_reason:
             skipped_allocations[(snapshot.condition_id, snapshot.token_id)] = _skipped_allocation(
                 snapshot,
@@ -123,6 +144,7 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
         allocation_plan=plan,
         allocation=allocation,
         reason=_sizing_reason(plan, allocation),
+        metadata=sizing_metadata,
     )
 
 
@@ -145,10 +167,20 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
 
     if context.market is None or context.orderbook is None:
         return ExtensionDecision.skip(reason="missing_market_state")
+
+    sports_gate = _sports_tail_entry_gate(config, context)
+    if sports_gate is not None:
+        decision, allowed_price, sports_metadata = sports_gate
+        if decision is not None:
+            return decision
+    else:
+        allowed_price = config.entry_no_price_max
+        sports_metadata = {}
+
     best_ask = context.orderbook.best_ask
     if best_ask is None:
         return ExtensionDecision.skip(reason="missing_best_ask")
-    if best_ask > config.entry_no_price_max:
+    if best_ask > allowed_price:
         return ExtensionDecision.skip(reason="price_above_entry_max")
 
     amount_usdc = context.amount_usdc or _metadata_decimal(context, "amount_usdc", "buy_budget_usdc")
@@ -158,9 +190,10 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
     return ExtensionDecision.buy(
         reason="strategy_entry",
         token_id=context.token_id or context.orderbook.token_id,
-        price=config.entry_no_price_max,
+        price=allowed_price,
         amount_usdc=amount_usdc,
         market_slug=context.market.market_slug,
+        metadata=sports_metadata,
     )
 
 
@@ -352,7 +385,8 @@ def _allocation_skip_reason(
     )
     if best_ask is None:
         return "missing_best_ask"
-    if best_ask > config.entry_no_price_max:
+    price_cap = _sports_tail_price_cap(config, snapshot.market, snapshot.token_id)
+    if best_ask > price_cap:
         return "price_above_entry_max"
 
     spread = snapshot.spread if snapshot.spread is not None else (
@@ -365,6 +399,160 @@ def _allocation_skip_reason(
         return "liquidity_below_min"
 
     return ""
+
+
+def _sports_tail_entry_gate(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+) -> tuple[ExtensionDecision | None, Decimal, dict[str, object]] | None:
+    """在下单前执行体育扫尾统一评估门禁。
+
+    返回：
+        - ``None``：当前 market 不是可解析体育盘口，交给旧兜底逻辑处理；
+        - ``(decision, price, metadata)``：已经完成体育评估。如果 decision 非空，
+          调用方直接返回；如果 decision 为空，调用方可继续按返回 price 生成 BUY。
+    """
+
+    if context.market is None or context.orderbook is None:
+        return None
+
+    descriptor = describe_sports_market(context.market)
+    if not descriptor.accepted or descriptor.market_type is None:
+        return None
+
+    token_id = context.token_id or context.orderbook.token_id
+    target = target_for_token(context.market, token_id)
+    if target is None:
+        return (
+            ExtensionDecision.skip(
+                reason="unsupported_sports_token",
+                metadata={"sports_parse_reason": descriptor.reason},
+            ),
+            config.entry_no_price_max,
+            {},
+        )
+
+    policy = sports_tail_policy_from_config(config)
+    market_snapshot = SportsMarketSnapshot(
+        market_type=descriptor.market_type,
+        side=target.side,
+        token_id=target.token_id,
+        line=descriptor.line,
+        best_ask=context.orderbook.best_ask,
+        buyable_liquidity_usdc=_ask_depth_notional(
+            context.orderbook,
+            price_cap=_sports_tail_price_cap(config, context.market, token_id),
+        ),
+        market_slug=context.market.market_slug,
+    )
+    evaluation = evaluate_tail_opportunity(
+        live_game_state_from_metadata(context.metadata),
+        market_snapshot,
+        policy=policy,
+        now=context.now,
+    )
+    metadata = _sports_tail_evaluation_metadata(evaluation)
+
+    if not evaluation.accepted:
+        return (
+            ExtensionDecision.skip(reason=evaluation.reason, metadata=metadata),
+            market_snapshot.best_ask or config.entry_no_price_max,
+            metadata,
+        )
+    if evaluation.action != TailAction.AUTO_EXECUTE:
+        return (
+            ExtensionDecision.skip(
+                reason=f"sports_tail_{evaluation.action.value}",
+                metadata=metadata,
+            ),
+            _sports_tail_price_cap(config, context.market, token_id),
+            metadata,
+        )
+    return None, _sports_tail_price_cap(config, context.market, token_id), metadata
+
+
+def _sports_tail_allocation_gate(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    snapshot: AllocationMarketSnapshot,
+    *,
+    buyable_liquidity_usdc: Decimal,
+) -> tuple[str, dict[str, object]]:
+    """在预算分配阶段执行当前焦点候选的体育扫尾门禁。"""
+
+    descriptor = describe_sports_market(snapshot.market)
+    if not descriptor.accepted or descriptor.market_type is None:
+        return "", {}
+    target = target_for_token(snapshot.market, snapshot.token_id)
+    if target is None:
+        return "unsupported_sports_token", {"sports_parse_reason": descriptor.reason}
+
+    policy = sports_tail_policy_from_config(config)
+    best_ask = snapshot.best_ask if snapshot.best_ask is not None else (
+        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
+    )
+    evaluation = evaluate_tail_opportunity(
+        live_game_state_from_metadata(context.metadata),
+        SportsMarketSnapshot(
+            market_type=descriptor.market_type,
+            side=target.side,
+            token_id=target.token_id,
+            line=descriptor.line,
+            best_ask=best_ask,
+            buyable_liquidity_usdc=buyable_liquidity_usdc,
+            market_slug=snapshot.market_slug,
+        ),
+        policy=policy,
+        now=context.now,
+    )
+    metadata = _sports_tail_evaluation_metadata(evaluation)
+    if not evaluation.accepted:
+        return evaluation.reason, metadata
+    if evaluation.action != TailAction.AUTO_EXECUTE:
+        return f"sports_tail_{evaluation.action.value}", metadata
+    return "", metadata
+
+
+def _sports_tail_evaluation_metadata(evaluation: SportsTailEvaluation) -> dict[str, object]:
+    """把体育扫尾评估结果转换成审计 metadata。"""
+
+    metadata = dict(evaluation.metadata)
+    metadata["sports_tail_action"] = evaluation.action.value
+    metadata["sports_tail_reason"] = evaluation.reason
+    if evaluation.execution_permission is not None:
+        metadata["sports_execution_permission"] = evaluation.execution_permission.value
+    return metadata
+
+
+def _is_focus_snapshot(
+    context: ExtensionContext,
+    snapshot: AllocationMarketSnapshot,
+) -> bool:
+    """判断 allocation snapshot 是否对应当前触发入场判断的 token。"""
+
+    if context.market is None:
+        return False
+    focus_token_id = context.token_id or (context.orderbook.token_id if context.orderbook is not None else None)
+    return snapshot.condition_id == context.market.condition_id and snapshot.token_id == focus_token_id
+
+
+def _sports_tail_price_cap(
+    config: CurrentStrategyConfig,
+    market,
+    token_id: str | None,
+) -> Decimal:
+    descriptor = describe_sports_market(market)
+    if descriptor.market_type is None:
+        return config.entry_no_price_max
+    if token_id is not None and target_for_token(market, token_id) is None:
+        return config.entry_no_price_max
+    if descriptor.market_type.value == "totals":
+        return config.sports_totals_max_entry_price
+    if descriptor.market_type.value == "moneyline":
+        return config.sports_moneyline_max_entry_price
+    if descriptor.market_type.value == "spreads":
+        return config.sports_spreads_max_entry_price
+    return config.entry_no_price_max
 
 
 def _skipped_allocation(

@@ -368,6 +368,7 @@ class AdminSerializer:
             "status": event.status,
             "reason": event.reason,
             "raw_response": event.raw_response,
+            "payload": jsonable(event.payload),
             "created_at": jsonable(event.created_at),
             "updated_at": jsonable(event.updated_at),
         }

@@ -1,17 +1,239 @@
-"""当前策略明确声明自己关注的 outcome。"""
+"""当前策略的体育盘口 outcome 解析。
+
+体育扫尾策略不再假设固定交易 ``NO`` token，而是按盘口类型解析目标方向。
+解析失败时返回显式原因，由 universe、trading 和 recovery 决定是否跳过或暂停。
+"""
 
 from __future__ import annotations
 
-from polymarket_trader.domain.market import Market
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
+import re
 
-PRIMARY_OUTCOME = "NO"
+from polymarket_trader.domain.market import Market
+from strategies.current.sports_tail import SportsMarketSide, SportsMarketType
+
+_GENERIC_OUTCOMES = {"yes", "no"}
+
+
+@dataclass(frozen=True, slots=True)
+class SportsTokenTarget:
+    """一个可由体育扫尾策略管理的 token 方向。"""
+
+    token_id: str
+    side: SportsMarketSide
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
+class SportsMarketDescriptor:
+    """market 文本和 outcomes 解析后的体育盘口描述。"""
+
+    accepted: bool
+    reason: str
+    market_type: SportsMarketType | None = None
+    line: Decimal | None = None
+    targets: tuple[SportsTokenTarget, ...] = ()
+
+    @property
+    def target_token_ids(self) -> tuple[str, ...]:
+        return tuple(target.token_id for target in self.targets)
 
 
 def primary_token_id(market: Market) -> str:
-    return market.require_token_id(PRIMARY_OUTCOME)
+    """返回第一个可管理 token，保留给旧调用侧使用。
+
+    新代码应优先使用 ``sports_token_targets()``，避免重新引入“固定主 token”假设。
+    """
+
+    descriptor = describe_sports_market(market)
+    if not descriptor.targets:
+        raise ValueError(descriptor.reason or "missing_sports_target")
+    return descriptor.targets[0].token_id
 
 
 def is_primary_token(market: Market, token_id: str | None) -> bool:
     if token_id is None:
         return False
-    return token_id == primary_token_id(market)
+    return token_id in describe_sports_market(market).target_token_ids
+
+
+def sports_token_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
+    """返回体育扫尾可管理的 token 方向。"""
+
+    return describe_sports_market(market).targets
+
+
+def describe_sports_market(market: Market) -> SportsMarketDescriptor:
+    """从 market 文本和 outcomes 中解析体育盘口类型、盘口线和方向。"""
+
+    text = _market_text(market)
+    market_type = _market_type(market, text)
+    if market_type is None:
+        return SportsMarketDescriptor(accepted=False, reason="unsupported_sports_market_type")
+
+    line = _market_line(text)
+    if market_type in {SportsMarketType.TOTALS, SportsMarketType.SPREADS} and line is None:
+        return SportsMarketDescriptor(accepted=False, reason="missing_market_line")
+
+    targets = _token_targets(market, market_type)
+    if not targets:
+        return SportsMarketDescriptor(accepted=False, reason="missing_target_token")
+    return SportsMarketDescriptor(
+        accepted=True,
+        reason="sports_market_selected",
+        market_type=market_type,
+        line=line,
+        targets=targets,
+    )
+
+
+def target_for_token(market: Market, token_id: str | None) -> SportsTokenTarget | None:
+    """返回 token 对应的体育盘口方向。"""
+
+    if token_id is None:
+        return None
+    for target in sports_token_targets(market):
+        if target.token_id == token_id:
+            return target
+    return None
+
+
+def _market_type(market: Market, text: str) -> SportsMarketType | None:
+    outcome_tokens = {_normalize_text(outcome.outcome) for outcome in market.outcomes}
+    if {"over", "under"} & outcome_tokens or "total" in text or "overunder" in text:
+        return SportsMarketType.TOTALS
+    if "spread" in text or "handicap" in text or _has_signed_number(text):
+        return SportsMarketType.SPREADS
+    if len(market.outcomes) >= 2:
+        return SportsMarketType.MONEYLINE
+    return None
+
+
+def _token_targets(
+    market: Market,
+    market_type: SportsMarketType,
+) -> tuple[SportsTokenTarget, ...]:
+    if market_type == SportsMarketType.TOTALS:
+        return _totals_targets(market)
+    return _side_targets(market)
+
+
+def _totals_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
+    targets: list[SportsTokenTarget] = []
+    for outcome in market.outcomes:
+        normalized = _normalize_text(outcome.outcome)
+        if "over" in normalized:
+            targets.append(
+                SportsTokenTarget(
+                    token_id=outcome.token_id,
+                    side=SportsMarketSide.OVER,
+                    label=outcome.outcome,
+                )
+            )
+        elif "under" in normalized:
+            targets.append(
+                SportsTokenTarget(
+                    token_id=outcome.token_id,
+                    side=SportsMarketSide.UNDER,
+                    label=outcome.outcome,
+                )
+            )
+    return tuple(targets)
+
+
+def _side_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
+    non_generic = [
+        outcome for outcome in market.outcomes if _normalize_text(outcome.outcome) not in _GENERIC_OUTCOMES
+    ]
+    if len(non_generic) < 2:
+        return ()
+    return (
+        SportsTokenTarget(
+            token_id=non_generic[0].token_id,
+            side=SportsMarketSide.HOME,
+            label=non_generic[0].outcome,
+        ),
+        SportsTokenTarget(
+            token_id=non_generic[1].token_id,
+            side=SportsMarketSide.AWAY,
+            label=non_generic[1].outcome,
+        ),
+    )
+
+
+def _market_line(text: str) -> Decimal | None:
+    hyphen_decimal = re.search(
+        r"(?:spread|handicap)[\s:_/-]*(?:minus|negative)[\s:_/-]*(\d+)-(\d+)",
+        text,
+    )
+    if hyphen_decimal is not None:
+        try:
+            return Decimal(f"-{hyphen_decimal.group(1)}.{hyphen_decimal.group(2)}")
+        except InvalidOperation:
+            return None
+
+    hyphen_decimal = re.search(
+        r"(?:over|under|total|spread|handicap)[\s:_/-]*([-+]?\d+)-(\d+)",
+        text,
+    )
+    if hyphen_decimal is not None:
+        try:
+            return Decimal(f"{hyphen_decimal.group(1)}.{hyphen_decimal.group(2)}")
+        except InvalidOperation:
+            return None
+
+    marker_decimal = re.search(
+        r"(?:over|under|total|spread|handicap)[\s:_/-]*([-+]?\d+(?:\.\d+)?)",
+        text,
+    )
+    if marker_decimal is not None:
+        try:
+            return Decimal(marker_decimal.group(1))
+        except InvalidOperation:
+            return None
+
+    match = re.search(r"(?<![a-z0-9])[-+]?\d+(?:\.\d+)?(?![a-z0-9])", text)
+    if match is None:
+        return None
+    try:
+        return Decimal(match.group(0))
+    except InvalidOperation:
+        return None
+
+
+def _has_signed_number(text: str) -> bool:
+    return bool(re.search(r"(?<![a-z0-9])[-+]\d+(?:\.\d+)?(?![a-z0-9])", text))
+
+
+def _market_text(market: Market) -> str:
+    return _normalize_text(
+        " ".join(
+            part
+            for part in (
+                market.market_question,
+                market.market_name,
+                market.market_slug,
+                market.event_title,
+            )
+            if part
+        )
+    )
+
+
+def _normalize_text(text: str | None) -> str:
+    if not text:
+        return ""
+    normalized = text.lower().replace("&", " and ")
+    parts: list[str] = []
+    current: list[str] = []
+    for char in normalized:
+        if char.isalnum() or char in {"+", "-", "."}:
+            current.append(char)
+            continue
+        if current:
+            parts.append("".join(current))
+            current = []
+    if current:
+        parts.append("".join(current))
+    return " ".join(parts)

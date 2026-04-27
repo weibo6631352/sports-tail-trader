@@ -268,6 +268,7 @@ export interface AuditEventRecord {
   status: string | null
   reason: string | null
   raw_response: JsonValue
+  payload: JsonValue
   created_at: string | null
   updated_at: string | null
 }

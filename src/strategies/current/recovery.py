@@ -9,7 +9,7 @@ from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.extension_api import RecoveryDecision, ExtensionContext, ExtensionDecision
 
 from strategies.current.config import CurrentStrategyConfig
-from strategies.current.outcomes import primary_token_id
+from strategies.current.outcomes import sports_token_targets
 
 
 def decide_recovery(
@@ -19,28 +19,30 @@ def decide_recovery(
     if context.market is None:
         return RecoveryDecision(reason="missing_market_state")
 
-    try:
-        managed_token_id = primary_token_id(context.market)
-    except ValueError:
+    managed_token_ids = {target.token_id for target in sports_token_targets(context.market)}
+    if not managed_token_ids:
         return RecoveryDecision(
-            reason="missing_primary_outcome",
+            reason="missing_sports_target",
             pause_trading=True,
-            pause_reason="missing_primary_outcome",
+            pause_reason="missing_sports_target",
         )
 
     account_snapshot = context.account_snapshot
-    position = context.position if context.position is not None and context.position.token_id == managed_token_id else None
-    if position is None and account_snapshot is not None:
-        position = account_snapshot.get_position(
-            context.market.condition_id,
-            managed_token_id,
-        )
+    positions = []
+    if context.position is not None and context.position.token_id in managed_token_ids:
+        positions.append(context.position)
+    if account_snapshot is not None:
+        for token_id in managed_token_ids:
+            position = account_snapshot.get_position(context.market.condition_id, token_id)
+            if position is not None and position not in positions:
+                positions.append(position)
 
-    open_orders = tuple(order for order in context.open_orders if order.token_id == managed_token_id)
+    open_orders = tuple(order for order in context.open_orders if order.token_id in managed_token_ids)
     if not open_orders and account_snapshot is not None:
-        open_orders = account_snapshot.open_orders_for_market(
-            context.market.condition_id,
-            managed_token_id,
+        open_orders = tuple(
+            order
+            for token_id in managed_token_ids
+            for order in account_snapshot.open_orders_for_market(context.market.condition_id, token_id)
         )
 
     actions: list[ExtensionDecision] = []
@@ -57,15 +59,15 @@ def decide_recovery(
             )
         )
 
-    open_exit_shares = sum(
-        (
-            _open_order_shares(order)
-            for order in open_orders
-            if _is_open_exit_order(order)
-        ),
-        start=Decimal("0"),
-    )
-    if position is not None:
+    open_exit_by_token: dict[str, Decimal] = {}
+    for order in open_orders:
+        if _is_open_exit_order(order):
+            open_exit_by_token[order.token_id] = open_exit_by_token.get(order.token_id, Decimal("0")) + (
+                _open_order_shares(order)
+            )
+
+    for position in positions:
+        open_exit_shares = open_exit_by_token.get(position.token_id, Decimal("0"))
         uncovered_shares = position.shares - open_exit_shares
         if uncovered_shares > Decimal("0"):
             actions.append(

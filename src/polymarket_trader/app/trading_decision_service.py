@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 from polymarket_trader.app.extension_intent_builder import decision_to_managed_intent
 from polymarket_trader.app.entry_plan import EntryPlan
@@ -50,6 +50,7 @@ class TradingDecisionService:
         max_total_usdc: Decimal,
         positions: Iterable[Position] = (),
         open_orders: Iterable[Order] = (),
+        metadata: Mapping[str, Any] | None = None,
     ) -> EntryPlan:
         return self._entry_planner.build_entry_plan(
             market=market,
@@ -65,6 +66,7 @@ class TradingDecisionService:
             max_total_usdc=max_total_usdc,
             positions=positions,
             open_orders=open_orders,
+            metadata=metadata,
         )
 
     def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:

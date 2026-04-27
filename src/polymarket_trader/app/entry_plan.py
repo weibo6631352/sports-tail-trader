@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Mapping
 
 from polymarket_trader.domain.allocation import Allocation, AllocationPlan
 from polymarket_trader.domain.market import Market
@@ -18,6 +19,7 @@ class EntryPlan:
     intent: TradableOrderIntent | None
     eligible_market_count: int = 0
     reason: str = ""
+    metadata: Mapping[str, Any] | None = None
 
     @property
     def ready_to_trade(self) -> bool:

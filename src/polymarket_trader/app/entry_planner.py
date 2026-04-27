@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from polymarket_trader.app.extension_intent_builder import decision_to_trade_intent
 from polymarket_trader.app.entry_plan import EntryPlan
@@ -51,8 +51,10 @@ class EntryPlanner:
         max_total_usdc: Decimal,
         positions: Iterable[Position] = (),
         open_orders: Iterable[Order] = (),
+        metadata: Mapping[str, Any] | None = None,
     ) -> EntryPlan:
         trace_id = trace_id or ensure_trace_id()
+        base_metadata = dict(metadata or {})
         available_usdc, positions, open_orders = _entry_account_inputs(
             account_snapshot=account_snapshot,
             available_usdc=available_usdc,
@@ -72,6 +74,7 @@ class EntryPlanner:
                 orderbook=resolved_orderbook,
                 portfolio_budget_usdc=portfolio_budget_usdc,
                 reason="missing_market_state",
+                metadata=base_metadata,
             )
 
         if account_snapshot is not None:
@@ -84,6 +87,7 @@ class EntryPlanner:
                     orderbook=resolved_orderbook,
                     portfolio_budget_usdc=portfolio_budget_usdc,
                     reason="entry_paused",
+                    metadata=base_metadata,
                 )
 
         positions = tuple(positions)
@@ -125,6 +129,7 @@ class EntryPlanner:
                 max_order_usdc=max_order_usdc,
                 max_market_usdc=max_market_usdc,
                 max_total_usdc=max_total_usdc,
+                metadata=base_metadata,
             )
         )
         plan = sizing.allocation_plan
@@ -135,6 +140,8 @@ class EntryPlanner:
         )
         reason = sizing.reason or plan.reason
         intent = None
+        plan_metadata: dict[str, Any] = dict(base_metadata)
+        plan_metadata.update(sizing.metadata or {})
 
         if allocation is not None:
             focus_token_id = allocation.token_id or focus_token_id
@@ -156,8 +163,10 @@ class EntryPlanner:
                         max_total_usdc=max_total_usdc,
                         allocation_plan=plan,
                         allocation=allocation,
+                        metadata=base_metadata,
                     )
                 )
+                plan_metadata.update(decision.metadata)
                 intent = decision_to_trade_intent(
                     trace_id=trace_id,
                     market=resolved_market,
@@ -176,6 +185,7 @@ class EntryPlanner:
             intent=intent,
             eligible_market_count=plan.eligible_market_count,
             reason=reason,
+            metadata=plan_metadata,
         )
 
     def _sizing_context(
@@ -194,8 +204,19 @@ class EntryPlanner:
         max_order_usdc: Decimal,
         max_market_usdc: Decimal,
         max_total_usdc: Decimal,
+        metadata: Mapping[str, Any],
     ) -> ExtensionContext:
         effective_available_usdc = available_usdc if available_usdc is not None else portfolio_budget_usdc
+        context_metadata: dict[str, Any] = dict(metadata)
+        context_metadata.update(
+            {
+                "portfolio_budget_usdc": portfolio_budget_usdc,
+                "available_usdc": effective_available_usdc,
+                "max_order_usdc": max_order_usdc,
+                "max_market_usdc": max_market_usdc,
+                "max_total_usdc": max_total_usdc,
+            }
+        )
         return ExtensionContext(
             trace_id=trace_id,
             market=market,
@@ -216,13 +237,7 @@ class EntryPlanner:
             max_order_usdc=max_order_usdc,
             max_market_usdc=max_market_usdc,
             max_total_usdc=max_total_usdc,
-            metadata={
-                "portfolio_budget_usdc": portfolio_budget_usdc,
-                "available_usdc": effective_available_usdc,
-                "max_order_usdc": max_order_usdc,
-                "max_market_usdc": max_market_usdc,
-                "max_total_usdc": max_total_usdc,
-            },
+            metadata=context_metadata,
         )
 
     def _entry_decision_context(
@@ -242,7 +257,22 @@ class EntryPlanner:
         max_total_usdc: Decimal,
         allocation_plan: AllocationPlan,
         allocation: Allocation,
+        metadata: Mapping[str, Any],
     ) -> ExtensionContext:
+        context_metadata: dict[str, Any] = dict(metadata)
+        context_metadata.update(
+            {
+                "allocation": allocation,
+                "allocation_plan": allocation_plan,
+                "amount_usdc": allocation.buy_budget_usdc,
+                "buy_budget_usdc": allocation.buy_budget_usdc,
+                "portfolio_budget_usdc": portfolio_budget_usdc,
+                "available_usdc": available_usdc,
+                "max_order_usdc": max_order_usdc,
+                "max_market_usdc": max_market_usdc,
+                "max_total_usdc": max_total_usdc,
+            }
+        )
         return ExtensionContext(
             trace_id=trace_id,
             market=market,
@@ -265,17 +295,7 @@ class EntryPlanner:
             allocation_plan=allocation_plan,
             allocation=allocation,
             amount_usdc=allocation.buy_budget_usdc,
-            metadata={
-                "allocation": allocation,
-                "allocation_plan": allocation_plan,
-                "amount_usdc": allocation.buy_budget_usdc,
-                "buy_budget_usdc": allocation.buy_budget_usdc,
-                "portfolio_budget_usdc": portfolio_budget_usdc,
-                "available_usdc": available_usdc,
-                "max_order_usdc": max_order_usdc,
-                "max_market_usdc": max_market_usdc,
-                "max_total_usdc": max_total_usdc,
-            },
+            metadata=context_metadata,
         )
 
     def _build_entry_candidates(
@@ -394,6 +414,7 @@ def _unavailable_entry_plan(
     orderbook: OrderbookSnapshot | None,
     portfolio_budget_usdc: Decimal,
     reason: str,
+    metadata: Mapping[str, Any] | None = None,
 ) -> EntryPlan:
     return EntryPlan(
         trace_id=trace_id,
@@ -408,6 +429,7 @@ def _unavailable_entry_plan(
         intent=None,
         eligible_market_count=0,
         reason=reason,
+        metadata=metadata or {},
     )
 
 

@@ -4,8 +4,15 @@ import { adminApi } from '../../core/api/resources'
 import type { AuditEventRecord, OutboxEventRecord } from '../../core/api/types'
 import { SectionCard } from '../../shared/ui/SectionCard'
 import { DataTable, type DataColumn } from '../../shared/ui/DataTable'
+import { JsonPanel } from '../../shared/ui/JsonPanel'
 import { MarketExternalLink } from '../../shared/ui/MarketExternalLink'
 import { formatDateTime } from '../../shared/utils/format'
+
+const auditRowKey = (row: AuditEventRecord) =>
+  row.event_id ?? `${row.trace_id}-${row.updated_at ?? row.created_at ?? 'unknown'}`
+
+const outboxRowKey = (row: OutboxEventRecord) =>
+  row.event_id ?? `${row.trace_id}-${row.created_at ?? 'unknown'}`
 
 export const AuditPage = () => {
   const pageSize = 100
@@ -14,6 +21,8 @@ export const AuditPage = () => {
   const [outboxTraceId, setOutboxTraceId] = useState('')
   const [auditOffset, setAuditOffset] = useState(0)
   const [outboxOffset, setOutboxOffset] = useState(0)
+  const [selectedAuditEvent, setSelectedAuditEvent] = useState<AuditEventRecord | null>(null)
+  const [selectedOutboxEvent, setSelectedOutboxEvent] = useState<OutboxEventRecord | null>(null)
 
   const auditQuery = useQuery({
     queryKey: ['audit-events', { traceId, eventTitle, auditOffset }],
@@ -101,6 +110,7 @@ export const AuditPage = () => {
               onChange={(event) => {
                 setTraceId(event.target.value)
                 setAuditOffset(0)
+                setSelectedAuditEvent(null)
               }}
             />
           </label>
@@ -111,6 +121,7 @@ export const AuditPage = () => {
               onChange={(event) => {
                 setEventTitle(event.target.value)
                 setAuditOffset(0)
+                setSelectedAuditEvent(null)
               }}
             />
           </label>
@@ -121,6 +132,7 @@ export const AuditPage = () => {
               onChange={(event) => {
                 setOutboxTraceId(event.target.value)
                 setOutboxOffset(0)
+                setSelectedOutboxEvent(null)
               }}
             />
           </label>
@@ -132,12 +144,22 @@ export const AuditPage = () => {
         subtitle={`当前 ${auditQuery.data?.total ?? 0} 条，当前第 ${Math.floor(auditOffset / pageSize) + 1} 页。`}
         actions={
           <div className="inline-actions">
-            <button type="button" onClick={() => setAuditOffset((current) => Math.max(0, current - pageSize))} disabled={auditOffset === 0}>
+            <button
+              type="button"
+              onClick={() => {
+                setAuditOffset((current) => Math.max(0, current - pageSize))
+                setSelectedAuditEvent(null)
+              }}
+              disabled={auditOffset === 0}
+            >
               上一页
             </button>
             <button
               type="button"
-              onClick={() => setAuditOffset((current) => current + pageSize)}
+              onClick={() => {
+                setAuditOffset((current) => current + pageSize)
+                setSelectedAuditEvent(null)
+              }}
               disabled={(auditQuery.data?.items.length ?? 0) < pageSize}
             >
               下一页
@@ -148,11 +170,19 @@ export const AuditPage = () => {
         <DataTable
           columns={auditColumns}
           rows={auditQuery.data?.items ?? []}
-          rowKey={(row) => row.event_id ?? `${row.trace_id}-${row.updated_at ?? row.created_at ?? 'unknown'}`}
+          rowKey={auditRowKey}
+          onRowClick={setSelectedAuditEvent}
+          selectedRowKey={selectedAuditEvent ? auditRowKey(selectedAuditEvent) : null}
           emptyTitle="没有审计事件"
           emptyDescription="当前查询条件下没有匹配的审计事件。"
         />
       </SectionCard>
+
+      {selectedAuditEvent ? (
+        <SectionCard title="审计载荷" subtitle={selectedAuditEvent.event_title}>
+          <JsonPanel value={selectedAuditEvent.payload} detailsLabel="查看载荷" defaultOpen />
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title="待处理外发队列"
@@ -161,14 +191,20 @@ export const AuditPage = () => {
           <div className="inline-actions">
             <button
               type="button"
-              onClick={() => setOutboxOffset((current) => Math.max(0, current - pageSize))}
+              onClick={() => {
+                setOutboxOffset((current) => Math.max(0, current - pageSize))
+                setSelectedOutboxEvent(null)
+              }}
               disabled={outboxOffset === 0}
             >
               上一页
             </button>
             <button
               type="button"
-              onClick={() => setOutboxOffset((current) => current + pageSize)}
+              onClick={() => {
+                setOutboxOffset((current) => current + pageSize)
+                setSelectedOutboxEvent(null)
+              }}
               disabled={(outboxQuery.data?.items.length ?? 0) < pageSize}
             >
               下一页
@@ -179,11 +215,19 @@ export const AuditPage = () => {
         <DataTable
           columns={outboxColumns}
           rows={outboxQuery.data?.items ?? []}
-          rowKey={(row) => row.event_id ?? `${row.trace_id}-${row.created_at ?? 'unknown'}`}
+          rowKey={outboxRowKey}
+          onRowClick={setSelectedOutboxEvent}
+          selectedRowKey={selectedOutboxEvent ? outboxRowKey(selectedOutboxEvent) : null}
           emptyTitle="没有待处理外发事件"
           emptyDescription="当前没有待处理的外发队列事件。"
         />
       </SectionCard>
+
+      {selectedOutboxEvent ? (
+        <SectionCard title="外发载荷" subtitle={selectedOutboxEvent.event_type}>
+          <JsonPanel value={selectedOutboxEvent.payload} detailsLabel="查看载荷" defaultOpen />
+        </SectionCard>
+      ) : null}
     </div>
   )
 }

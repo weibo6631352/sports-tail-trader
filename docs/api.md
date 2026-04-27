@@ -538,7 +538,12 @@
 - `tx_hash`
 - `status`
 - `reason`
+- `payload`
 - `created_at`
+
+说明：
+
+- `payload` 为脱敏后的审计载荷，可包含入场计划 metadata、候选原因、执行权限、风控结果和事件输入等复盘信息。
 
 ### 3.14 `GET /allocations`
 

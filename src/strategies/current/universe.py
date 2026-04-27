@@ -30,23 +30,30 @@ def select_market(config: CurrentStrategyConfig, market: Market) -> UniverseDeci
         - ``exclude`` 表示排除，并附带原因。
 
     规则：
-        - 分类文本至少命中一个要求的 category token；
-        - event 文本必须包含所有要求的 event token；
-        - market 文本必须包含所有要求的 target token。
+        - 分类或标签文本至少命中一个体育 token；
+        - market 文本和 outcomes 能解析成目标盘口类型；
+        - 盘口类型在策略白名单内。
     """
 
     category_tokens = _normalized_tokens(" ".join(_non_empty(market.category, *market.tags)))
-    event_tokens = _normalized_tokens(market.event_title)
-    market_tokens = _normalized_tokens(
-        " ".join(_non_empty(market.market_question, market.market_name, market.market_slug))
-    )
+    if not set(config.sports_category_tokens) & category_tokens:
+        return UniverseDecision.exclude(reason="sports_category_not_matched")
 
-    has_category = bool(set(config.required_category_tokens) & category_tokens)
-    has_event = all(token in event_tokens for token in config.required_event_tokens)
-    has_target = all(token in market_tokens for token in config.required_target_tokens)
-    if has_category and has_event and has_target:
-        return UniverseDecision.include(reason="selected_by_strategy")
-    return UniverseDecision.exclude(reason="market_out_of_universe")
+    from strategies.current.outcomes import describe_sports_market
+
+    descriptor = describe_sports_market(market)
+    if not descriptor.accepted or descriptor.market_type is None:
+        return UniverseDecision.exclude(reason=descriptor.reason or "sports_market_parse_failed")
+    if descriptor.market_type not in config.sports_enabled_market_types:
+        return UniverseDecision.exclude(reason="sports_market_type_disabled")
+    return UniverseDecision.include(
+        reason="sports_market_selected",
+        metadata={
+            "sports_market_type": descriptor.market_type.value,
+            "sports_line": str(descriptor.line) if descriptor.line is not None else None,
+            "sports_target_count": len(descriptor.targets),
+        },
+    )
 
 
 def _non_empty(*values: str | None) -> tuple[str, ...]:
@@ -66,23 +73,13 @@ def _normalized_tokens(text: str | None) -> set[str]:
         归一化后的 token 集合。
 
     说明：
-        这个函数故意做了少量业务缩写归一化，例如把
-        ``fully diluted valuation`` 统一成 ``fdv``，
-        把不同写法的 ``500 million`` 统一成 ``500m``，
-        这样上层筛选规则可以写得更稳定。
+        这个函数故意只做通用分词，不承载盘口判断；盘口语义由
+        ``outcomes.describe_sports_market`` 统一解析。
     """
 
     if not text:
         return set()
-    normalized = (
-        text.lower()
-        .replace("$500 million", "500m")
-        .replace("500 million", "500m")
-        .replace("500,000,000", "500m")
-        .replace("$500m", "500m")
-        .replace("500 m", "500m")
-        .replace("fully diluted valuation", "fdv")
-    )
+    normalized = text.lower()
     parts: list[str] = []
     current: list[str] = []
     for char in normalized:

@@ -74,6 +74,7 @@ def run_entry_replay(
         max_market_usdc=_decimal(budgets, "max_market_usdc"),
         max_total_usdc=_decimal(budgets, "max_total_usdc"),
         account_snapshot=account_state_store.snapshot(),
+        metadata=_mapping(fixture, "metadata"),
     )
     return {
         "fixture_path": str(Path(fixture_path)),
@@ -168,6 +169,7 @@ def _serialize_plan(plan: EntryPlan) -> dict[str, Any]:
         "reason": plan.reason,
         "ready_to_trade": plan.ready_to_trade,
         "eligible_market_count": plan.eligible_market_count,
+        "metadata": _jsonish(plan.metadata or {}),
         "market": None
         if plan.market is None
         else {
@@ -217,6 +219,18 @@ def _serialize_plan(plan: EntryPlan) -> dict[str, Any]:
 def _mapping(item: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     value = item.get(key, {})
     return value if isinstance(value, Mapping) else {}
+
+
+def _jsonish(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _jsonish(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_jsonish(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def _list(item: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:

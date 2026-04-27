@@ -5,6 +5,8 @@
 - `manifest.py`：策略 manifest
 - `strategy.py`：策略装配入口
 - `config.py`：策略配置 dataclass
+- `sports_tail.py`：体育扫尾候选、执行权限、评估结果和拒绝原因
+- `outcomes.py`：体育盘口类型、盘口线和目标 token 方向解析
 - `universe.py`：返回后本地 universe 精筛
 - `trading.py`：分配、入场、退出
 - `recovery.py`：恢复语义
@@ -20,15 +22,21 @@
    再看有哪些业务参数可以改，哪些阈值会影响扫描、筛选和交易。
 3. `universe.py`
    理解扫回来的 market 为什么会被纳入或排除。
-4. `trading.py`
+4. `sports_tail.py` / `outcomes.py`
+   理解 `Totals`、`Moneyline`、`Spreads` 如何被统一建模、解析和评估。
+5. `trading.py`
    理解资金怎么分配、什么条件下会买、什么条件下会卖。
-5. `recovery.py` / `tracking.py`
+6. `recovery.py` / `tracking.py`
    理解异常状态如何修复，以及 market 被排除后是否继续跟踪。
 
 ## 二次开发时优先改哪里
 
 - 只想改搜索词、价格阈值、流动性门槛：
   先改 `config.py`
+- 想改体育盘口模型、执行权限或拒绝原因：
+  改 `sports_tail.py`
+- 想改 outcome / token 方向解析：
+  改 `outcomes.py`
 - 想改“哪些 market 才算命中策略”：
   改 `universe.py`
 - 想改预算分配、买卖逻辑：
@@ -41,5 +49,6 @@
 - 这个目录只放策略自身语义，不放框架通用能力。
 - 策略通过 `polymarket_trader.extension_api` 提供的契约与框架交互。
 - 远端 discovery 粗筛通过 `CurrentStrategy.discovery_queries()` 暴露；当前实现从 `config.py` 的 `discovery_title_searches` 和 `discovery_tag_slugs` 生成 `DiscoveryQuery`。
+- 体育扫尾策略默认覆盖 `Totals`、`Moneyline`、`Spreads`，但不同盘口可以配置不同执行权限。
 - 策略不直接操作交易客户端、事件总线、数据库或 worker。
 - 真正下单、撤单、改价仍然由框架统一执行。

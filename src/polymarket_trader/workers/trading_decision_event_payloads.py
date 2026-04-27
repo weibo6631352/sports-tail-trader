@@ -17,6 +17,7 @@ from polymarket_trader.domain.order import (
     OrderType,
 )
 from polymarket_trader.domain.position import Position
+from polymarket_trader.serialization import jsonable
 
 TRADING_DECISION_WORKER_ORIGIN = "trading_decision_worker"
 
@@ -89,6 +90,17 @@ def serialize_allocation(plan: EntryPlan) -> dict[str, object] | None:
         "reason": plan.allocation.reason,
         "release_reason": plan.allocation.release_reason,
     }
+
+
+def serialize_plan_metadata(plan: EntryPlan) -> dict[str, object]:
+    """序列化入场计划的审计 metadata。
+
+    metadata 由 app 层透传，可能包含策略候选原因、执行权限或事件输入。
+    这里仅做 JSON 友好转换，不解释具体策略字段。
+    """
+
+    metadata = jsonable(plan.metadata or {})
+    return metadata if isinstance(metadata, dict) else {"value": metadata}
 
 
 def serialize_intent(intent: ManagedOrderIntent) -> dict[str, object]:
