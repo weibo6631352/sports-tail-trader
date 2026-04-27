@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from polymarket_trader.infra.polymarket import normalize_position_payload
 from polymarket_trader.serialization import jsonable
@@ -161,15 +162,19 @@ def _compare_replay_position(
 
 
 def _items(payload: Any, *keys: str) -> tuple[Mapping[str, Any], ...]:
-    if isinstance(payload, list):
+    if _is_record_sequence(payload):
         return tuple(item for item in payload if isinstance(item, Mapping))
     if isinstance(payload, Mapping):
         for key in keys:
             value = payload.get(key)
-            if isinstance(value, list):
+            if _is_record_sequence(value):
                 return tuple(item for item in value if isinstance(item, Mapping))
         return (payload,)
     return ()
+
+
+def _is_record_sequence(value: Any) -> bool:
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:

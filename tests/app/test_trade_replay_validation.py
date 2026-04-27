@@ -73,3 +73,33 @@ def test_trade_replay_validation_reports_mismatch() -> None:
 
     assert report.passed is False
     assert report.mismatches[0].field == "pnl.cash_pnl_usdc"
+
+
+def test_trade_replay_validation_accepts_tuple_payload_items() -> None:
+    trade_replays = {
+        "items": (
+            {
+                "condition_id": "condition-1",
+                "token_id": "token-1",
+                "position": {"shares": "2", "cost_usdc": "1.5"},
+                "pnl": {"cur_price": "0.75"},
+            },
+        )
+    }
+    positions = {
+        "positions": (
+            {
+                "conditionId": "condition-1",
+                "asset": "token-1",
+                "shares": "2",
+                "cost": "1.5",
+                "curPrice": "0.75",
+            },
+        )
+    }
+
+    report = validate_trade_replays_against_positions(trade_replays, positions)
+
+    assert report.passed is True
+    assert report.checked_records == 1
+    assert report.matched_positions == 1
