@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 import httpx
 
@@ -13,6 +14,9 @@ def test_espn_scoreboard_client_normalizes_live_basketball_game() -> None:
         client = EspnScoreboardClient(
             base_url="https://example.test",
             leagues=("nba",),
+            date_window_days_before=0,
+            date_window_days_after=0,
+            now_provider=lambda: datetime(2026, 4, 27, 9, 0, tzinfo=timezone.utc),
             client=httpx.AsyncClient(
                 base_url="https://example.test",
                 transport=httpx.MockTransport(_scoreboard_handler),
@@ -43,6 +47,9 @@ def test_espn_scoreboard_client_maps_429_to_rate_limit_error() -> None:
         client = EspnScoreboardClient(
             base_url="https://example.test",
             leagues=("nba",),
+            date_window_days_before=0,
+            date_window_days_after=0,
+            now_provider=lambda: datetime(2026, 4, 27, tzinfo=timezone.utc),
             client=httpx.AsyncClient(
                 base_url="https://example.test",
                 transport=httpx.MockTransport(
@@ -70,6 +77,34 @@ def test_espn_scoreboard_client_maps_429_to_rate_limit_error() -> None:
     asyncio.run(run())
 
 
+def test_espn_scoreboard_client_requests_only_current_scoreboard_date_by_default() -> None:
+    requests: list[tuple[str, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.url.path, request.url.params.get("dates")))
+        return httpx.Response(200, request=request, json={"events": []})
+
+    async def run() -> None:
+        client = EspnScoreboardClient(
+            base_url="https://example.test",
+            leagues=("nba",),
+            now_provider=lambda: datetime(2026, 4, 27, 9, 0, tzinfo=timezone.utc),
+            client=httpx.AsyncClient(
+                base_url="https://example.test",
+                transport=httpx.MockTransport(handler),
+            ),
+        )
+
+        await client.list_games()
+        await client.aclose()
+
+    asyncio.run(run())
+
+    assert requests == [
+        ("/apis/site/v2/sports/basketball/nba/scoreboard", "20260427"),
+    ]
+
+
 def test_espn_scoreboard_client_ignores_unsupported_env_proxy(monkeypatch) -> None:
     monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:7897")
 
@@ -80,6 +115,7 @@ def test_espn_scoreboard_client_ignores_unsupported_env_proxy(monkeypatch) -> No
 
 def _scoreboard_handler(request: httpx.Request) -> httpx.Response:
     assert request.url.path == "/apis/site/v2/sports/basketball/nba/scoreboard"
+    assert request.url.params.get("dates") == "20260427"
     return httpx.Response(
         200,
         request=request,

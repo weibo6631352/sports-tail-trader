@@ -24,7 +24,12 @@ from polymarket_trader.extension_api import ExtensionContext
 from strategies.current.config import CurrentStrategyConfig, sports_tail_policy_from_config
 from strategies.current.outcomes import describe_sports_market
 from strategies.current.recovery import decide_recovery
-from strategies.current.sports_tail import ExecutionPermission, SportsMarketType
+from strategies.current.sports_tail import (
+    ExecutionPermission,
+    LiveGameStatus,
+    SportsMarketType,
+    live_game_state_from_metadata,
+)
 from strategies.current.strategy import CurrentStrategy
 from strategies.current.trading import decide_entry
 from strategies.current.universe import select_market
@@ -47,6 +52,27 @@ def test_config_expresses_complete_sports_tail_policy() -> None:
     assert policy.totals_execution_permission == ExecutionPermission.AUTO_EXECUTE
     assert policy.moneyline_execution_permission == ExecutionPermission.AUTO_EXECUTE
     assert policy.spreads_execution_permission == ExecutionPermission.AUTO_EXECUTE
+
+
+def test_live_game_metadata_preserves_scheduled_status() -> None:
+    game = live_game_state_from_metadata(
+        {
+            "sports_tail_game": {
+                "league": "NBA",
+                "home_name": "Suns",
+                "away_name": "Thunder",
+                "home_score": 0,
+                "away_score": 0,
+                "period": "STATUS_SCHEDULED",
+                "seconds_remaining": None,
+                "status": "scheduled",
+                "observed_at": "2026-04-27T09:00:00+00:00",
+            }
+        }
+    )
+
+    assert game is not None
+    assert game.status == LiveGameStatus.SCHEDULED
 
 
 def test_universe_accepts_totals_moneyline_and_spreads_with_shared_descriptor_shape() -> None:

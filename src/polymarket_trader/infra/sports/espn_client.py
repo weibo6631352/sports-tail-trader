@@ -5,9 +5,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -29,6 +30,8 @@ _DEFAULT_LEAGUE_PATHS: dict[str, str] = {
     "nhl": "/apis/site/v2/sports/hockey/nhl/scoreboard",
     "mlb": "/apis/site/v2/sports/baseball/mlb/scoreboard",
 }
+
+_DEFAULT_SCOREBOARD_TIMEZONE = "America/New_York"
 
 _LEAGUE_SECONDS = {
     "nba": (4, 12 * 60),
@@ -102,10 +105,18 @@ class EspnScoreboardClient:
         client: httpx.AsyncClient | None = None,
         timeout_s: float = 5.0,
         limit: int = 100,
+        date_window_days_before: int = 0,
+        date_window_days_after: int = 0,
+        scoreboard_timezone: str = _DEFAULT_SCOREBOARD_TIMEZONE,
+        now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._leagues = tuple(_normalize_league_code(league) for league in leagues if str(league).strip())
         self._limit = max(1, limit)
+        self._date_window_days_before = max(0, int(date_window_days_before))
+        self._date_window_days_after = max(0, int(date_window_days_after))
+        self._scoreboard_timezone = _timezone(scoreboard_timezone)
+        self._now_provider = now_provider
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
             base_url=self._base_url,
@@ -125,18 +136,38 @@ class EspnScoreboardClient:
     async def list_games(self) -> SportsLiveSnapshot:
         """拉取所有配置联赛的当前 scoreboard。"""
 
-        observed_at = datetime.now(timezone.utc)
+        observed_at = self._now()
+        scoreboard_dates = _scoreboard_dates(
+            observed_at,
+            timezone_=self._scoreboard_timezone,
+            days_before=self._date_window_days_before,
+            days_after=self._date_window_days_after,
+        )
         games: list[SportsLiveGame] = []
+        seen_event_keys: set[tuple[str, str]] = set()
         for league in self._leagues:
-            payload = await self._get_scoreboard(league)
-            games.extend(parse_espn_scoreboard_payload(payload, league=league, observed_at=observed_at))
+            for scoreboard_date in scoreboard_dates:
+                payload = await self._get_scoreboard(league, scoreboard_date=scoreboard_date)
+                for game in parse_espn_scoreboard_payload(
+                    payload,
+                    league=league,
+                    observed_at=observed_at,
+                ):
+                    event_key = (game.league, game.source_event_id)
+                    if game.source_event_id and event_key in seen_event_keys:
+                        continue
+                    seen_event_keys.add(event_key)
+                    games.append(game)
         return SportsLiveSnapshot(source="espn", observed_at=observed_at, games=tuple(games))
 
-    async def _get_scoreboard(self, league: str) -> Mapping[str, Any]:
+    async def _get_scoreboard(self, league: str, *, scoreboard_date: str) -> Mapping[str, Any]:
         path = _path_for_league(league)
         operation = f"espn_scoreboard:{league}"
         try:
-            response = await self._client.get(path, params={"limit": self._limit})
+            response = await self._client.get(
+                path,
+                params={"limit": self._limit, "dates": scoreboard_date},
+            )
             response.raise_for_status()
         except Exception as exc:
             raise _normalize_error(exc, operation=operation) from exc
@@ -159,6 +190,16 @@ class EspnScoreboardClient:
                 raw_response_summary=sanitize_raw_response(payload, max_length=512),
             )
         return payload
+
+    def _now(self) -> datetime:
+        value = (
+            datetime.now(timezone.utc)
+            if self._now_provider is None
+            else self._now_provider()
+        )
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 def parse_espn_scoreboard_payload(
@@ -386,6 +427,27 @@ def _path_for_league(league: str) -> str:
 
 def _normalize_league_code(value: Any) -> str:
     return str(value).strip().lower()
+
+
+def _timezone(value: str) -> tzinfo:
+    try:
+        return ZoneInfo(value)
+    except ZoneInfoNotFoundError:
+        return timezone.utc
+
+
+def _scoreboard_dates(
+    observed_at: datetime,
+    *,
+    timezone_: tzinfo,
+    days_before: int,
+    days_after: int,
+) -> tuple[str, ...]:
+    local_date = observed_at.astimezone(timezone_).date()
+    return tuple(
+        (local_date + timedelta(days=offset)).strftime("%Y%m%d")
+        for offset in range(-days_before, days_after + 1)
+    )
 
 
 def _normalize_error(exc: Exception, *, operation: str) -> SportsDataClientError:

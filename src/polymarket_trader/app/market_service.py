@@ -6,6 +6,7 @@ from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from polymarket_trader.app.market_payload_parser import MarketParseResult, MarketPayloadParser
+from polymarket_trader.app.market_tracking_policy import market_unsubscribe_prune_reason
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.market import Market
 from polymarket_trader.observability.trace import ensure_trace_id
@@ -83,32 +84,43 @@ class MarketService:
                         fee_rate_updated_at=existing_market.fee_rate_updated_at,
                     )
 
-            universe_decision = self._extension_hooks.select_market(candidate_market)
-            if universe_decision.selected:
-                market = candidate_market
-                tracked_market = market
-                if self._registry is not None:
-                    self._registry.upsert(market)
-                if self._market_tracker is not None:
-                    self._market_tracker.track_market(market)
-                    if hasattr(self._market_tracker, "build_subscription_request"):
-                        subscription_request = self._market_tracker.build_subscription_request(
-                            market.token_ids
-                        )
-            elif existing_market is not None:
-                if self._should_retain_filtered_market(existing_market, account_snapshot):
-                    tracked_market = self._build_retained_filtered_market(
-                        candidate_market,
-                        existing_market=existing_market,
-                        reason=universe_decision.reason,
-                    )
-                    tracking_retained = True
-                    if self._registry is not None:
-                        self._registry.upsert(tracked_market)
-                    if self._market_tracker is not None:
-                        self._market_tracker.track_market(tracked_market)
-                else:
+            prune_reason = market_unsubscribe_prune_reason(
+                account_snapshot,
+                candidate_market,
+                now=discovered_at,
+            )
+            if prune_reason is not None:
+                # 发现链路也执行同一套终态清理，避免 reconcile 刚退订又被扫描重新订阅。
+                universe_decision = UniverseDecision.exclude(reason=prune_reason)
+                if existing_market is not None:
                     self._remove_market_tracking(existing_market)
+            else:
+                universe_decision = self._extension_hooks.select_market(candidate_market)
+                if universe_decision.selected:
+                    market = candidate_market
+                    tracked_market = market
+                    if self._registry is not None:
+                        self._registry.upsert(market)
+                    if self._market_tracker is not None:
+                        self._market_tracker.track_market(market)
+                        if hasattr(self._market_tracker, "build_subscription_request"):
+                            subscription_request = self._market_tracker.build_subscription_request(
+                                market.token_ids
+                            )
+                elif existing_market is not None:
+                    if self._should_retain_filtered_market(existing_market, account_snapshot):
+                        tracked_market = self._build_retained_filtered_market(
+                            candidate_market,
+                            existing_market=existing_market,
+                            reason=universe_decision.reason,
+                        )
+                        tracking_retained = True
+                        if self._registry is not None:
+                            self._registry.upsert(tracked_market)
+                        if self._market_tracker is not None:
+                            self._market_tracker.track_market(tracked_market)
+                    else:
+                        self._remove_market_tracking(existing_market)
 
         discovery_kind = (
             DomainEventType.MARKET_UPDATED.value

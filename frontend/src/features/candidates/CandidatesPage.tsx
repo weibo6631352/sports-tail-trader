@@ -313,11 +313,11 @@ export const CandidatesPage = () => {
         <div>
           <p className="eyebrow">候选</p>
           <h1>体育扫尾候选</h1>
-          <p>查看策略输出的候选，并通过人工确认入口提交确认请求。</p>
+          <p>查看策略输出的候选、拒绝原因和自动执行状态；人工复核只用于服务端标记为可确认的候选。</p>
         </div>
       </header>
 
-      <SectionCard title="筛选条件" subtitle="候选列表自动刷新，确认可用性以服务端 confirmable 字段为准。">
+      <SectionCard title="筛选条件" subtitle="候选列表自动刷新；自动交易以 action 和 execution_permission 为准，人工复核可用性以 confirmable 为准。">
         <div className="form-grid form-grid--filters">
           <label>
             <span>条件 ID</span>
@@ -409,7 +409,7 @@ export const CandidatesPage = () => {
         </SectionCard>
 
         <div className="detail-stack">
-          <SectionCard title="人工确认" subtitle="只提交选中候选，前端不重算策略确认条件。">
+          <SectionCard title="人工复核（可选）" subtitle="auto_execute 候选不需要手工确认；这里只提交服务端允许人工确认的候选。">
             <form className="form-grid" onSubmit={handleConfirm}>
               <label>
                 <span>操作者</span>
@@ -420,14 +420,14 @@ export const CandidatesPage = () => {
                 <input value={note} onChange={(event) => setNote(event.target.value)} />
               </label>
               <button type="submit" disabled={!canConfirm}>
-                {confirmMutation.isPending ? '确认中...' : '确认候选'}
+                {confirmMutation.isPending ? '提交中...' : '提交人工复核'}
               </button>
             </form>
             {selectedCandidate && !selectedCandidate.confirmable ? (
               <ul className="message-list form-feedback">
                 <li>
                   <strong>不可确认</strong>
-                  <span>当前候选的 confirmable 为否。</span>
+                  <span>当前候选不需要或不允许人工确认；如果满足 auto_execute 条件，后台会直接走交易主链路。</span>
                 </li>
               </ul>
             ) : null}

@@ -12,10 +12,11 @@ from polymarket_trader.app.reconcile_service import (
     ReconcilePlan,
     ReconcileService,
 )
+from polymarket_trader.app.market_tracking_policy import market_unsubscribe_prune_reason
 from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.domain.account import AccountSnapshot, MarketPauseSource
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
-from polymarket_trader.domain.market import Market, TradingStatus
+from polymarket_trader.domain.market import Market
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry, MarketRegistrySnapshot
@@ -318,7 +319,7 @@ class ReconcileWorker:
 
         if self._account_state_store is not None:
             self._account_state_store.mark_reconciled()
-            self._prune_out_of_universe_markets(self._account_state_store.snapshot())
+            self._prune_unsubscribable_markets(self._account_state_store.snapshot())
 
         completed_at = _utc_now()
         self._last_completed_at = completed_at
@@ -360,20 +361,30 @@ class ReconcileWorker:
         if self._event_bus is not None:
             await self._event_bus.publish(priority, event)
 
-    def _prune_out_of_universe_markets(self, account_snapshot: AccountSnapshot) -> None:
+    def _prune_unsubscribable_markets(self, account_snapshot: AccountSnapshot) -> None:
         if self._registry is None:
             return
+        now = _utc_now()
         markets = self._registry.snapshot().markets
         for market in markets:
-            if market.trading_status != TradingStatus.PAUSED:
-                continue
-            if market.reject_reason != "market_out_of_universe":
-                continue
-            if _market_has_exposure(account_snapshot, market):
+            prune_reason = market_unsubscribe_prune_reason(
+                account_snapshot,
+                market,
+                now=now,
+            )
+            if prune_reason is None:
                 continue
             self._registry.remove_market(market.condition_id)
             if self._market_ws_worker is not None and hasattr(self._market_ws_worker, "untrack_market"):
                 self._market_ws_worker.untrack_market(market.token_ids)
+            logger.info(
+                "pruned unsubscribable market from runtime tracking",
+                extra={
+                    "condition_id": market.condition_id,
+                    "market_slug": market.market_slug,
+                    "reason": prune_reason,
+                },
+            )
 
     def _resolve_snapshots(self) -> tuple[MarketRegistrySnapshot, AccountSnapshot]:
         if self._registry is not None:
@@ -404,21 +415,6 @@ class ReconcileWorker:
             condition_ids=condition_ids,
             refresh_market_authority=refresh_market_authority,
         )
-
-
-def _market_has_exposure(account_snapshot: AccountSnapshot, market: Market) -> bool:
-    for token_id in market.token_ids:
-        position = account_snapshot.get_position(market.condition_id, token_id)
-        if position is not None and (
-            position.shares > 0
-            or position.open_buy_shares > 0
-            or position.open_sell_shares > 0
-            or position.pending_buy_shares > 0
-        ):
-            return True
-        if account_snapshot.open_orders_for_market(market.condition_id, token_id):
-            return True
-    return False
 
 
 def _event_requests_market_authority_refresh(event: DomainEvent | None) -> bool:

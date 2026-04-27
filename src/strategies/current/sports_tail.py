@@ -34,6 +34,7 @@ class SportsMarketSide(StrEnum):
 class LiveGameStatus(StrEnum):
     """策略侧直播比赛状态。"""
 
+    SCHEDULED = "scheduled"
     LIVE = "live"
     PAUSED = "paused"
     POSTPONED = "postponed"
