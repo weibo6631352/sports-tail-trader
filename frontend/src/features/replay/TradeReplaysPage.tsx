@@ -5,6 +5,7 @@ import type { TradeReplayRecord } from '../../core/api/types'
 import { DataTable, type DataColumn } from '../../shared/ui/DataTable'
 import { JsonPanel } from '../../shared/ui/JsonPanel'
 import { MarketExternalLink } from '../../shared/ui/MarketExternalLink'
+import { QueryErrorNotice } from '../../shared/ui/QueryErrorNotice'
 import { SectionCard } from '../../shared/ui/SectionCard'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import { formatDateTime, formatDecimal } from '../../shared/utils/format'
@@ -182,15 +183,19 @@ export const TradeReplaysPage = () => {
             </div>
           }
         >
-          <DataTable
-            columns={columns}
-            rows={replayQuery.data?.items ?? []}
-            rowKey={rowKey}
-            emptyTitle="没有复盘记录"
-            emptyDescription="当前筛选下没有成交或持仓复盘数据。"
-            onRowClick={setSelectedReplay}
-            selectedRowKey={selectedReplay ? rowKey(selectedReplay) : null}
-          />
+          {replayQuery.error ? (
+            <QueryErrorNotice title="复盘记录加载失败" error={replayQuery.error} />
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={replayQuery.data?.items ?? []}
+              rowKey={rowKey}
+              emptyTitle="没有复盘记录"
+              emptyDescription="当前筛选下没有成交或持仓复盘数据。"
+              onRowClick={setSelectedReplay}
+              selectedRowKey={selectedReplay ? rowKey(selectedReplay) : null}
+            />
+          )}
         </SectionCard>
 
         <div className="detail-stack">

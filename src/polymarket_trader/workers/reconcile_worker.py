@@ -150,7 +150,11 @@ class ReconcileWorker:
         self._last_trace_id = trace_id
         self._last_trigger_event_type = None if trigger is None else str(trigger.event_type)
         try:
-            result = await self.reconcile_once(trace_id=trace_id, trigger_event=trigger)
+            result = await self.reconcile_once(
+                trace_id=trace_id,
+                trigger_event=trigger,
+                refresh_market_authority=_event_requests_market_authority_refresh(trigger),
+            )
         except Exception as exc:
             self._last_error = str(exc)
             self._last_completed_at = _utc_now()
@@ -200,6 +204,7 @@ class ReconcileWorker:
         trace_id: str | None = None,
         trigger_event: DomainEvent | None = None,
         condition_ids: tuple[str, ...] | None = None,
+        refresh_market_authority: bool = True,
     ) -> ReconcileWorkerResult:
         trace_id = trace_id or getattr(trigger_event, "trace_id", None) or uuid4().hex
         self._running = True
@@ -209,6 +214,7 @@ class ReconcileWorker:
         refresh_summary = await self._refresh_authoritative_state(
             trace_id=trace_id,
             condition_ids=condition_ids,
+            refresh_market_authority=refresh_market_authority,
         )
         self._last_refresh_summary = refresh_summary
         if refresh_summary.failures:
@@ -391,10 +397,12 @@ class ReconcileWorker:
         *,
         trace_id: str,
         condition_ids: tuple[str, ...] | None = None,
+        refresh_market_authority: bool = True,
     ) -> AuthoritativeRefreshSummary:
         return await self._authority_refresher.refresh(
             trace_id=trace_id,
             condition_ids=condition_ids,
+            refresh_market_authority=refresh_market_authority,
         )
 
 
@@ -411,3 +419,9 @@ def _market_has_exposure(account_snapshot: AccountSnapshot, market: Market) -> b
         if account_snapshot.open_orders_for_market(market.condition_id, token_id):
             return True
     return False
+
+
+def _event_requests_market_authority_refresh(event: DomainEvent | None) -> bool:
+    if event is None:
+        return False
+    return str(event.event_type).startswith("reconcile_")

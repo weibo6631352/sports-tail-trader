@@ -199,7 +199,7 @@ class AdminSerializer:
         token_id: str,
         condition_id: str | None,
         market_slug: str | None,
-        midpoint: Decimal,
+        midpoint: Decimal | None,
         orderbook: OrderbookSnapshot | None,
         source: str,
     ) -> dict[str, Any]:

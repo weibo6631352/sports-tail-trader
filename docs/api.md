@@ -357,6 +357,9 @@
 - 候选来自运行时 registry、orderbook 热态和 `EntryMetadataStore`，不查外部直播 API。
 - 外部直播源同步只由 `sports_live_state_sync` P2 job 更新 store；候选查询本身不触发外部请求。
 - 服务端返回策略已识别的候选，包括 `reject`，用于管理台复盘和调参；前端不能自行复写确认条件。
+- 候选查询读取已经进入 `EntryMetadataStore` 的运行时候选事实；当显式传入 `condition_id`、`token_id` 或 `market_slug` 时，只对指定市场构建展示投影。
+- 候选查询不枚举全量 registry 重新计算所有 market；全量市场列表仍由 `/markets` 提供，后台发现、订阅和交易判断不受前端分页影响。
+- 响应除通用分页字段外可包含 `has_more`、`source_markets`，用于说明当前候选投影来源市场数量。
 - `confirmable` 是人工确认按钮的唯一事实来源。
 - `exit_plan` 来自策略决策 metadata，用于展示买入后的目标卖出价、异常状态处理和恢复口径。
 

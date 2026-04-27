@@ -5,6 +5,7 @@ import type { FillRecord, PositionRecord } from '../../core/api/types'
 import { SectionCard } from '../../shared/ui/SectionCard'
 import { DataTable, type DataColumn } from '../../shared/ui/DataTable'
 import { MarketExternalLink } from '../../shared/ui/MarketExternalLink'
+import { QueryErrorNotice } from '../../shared/ui/QueryErrorNotice'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import { formatDateTime, formatDecimal } from '../../shared/utils/format'
 import { formatConfirmationStatusLabel, formatOrderSideLabel, isSellOrderSide } from '../../shared/utils/labels'
@@ -133,23 +134,31 @@ export const PositionsPage = () => {
       </SectionCard>
 
       <SectionCard title="持仓" subtitle={`当前 ${positionsQuery.data?.total ?? 0} 条。`}>
-        <DataTable
-          columns={positionColumns}
-          rows={positionsQuery.data?.items ?? []}
-          rowKey={(row) => `${row.condition_id}-${row.token_id}`}
-          emptyTitle="没有持仓"
-          emptyDescription="当前没有匹配的持仓记录。"
-        />
+        {positionsQuery.error ? (
+          <QueryErrorNotice title="持仓加载失败" error={positionsQuery.error} />
+        ) : (
+          <DataTable
+            columns={positionColumns}
+            rows={positionsQuery.data?.items ?? []}
+            rowKey={(row) => `${row.condition_id}-${row.token_id}`}
+            emptyTitle="没有持仓"
+            emptyDescription="当前没有匹配的持仓记录。"
+          />
+        )}
       </SectionCard>
 
       <SectionCard title="成交记录" subtitle={`当前 ${fillsQuery.data?.total ?? 0} 条。`}>
-        <DataTable
-          columns={fillColumns}
-          rows={fillsQuery.data?.items ?? []}
-          rowKey={(row) => row.event_id ?? `${row.order_id}-${row.trade_id}-${row.created_at ?? 'unknown'}`}
-          emptyTitle="没有成交记录"
-          emptyDescription="当前没有匹配的成交记录。"
-        />
+        {fillsQuery.error ? (
+          <QueryErrorNotice title="成交记录加载失败" error={fillsQuery.error} />
+        ) : (
+          <DataTable
+            columns={fillColumns}
+            rows={fillsQuery.data?.items ?? []}
+            rowKey={(row) => row.event_id ?? `${row.order_id}-${row.trade_id}-${row.created_at ?? 'unknown'}`}
+            emptyTitle="没有成交记录"
+            emptyDescription="当前没有匹配的成交记录。"
+          />
+        )}
       </SectionCard>
     </div>
   )

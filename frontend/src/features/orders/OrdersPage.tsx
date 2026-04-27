@@ -6,6 +6,7 @@ import { formatApiError } from '../../core/api/client'
 import { SectionCard } from '../../shared/ui/SectionCard'
 import { DataTable, type DataColumn } from '../../shared/ui/DataTable'
 import { JsonPanel } from '../../shared/ui/JsonPanel'
+import { QueryErrorNotice } from '../../shared/ui/QueryErrorNotice'
 import { MarketExternalLink } from '../../shared/ui/MarketExternalLink'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import { formatDateTime, formatDecimal } from '../../shared/utils/format'
@@ -222,19 +223,23 @@ export const OrdersPage = () => {
             </div>
           }
         >
-          <DataTable
-            columns={columns}
-            rows={ordersQuery.data?.items ?? []}
-            rowKey={(row) => row.order_id ?? `${row.condition_id}-${row.token_id}-${row.created_at ?? 'unknown'}`}
-            emptyTitle="没有订单"
-            emptyDescription="当前筛选下没有匹配结果。"
-            onRowClick={(row) => {
-              setSelectedOrder(row)
-              setMarketSlug(row.market_slug ?? '')
-              setManualTokenId(row.token_id)
-            }}
-            selectedRowKey={selectedOrder?.order_id ?? null}
-          />
+          {ordersQuery.error ? (
+            <QueryErrorNotice title="订单列表加载失败" error={ordersQuery.error} />
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={ordersQuery.data?.items ?? []}
+              rowKey={(row) => row.order_id ?? `${row.condition_id}-${row.token_id}-${row.created_at ?? 'unknown'}`}
+              emptyTitle="没有订单"
+              emptyDescription="当前筛选下没有匹配结果。"
+              onRowClick={(row) => {
+                setSelectedOrder(row)
+                setMarketSlug(row.market_slug ?? '')
+                setManualTokenId(row.token_id)
+              }}
+              selectedRowKey={selectedOrder?.order_id ?? null}
+            />
+          )}
         </SectionCard>
 
         <div className="detail-stack">

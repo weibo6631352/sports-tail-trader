@@ -7,6 +7,8 @@ export interface PageResponse<T> {
   total: number
   limit: number
   offset: number
+  has_more?: boolean
+  source_markets?: number
 }
 
 export interface BlockingIssue {

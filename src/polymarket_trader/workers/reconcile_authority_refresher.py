@@ -148,6 +148,7 @@ class ReconcileAuthorityRefresher:
         data_client: DataAuthorityClient | None = None,
         trading_client: TradingAuthorityClient | None = None,
         authority_call_timeout_s: float | None = None,
+        market_authority_concurrency: int = 8,
     ) -> None:
         self._registry_snapshot_provider = registry_snapshot_provider
         self._account_state_store = account_state_store
@@ -162,12 +163,14 @@ class ReconcileAuthorityRefresher:
             if authority_call_timeout_s is None
             else authority_call_timeout_s
         )
+        self._market_authority_concurrency = max(1, market_authority_concurrency)
 
     async def refresh(
         self,
         *,
         trace_id: str,
         condition_ids: tuple[str, ...] | None = None,
+        refresh_market_authority: bool = True,
     ) -> AuthoritativeRefreshSummary:
         markets = self._target_markets(condition_ids=condition_ids)
         if not markets:
@@ -185,10 +188,12 @@ class ReconcileAuthorityRefresher:
                 user_refresh_enabled=self._trading_client is not None,
             )
 
-        market_refreshes = await asyncio.gather(
-            *(self._refresh_market_authority(market) for market in markets),
-            return_exceptions=True,
+        market_authority_targets = self._market_authority_targets(
+            markets,
+            condition_ids=condition_ids,
+            refresh_market_authority=refresh_market_authority,
         )
+        market_refreshes = await self._refresh_market_authority_targets(market_authority_targets)
         refresh_failures: list[AuthoritativeRefreshFailure] = []
         refreshed_markets = 0
         refreshed_orderbooks = 0
@@ -319,6 +324,36 @@ class ReconcileAuthorityRefresher:
         if not condition_id_filter:
             return markets
         return tuple(market for market in markets if market.condition_id in condition_id_filter)
+
+    def _market_authority_targets(
+        self,
+        markets: tuple[Market, ...],
+        *,
+        condition_ids: tuple[str, ...] | None,
+        refresh_market_authority: bool,
+    ) -> tuple[Market, ...]:
+        if not refresh_market_authority:
+            return ()
+        if condition_ids is not None:
+            return markets
+        if self._account_state_store is None:
+            return ()
+        account_snapshot = self._account_state_store.snapshot()
+        return tuple(market for market in markets if _market_has_account_exposure(account_snapshot, market))
+
+    async def _refresh_market_authority_targets(
+        self,
+        markets: tuple[Market, ...],
+    ) -> tuple[AuthoritativeMarketRefresh | BaseException, ...]:
+        if not markets:
+            return ()
+        semaphore = asyncio.Semaphore(self._market_authority_concurrency)
+
+        async def _refresh_one(market: Market) -> AuthoritativeMarketRefresh:
+            async with semaphore:
+                return await self._refresh_market_authority(market)
+
+        return await asyncio.gather(*(_refresh_one(market) for market in markets), return_exceptions=True)
 
     async def _refresh_market_authority(self, market: Market) -> AuthoritativeMarketRefresh:
         failures: list[AuthoritativeRefreshFailure] = []
@@ -579,6 +614,21 @@ class ReconcileAuthorityRefresher:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _market_has_account_exposure(account_snapshot: Any, market: Market) -> bool:
+    for token_id in market.token_ids:
+        position = account_snapshot.get_position(market.condition_id, token_id)
+        if position is not None and (
+            position.shares > 0
+            or position.open_buy_shares > 0
+            or position.open_sell_shares > 0
+            or position.pending_buy_shares > 0
+        ):
+            return True
+        if account_snapshot.open_orders_for_market(market.condition_id, token_id):
+            return True
+    return False
 
 
 async def _await_authority(

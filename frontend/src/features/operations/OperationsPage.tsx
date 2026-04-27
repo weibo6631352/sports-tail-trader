@@ -7,6 +7,7 @@ import { SectionCard } from '../../shared/ui/SectionCard'
 import { DataTable, type DataColumn } from '../../shared/ui/DataTable'
 import { JsonPanel } from '../../shared/ui/JsonPanel'
 import { MarketExternalLink } from '../../shared/ui/MarketExternalLink'
+import { QueryErrorNotice } from '../../shared/ui/QueryErrorNotice'
 import { formatDecimal } from '../../shared/utils/format'
 
 export const OperationsPage = () => {
@@ -144,13 +145,17 @@ export const OperationsPage = () => {
       </div>
 
       <SectionCard title="预算分配" subtitle={`当前 ${allocationsQuery.data?.total ?? 0} 条。`}>
-        <DataTable
-          columns={allocationColumns}
-          rows={allocationsQuery.data?.items ?? []}
-          rowKey={(row) => row.idempotency_key ?? `${row.condition_id}-${row.token_id ?? 'unknown'}`}
-          emptyTitle="没有分配记录"
-          emptyDescription="当前没有可展示的预算分配记录。"
-        />
+        {allocationsQuery.error ? (
+          <QueryErrorNotice title="预算分配加载失败" error={allocationsQuery.error} />
+        ) : (
+          <DataTable
+            columns={allocationColumns}
+            rows={allocationsQuery.data?.items ?? []}
+            rowKey={(row) => row.idempotency_key ?? `${row.condition_id}-${row.token_id ?? 'unknown'}`}
+            emptyTitle="没有分配记录"
+            emptyDescription="当前没有可展示的预算分配记录。"
+          />
+        )}
       </SectionCard>
     </div>
   )

@@ -323,8 +323,8 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         settings_readiness=readiness,
         scheduler_snapshot_provider=scheduler.snapshot,
         account_snapshot_provider=account_state_store.snapshot,
-        market_ws_snapshot_provider=market_ws_worker.status_snapshot,
-        user_ws_snapshot_provider=user_ws_worker.status_snapshot,
+        market_ws_snapshot_provider=lambda: market_ws_worker.status_snapshot(include_subscriptions=False),
+        user_ws_snapshot_provider=lambda: user_ws_worker.status_snapshot(include_subscriptions=False),
         reconcile_snapshot_provider=reconcile_worker.status_snapshot,
         persistence_snapshot_provider=persistence_worker.snapshot,
         metrics_snapshot_provider=metrics.snapshot,
@@ -404,7 +404,11 @@ async def bootstrap_runtime(runtime: RuntimeComponents) -> RuntimeComponents:
     reconcile_summary: dict[str, Any]
     runtime.supervisor.set_phase(RuntimePhase.RECONCILING)
     try:
-        result = await _run_reconcile_once(runtime, source="startup")
+        result = await _run_reconcile_once(
+            runtime,
+            source="startup",
+            refresh_market_authority=False,
+        )
         reconcile_summary = {
             "trace_id": result.trace_id,
             "markets": len(result.plan.market_plans),
@@ -694,13 +698,7 @@ def _is_reconcile_trigger(event: DomainEvent) -> bool:
     event_type = str(event.event_type)
     if event_type.startswith("reconcile_"):
         return True
-    return event_type in {
-        "market_discovered",
-        "market_updated",
-        "market_filtered_in",
-        "market_filtered_out",
-        "market_resolved_or_disabled",
-    }
+    return event_type == "market_resolved_or_disabled"
 
 
 def _coalesce_reconcile_scope(
@@ -726,6 +724,10 @@ def _coalesce_reconcile_scope(
     return source, trigger, tuple(condition_ids)
 
 
+def _events_request_market_authority_refresh(events: tuple[DomainEvent, ...]) -> bool:
+    return any(str(event.event_type).startswith("reconcile_") for event in events)
+
+
 async def _run_reconcile(runtime: RuntimeComponents) -> None:
     max_batch_size = max(1, min(runtime.settings.maintenance_event_queue_max_size, 256))
     while True:
@@ -740,6 +742,7 @@ async def _run_reconcile(runtime: RuntimeComponents) -> None:
         actionable_events = tuple(event for event in pending_events if _is_reconcile_trigger(event))
         if not actionable_events:
             _sync_runtime_metrics(runtime)
+            await asyncio.sleep(0)
             continue
 
         source, trigger, condition_ids = _coalesce_reconcile_scope(actionable_events)
@@ -748,7 +751,9 @@ async def _run_reconcile(runtime: RuntimeComponents) -> None:
             source=source,
             trigger_event=trigger,
             condition_ids=condition_ids,
+            refresh_market_authority=_events_request_market_authority_refresh(actionable_events),
         )
+        await asyncio.sleep(0)
 
 
 async def _run_reconcile_once(
@@ -757,6 +762,7 @@ async def _run_reconcile_once(
     source: str,
     trigger_event: DomainEvent | None = None,
     condition_ids: tuple[str, ...] | None = None,
+    refresh_market_authority: bool = True,
 ) -> Any:
     runtime.supervisor.heartbeat_worker("reconcile", detail=source)
     started_at = asyncio.get_running_loop().time()
@@ -765,6 +771,7 @@ async def _run_reconcile_once(
             trace_id=f"reconcile-{source}-{uuid4().hex}",
             trigger_event=trigger_event,
             condition_ids=condition_ids,
+            refresh_market_authority=refresh_market_authority,
         )
     except Exception as exc:
         duration_ms = (asyncio.get_running_loop().time() - started_at) * 1000.0

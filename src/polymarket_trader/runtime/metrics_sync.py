@@ -27,7 +27,7 @@ def sync_runtime_metrics(runtime: Any) -> None:
         paused=queue_snapshot.low_priority_paused,
     )
 
-    market_ws = runtime.market_ws_worker.status_snapshot()
+    market_ws = runtime.market_ws_worker.status_snapshot(include_subscriptions=False)
     market_last_event = None
     if market_ws.last_result is not None and market_ws.last_result.event_types:
         market_last_event = market_ws.last_result.event_types[-1]
@@ -40,7 +40,7 @@ def sync_runtime_metrics(runtime: Any) -> None:
         last_error=market_ws.last_error,
     )
 
-    user_ws = runtime.user_ws_worker.status_snapshot()
+    user_ws = runtime.user_ws_worker.status_snapshot(include_subscriptions=False)
     runtime.metrics.set_ws_state(
         "user_ws",
         connected=user_ws.connected,

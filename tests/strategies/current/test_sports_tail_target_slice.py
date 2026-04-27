@@ -408,6 +408,15 @@ def test_admin_candidates_include_rejects_and_filter_by_action_permission_status
     assert result["manual"]["total"] == 0
 
 
+def test_admin_candidates_use_runtime_metadata_source_not_full_registry() -> None:
+    result = asyncio.run(_run_admin_candidate_metadata_source_flow())
+
+    assert len(result["items"]) == 2
+    assert result["total"] == 2
+    assert result["has_more"] is False
+    assert result["source_markets"] == 2
+
+
 def test_admin_confirmation_refuses_non_confirmable_candidate() -> None:
     result = asyncio.run(_run_admin_auto_candidate_confirmation_attempt())
 
@@ -639,6 +648,22 @@ def _moneyline_market() -> Market:
         outcomes=(
             MarketOutcome(token_id="home", outcome="NYK"),
             MarketOutcome(token_id="away", outcome="BOS"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+
+def _moneyline_market_for_index(index: int) -> Market:
+    return Market(
+        condition_id=f"moneyline-condition-{index}",
+        market_slug=f"nba-nyk-bos-moneyline-{index}",
+        market_question=f"NYK vs BOS moneyline {index}",
+        event_title="NYK vs BOS",
+        category="Sports",
+        tags=("NBA",),
+        outcomes=(
+            MarketOutcome(token_id=f"home-{index}", outcome="NYK"),
+            MarketOutcome(token_id=f"away-{index}", outcome="BOS"),
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
@@ -890,6 +915,51 @@ async def _run_admin_candidate_filter_flow() -> dict[str, object]:
             execution_permission="manual_confirm",
         ),
     }
+
+
+async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
+    registry = MarketRegistry()
+    snapshots: dict[str, OrderbookSnapshot] = {}
+    live_store = EntryMetadataStore()
+    for index in range(5):
+        market = _moneyline_market_for_index(index)
+        registry.upsert(market)
+        if index >= 2:
+            continue
+        snapshots[f"home-{index}"] = _orderbook(token_id=f"home-{index}", best_ask=Decimal("0.96"))
+        live_store.upsert(
+            condition_id=market.condition_id,
+            source="unit_test",
+            metadata={"sports_tail_game": _moneyline_live_game()},
+        )
+
+    market_ws = _MarketWs(snapshots)
+    account_state = AccountStateStore()
+    account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+    service = AdminService(
+        runtime=SimpleNamespace(
+            settings=SimpleNamespace(
+                portfolio_budget_usdc=Decimal("10"),
+                max_order_usdc=Decimal("10"),
+                max_market_usdc=Decimal("10"),
+                max_total_usdc=Decimal("10"),
+                max_open_orders=10,
+                order_retry_limit=2,
+            ),
+            registry=registry,
+            market_ws_worker=market_ws,
+            account_state_store=account_state,
+            entry_metadata_store=live_store,
+            trading_decision_service=TradingDecisionService(
+                extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+                registry=registry,
+                orderbook_reader=market_ws.snapshot,
+            ),
+            trading_service=TradingService(executor=_NoFillExecutor()),
+            event_bus=None,
+        )
+    )
+    return await service.list_sports_tail_candidates(limit=2, offset=0)
 
 
 async def _run_worker_without_live_game_state():

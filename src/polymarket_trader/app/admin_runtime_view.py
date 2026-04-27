@@ -12,6 +12,7 @@ from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.serialization import utc_now
 
 logger = logging.getLogger(__name__)
+_RUNTIME_MARKET_SAMPLE_LIMIT = 20
 
 
 def _text_or_none(value: Any) -> str | None:
@@ -50,7 +51,11 @@ class AdminRuntimeView:
         runtime_status = self._runtime_status_snapshot(supervisor, readiness)
         account = self._account_snapshot()
         registry = self._registry_snapshot()
-        markets = [self._serializer().market_view(market) for market in registry.markets]
+        market_sample = [
+            self._serializer().market_view(market)
+            for market in registry.markets[:_RUNTIME_MARKET_SAMPLE_LIMIT]
+        ]
+        markets_truncated = len(registry.markets) > _RUNTIME_MARKET_SAMPLE_LIMIT
         return {
             "phase": runtime_status["phase"],
             "ready_to_trade": runtime_status["ready_to_trade"],
@@ -63,12 +68,14 @@ class AdminRuntimeView:
             "sports_live_sync": self._sports_live_sync_snapshot(),
             "registry": {
                 "market_count": len(registry.markets),
-                "markets": [jsonable(market) for market in markets],
+                "markets": [jsonable(market) for market in market_sample],
+                "market_sample_limit": _RUNTIME_MARKET_SAMPLE_LIMIT,
+                "markets_truncated": markets_truncated,
             },
             "account": self._serializer().account_snapshot(account),
             "event_bus": jsonable(self._event_bus_snapshot()),
             "persistence": jsonable(self._persistence_snapshot()),
-            "markets": markets,
+            "markets": market_sample,
             "portfolio": self._serializer().portfolio_snapshot(account),
         }
 

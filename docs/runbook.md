@@ -78,10 +78,11 @@
 
 处置：
 1. 保持交易主链路继续运行，除非 outbox 关键事件也无法写入。
-2. 限速或暂停低优先级快照写入。
-3. 优先保留订单、成交、cancel、risk failure 等关键审计事件。
-4. 修复数据库连接后恢复 Persistence Worker。
-5. 核对 outbox 幂等写入结果。
+2. 先确认市场发现、orderbook 快照、候选拒绝等非交易事件没有重新进入持久化 outbox。
+3. 限速或暂停低优先级快照写入。
+4. 优先保留订单、成交、cancel、risk failure 等关键审计事件。
+5. 修复数据库连接后恢复 Persistence Worker。
+6. 核对 outbox 幂等写入结果。
 
 ## 交易主链路延迟升高
 

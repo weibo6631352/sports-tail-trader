@@ -112,8 +112,29 @@ class UserWsWorker:
     def snapshot(self) -> AccountSnapshot:
         return self._account_state.snapshot()
 
-    def status_snapshot(self) -> UserWsWorkerStatus:
+    def status_snapshot(self, *, include_subscriptions: bool = True) -> UserWsWorkerStatus:
         account_snapshot = self._account_state.snapshot()
+        if not include_subscriptions:
+            return UserWsWorkerStatus(
+                connected=account_snapshot.user_ws_connected,
+                allow_new_entries=account_snapshot.allow_new_entries,
+                subscribed_condition_ids=(),
+                subscription_count=len(self._subscribed_condition_ids),
+                last_message_at=self._last_message_at,
+                last_connected_at=self._last_connected_at,
+                last_disconnected_at=self._last_disconnected_at,
+                last_reconcile_at=account_snapshot.last_reconcile_at,
+                last_error=self._last_error,
+                last_result=self._last_result,
+                recent_results=tuple(self._recent_results),
+                balance_usdc=account_snapshot.balance_usdc,
+                allowance_usdc=account_snapshot.allowance_usdc,
+                open_order_count=len(account_snapshot.open_orders),
+                position_count=len(account_snapshot.positions),
+                fill_count=len(account_snapshot.fills),
+                paused_market_count=len(account_snapshot.market_pauses),
+                subscriptions=(),
+            )
         subscribed_condition_ids = tuple(sorted(self._subscribed_condition_ids))
         subscriptions = tuple(
             UserWsSubscriptionStatus(

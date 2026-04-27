@@ -6,6 +6,7 @@ import { formatApiError } from '../../core/api/client'
 import { DataTable, type DataColumn } from '../../shared/ui/DataTable'
 import { JsonPanel } from '../../shared/ui/JsonPanel'
 import { MarketExternalLink } from '../../shared/ui/MarketExternalLink'
+import { QueryErrorNotice } from '../../shared/ui/QueryErrorNotice'
 import { SectionCard } from '../../shared/ui/SectionCard'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import { formatBool, formatDateTime, formatDecimal } from '../../shared/utils/format'
@@ -381,22 +382,30 @@ export const CandidatesPage = () => {
               <button
                 type="button"
                 onClick={() => setOffset((current) => current + pageSize)}
-                disabled={(candidatesQuery.data?.items.length ?? 0) < pageSize}
+                disabled={
+                  candidatesQuery.data?.has_more
+                    ? false
+                    : (candidatesQuery.data?.items.length ?? 0) < pageSize
+                }
               >
                 下一页
               </button>
             </div>
           }
         >
-          <DataTable
-            columns={columns}
-            rows={candidatesQuery.data?.items ?? []}
-            rowKey={rowKey}
-            emptyTitle="没有候选"
-            emptyDescription="当前筛选下没有体育扫尾候选。"
-            onRowClick={setSelectedCandidate}
-            selectedRowKey={selectedCandidateKey}
-          />
+          {candidatesQuery.error ? (
+            <QueryErrorNotice title="候选列表加载失败" error={candidatesQuery.error} />
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={candidatesQuery.data?.items ?? []}
+              rowKey={rowKey}
+              emptyTitle="没有候选"
+              emptyDescription="当前筛选下没有体育扫尾候选。"
+              onRowClick={setSelectedCandidate}
+              selectedRowKey={selectedCandidateKey}
+            />
+          )}
         </SectionCard>
 
         <div className="detail-stack">
@@ -476,60 +485,68 @@ export const CandidatesPage = () => {
           </SectionCard>
 
           <SectionCard title="直播同步" subtitle="展示外部体育状态源的运行时快照。">
-            <JsonPanel
-              value={syncStatus}
-              emptyLabel="尚无直播同步状态。"
-              detailsLabel="查看直播同步原始状态"
-              summary={
-                syncStatus ? (
-                  <div className="detail-list">
-                    <div>
-                      <dt>状态</dt>
-                      <dd>
-                        <StatusPill
-                          label={
-                            syncStatus.last_error
-                              ? '异常'
-                              : syncStatus.running
-                                ? '同步中'
-                                : syncStatus.enabled
-                                  ? '已启用'
-                                  : '未启用'
-                          }
-                          tone={syncStatusTone(syncStatus)}
-                        />
-                      </dd>
+            {workersQuery.error ? (
+              <QueryErrorNotice title="直播同步状态加载失败" error={workersQuery.error} />
+            ) : (
+              <JsonPanel
+                value={syncStatus}
+                emptyLabel="尚无直播同步状态。"
+                detailsLabel="查看直播同步原始状态"
+                summary={
+                  syncStatus ? (
+                    <div className="detail-list">
+                      <div>
+                        <dt>状态</dt>
+                        <dd>
+                          <StatusPill
+                            label={
+                              syncStatus.last_error
+                                ? '异常'
+                                : syncStatus.running
+                                  ? '同步中'
+                                  : syncStatus.enabled
+                                    ? '已启用'
+                                    : '未启用'
+                            }
+                            tone={syncStatusTone(syncStatus)}
+                          />
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>来源</dt>
+                        <dd>{String(syncStatus.source ?? '—')}</dd>
+                      </div>
+                      <div>
+                        <dt>最近成功</dt>
+                        <dd>{formatDateTime(String(syncStatus.last_success_at ?? ''))}</dd>
+                      </div>
+                      <div>
+                        <dt>匹配</dt>
+                        <dd>{String(syncStatus.last_matches ?? 0)} / {String(syncStatus.last_markets_seen ?? 0)}</dd>
+                      </div>
+                      <div>
+                        <dt>信号</dt>
+                        <dd>{String(syncStatus.last_entry_signals_published ?? 0)}</dd>
+                      </div>
                     </div>
-                    <div>
-                      <dt>来源</dt>
-                      <dd>{String(syncStatus.source ?? '—')}</dd>
-                    </div>
-                    <div>
-                      <dt>最近成功</dt>
-                      <dd>{formatDateTime(String(syncStatus.last_success_at ?? ''))}</dd>
-                    </div>
-                    <div>
-                      <dt>匹配</dt>
-                      <dd>{String(syncStatus.last_matches ?? 0)} / {String(syncStatus.last_markets_seen ?? 0)}</dd>
-                    </div>
-                    <div>
-                      <dt>信号</dt>
-                      <dd>{String(syncStatus.last_entry_signals_published ?? 0)}</dd>
-                    </div>
-                  </div>
-                ) : null
-              }
-            />
+                  ) : null
+                }
+              />
+            )}
           </SectionCard>
 
           <SectionCard title="现场状态" subtitle={`最近 ${liveStatesQuery.data?.items.length ?? 0} 条现场状态。`}>
-            <DataTable
-              columns={liveStateColumns}
-              rows={liveStatesQuery.data?.items ?? []}
-              rowKey={liveStateRowKey}
-              emptyTitle="没有现场状态"
-              emptyDescription="当前没有可展示的体育现场状态。"
-            />
+            {liveStatesQuery.error ? (
+              <QueryErrorNotice title="现场状态加载失败" error={liveStatesQuery.error} />
+            ) : (
+              <DataTable
+                columns={liveStateColumns}
+                rows={liveStatesQuery.data?.items ?? []}
+                rowKey={liveStateRowKey}
+                emptyTitle="没有现场状态"
+                emptyDescription="当前没有可展示的体育现场状态。"
+              />
+            )}
           </SectionCard>
         </div>
       </div>

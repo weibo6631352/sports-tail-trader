@@ -657,6 +657,26 @@ pre {
   background: rgba(183, 121, 31, 0.06);
 }
 
+.query-error {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid rgba(185, 56, 47, 0.28);
+  border-left: 3px solid var(--danger);
+  border-radius: 8px;
+  color: var(--text-primary);
+  background: rgba(185, 56, 47, 0.08);
+}
+
+.query-error strong {
+  font-size: 0.92rem;
+}
+
+.query-error span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 .form-feedback {
   margin-top: 0.9rem;
 }

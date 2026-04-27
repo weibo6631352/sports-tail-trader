@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from itertools import count
@@ -125,7 +126,7 @@ class MarketDiscoveryWorker:
     ) -> list[DomainEvent]:
         discovered_trace_id = trace_id or self._next_trace_id(source)
         events: list[DomainEvent] = []
-        for market_payload in _extract_market_payloads(payload):
+        for index, market_payload in enumerate(_extract_market_payloads(payload), start=1):
             raw_event = RawMarketEvent(
                 source=source,
                 payload=_normalize_payload(market_payload),
@@ -134,6 +135,9 @@ class MarketDiscoveryWorker:
             event = await self._classify_and_emit(raw_event)
             if event is not None:
                 events.append(event)
+            if index % 10 == 0:
+                # Gamma 单页可能包含大量市场；发现链路必须定期让出事件循环，避免拖慢 Admin/API。
+                await asyncio.sleep(0)
         return events
 
     def record_failure(
@@ -223,12 +227,9 @@ class MarketDiscoveryWorker:
             },
         )
         if self._event_bus is not None:
-            await self._event_bus.publish(
-                OutboxPriority.P3
-                if event.event_type == DomainEventType.MARKET_FILTERED_OUT
-                else OutboxPriority.P2,
-                event,
-            )
+            # Discovery 结果已经在当前调用内更新 registry / tracker。后续只需要审计落库，
+            # 不能把批量发现事件灌进维护队列触发 reconcile 风暴。
+            await self._event_bus.publish(OutboxPriority.P3, event)
         return event
 
     def _remember(self, raw_event: RawMarketEvent) -> None:

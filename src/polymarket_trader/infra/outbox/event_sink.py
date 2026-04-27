@@ -6,12 +6,6 @@ from typing import Any, Protocol
 
 from polymarket_trader.domain.events import DomainEventType, OutboxEvent
 
-_MARKET_EVENT_TYPES = {
-    DomainEventType.MARKET_DISCOVERED.value,
-    DomainEventType.MARKET_FILTERED_IN.value,
-    DomainEventType.MARKET_FILTERED_OUT.value,
-    DomainEventType.MARKET_RESOLVED_OR_DISABLED.value,
-}
 _USER_EVENT_TYPES = {
     DomainEventType.BALANCE_UPDATED.value,
     DomainEventType.ORDER_STATE_UPDATED.value,
@@ -41,7 +35,7 @@ def _to_outbox_event(priority: int, event: Any) -> OutboxEvent | None:
     if event_type is None or event_id is None or trace_id is None:
         return None
     event_type_text = str(event_type).strip()
-    if event_type_text not in _MARKET_EVENT_TYPES | _USER_EVENT_TYPES:
+    if event_type_text not in _USER_EVENT_TYPES:
         return None
     payload = getattr(event, "payload", {})
     if not isinstance(payload, Mapping):
@@ -63,8 +57,6 @@ def _to_outbox_event(priority: int, event: Any) -> OutboxEvent | None:
 
 
 def _project_payload(event_type: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-    if event_type in _MARKET_EVENT_TYPES:
-        return dict(payload)
     if event_type == DomainEventType.BALANCE_UPDATED.value:
         projected: dict[str, Any] = {}
         for key in (

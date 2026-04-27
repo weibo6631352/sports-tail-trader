@@ -8,6 +8,7 @@ import { SectionCard } from '../../shared/ui/SectionCard'
 import { DataTable, type DataColumn } from '../../shared/ui/DataTable'
 import { JsonPanel } from '../../shared/ui/JsonPanel'
 import { StatusPill } from '../../shared/ui/StatusPill'
+import { QueryErrorNotice } from '../../shared/ui/QueryErrorNotice'
 import { EntityAvatar } from '../../shared/ui/EntityAvatar'
 import { MarketExternalLink } from '../../shared/ui/MarketExternalLink'
 import {
@@ -418,16 +419,20 @@ export const MarketsPage = () => {
           </div>
         }
       >
-        <DataTable
-          columns={columns}
-          rows={filteredMarkets}
-          rowKey={(row) => getMarketTokenId(row)}
-      emptyTitle="没有可展示的市场"
-      emptyDescription="请调整筛选条件后重试。"
-      onRowClick={(row) => selectMarket(getMarketTokenId(row))}
-      selectedRowKey={activeTokenId}
-    />
-  </SectionCard>
+        {marketsQuery.error ? (
+          <QueryErrorNotice title="市场列表加载失败" error={marketsQuery.error} />
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={filteredMarkets}
+            rowKey={(row) => getMarketTokenId(row)}
+            emptyTitle="没有可展示的市场"
+            emptyDescription="请调整筛选条件后重试。"
+            onRowClick={(row) => selectMarket(getMarketTokenId(row))}
+            selectedRowKey={activeTokenId}
+          />
+        )}
+      </SectionCard>
 
       <SectionCard
         title="当前选中市场"

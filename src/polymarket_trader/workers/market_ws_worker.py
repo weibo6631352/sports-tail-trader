@@ -282,7 +282,24 @@ class MarketWsWorker:
         state = self._states.get(token_id)
         return None if state is None else state.snapshot
 
-    def status_snapshot(self) -> MarketWsWorkerStatus:
+    def status_snapshot(self, *, include_subscriptions: bool = True) -> MarketWsWorkerStatus:
+        if not include_subscriptions:
+            recent_results = tuple(self._recent_results)
+            return MarketWsWorkerStatus(
+                tracked_market_count=len(self._tracked_markets),
+                subscription_count=len(self._tracked_markets),
+                tracked_token_ids=(),
+                subscribed_token_ids=(),
+                resolved_token_ids=(),
+                needs_rest_snapshot_token_ids=(),
+                last_message_at=self._last_message_at,
+                last_rest_snapshot_at=self._last_rest_snapshot_at,
+                last_error=self._last_error,
+                last_result=recent_results[-1] if recent_results else None,
+                recent_results=recent_results,
+                subscriptions=(),
+            )
+
         subscriptions: list[MarketWsSubscriptionStatus] = []
         tracked_token_ids = tuple(sorted(self._tracked_markets.keys()))
         subscribed_token_ids: list[str] = []

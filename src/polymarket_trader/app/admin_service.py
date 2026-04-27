@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import asyncio
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Literal, Mapping, Sequence, cast
@@ -38,6 +40,7 @@ from polymarket_trader.infra.db import (
     PositionRepository,
     RepositoryPage,
 )
+from polymarket_trader.infra.polymarket import PolymarketClientError
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 
@@ -466,7 +469,12 @@ class AdminService:
         if snapshot is not None and snapshot.best_bid is not None and snapshot.best_ask is not None:
             midpoint = (snapshot.best_bid + snapshot.best_ask) / Decimal("2")
         else:
-            midpoint = await self._clob_client().get_midpoint(resolved_token_id)
+            try:
+                midpoint = await self._clob_client().get_midpoint(resolved_token_id)
+            except PolymarketClientError as exc:
+                if exc.status_code != 404:
+                    raise
+                midpoint = None
             source = "rest"
         return self._serializer().market_midpoint(
             token_id=resolved_token_id,
@@ -807,11 +815,14 @@ class AdminService:
 
         candidates: list[dict[str, Any]] = []
         account = self._account_snapshot()
-        for market in self._registry_snapshot().markets:
-            if condition_id is not None and market.condition_id != condition_id:
-                continue
-            if market_slug is not None and market.market_slug != market_slug:
-                continue
+        source_markets = self._candidate_source_markets(
+            condition_id=condition_id,
+            token_id=token_id,
+            market_slug=market_slug,
+        )
+        for index, market in enumerate(source_markets, start=1):
+            if index % 20 == 0:
+                await asyncio.sleep(0)
             for outcome in market.outcomes:
                 if token_id is not None and outcome.token_id != token_id:
                     continue
@@ -841,7 +852,10 @@ class AdminService:
                     continue
                 candidates.append(candidate)
         page = self._slice_sequence(candidates, limit=limit, offset=offset)
-        return page_payload(page, serializer=lambda item: item)
+        payload = page_payload(page, serializer=lambda item: item)
+        payload["has_more"] = offset + len(page.items) < page.total
+        payload["source_markets"] = len(source_markets)
+        return payload
 
     async def confirm_sports_tail_candidate(
         self,
@@ -1064,6 +1078,43 @@ class AdminService:
             market_slug=market.market_slug,
             event_slug=market.event_slug,
         )
+
+    def _candidate_source_markets(
+        self,
+        *,
+        condition_id: str | None = None,
+        token_id: str | None = None,
+        market_slug: str | None = None,
+    ) -> tuple[Market, ...]:
+        """候选展示只读取已形成运行时事实的市场，不用页面请求触发全量业务评估。"""
+
+        if condition_id is not None or token_id is not None or market_slug is not None:
+            market = self._resolve_market(
+                condition_id=condition_id,
+                token_id=token_id,
+                market_slug=market_slug,
+            )
+            return () if market is None else (market,)
+
+        store = self._entry_metadata_store()
+        registry = getattr(self.runtime, "registry", None)
+        if store is None or registry is None:
+            return ()
+
+        markets: dict[str, Market] = {}
+        for record in store.records():
+            if "sports_tail_game" not in record.metadata:
+                continue
+            market = None
+            if record.condition_id:
+                market = registry.get_by_condition_id(record.condition_id)
+            if market is None and record.market_slug:
+                market = registry.get_by_slug(record.market_slug)
+            if market is None and record.event_slug:
+                market = registry.get_by_slug(record.event_slug)
+            if market is not None:
+                markets[market.condition_id] = market
+        return tuple(markets.values())
 
     def _project_manual_entry_result(self, review, *, snapshot: AccountSnapshot) -> None:
         account_state = getattr(self.runtime, "account_state_store", None)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from time import monotonic
 from typing import Callable, Iterable, Mapping
 from uuid import uuid4
 
@@ -44,9 +45,27 @@ from polymarket_trader.workers.trading_decision_worker_result import TradingDeci
 PositionsProvider = Callable[[], Iterable[Position]]
 OpenOrdersProvider = Callable[[], Iterable[Order]]
 EntryMetadataProvider = Callable[[DomainEvent, AccountSnapshot | None], Mapping[str, object] | None]
+ORDERBOOK_DECISION_GLOBAL_MIN_INTERVAL_S = 1.0
+ORDERBOOK_DECISION_TOKEN_MIN_INTERVAL_S = 3.0
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _entry_gate_closed_for_event(
+    snapshot: AccountSnapshot | None,
+    event: DomainEvent,
+) -> bool:
+    """账户或单市场入场闸门关闭时，不对高频盘口事件构建交易计划。"""
+
+    if snapshot is None:
+        return False
+    if not snapshot.allow_new_entries:
+        return True
+    if event.condition_id and snapshot.is_market_paused(event.condition_id):
+        return True
+    return False
 
 
 class TradingDecisionWorker:
@@ -91,6 +110,8 @@ class TradingDecisionWorker:
         self._order_retry_limit = order_retry_limit
         self._entry_metadata_provider = entry_metadata_provider
         self._market_lifecycle: dict[str, MarketLifecycle] = {}
+        self._last_orderbook_decision_at = 0.0
+        self._last_orderbook_decision_by_key: dict[str, float] = {}
         self._order_result_processor = TradingOrderResultProcessor(
             host=self,
             trading_decision_service=self._trading_decision_service,
@@ -140,6 +161,10 @@ class TradingDecisionWorker:
         event: DomainEvent,
         snapshot: AccountSnapshot | None,
     ) -> "TradingDecisionWorkerResult | None":
+        if _entry_gate_closed_for_event(snapshot, event):
+            return None
+        if self._should_throttle_orderbook_decision(event):
+            return None
         plan = self._trading_decision_service.build_entry_plan(
             trace_id=event.trace_id,
             condition_id=event.condition_id,
@@ -388,6 +413,25 @@ class TradingDecisionWorker:
         if extra_metadata:
             metadata.update(dict(extra_metadata))
         return metadata
+
+    def _should_throttle_orderbook_decision(self, event: DomainEvent) -> bool:
+        # 普通 orderbook tick 是高频行情事实；显式入场信号保留即时处理，不走这里的节流。
+        if str(event.event_type) != DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED.value:
+            return False
+        now = monotonic()
+        if now - self._last_orderbook_decision_at < ORDERBOOK_DECISION_GLOBAL_MIN_INTERVAL_S:
+            return True
+        key = event.token_id or event.condition_id or event.market_slug
+        if key:
+            last_token_decision_at = self._last_orderbook_decision_by_key.get(key)
+            if (
+                last_token_decision_at is not None
+                and now - last_token_decision_at < ORDERBOOK_DECISION_TOKEN_MIN_INTERVAL_S
+            ):
+                return True
+            self._last_orderbook_decision_by_key[key] = now
+        self._last_orderbook_decision_at = now
+        return False
 
     def _snapshot(self) -> AccountSnapshot | None:
         if self._account_state_store is not None:

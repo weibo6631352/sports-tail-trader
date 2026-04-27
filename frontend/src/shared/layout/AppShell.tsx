@@ -9,6 +9,7 @@ import { formatAddressShort, formatAllowance, formatCompact, getString } from '.
 import { resolvePolymarketIdentityDisplay } from '../utils/identity'
 import { formatPhaseLabel } from '../utils/labels'
 import { StatusPill } from '../ui/StatusPill'
+import { QueryErrorNotice } from '../ui/QueryErrorNotice'
 import { hasPositiveShares } from '../utils/markets'
 import { getMarketPosition } from '../utils/marketViews'
 
@@ -85,6 +86,7 @@ export const AppShell = ({ children }: AppShellProps) => {
     0
   const positionMarketCount =
     marketsQuery.data?.items.filter((item) => hasPositiveShares(getMarketPosition(item)?.shares)).length ?? 0
+  const shellError = readyQuery.error ?? runtimeQuery.error ?? portfolioQuery.error ?? marketsQuery.error
 
   return (
     <div className="app-shell">
@@ -159,6 +161,7 @@ export const AppShell = ({ children }: AppShellProps) => {
             </div>
           </div>
         </header>
+        {shellError ? <QueryErrorNotice title="运行状态接口加载失败" error={shellError} /> : null}
         <main className="page-container">{children}</main>
       </div>
     </div>

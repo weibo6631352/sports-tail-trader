@@ -6,6 +6,7 @@ import { SectionCard } from '../../shared/ui/SectionCard'
 import { DataTable, type DataColumn } from '../../shared/ui/DataTable'
 import { JsonPanel } from '../../shared/ui/JsonPanel'
 import { MarketExternalLink } from '../../shared/ui/MarketExternalLink'
+import { QueryErrorNotice } from '../../shared/ui/QueryErrorNotice'
 import { formatDateTime } from '../../shared/utils/format'
 
 const auditRowKey = (row: AuditEventRecord) =>
@@ -167,15 +168,19 @@ export const AuditPage = () => {
           </div>
         }
       >
-        <DataTable
-          columns={auditColumns}
-          rows={auditQuery.data?.items ?? []}
-          rowKey={auditRowKey}
-          onRowClick={setSelectedAuditEvent}
-          selectedRowKey={selectedAuditEvent ? auditRowKey(selectedAuditEvent) : null}
-          emptyTitle="没有审计事件"
-          emptyDescription="当前查询条件下没有匹配的审计事件。"
-        />
+        {auditQuery.error ? (
+          <QueryErrorNotice title="审计事件加载失败" error={auditQuery.error} />
+        ) : (
+          <DataTable
+            columns={auditColumns}
+            rows={auditQuery.data?.items ?? []}
+            rowKey={auditRowKey}
+            onRowClick={setSelectedAuditEvent}
+            selectedRowKey={selectedAuditEvent ? auditRowKey(selectedAuditEvent) : null}
+            emptyTitle="没有审计事件"
+            emptyDescription="当前查询条件下没有匹配的审计事件。"
+          />
+        )}
       </SectionCard>
 
       {selectedAuditEvent ? (
@@ -212,15 +217,19 @@ export const AuditPage = () => {
           </div>
         }
       >
-        <DataTable
-          columns={outboxColumns}
-          rows={outboxQuery.data?.items ?? []}
-          rowKey={outboxRowKey}
-          onRowClick={setSelectedOutboxEvent}
-          selectedRowKey={selectedOutboxEvent ? outboxRowKey(selectedOutboxEvent) : null}
-          emptyTitle="没有待处理外发事件"
-          emptyDescription="当前没有待处理的外发队列事件。"
-        />
+        {outboxQuery.error ? (
+          <QueryErrorNotice title="外发队列加载失败" error={outboxQuery.error} />
+        ) : (
+          <DataTable
+            columns={outboxColumns}
+            rows={outboxQuery.data?.items ?? []}
+            rowKey={outboxRowKey}
+            onRowClick={setSelectedOutboxEvent}
+            selectedRowKey={selectedOutboxEvent ? outboxRowKey(selectedOutboxEvent) : null}
+            emptyTitle="没有待处理外发事件"
+            emptyDescription="当前没有待处理的外发队列事件。"
+          />
+        )}
       </SectionCard>
 
       {selectedOutboxEvent ? (

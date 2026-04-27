@@ -6,6 +6,7 @@ import { JsonPanel } from '../../shared/ui/JsonPanel'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import { EntityAvatar } from '../../shared/ui/EntityAvatar'
 import { MarketExternalLink } from '../../shared/ui/MarketExternalLink'
+import { QueryErrorNotice } from '../../shared/ui/QueryErrorNotice'
 import {
   formatCompact,
   formatDateTime,
@@ -119,6 +120,13 @@ export const DashboardPage = () => {
   const currentRoundScannedMarkets = runtimeQuery.data?.market_discovery.markets_seen_in_round ?? 0
   const fullScanMarketCount = lastCompletedFullScanMarkets || currentRoundScannedMarkets
   const fullScanCompletedAt = runtimeQuery.data?.market_discovery.last_round_completed_at ?? null
+  const dashboardError =
+    readyQuery.error ??
+    runtimeQuery.error ??
+    workersQuery.error ??
+    metricsQuery.error ??
+    portfolioQuery.error ??
+    marketsQuery.error
 
   return (
     <div className="page-stack">
@@ -129,6 +137,8 @@ export const DashboardPage = () => {
           <p>先看账户、市场覆盖和阻塞项，再进入线程、扩展和原始快照。</p>
         </div>
       </header>
+
+      {dashboardError ? <QueryErrorNotice title="总览数据加载失败" error={dashboardError} /> : null}
 
       <section className="stats-grid">
         <div className="stat-card">
