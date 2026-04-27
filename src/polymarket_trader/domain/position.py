@@ -20,6 +20,15 @@ class Position:
     last_trade_id: str | None = None
     confirmation_status: str = "unknown"
     updated_at: datetime | None = None
+    avg_price: Decimal | None = None
+    initial_value: Decimal | None = None
+    current_value: Decimal | None = None
+    cash_pnl: Decimal | None = None
+    percent_pnl: Decimal | None = None
+    realized_pnl: Decimal | None = None
+    percent_realized_pnl: Decimal | None = None
+    cur_price: Decimal | None = None
+    redeemable: bool | None = None
 
     def with_open_buy_shares(self, shares: Decimal) -> "Position":
         return replace(self, open_buy_shares=shares)

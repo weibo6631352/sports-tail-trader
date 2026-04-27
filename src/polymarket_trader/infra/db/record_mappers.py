@@ -464,6 +464,15 @@ def position_from_record(record: Mapping[str, Any]) -> Position | None:
         last_trade_id=_text(record.get("last_trade_id")),
         confirmation_status=_text(record.get("confirmation_status")) or "unknown",
         updated_at=_datetime(record.get("updated_at") or record.get("created_at")),
+        avg_price=_decimal(record.get("avg_price")),
+        initial_value=_decimal(record.get("initial_value")),
+        current_value=_decimal(record.get("current_value")),
+        cash_pnl=_decimal(record.get("cash_pnl")),
+        percent_pnl=_decimal(record.get("percent_pnl")),
+        realized_pnl=_decimal(record.get("realized_pnl")),
+        percent_realized_pnl=_decimal(record.get("percent_realized_pnl")),
+        cur_price=_decimal(record.get("cur_price")),
+        redeemable=_bool(record.get("redeemable"), False) if record.get("redeemable") is not None else None,
     )
 
 

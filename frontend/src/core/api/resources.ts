@@ -21,6 +21,7 @@ import type {
   ReconcileResult,
   RuntimePayload,
   SportsLiveStateRecord,
+  TradeReplayRecord,
   WorkersPayload,
 } from './types'
 
@@ -56,6 +57,8 @@ export const adminApi = {
     apiClient.get<PageResponse<PositionRecord>>(`/positions${buildSearch(params)}`),
   listFills: (params: Record<string, unknown>) =>
     apiClient.get<PageResponse<FillRecord>>(`/fills${buildSearch(params)}`),
+  listTradeReplays: (params: Record<string, unknown>) =>
+    apiClient.get<PageResponse<TradeReplayRecord>>(`/trade-replays${buildSearch(params)}`),
   listCandidates: (params: Record<string, unknown>) =>
     apiClient.get<PageResponse<CandidateRecord>>(`/candidates${buildSearch(params)}`),
   listSportsLiveStates: (params: Record<string, unknown>) =>

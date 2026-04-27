@@ -674,6 +674,8 @@ class FillRepository(BaseRepository):
         trace_id: str | None = None,
         order_id: str | None = None,
         trade_id: str | None = None,
+        condition_id: str | None = None,
+        token_id: str | None = None,
     ) -> RepositoryPage[Fill]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(FillModel).order_by(FillModel.confirmed_at.desc(), FillModel.id.desc())
@@ -683,6 +685,10 @@ class FillRepository(BaseRepository):
             stmt = stmt.where(FillModel.order_id == order_id)
         if trade_id is not None:
             stmt = stmt.where(FillModel.trade_id == trade_id)
+        if condition_id is not None:
+            stmt = stmt.where(FillModel.condition_id == condition_id)
+        if token_id is not None:
+            stmt = stmt.where(FillModel.token_id == token_id)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
@@ -731,6 +737,15 @@ class PositionRepository(BaseRepository):
                 "last_order_id",
                 "last_trade_id",
                 "confirmation_status",
+                "avg_price",
+                "initial_value",
+                "current_value",
+                "cash_pnl",
+                "percent_pnl",
+                "realized_pnl",
+                "percent_realized_pnl",
+                "cur_price",
+                "redeemable",
                 "raw_payload",
                 "updated_at",
             ),
@@ -872,6 +887,8 @@ class AuditEventRepository(BaseRepository):
         offset: int = 0,
         trace_id: str | None = None,
         event_title: str | None = None,
+        condition_id: str | None = None,
+        token_id: str | None = None,
     ) -> RepositoryPage[AuditEvent]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(AuditEventModel).order_by(AuditEventModel.created_at.desc(), AuditEventModel.id.desc())
@@ -879,6 +896,10 @@ class AuditEventRepository(BaseRepository):
             stmt = stmt.where(AuditEventModel.trace_id == trace_id)
         if event_title is not None:
             stmt = stmt.where(AuditEventModel.event_title == event_title)
+        if condition_id is not None:
+            stmt = stmt.where(AuditEventModel.condition_id == condition_id)
+        if token_id is not None:
+            stmt = stmt.where(AuditEventModel.token_id == token_id)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 

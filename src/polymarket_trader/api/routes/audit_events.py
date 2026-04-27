@@ -14,6 +14,8 @@ async def list_audit_events(
     offset: int = Query(default=0, ge=0),
     trace_id: str | None = Query(default=None),
     event_title: str | None = Query(default=None),
+    condition_id: str | None = Query(default=None),
+    token_id: str | None = Query(default=None),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
     return await service.list_audit_events(
@@ -21,4 +23,6 @@ async def list_audit_events(
         offset=offset,
         trace_id=trace_id,
         event_title=event_title,
+        condition_id=condition_id,
+        token_id=token_id,
     )

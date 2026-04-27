@@ -22,6 +22,7 @@ const navigation = [
   { to: '/candidates', label: '候选' },
   { to: '/orders', label: '订单' },
   { to: '/positions', label: '持仓' },
+  { to: '/replay', label: '复盘' },
   { to: '/audit', label: '审计' },
   { to: '/operations', label: '操作' },
 ]

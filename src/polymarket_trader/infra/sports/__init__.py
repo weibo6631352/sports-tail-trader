@@ -7,6 +7,7 @@ from polymarket_trader.infra.sports.espn_client import (
     SportsDataResponseError,
     SportsDataTimeoutError,
     SportsDataTransportError,
+    parse_espn_scoreboard_payload,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "SportsDataResponseError",
     "SportsDataTimeoutError",
     "SportsDataTransportError",
+    "parse_espn_scoreboard_payload",
 ]

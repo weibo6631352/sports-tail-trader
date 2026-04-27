@@ -281,6 +281,15 @@ class AdminSerializer:
             "last_trade_id": position.last_trade_id,
             "confirmation_status": position.confirmation_status,
             "updated_at": jsonable(position.updated_at),
+            "avg_price": decimal_text(position.avg_price),
+            "initial_value": decimal_text(position.initial_value),
+            "current_value": decimal_text(position.current_value),
+            "cash_pnl": decimal_text(position.cash_pnl),
+            "percent_pnl": decimal_text(position.percent_pnl),
+            "realized_pnl": decimal_text(position.realized_pnl),
+            "percent_realized_pnl": decimal_text(position.percent_realized_pnl),
+            "cur_price": decimal_text(position.cur_price),
+            "redeemable": position.redeemable,
         }
 
     def order(self, order: Order) -> dict[str, Any]:

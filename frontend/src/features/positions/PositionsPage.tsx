@@ -27,12 +27,14 @@ export const PositionsPage = () => {
   })
 
   const fillsQuery = useQuery({
-    queryKey: ['fills', { fillTraceId }],
+    queryKey: ['fills', { fillTraceId, conditionId, tokenId }],
     queryFn: () =>
       adminApi.listFills({
         limit: 100,
         offset: 0,
         trace_id: fillTraceId || undefined,
+        condition_id: conditionId || undefined,
+        token_id: tokenId || undefined,
       }),
     refetchInterval: 10_000,
   })
@@ -56,6 +58,9 @@ export const PositionsPage = () => {
     },
     { key: 'shares', header: '持仓份额', align: 'right', cell: (row) => formatDecimal(row.shares) },
     { key: 'cost', header: '持仓成本', align: 'right', cell: (row) => formatDecimal(row.cost_usdc) },
+    { key: 'currentValue', header: '当前价值', align: 'right', cell: (row) => formatDecimal(row.current_value) },
+    { key: 'cashPnl', header: '现金盈亏', align: 'right', cell: (row) => formatDecimal(row.cash_pnl) },
+    { key: 'realizedPnl', header: '已实现盈亏', align: 'right', cell: (row) => formatDecimal(row.realized_pnl) },
     {
       key: 'confirmed',
       header: '已确认份额',

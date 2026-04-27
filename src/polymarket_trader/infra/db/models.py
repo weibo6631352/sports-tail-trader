@@ -882,6 +882,15 @@ class PositionModel(Base, TimestampMixin):
     last_order_id: Mapped[str | None] = mapped_column(String(128), index=True)
     last_trade_id: Mapped[str | None] = mapped_column(String(128), index=True)
     confirmation_status: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown", index=True)
+    avg_price: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    initial_value: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    current_value: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    cash_pnl: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    percent_pnl: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    realized_pnl: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    percent_realized_pnl: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    cur_price: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    redeemable: Mapped[bool | None] = mapped_column(Boolean)
     raw_payload: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
@@ -917,6 +926,15 @@ class PositionModel(Base, TimestampMixin):
             "last_trade_id": position.last_trade_id,
             "confirmation_status": position.confirmation_status,
             "updated_at": position.updated_at,
+            "avg_price": str(position.avg_price) if position.avg_price is not None else None,
+            "initial_value": str(position.initial_value) if position.initial_value is not None else None,
+            "current_value": str(position.current_value) if position.current_value is not None else None,
+            "cash_pnl": str(position.cash_pnl) if position.cash_pnl is not None else None,
+            "percent_pnl": str(position.percent_pnl) if position.percent_pnl is not None else None,
+            "realized_pnl": str(position.realized_pnl) if position.realized_pnl is not None else None,
+            "percent_realized_pnl": str(position.percent_realized_pnl) if position.percent_realized_pnl is not None else None,
+            "cur_price": str(position.cur_price) if position.cur_price is not None else None,
+            "redeemable": position.redeemable,
         }
         return cls(
             position_key=position_key,
@@ -933,6 +951,15 @@ class PositionModel(Base, TimestampMixin):
             last_order_id=position.last_order_id,
             last_trade_id=position.last_trade_id,
             confirmation_status=position.confirmation_status,
+            avg_price=position.avg_price,
+            initial_value=position.initial_value,
+            current_value=position.current_value,
+            cash_pnl=position.cash_pnl,
+            percent_pnl=position.percent_pnl,
+            realized_pnl=position.realized_pnl,
+            percent_realized_pnl=position.percent_realized_pnl,
+            cur_price=position.cur_price,
+            redeemable=position.redeemable,
             raw_payload=payload,
         )
 
@@ -951,6 +978,15 @@ class PositionModel(Base, TimestampMixin):
             last_trade_id=self.last_trade_id,
             confirmation_status=self.confirmation_status,
             updated_at=self.updated_at,
+            avg_price=_decimal(self.avg_price),
+            initial_value=_decimal(self.initial_value),
+            current_value=_decimal(self.current_value),
+            cash_pnl=_decimal(self.cash_pnl),
+            percent_pnl=_decimal(self.percent_pnl),
+            realized_pnl=_decimal(self.realized_pnl),
+            percent_realized_pnl=_decimal(self.percent_realized_pnl),
+            cur_price=_decimal(self.cur_price),
+            redeemable=self.redeemable,
         )
 
 

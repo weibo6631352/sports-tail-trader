@@ -570,6 +570,10 @@ pre {
   gap: 0.18rem;
 }
 
+.table-primary--right {
+  justify-items: end;
+}
+
 .table-primary span {
   color: var(--muted);
   font-size: 0.88rem;

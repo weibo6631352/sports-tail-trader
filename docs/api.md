@@ -37,6 +37,7 @@
 | `POST` | `/orders/replace` | 人工替换单个 open order |
 | `GET` | `/fills` | fills 分页查询 |
 | `GET` | `/positions` | 持仓分页查询 |
+| `GET` | `/trade-replays` | 成交、盈亏和结算复盘聚合 |
 | `GET` | `/portfolio` | 组合与账户摘要 |
 | `GET` | `/outbox/pending` | outbox 待处理事件 |
 | `POST` | `/operations/reconcile` | 手动触发 reconcile |
@@ -56,7 +57,7 @@
 
 ### 2.1 分页接口
 
-`/markets`、`/orders`、`/fills`、`/positions` 统一返回：
+`/markets`、`/orders`、`/fills`、`/positions`、`/trade-replays` 统一返回：
 
 ```json
 {
@@ -562,6 +563,8 @@
 | `trace_id` | `str` | `null` | 可选过滤 |
 | `order_id` | `str` | `null` | 可选过滤 |
 | `trade_id` | `str` | `null` | 可选过滤 |
+| `condition_id` | `str` | `null` | 可选过滤 |
+| `token_id` | `str` | `null` | 可选过滤 |
 
 单项结构重点：
 
@@ -661,8 +664,66 @@
 - `last_trade_id`
 - `confirmation_status`
 - `updated_at`
+- `avg_price`
+- `initial_value`
+- `current_value`
+- `cash_pnl`
+- `percent_pnl`
+- `realized_pnl`
+- `percent_realized_pnl`
+- `cur_price`
+- `redeemable`
 
-### 3.16 `GET /portfolio`
+说明：
+
+- 当前热态有持仓时优先读热态；热态为空且仓储可用时回退 DB position 快照。
+- PnL 字段来自 Polymarket Data API position 快照；缺失时保持 `null`，不由管理接口臆造。
+
+### 3.16 `GET /trade-replays`
+
+用途：
+
+- 按 `condition_id/token_id` 聚合 orders、fills、positions 和 audit events，形成成交后只读复盘视图。
+
+查询参数：
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `limit` | `int` | `100` | `1..500` |
+| `offset` | `int` | `0` | `>=0` |
+| `condition_id` | `str` | `null` | 可选过滤 |
+| `token_id` | `str` | `null` | 可选过滤 |
+| `trace_id` | `str` | `null` | 可选过滤 |
+
+单项结构重点：
+
+- `condition_id`
+- `token_id`
+- `market_slug`
+- `event_slug`
+- `outcome`
+- `market_status`
+- `settlement_status`
+- `trace_ids`
+- `order_ids`
+- `trade_ids`
+- `buy`
+- `sell`
+- `position`
+- `pnl`
+- `sports_tail_game`
+- `sports_live_match`
+- `exit_plan`
+- `candidate_reasons`
+- `source_counts`
+
+说明：
+
+- `pnl.source=data_position` 表示优先使用 Data API position 中的 `realized_pnl/cash_pnl/current_value`。
+- Data API PnL 缺失时，`pnl.source=fills`，已实现盈亏按 fills 的买入均价和卖出成交估算。
+- audit payload 只用于串联入场候选、直播状态匹配和退出计划，不作为财务账本主数据源。
+
+### 3.17 `GET /portfolio`
 
 用途：
 
@@ -688,7 +749,7 @@
 - `available_usdc` 直接等于 `balance_usdc`。
 - 若仓储可用，会补 `recent_allocations`；否则返回空数组。
 
-### 3.17 `GET /audit-events`
+### 3.18 `GET /audit-events`
 
 用途：
 
@@ -702,6 +763,8 @@
 | `offset` | `int` | `0` | `>=0` |
 | `trace_id` | `str` | `null` | 可选过滤 |
 | `event_title` | `str` | `null` | 按事件标题精确过滤 |
+| `condition_id` | `str` | `null` | 可选过滤 |
+| `token_id` | `str` | `null` | 可选过滤 |
 
 单项结构重点：
 
@@ -730,7 +793,7 @@
 
 - `payload` 为脱敏后的审计载荷，可包含入场计划 metadata、候选原因、执行权限、风控结果和事件输入等复盘信息。
 
-### 3.18 `GET /allocations`
+### 3.19 `GET /allocations`
 
 用途：
 
@@ -766,7 +829,7 @@
 - 有 DB session factory 时返回已落库分配快照。
 - 没有 DB session factory 时返回空分页结果。
 
-### 3.19 `GET /workers`
+### 3.20 `GET /workers`
 
 用途：
 
@@ -785,7 +848,7 @@
 
 - `sports_live_sync` 是同步 worker 的详细快照；`workers[]` 只表达 supervisor 心跳和生命周期状态。
 
-### 3.20 `GET /metrics`
+### 3.21 `GET /metrics`
 
 用途：
 
@@ -799,7 +862,7 @@
 - `metrics`
 - `sports_live_sync`
 
-### 3.21 `GET /outbox/pending`
+### 3.22 `GET /outbox/pending`
 
 用途：
 

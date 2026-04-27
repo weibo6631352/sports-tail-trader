@@ -128,7 +128,7 @@ class EspnScoreboardClient:
         games: list[SportsLiveGame] = []
         for league in self._leagues:
             payload = await self._get_scoreboard(league)
-            games.extend(_parse_scoreboard_payload(payload, league=league, observed_at=observed_at))
+            games.extend(parse_espn_scoreboard_payload(payload, league=league, observed_at=observed_at))
         return SportsLiveSnapshot(source="espn", observed_at=observed_at, games=tuple(games))
 
     async def _get_scoreboard(self, league: str) -> Mapping[str, Any]:
@@ -160,12 +160,20 @@ class EspnScoreboardClient:
         return payload
 
 
-def _parse_scoreboard_payload(
+def parse_espn_scoreboard_payload(
     payload: Mapping[str, Any],
     *,
     league: str,
-    observed_at: datetime,
+    observed_at: datetime | None = None,
 ) -> tuple[SportsLiveGame, ...]:
+    """把 ESPN scoreboard 原始 payload 转成内部直播比赛 DTO。
+
+    该函数供运行时 client 和离线真实样本校验复用。它不发起网络请求，也不判断
+    盘口或交易机会，便于把采集到的 ESPN JSON 固定成回归样本。
+    """
+
+    observed_at = observed_at or datetime.now(timezone.utc)
+    league = _normalize_league_code(league)
     events = payload.get("events")
     if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
         return ()

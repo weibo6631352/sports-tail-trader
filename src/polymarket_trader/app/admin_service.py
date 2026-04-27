@@ -11,6 +11,7 @@ from polymarket_trader.app.admin_order_control import AdminOrderController
 from polymarket_trader.app.admin_runtime_view import AdminRuntimeView
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable, page_payload
 from polymarket_trader.app.order_projection import AccountStateProjector, normalize_order_id
+from polymarket_trader.app.trade_replay import TradeReplayFilters, build_trade_replay_records
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
 from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
@@ -314,6 +315,8 @@ class AdminService:
         trace_id: str | None = None,
         order_id: str | None = None,
         trade_id: str | None = None,
+        condition_id: str | None = None,
+        token_id: str | None = None,
     ) -> dict[str, Any]:
         if not self._has_db_session_factory():
             snapshot = self._account_snapshot()
@@ -323,6 +326,8 @@ class AdminService:
                 if (trace_id is None or fill.trace_id == trace_id)
                 and (order_id is None or fill.order_id == order_id)
                 and (trade_id is None or fill.trade_id == trade_id)
+                and (condition_id is None or fill.condition_id == condition_id)
+                and (token_id is None or fill.token_id == token_id)
             ]
             page = self._slice_sequence(fills, limit=limit, offset=offset)
             return page_payload(page, serializer=self._serializer().fill)
@@ -334,6 +339,8 @@ class AdminService:
                 trace_id=trace_id,
                 order_id=order_id,
                 trade_id=trade_id,
+                condition_id=condition_id,
+                token_id=token_id,
             )
 
         page = await self._with_repositories(_query)
@@ -348,13 +355,25 @@ class AdminService:
         token_id: str | None = None,
     ) -> dict[str, Any]:
         snapshot = self._account_snapshot()
-        positions = [
-            position
-            for position in snapshot.positions
-            if (condition_id is None or position.condition_id == condition_id)
-            and (token_id is None or position.token_id == token_id)
-        ]
-        page = self._slice_sequence(positions, limit=limit, offset=offset)
+        if snapshot.positions or not self._has_db_session_factory():
+            positions = [
+                position
+                for position in snapshot.positions
+                if (condition_id is None or position.condition_id == condition_id)
+                and (token_id is None or position.token_id == token_id)
+            ]
+            page = self._slice_sequence(positions, limit=limit, offset=offset)
+            return page_payload(page, serializer=self._serializer().position)
+
+        async def _query(repos: _RepositoryGroup) -> RepositoryPage[Any]:
+            return await repos.position.list_positions_snapshot(
+                limit=limit,
+                offset=offset,
+                condition_id=condition_id,
+                token_id=token_id,
+            )
+
+        page = await self._with_repositories(_query)
         return page_payload(page, serializer=self._serializer().position)
 
     async def get_market(
@@ -488,6 +507,8 @@ class AdminService:
         offset: int = 0,
         trace_id: str | None = None,
         event_title: str | None = None,
+        condition_id: str | None = None,
+        token_id: str | None = None,
     ) -> dict[str, Any]:
         if not self._has_db_session_factory():
             page: RepositoryPage[Any] = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
@@ -499,10 +520,91 @@ class AdminService:
                 offset=offset,
                 trace_id=trace_id,
                 event_title=event_title,
+                condition_id=condition_id,
+                token_id=token_id,
             )
 
         page = await self._with_repositories(_query)
         return page_payload(page, serializer=self._serializer().audit_event)
+
+    async def list_trade_replays(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        condition_id: str | None = None,
+        token_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """聚合成交、持仓、审计和策略 metadata，返回只读复盘视图。"""
+
+        filters = TradeReplayFilters(
+            condition_id=condition_id,
+            token_id=token_id,
+            trace_id=trace_id,
+        )
+        if not self._has_db_session_factory():
+            account = self._account_snapshot()
+            records = build_trade_replay_records(
+                markets=self._registry_snapshot().markets,
+                orders=account.open_orders,
+                fills=account.fills,
+                positions=account.positions,
+                audit_events=(),
+                serializer=self._serializer(),
+                filters=filters,
+            )
+            page = self._slice_sequence(records, limit=limit, offset=offset)
+            return page_payload(page, serializer=lambda item: item)
+
+        async def _query(repos: _RepositoryGroup) -> dict[str, Any]:
+            query_limit = max(500, limit + offset)
+            if condition_id is not None:
+                market = await repos.market.get_by_condition_id(condition_id)
+                markets = () if market is None else (market,)
+            else:
+                market_page = await repos.market.list_markets_snapshot(limit=query_limit, offset=0)
+                markets = market_page.items
+            order_page = await repos.order.list_orders_snapshot(
+                limit=query_limit,
+                offset=0,
+                trace_id=trace_id,
+                condition_id=condition_id,
+                token_id=token_id,
+            )
+            fill_page = await repos.fill.list_fills_snapshot(
+                limit=query_limit,
+                offset=0,
+                trace_id=trace_id,
+                condition_id=condition_id,
+                token_id=token_id,
+            )
+            position_page = await repos.position.list_positions_snapshot(
+                limit=query_limit,
+                offset=0,
+                condition_id=condition_id,
+                token_id=token_id,
+            )
+            audit_page = await repos.audit.list_audit_events_snapshot(
+                limit=query_limit,
+                offset=0,
+                trace_id=trace_id,
+                condition_id=condition_id,
+                token_id=token_id,
+            )
+            records = build_trade_replay_records(
+                markets=markets,
+                orders=order_page.items,
+                fills=fill_page.items,
+                positions=position_page.items,
+                audit_events=audit_page.items,
+                serializer=self._serializer(),
+                filters=filters,
+            )
+            page = self._slice_sequence(records, limit=limit, offset=offset)
+            return page_payload(page, serializer=lambda item: item)
+
+        return await self._with_repositories(_query)
 
     async def list_allocations(
         self,

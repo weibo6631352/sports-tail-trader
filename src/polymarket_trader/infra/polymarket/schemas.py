@@ -1003,7 +1003,18 @@ class DataPositionDTO:
             last_trade_id=self.last_trade_id,
             confirmation_status=self.confirmation_status,
             updated_at=self.updated_at,
+            avg_price=self.avg_price,
+            initial_value=self.initial_value,
+            current_value=self.current_value,
+            cash_pnl=self.cash_pnl,
+            percent_pnl=self.percent_pnl,
+            realized_pnl=self.realized_pnl,
+            percent_realized_pnl=self.percent_realized_pnl,
+            cur_price=self.cur_price,
+            redeemable=self.redeemable,
         )
+
+
 @dataclass(frozen=True, slots=True)
 class WebSocketSubscription:
     channel: PolymarketSubscriptionChannel
@@ -1220,6 +1231,17 @@ def normalize_position_payload(payload: Mapping[str, Any]) -> DataPositionDTO:
         last_trade_id=_first_text(normalized, "last_trade_id", "lastTradeId"),
         confirmation_status=_first_text(normalized, "confirmation_status", "confirmationStatus") or "unknown",
         updated_at=_coerce_datetime(_first_value(normalized, "updated_at", "updatedAt")) or _utc_now(),
+        avg_price=_coerce_decimal(_first_value(normalized, "avg_price", "avgPrice")),
+        initial_value=_coerce_decimal(_first_value(normalized, "initialValue", "initial_value")),
+        current_value=_coerce_decimal(_first_value(normalized, "currentValue", "current_value")),
+        cash_pnl=_coerce_decimal(_first_value(normalized, "cashPnl", "cash_pnl")),
+        percent_pnl=_coerce_decimal(_first_value(normalized, "percentPnl", "percent_pnl")),
+        realized_pnl=_coerce_decimal(_first_value(normalized, "realizedPnl", "realized_pnl")),
+        percent_realized_pnl=_coerce_decimal(
+            _first_value(normalized, "percentRealizedPnl", "percent_realized_pnl")
+        ),
+        cur_price=_coerce_decimal(_first_value(normalized, "curPrice", "cur_price")),
+        redeemable=_coerce_bool(_first_value(normalized, "redeemable")),
     )
 
 

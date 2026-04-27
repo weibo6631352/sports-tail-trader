@@ -205,6 +205,15 @@ export interface PositionRecord {
   last_trade_id: string | null
   confirmation_status: string | null
   updated_at: string | null
+  avg_price: string | null
+  initial_value: string | null
+  current_value: string | null
+  cash_pnl: string | null
+  percent_pnl: string | null
+  realized_pnl: string | null
+  percent_realized_pnl: string | null
+  cur_price: string | null
+  redeemable: boolean | null
 }
 
 export interface OrderRecord {
@@ -249,6 +258,55 @@ export interface FillRecord {
   notional_usdc: string | null
   status: string | null
   confirmed_at: string | null
+}
+
+export interface TradeReplayRecord {
+  condition_id: string
+  token_id: string
+  market_slug: string | null
+  event_slug: string | null
+  event_title: string | null
+  outcome: string | null
+  market_status: string | null
+  settlement_status: string
+  trace_ids: string[]
+  order_ids: string[]
+  trade_ids: string[]
+  buy: {
+    count: number
+    size: string | null
+    notional_usdc: string | null
+    avg_price: string | null
+  }
+  sell: {
+    count: number
+    size: string | null
+    notional_usdc: string | null
+    avg_price: string | null
+  }
+  position: PositionRecord | null
+  pnl: {
+    source: string
+    realized_pnl_usdc: string | null
+    cash_pnl_usdc: string | null
+    current_value_usdc: string | null
+    initial_value_usdc: string | null
+    open_cost_usdc: string | null
+    net_cashflow_usdc: string | null
+    avg_buy_price: string | null
+    cur_price: string | null
+    redeemable: boolean | null
+    warning: string | null
+    data_sources: string[]
+  }
+  sports_tail_game: JsonValue
+  sports_live_match: JsonValue
+  exit_plan: JsonValue
+  candidate_reasons: string[]
+  first_fill_at: string | null
+  last_fill_at: string | null
+  last_position_updated_at: string | null
+  source_counts: JsonObject
 }
 
 export interface CandidateRecord {
