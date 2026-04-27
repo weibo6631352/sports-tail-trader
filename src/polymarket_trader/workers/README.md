@@ -9,6 +9,7 @@
 - `user_ws_worker.py`：交易主链路，接收订单、成交、持仓生命周期事件。
 - `trading_decision_worker.py`：交易主链路，消费交易事件并生成扩展决策和订单意图。
 - `reconcile_worker.py`：后台维护链路，周期校准权威状态，必要修复动作升级到关键修复链路或交易主链路。
+- `sports_live_state_worker.py`：后台维护链路，周期读取外部体育直播状态，匹配本地 market 并写入入场 metadata store。
 - `persistence_worker.py`：异步支撑链路，消费 outbox 异步落库；审计/outbox 记录保留原事件，宽表快照只物化 payload 中明确携带的结构化对象。
 
 ## 允许依赖
@@ -21,6 +22,7 @@
 
 - Worker 不直接实现业务规则。
 - Worker 不直接调用 Polymarket SDK；需要通过 app / infra 边界。
+- 体育直播状态 worker 只能同步事实和发布入场重放信号，不能判断套利、计算仓位或直接提交订单。
 - 交易主链路 worker 不等待后台维护或异步支撑 worker 释放资源。
 - Persistence Worker 不反向调用 Strategy 或 Order Executor。
 - Reconciler 不在批量扫描任务中长时间持有交易状态写锁。

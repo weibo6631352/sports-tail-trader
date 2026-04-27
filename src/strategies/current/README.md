@@ -6,6 +6,7 @@
 - `strategy.py`：策略装配入口
 - `config.py`：策略配置 dataclass
 - `sports_tail.py`：体育扫尾候选、执行权限、评估结果和拒绝原因
+- `live_state.py`：外部直播比赛状态与当前策略 market 的匹配和 metadata 映射
 - `outcomes.py`：体育盘口类型、盘口线和目标 token 方向解析
 - `universe.py`：返回后本地 universe 精筛
 - `trading.py`：分配、入场、退出
@@ -22,7 +23,7 @@
    再看有哪些业务参数可以改，哪些阈值会影响扫描、筛选和交易。
 3. `universe.py`
    理解扫回来的 market 为什么会被纳入或排除。
-4. `sports_tail.py` / `outcomes.py`
+4. `sports_tail.py` / `outcomes.py` / `live_state.py`
    理解 `Totals`、`Moneyline`、`Spreads` 如何被统一建模、解析和评估。
 5. `trading.py`
    理解资金怎么分配、什么条件下会买、什么条件下会卖。
@@ -37,6 +38,8 @@
   改 `sports_tail.py`
 - 想改 outcome / token 方向解析：
   改 `outcomes.py`
+- 想改外部比分与 market 文本的匹配方式：
+  改 `live_state.py`
 - 想改“哪些 market 才算命中策略”：
   改 `universe.py`
 - 想改预算分配、买卖逻辑：

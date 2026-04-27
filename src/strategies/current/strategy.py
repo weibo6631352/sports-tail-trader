@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Mapping
+
 from polymarket_trader.extension_api import (
     AccountSnapshotView,
     BusinessExtension,
@@ -20,8 +22,10 @@ from polymarket_trader.extension_api import (
 )
 
 from polymarket_trader.domain.market import Market
+from polymarket_trader.domain.sports_live import SportsLiveGame
 
 from strategies.current.config import CurrentStrategyConfig, load_current_strategy_config
+from strategies.current.live_state import sports_live_metadata_match
 from strategies.current.recovery import decide_recovery
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
 from strategies.current.trading import decide_entry, decide_exit, size_entry
@@ -202,6 +206,15 @@ class CurrentStrategy:
             existing_market=existing_market,
             reason=reason,
         )
+
+    def match_sports_live_state(
+        self,
+        market: Market,
+        games: tuple[SportsLiveGame, ...],
+    ) -> tuple[Market, SportsLiveGame, Mapping[str, Any]] | None:
+        """将外部直播比赛集合匹配成当前策略可消费的 metadata。"""
+
+        return sports_live_metadata_match(market, games)
 
 
 def build_strategy(

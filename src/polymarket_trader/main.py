@@ -43,6 +43,7 @@ from polymarket_trader.infra.polymarket.order_executor import (
     InMemoryPolymarketOrderClient,
     PolymarketOrderExecutor,
 )
+from polymarket_trader.infra.sports import EspnScoreboardClient
 from polymarket_trader.logging import LoggingRuntime, configure_logging
 from polymarket_trader.observability.metrics import MetricsRegistry
 from polymarket_trader.runtime import (
@@ -73,6 +74,7 @@ from polymarket_trader.workers.market_discovery_worker import MarketDiscoveryWor
 from polymarket_trader.workers.market_ws_worker import MarketWsWorker
 from polymarket_trader.workers.persistence_worker import PersistenceWorker
 from polymarket_trader.workers.reconcile_worker import ReconcileWorker
+from polymarket_trader.workers.sports_live_state_worker import SportsLiveStateWorker
 from polymarket_trader.workers.trading_decision_worker import TradingDecisionWorker
 from polymarket_trader.workers.user_ws_worker import UserWsWorker
 
@@ -104,6 +106,8 @@ class RuntimeComponents:
     market_service: MarketService
     market_discovery_worker: MarketDiscoveryWorker
     market_discovery_scan: FullMarketDiscoveryState
+    sports_live_state_client: EspnScoreboardClient | None
+    sports_live_state_worker: SportsLiveStateWorker | None
     trading_decision_service: TradingDecisionService
     trading_service: TradingService
     trading_decision_worker: TradingDecisionWorker
@@ -276,6 +280,33 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         retry_delay_seconds=MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS,
     )
     market_discovery_scan = FullMarketDiscoveryState()
+    sports_live_state_client: EspnScoreboardClient | None = None
+    sports_live_state_worker: SportsLiveStateWorker | None = None
+    sports_live_state_source = settings.sports_live_state_source.strip().lower()
+    if settings.sports_live_state_enabled and sports_live_state_source == "espn":
+        sports_live_state_client = EspnScoreboardClient(
+            base_url=settings.sports_live_state_base_url,
+            leagues=settings.sports_live_state_league_codes,
+            timeout_s=settings.sports_live_state_timeout_s,
+        )
+        sports_live_state_matcher = getattr(extension.hooks, "match_sports_live_state", None)
+        if callable(sports_live_state_matcher):
+            sports_live_state_worker = SportsLiveStateWorker(
+                snapshot_provider=sports_live_state_client.list_games,
+                match_live_state=sports_live_state_matcher,
+                registry=registry,
+                entry_metadata_store=entry_metadata_store,
+                event_bus=event_bus,
+                enabled=True,
+                source=sports_live_state_source,
+                leagues=settings.sports_live_state_league_codes,
+                publish_entry_signals=settings.sports_live_state_publish_entry_signals,
+            )
+        else:
+            logger.warning(
+                "sports live state sync disabled because extension lacks match_sports_live_state hook",
+                extra={"extension": getattr(extension.spec, "name", "unknown")},
+            )
     scheduler = Scheduler()
     supervisor = Supervisor(
         event_bus=event_bus,
@@ -316,6 +347,8 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         market_service=market_service,
         market_discovery_worker=market_discovery_worker,
         market_discovery_scan=market_discovery_scan,
+        sports_live_state_client=sports_live_state_client,
+        sports_live_state_worker=sports_live_state_worker,
         trading_decision_service=trading_decision_service,
         trading_service=trading_service,
         trading_decision_worker=trading_decision_worker,
@@ -420,6 +453,9 @@ async def shutdown_runtime(runtime: RuntimeComponents) -> None:
     for client in (runtime.gamma_client, runtime.clob_client, runtime.data_client):
         with suppress(Exception):
             await client.aclose()
+    if runtime.sports_live_state_client is not None:
+        with suppress(Exception):
+            await runtime.sports_live_state_client.aclose()
     bind = getattr(runtime.db_session_factory, "kw", {}).get("bind")
     if bind is not None:
         with suppress(Exception):
@@ -446,6 +482,8 @@ def _register_runtime_workers(runtime: RuntimeComponents) -> None:
     runtime.supervisor.register_worker("user_ws", priority="P0", state=WorkerLifecycleState.PAUSED)
     runtime.supervisor.register_worker("trading_decision", priority="P0")
     runtime.supervisor.register_worker("reconcile", priority="P2")
+    if runtime.sports_live_state_worker is not None:
+        runtime.supervisor.register_worker("sports_live_state_sync", priority="P2")
     runtime.supervisor.register_worker("persistence", priority="P3")
 
 
@@ -577,6 +615,16 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         start=True,
         run_immediately=False,
     )
+    if runtime.sports_live_state_worker is not None:
+        runtime.scheduler.register_job(
+            "sports_live_state_sync",
+            lambda: _run_sports_live_state_sync(runtime),
+            priority="P2",
+            interval_seconds=float(runtime.settings.sports_live_state_interval_seconds),
+            tags=("sports_live_state",),
+            start=True,
+            run_immediately=True,
+        )
     runtime.scheduler.register_job(
         "supervisor_refresh",
         lambda: _run_supervisor_refresh(runtime),
@@ -739,6 +787,38 @@ async def _run_reconcile_once(
     )
     _sync_runtime_metrics(runtime)
     return result
+
+
+async def _run_sports_live_state_sync(runtime: RuntimeComponents) -> None:
+    worker = runtime.sports_live_state_worker
+    if worker is None:
+        return
+    runtime.supervisor.heartbeat_worker("sports_live_state_sync", detail="syncing")
+    try:
+        result = await worker.sync_once()
+    except Exception as exc:
+        runtime.supervisor.mark_worker_error(
+            "sports_live_state_sync",
+            detail="sync_failed",
+            last_error=str(exc),
+        )
+        _sync_runtime_metrics(runtime)
+        raise
+    if result is None:
+        runtime.supervisor.heartbeat_worker(
+            "sports_live_state_sync",
+            state=WorkerLifecycleState.PAUSED,
+            detail="disabled",
+        )
+    else:
+        runtime.supervisor.heartbeat_worker(
+            "sports_live_state_sync",
+            detail=(
+                f"games={result.games_seen} matches={result.matches} "
+                f"signals={result.entry_signals_published}"
+            ),
+        )
+    _sync_runtime_metrics(runtime)
 
 
 async def _run_supervisor_refresh(runtime: RuntimeComponents) -> None:

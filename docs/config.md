@@ -19,6 +19,7 @@
 | 组合预算 | `PORTFOLIO_BUDGET_USDC`、`MAX_ORDER_USDC`、`MAX_MARKET_USDC` | 控制总预算、单笔和单 market 上限 |
 | 框架风控阈值 | `MAX_OPEN_ORDERS` | 运行时公共风控门禁 |
 | 同步与重试 | `MARKET_SYNC_INTERVAL_SECONDS`、`ORDER_RETRY_LIMIT` | reconcile 与失败处理 |
+| 体育直播状态源 | `SPORTS_LIVE_STATE_ENABLED`、`SPORTS_LIVE_STATE_LEAGUES` | 外部比分/阶段事实输入，不承载策略阈值 |
 | 性能隔离 | `TRADING_EVENT_QUEUE_MAX_SIZE`、`TRADING_WORKER_THREADS` | 交易主链路与后台维护 / 异步支撑队列及执行器隔离 |
 | 超时告警 | `ORDER_SUBMIT_TIMEOUT_MS`、`CRITICAL_LOCK_TIMEOUT_MS` | 防止交易链路无限等待 |
 | 数据库 | `DATABASE_URL`、`DATABASE_HOST` | PostgreSQL 连接地址；支持完整 URL 或拆分字段 |
@@ -42,6 +43,25 @@
 - `PORTFOLIO_BUDGET_USDC`、`MAX_ORDER_USDC`、`MAX_MARKET_USDC`、`MAX_TOTAL_USDC`、`MAX_OPEN_ORDERS` 任一不大于 `0` 时，系统不会进入自动交易态。
 - `POLYMARKET_API_KEY`、`POLYMARKET_API_SECRET`、`POLYMARKET_API_PASSPHRASE` 只填部分字段时，系统不会进入自动交易态。
 - `POLYMARKET_SIGNATURE_TYPE` 为 `1` 或 `2` 但未填写 `POLYMARKET_FUNDER_ADDRESS` 时，系统不会进入自动交易态。
+- `SPORTS_LIVE_STATE_ENABLED=true` 时，`SPORTS_LIVE_STATE_SOURCE` 当前只支持 `espn`，且 `SPORTS_LIVE_STATE_LEAGUES` 至少需要一个联赛代码；配置错误会阻止系统进入自动交易态。
+
+## 体育直播状态源
+
+这些配置只决定运行时从哪里读取比分、阶段和剩余时间，不属于策略参数：
+
+- `SPORTS_LIVE_STATE_ENABLED`：是否启用外部直播状态同步 worker。
+- `SPORTS_LIVE_STATE_SOURCE`：当前支持 `espn`。
+- `SPORTS_LIVE_STATE_BASE_URL`：ESPN site API 基础地址。
+- `SPORTS_LIVE_STATE_LEAGUES`：逗号分隔的联赛代码，例如 `nba,nhl,nfl,mlb`。
+- `SPORTS_LIVE_STATE_INTERVAL_SECONDS`：P2 同步任务间隔，默认 `15` 秒。
+- `SPORTS_LIVE_STATE_TIMEOUT_S`：外部请求超时。
+- `SPORTS_LIVE_STATE_PUBLISH_ENTRY_SIGNALS`：直播状态更新后是否发布 `ENTRY_SIGNAL_TRIGGERED`，用于让交易主链路基于最新 metadata 重放入场判断。
+
+运行时行为：
+
+- 外部 API 请求只发生在 `sports_live_state_sync` P2 scheduler job 中。
+- `TradingDecisionWorker.entry_metadata_provider` 只读取内存 `EntryMetadataStore`，不会在 P0 路径请求外部 API。
+- 同步状态通过 `/runtime`、`/workers`、`/metrics` 的 `sports_live_sync` 字段和前端候选页展示。
 
 ## 数据库
 

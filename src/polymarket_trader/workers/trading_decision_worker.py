@@ -116,7 +116,10 @@ class TradingDecisionWorker:
 
         event_name = str(event.event_type)
         snapshot = self._snapshot()
-        if event_name == DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED.value:
+        if event_name in {
+            DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED.value,
+            DomainEventType.ENTRY_SIGNAL_TRIGGERED.value,
+        }:
             return await self._handle_orderbook_snapshot_updated(event, snapshot)
 
         order_result = coerce_order_result_from_event(event)

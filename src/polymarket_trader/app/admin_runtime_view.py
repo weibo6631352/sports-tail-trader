@@ -60,6 +60,7 @@ class AdminRuntimeView:
             "runtime": runtime_status,
             "bootstrap_summary": jsonable(getattr(self.runtime, "bootstrap_summary", {})),
             "market_discovery": self._market_discovery_snapshot(),
+            "sports_live_sync": self._sports_live_sync_snapshot(),
             "registry": {
                 "market_count": len(registry.markets),
                 "markets": [jsonable(market) for market in markets],
@@ -79,6 +80,7 @@ class AdminRuntimeView:
             "automatic_trading_enabled": bool(supervisor.get("automatic_trading_enabled")),
             "queue_depths": supervisor.get("queue_depths"),
             "scheduler": supervisor.get("scheduler"),
+            "sports_live_sync": self._sports_live_sync_snapshot(),
             "workers": list(supervisor.get("worker_health", ())),
         }
 
@@ -90,6 +92,7 @@ class AdminRuntimeView:
             "automatic_trading_enabled": bool(supervisor.get("automatic_trading_enabled")),
             "queue_depths": supervisor.get("queue_depths"),
             "metrics": supervisor.get("metrics"),
+            "sports_live_sync": self._sports_live_sync_snapshot(),
         }
 
     def _supervisor_snapshot(self) -> dict[str, Any]:
@@ -345,6 +348,37 @@ class AdminRuntimeView:
             "last_tick_markets": int(getattr(state, "last_tick_markets", 0)),
             "last_error": getattr(state, "last_error", None),
             "consecutive_failures": int(getattr(state, "consecutive_failures", 0)),
+        }
+
+    def _sports_live_sync_snapshot(self) -> dict[str, Any]:
+        worker = getattr(self.runtime, "sports_live_state_worker", None)
+        if worker is not None and callable(getattr(worker, "status_snapshot", None)):
+            status = worker.status_snapshot()
+            if hasattr(status, "as_dict"):
+                return status.as_dict()
+            payload = jsonable(status)
+            return dict(payload) if isinstance(payload, Mapping) else {"value": payload}
+        settings = self._settings()
+        return {
+            "enabled": bool(getattr(settings, "sports_live_state_enabled", False)),
+            "source": str(getattr(settings, "sports_live_state_source", "espn")),
+            "running": False,
+            "last_started_at": None,
+            "last_completed_at": None,
+            "last_success_at": None,
+            "last_error": (
+                "sports_live_state_worker_unavailable"
+                if bool(getattr(settings, "sports_live_state_enabled", False))
+                else None
+            ),
+            "consecutive_failures": 0,
+            "last_games_seen": 0,
+            "last_markets_seen": 0,
+            "last_matches": 0,
+            "last_records_written": 0,
+            "last_unmatched_markets": 0,
+            "last_entry_signals_published": 0,
+            "leagues": list(getattr(settings, "sports_live_state_league_codes", ())),
         }
 
     def _market_ws_snapshot(self, token_id: str) -> OrderbookSnapshot | None:

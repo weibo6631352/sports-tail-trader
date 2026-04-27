@@ -6,6 +6,7 @@
 
 - `account_state.py`：账户余额、持仓、open orders、fills 和买入闸门热状态快照。
 - `event_bus.py`：事件总线和优先级队列。
+- `entry_metadata.py`：入场前运行时 metadata 快照 store，供策略读取外部事实输入。
 - `registry.py`：market / token 索引和本地状态注册表。
 - `status.py`：runtime phase、readiness、scheduler snapshot 和 worker health 契约。
 - `scheduler.py`：任务创建与调度。
@@ -15,7 +16,7 @@
 
 - 交易主链路：Orderbook Watcher、Strategy Worker、Risk Manager、Order Executor、User WS 中的订单 / 成交状态更新。
 - 关键修复链路：取消异常 open order、补挂缺失订单、replace 漂移订单等必须优先处理的修复动作。
-- 后台维护链路：Market Discovery、周期 reconcile、余额和 allowance 周期检查。
+- 后台维护链路：Market Discovery、体育直播状态同步、周期 reconcile、余额和 allowance 周期检查。
 - 异步支撑链路：Persistence Worker、指标聚合、Admin 普通查询、报表。
 
 ## 允许依赖

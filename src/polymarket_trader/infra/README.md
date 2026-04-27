@@ -7,6 +7,7 @@
 - Polymarket Gamma / CLOB / Data / WebSocket 适配。
 - PostgreSQL 模型、会话和仓储。
 - outbox 可靠事件队列和持久化入口。
+- 外部体育比分 / 赛况数据源适配。
 - 时间、序列化、外部 I/O 辅助能力。
 
 ## 子目录
@@ -14,6 +15,7 @@
 - [db](./db/README.md)：数据库模型、会话、仓储。
 - [outbox](./outbox/README.md)：可靠事件队列。
 - [polymarket](./polymarket/README.md)：Polymarket API / WS / order executor 适配。
+- [sports](./sports/README.md)：外部体育数据源适配。
 
 ## 允许依赖
 

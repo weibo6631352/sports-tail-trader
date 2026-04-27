@@ -173,6 +173,7 @@
 - `runtime`
 - `bootstrap_summary`
 - `market_discovery`
+- `sports_live_sync`
 - `registry`
 - `account`
 - `event_bus`
@@ -184,6 +185,7 @@
 
 - `settings` 已脱敏，测试里已覆盖 `wallet_private_key -> "***"`。
 - `market_discovery.query_cursors` / `completed_query_names` 用于观察远端 discovery 多 query 分页状态。
+- `sports_live_sync` 用于观察外部直播状态同步 worker 的启用状态、最近成功时间、错误、匹配数量和触发的入场重放信号数量。
 - `markets[].market.fees` 输出：
   - `enabled`
   - `maker_base_fee_bps`
@@ -337,6 +339,7 @@
 说明：
 
 - 候选来自运行时 registry、orderbook 热态和 `EntryMetadataStore`，不查外部直播 API。
+- 外部直播源同步只由 `sports_live_state_sync` P2 job 更新 store；候选查询本身不触发外部请求。
 - 服务端只返回策略已识别的非 reject 体育候选；前端不能自行复写确认条件。
 - `confirmable` 是人工确认按钮的唯一事实来源。
 
@@ -346,6 +349,7 @@
 
 - 查询已写入运行时的直播状态 metadata。
 - 用于确认策略当前读取到的比分、阶段、剩余时间和更新时间。
+- 只返回包含 `sports_tail_game` 的 metadata 记录。
 
 查询参数：
 
@@ -376,6 +380,11 @@
   "updated_at": "2026-04-27T00:00:00+00:00"
 }
 ```
+
+说明：
+
+- `source=sports_live:espn` 表示记录来自外部 ESPN 同步 worker。
+- `metadata.sports_tail_game.observed_at` 是外部源观测时间，`updated_at` 是本地 store 更新时间；两者可能相同，也可能因人工写入或重放不同。
 
 ### 3.9 `POST /candidates/live-states`
 
@@ -410,6 +419,7 @@
 
 - `condition_id`、`market_slug`、`event_slug` 三者至少给一个。
 - API 只负责写入 store，不触发下单。
+- 自动外部同步不通过该 HTTP 接口调用，而是由运行时 `sports_live_state_sync` worker 直接写入同一 store。
 
 ### 3.10 `POST /candidates/confirm`
 
@@ -752,7 +762,12 @@
 - `automatic_trading_enabled`
 - `queue_depths`
 - `scheduler`
+- `sports_live_sync`
 - `workers`
+
+说明：
+
+- `sports_live_sync` 是同步 worker 的详细快照；`workers[]` 只表达 supervisor 心跳和生命周期状态。
 
 ### 3.20 `GET /metrics`
 
@@ -766,6 +781,7 @@
 - `automatic_trading_enabled`
 - `queue_depths`
 - `metrics`
+- `sports_live_sync`
 
 ### 3.21 `GET /outbox/pending`
 

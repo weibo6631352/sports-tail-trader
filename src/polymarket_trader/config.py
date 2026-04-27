@@ -96,6 +96,15 @@ class Settings(BaseSettings):
     order_retry_limit: int = Field(default=2, ge=0)
     max_open_orders: int = Field(default=0, ge=0)
 
+    # 外部体育直播状态源只提供入场前事实，不承载策略阈值或交易参数。
+    sports_live_state_enabled: bool = False
+    sports_live_state_source: str = "espn"
+    sports_live_state_base_url: str = "https://site.api.espn.com"
+    sports_live_state_leagues: str = "nba,nhl,nfl,mlb"
+    sports_live_state_interval_seconds: int = Field(default=15, ge=5)
+    sports_live_state_timeout_s: float = Field(default=5.0, ge=0.1)
+    sports_live_state_publish_entry_signals: bool = True
+
     # 性能与优先级字段必须始终有限制，避免无界队列、无界等待和热路径阻塞。
     enable_uvloop: bool = True
     trading_event_queue_max_size: int = Field(default=1000, ge=1)
@@ -177,6 +186,20 @@ class Settings(BaseSettings):
             except Exception:
                 return "***"
         return self._compose_database_url(mask_password=True)
+
+    @property
+    def sports_live_state_league_codes(self) -> tuple[str, ...]:
+        """返回外部体育直播状态源需要拉取的联赛代码。"""
+
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in self.sports_live_state_leagues.split(","):
+            code = item.strip().lower()
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            result.append(code)
+        return tuple(result)
 
     def _compose_database_url(self, *, mask_password: bool) -> str:
         password = self._secret_value(self.database_password)
@@ -311,6 +334,33 @@ class Settings(BaseSettings):
                     value=self.market_sync_interval_seconds,
                 )
             )
+
+        if self.sports_live_state_enabled:
+            if self.sports_live_state_source.strip().lower() != "espn":
+                blocking_issues.append(
+                    ConfigIssue(
+                        field="sports_live_state_source",
+                        code="unsupported_source",
+                        message="SPORTS_LIVE_STATE_SOURCE 当前仅支持 espn",
+                        value=self.sports_live_state_source,
+                    )
+                )
+            if not self.sports_live_state_base_url.strip():
+                blocking_issues.append(
+                    ConfigIssue(
+                        field="sports_live_state_base_url",
+                        code="missing_endpoint",
+                        message="启用体育直播状态源时必须配置 SPORTS_LIVE_STATE_BASE_URL",
+                    )
+                )
+            if not self.sports_live_state_league_codes:
+                blocking_issues.append(
+                    ConfigIssue(
+                        field="sports_live_state_leagues",
+                        code="missing_leagues",
+                        message="启用体育直播状态源时至少需要配置一个联赛代码",
+                    )
+                )
 
         if self.trading_queue_warn_depth < 0:
             warnings.append(

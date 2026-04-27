@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { adminApi } from '../../core/api/resources'
-import type { CandidateRecord, SportsLiveStateRecord } from '../../core/api/types'
+import type { CandidateRecord, JsonObject, JsonValue, SportsLiveStateRecord } from '../../core/api/types'
 import { formatApiError } from '../../core/api/client'
 import { DataTable, type DataColumn } from '../../shared/ui/DataTable'
 import { JsonPanel } from '../../shared/ui/JsonPanel'
@@ -38,6 +38,29 @@ const liveGameField = (row: SportsLiveStateRecord, field: string): string | numb
     return value
   }
   return null
+}
+
+const asJsonObject = (value: JsonValue | undefined): JsonObject | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  return value
+}
+
+const syncStatusTone = (status: JsonObject | null): 'neutral' | 'success' | 'warning' | 'danger' => {
+  if (!status) {
+    return 'neutral'
+  }
+  if (status.last_error) {
+    return 'danger'
+  }
+  if (status.running) {
+    return 'warning'
+  }
+  if (status.last_success_at) {
+    return 'success'
+  }
+  return status.enabled ? 'warning' : 'neutral'
 }
 
 const permissionTone = (permission: string | null | undefined): 'neutral' | 'success' | 'warning' | 'danger' => {
@@ -81,6 +104,12 @@ export const CandidatesPage = () => {
   const liveStatesQuery = useQuery({
     queryKey: ['candidates-live-states'],
     queryFn: () => adminApi.listSportsLiveStates({ limit: 20, offset: 0 }),
+    refetchInterval: 8_000,
+  })
+
+  const workersQuery = useQuery({
+    queryKey: ['workers', 'sports-live-sync'],
+    queryFn: adminApi.getWorkers,
     refetchInterval: 8_000,
   })
 
@@ -216,6 +245,7 @@ export const CandidatesPage = () => {
   const selectedCandidateKey = selectedCandidate ? rowKey(selectedCandidate) : null
   const requestError = confirmMutation.error ? formatApiError(confirmMutation.error) : null
   const canConfirm = Boolean(selectedCandidate?.confirmable) && !confirmMutation.isPending
+  const syncStatus = asJsonObject(workersQuery.data?.sports_live_sync)
 
   const handleConfirm = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -356,6 +386,53 @@ export const CandidatesPage = () => {
                     <div>
                       <dt>说明</dt>
                       <dd>{confirmMutation.data.reason ?? '—'}</dd>
+                    </div>
+                  </div>
+                ) : null
+              }
+            />
+          </SectionCard>
+
+          <SectionCard title="直播同步" subtitle="展示外部体育状态源的运行时快照。">
+            <JsonPanel
+              value={syncStatus}
+              emptyLabel="尚无直播同步状态。"
+              detailsLabel="查看直播同步原始状态"
+              summary={
+                syncStatus ? (
+                  <div className="detail-list">
+                    <div>
+                      <dt>状态</dt>
+                      <dd>
+                        <StatusPill
+                          label={
+                            syncStatus.last_error
+                              ? '异常'
+                              : syncStatus.running
+                                ? '同步中'
+                                : syncStatus.enabled
+                                  ? '已启用'
+                                  : '未启用'
+                          }
+                          tone={syncStatusTone(syncStatus)}
+                        />
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>来源</dt>
+                      <dd>{String(syncStatus.source ?? '—')}</dd>
+                    </div>
+                    <div>
+                      <dt>最近成功</dt>
+                      <dd>{formatDateTime(String(syncStatus.last_success_at ?? ''))}</dd>
+                    </div>
+                    <div>
+                      <dt>匹配</dt>
+                      <dd>{String(syncStatus.last_matches ?? 0)} / {String(syncStatus.last_markets_seen ?? 0)}</dd>
+                    </div>
+                    <div>
+                      <dt>信号</dt>
+                      <dd>{String(syncStatus.last_entry_signals_published ?? 0)}</dd>
                     </div>
                   </div>
                 ) : null

@@ -312,6 +312,17 @@ def test_worker_publishes_skipped_plan_metadata_for_candidate_replay() -> None:
     assert result.emitted_event.payload["plan_metadata"]["sports_tail_action"] == "reject"
 
 
+def test_worker_treats_live_state_entry_signal_as_entry_replay_trigger() -> None:
+    result = asyncio.run(_run_worker_with_live_state_entry_signal())
+
+    assert result is not None
+    assert result.plan is not None
+    assert result.plan.ready_to_trade is True
+    assert result.plan.intent is not None
+    assert result.plan.intent.token_id == "over"
+    assert result.plan.metadata["sports_tail_reason"] == "totals_over_locked"
+
+
 def test_moneyline_manual_permission_keeps_candidate_out_of_auto_buy_path() -> None:
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
@@ -617,6 +628,57 @@ async def _run_worker_without_live_game_state():
             condition_id=market.condition_id,
             token_id="over",
             reason="new_market",
+            created_at=orderbook.received_at,
+            payload={"source": "unit_test"},
+        )
+    )
+
+
+async def _run_worker_with_live_state_entry_signal():
+    market = _totals_market()
+    orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
+    registry = MarketRegistry()
+    registry.upsert(market)
+    service = TradingDecisionService(
+        extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+        registry=registry,
+        orderbook_reader=lambda token_id: orderbook if token_id == "over" else None,
+    )
+    worker = TradingDecisionWorker(
+        trading_decision_service=service,
+        trading_service=TradingService(executor=_NoFillExecutor()),
+        portfolio_budget_usdc=Decimal("10"),
+        available_usdc=Decimal("10"),
+        balance_usdc=Decimal("10"),
+        allowance_usdc=Decimal("10"),
+        max_order_usdc=Decimal("10"),
+        max_market_usdc=Decimal("10"),
+        max_total_usdc=Decimal("10"),
+        max_open_orders=10,
+        order_retry_limit=2,
+        entry_metadata_provider=lambda event, snapshot: {
+            "sports_tail_game": {
+                "league": "NHL",
+                "home_name": "TB",
+                "away_name": "MON",
+                "home_score": 3,
+                "away_score": 2,
+                "period": "P3",
+                "seconds_remaining": 420,
+                "status": "live",
+                "observed_at": "2026-04-27T00:00:00+00:00",
+            },
+        },
+    )
+    return await worker.process_event(
+        DomainEvent(
+            trace_id="trace-worker-entry-signal",
+            event_type=DomainEventType.ENTRY_SIGNAL_TRIGGERED,
+            event_id="event-worker-entry-signal",
+            market_slug=market.market_slug,
+            condition_id=market.condition_id,
+            token_id="over",
+            reason="sports_live_state_updated",
             created_at=orderbook.received_at,
             payload={"source": "unit_test"},
         )

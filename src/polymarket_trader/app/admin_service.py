@@ -641,7 +641,11 @@ class AdminService:
         """分页返回当前运行时保存的体育直播状态 metadata。"""
 
         store = self._entry_metadata_store()
-        records = () if store is None else store.records()
+        records = (
+            ()
+            if store is None
+            else tuple(record for record in store.records() if "sports_tail_game" in record.metadata)
+        )
         page = self._slice_sequence(records, limit=limit, offset=offset)
         return page_payload(page, serializer=lambda record: record.as_payload())
 
@@ -858,6 +862,7 @@ class AdminService:
             "condition_id": market.condition_id,
             "market_slug": market.market_slug,
             "event_slug": market.event_slug,
+            "event_title": market.event_title,
             "token_id": token_id,
             "outcome": None if outcome is None else outcome.outcome,
             "ready_to_trade": plan.ready_to_trade,

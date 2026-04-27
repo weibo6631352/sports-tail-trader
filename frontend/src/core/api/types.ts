@@ -63,6 +63,7 @@ export interface RuntimePayload {
   runtime: RuntimeStatus
   bootstrap_summary: JsonValue
   market_discovery: MarketDiscoverySnapshot
+  sports_live_sync?: JsonValue
   registry: {
     market_count: number
     markets: JsonValue[]
@@ -124,6 +125,7 @@ export interface WorkersPayload {
   automatic_trading_enabled: boolean
   queue_depths: JsonValue
   scheduler: JsonValue
+  sports_live_sync?: JsonValue
   workers: WorkerSnapshot[]
 }
 
@@ -132,6 +134,7 @@ export interface MetricsPayload {
   automatic_trading_enabled: boolean
   queue_depths: JsonValue
   metrics: JsonValue
+  sports_live_sync?: JsonValue
 }
 
 export interface MarketSummary {
