@@ -308,11 +308,9 @@ class EntryPlanner:
         position_index: dict[tuple[str, str], Position],
         open_orders: tuple[Order, ...],
     ) -> tuple[EntryCandidate, ...]:
-        markets = (
-            self._registry.snapshot().markets
-            if self._registry is not None and self._registry.snapshot().markets
-            else (focus_market,)
-        )
+        # 入场计划运行在 P0 交易热路径。每个 orderbook 事件只能围绕当前触发 market
+        # 构造候选，不能为了预算分配枚举全量 registry 并读取所有盘口热态。
+        markets = (focus_market,)
         candidates: list[EntryCandidate] = []
         for candidate in markets:
             for candidate_token_id in _candidate_token_ids(candidate):

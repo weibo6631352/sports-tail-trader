@@ -111,6 +111,7 @@ class EspnScoreboardClient:
             base_url=self._base_url,
             timeout=timeout_s,
             headers={"accept": "application/json"},
+            trust_env=False,
         )
 
     @property

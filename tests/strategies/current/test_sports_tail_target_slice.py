@@ -30,6 +30,12 @@ from strategies.current.trading import decide_entry
 from strategies.current.universe import select_market
 
 
+def _manual_moneyline_config() -> CurrentStrategyConfig:
+    return CurrentStrategyConfig(
+        sports_moneyline_execution_permission=ExecutionPermission.MANUAL_CONFIRM,
+    )
+
+
 def test_config_expresses_complete_sports_tail_policy() -> None:
     policy = sports_tail_policy_from_config(CurrentStrategyConfig())
 
@@ -39,8 +45,8 @@ def test_config_expresses_complete_sports_tail_policy() -> None:
         SportsMarketType.SPREADS,
     )
     assert policy.totals_execution_permission == ExecutionPermission.AUTO_EXECUTE
-    assert policy.moneyline_execution_permission == ExecutionPermission.MANUAL_CONFIRM
-    assert policy.spreads_execution_permission == ExecutionPermission.ALERT_ONLY
+    assert policy.moneyline_execution_permission == ExecutionPermission.AUTO_EXECUTE
+    assert policy.spreads_execution_permission == ExecutionPermission.AUTO_EXECUTE
 
 
 def test_universe_accepts_totals_moneyline_and_spreads_with_shared_descriptor_shape() -> None:
@@ -187,7 +193,7 @@ def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
     service = TradingDecisionService(
-        extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+        extension_hooks=CurrentStrategy(config=_manual_moneyline_config()).hooks,
     )
 
     plan = service.build_entry_plan(
@@ -228,7 +234,7 @@ def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
     service = TradingDecisionService(
-        extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+        extension_hooks=CurrentStrategy(config=_manual_moneyline_config()).hooks,
     )
 
     plan = service.build_entry_plan(
@@ -458,7 +464,7 @@ def test_worker_treats_live_state_entry_signal_as_entry_replay_trigger() -> None
     assert result.plan.metadata["sports_tail_reason"] == "totals_over_locked"
 
 
-def test_moneyline_manual_permission_keeps_candidate_out_of_auto_buy_path() -> None:
+def test_moneyline_default_permission_enters_auto_buy_path() -> None:
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
 
@@ -487,12 +493,13 @@ def test_moneyline_manual_permission_keeps_candidate_out_of_auto_buy_path() -> N
         ),
     )
 
-    assert decision.action.value == "skip"
-    assert decision.reason == "sports_tail_manual_confirm"
-    assert decision.metadata["sports_execution_permission"] == "manual_confirm"
+    assert decision.action.value == "buy"
+    assert decision.token_id == "home"
+    assert decision.price == Decimal("0.97")
+    assert decision.metadata["sports_execution_permission"] == "auto_execute"
 
 
-def test_spreads_alert_candidate_is_visible_but_not_auto_buy() -> None:
+def test_spreads_default_permission_enters_auto_buy_path() -> None:
     market = _spreads_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.95"))
 
@@ -521,10 +528,11 @@ def test_spreads_alert_candidate_is_visible_but_not_auto_buy() -> None:
         ),
     )
 
-    assert decision.action.value == "skip"
-    assert decision.reason == "sports_tail_alert"
+    assert decision.action.value == "buy"
+    assert decision.token_id == "home"
+    assert decision.price == Decimal("0.96")
     assert decision.metadata["sports_tail_reason"] == "spreads_late_cover"
-    assert decision.metadata["sports_execution_permission"] == "alert_only"
+    assert decision.metadata["sports_execution_permission"] == "auto_execute"
 
 
 def test_follow_up_sell_carries_explicit_exit_plan_metadata() -> None:
@@ -773,7 +781,7 @@ async def _run_admin_manual_candidate_flow() -> dict[str, object]:
             account_state_store=account_state,
             entry_metadata_store=EntryMetadataStore(),
             trading_decision_service=TradingDecisionService(
-                extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+                extension_hooks=CurrentStrategy(config=_manual_moneyline_config()).hooks,
                 registry=registry,
                 orderbook_reader=market_ws.snapshot,
             ),

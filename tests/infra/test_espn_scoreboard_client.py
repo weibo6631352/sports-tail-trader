@@ -70,6 +70,14 @@ def test_espn_scoreboard_client_maps_429_to_rate_limit_error() -> None:
     asyncio.run(run())
 
 
+def test_espn_scoreboard_client_ignores_unsupported_env_proxy(monkeypatch) -> None:
+    monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:7897")
+
+    client = EspnScoreboardClient(base_url="https://example.test", leagues=("nba",))
+
+    asyncio.run(client.aclose())
+
+
 def _scoreboard_handler(request: httpx.Request) -> httpx.Response:
     assert request.url.path == "/apis/site/v2/sports/basketball/nba/scoreboard"
     return httpx.Response(

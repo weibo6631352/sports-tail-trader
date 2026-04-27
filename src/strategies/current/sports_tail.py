@@ -122,8 +122,8 @@ class SportsTailPolicy:
         SportsMarketType.SPREADS,
     )
     totals_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
-    moneyline_execution_permission: ExecutionPermission = ExecutionPermission.MANUAL_CONFIRM
-    spreads_execution_permission: ExecutionPermission = ExecutionPermission.ALERT_ONLY
+    moneyline_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
+    spreads_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     totals_max_entry_price: Decimal = Decimal("0.99")
     moneyline_max_entry_price: Decimal = Decimal("0.97")
     spreads_max_entry_price: Decimal = Decimal("0.96")

@@ -84,8 +84,8 @@ class CurrentStrategyConfig:
         SportsMarketType.SPREADS,
     )
     sports_totals_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
-    sports_moneyline_execution_permission: ExecutionPermission = ExecutionPermission.MANUAL_CONFIRM
-    sports_spreads_execution_permission: ExecutionPermission = ExecutionPermission.ALERT_ONLY
+    sports_moneyline_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
+    sports_spreads_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     sports_totals_max_entry_price: Decimal = Decimal("0.99")
     sports_moneyline_max_entry_price: Decimal = Decimal("0.97")
     sports_spreads_max_entry_price: Decimal = Decimal("0.96")
