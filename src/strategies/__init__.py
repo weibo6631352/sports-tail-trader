@@ -1,0 +1,1 @@
+"""Application strategies live here."""

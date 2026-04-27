@@ -1,0 +1,23 @@
+# Python cache and test artifacts
+__pycache__/
+.pytest_cache/
+output/
+*.py[cod]
+*.egg-info/
+build/
+
+# Local runtime configuration
+.env
+
+# Frontend artifacts
+frontend/node_modules/
+frontend/dist/
+
+# Local dev runtime
+.dev-runtime/
+.playwright-cli/
+.worktrees/
+.frontend-test-build/
+
+# Local build packages
+.dist-packages/

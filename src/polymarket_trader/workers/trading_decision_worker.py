@@ -1,0 +1,489 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Callable, Iterable, Mapping
+from uuid import uuid4
+
+from polymarket_trader.app.trading_decision_service import EntryPlan, TradingDecisionService
+from polymarket_trader.app.trading_service import TradingReviewResult, TradingService
+from polymarket_trader.app.order_projection import AccountStateProjector
+from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
+from polymarket_trader.domain.market import Market
+from polymarket_trader.domain.order import (
+    CancelOrderIntent,
+    ManagedOrderIntent,
+    Order,
+    OrderResult,
+    OrderResultStatus,
+    ReplaceOrderIntent,
+)
+from polymarket_trader.domain.position import Position
+from polymarket_trader.domain.state_machine import MarketLifecycle
+from polymarket_trader.domain.account import AccountSnapshot, MarketPauseSource
+from polymarket_trader.runtime.account_state import AccountStateStore
+from polymarket_trader.runtime.event_bus import EventBus
+from polymarket_trader.workers.trading_decision_event_payloads import (
+    TRADING_DECISION_WORKER_ORIGIN,
+    coerce_order_result_from_event,
+    is_self_emitted,
+    market_from_result,
+    serialize_allocation,
+    serialize_allocation_plan,
+    serialize_intent,
+    serialize_review,
+    serialize_snapshot,
+    snapshot_allowance,
+    snapshot_balance,
+    snapshot_position,
+)
+from polymarket_trader.workers.trading_order_result_processor import TradingOrderResultProcessor
+from polymarket_trader.workers.trading_decision_worker_result import TradingDecisionWorkerResult
+
+PositionsProvider = Callable[[], Iterable[Position]]
+OpenOrdersProvider = Callable[[], Iterable[Order]]
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class TradingDecisionWorker:
+    priority = "P0"
+
+    def __init__(
+        self,
+        *,
+        event_bus: EventBus | None = None,
+        trading_decision_service: TradingDecisionService | None = None,
+        trading_service: TradingService | None = None,
+        positions_provider: PositionsProvider | None = None,
+        open_orders_provider: OpenOrdersProvider | None = None,
+        account_state_store: AccountStateStore | None = None,
+        portfolio_budget_usdc: Decimal = Decimal("0"),
+        available_usdc: Decimal | None = None,
+        max_order_usdc: Decimal = Decimal("0"),
+        max_market_usdc: Decimal = Decimal("0"),
+        max_total_usdc: Decimal = Decimal("0"),
+        balance_usdc: Decimal | None = None,
+        allowance_usdc: Decimal | None = None,
+        max_open_orders: int | None = None,
+        order_retry_limit: int | None = None,
+    ) -> None:
+        self._event_bus = event_bus
+        if trading_decision_service is None:
+            raise ValueError("trading_decision_service is required")
+        self._trading_decision_service = trading_decision_service
+        self._trading_service = trading_service or TradingService()
+        self._account_state_store = account_state_store
+        self._positions_provider = positions_provider or self._build_positions_provider()
+        self._open_orders_provider = open_orders_provider or self._build_open_orders_provider()
+        self._portfolio_budget_usdc = portfolio_budget_usdc
+        self._available_usdc = available_usdc
+        self._max_order_usdc = max_order_usdc
+        self._max_market_usdc = max_market_usdc
+        self._max_total_usdc = max_total_usdc
+        self._balance_usdc = balance_usdc
+        self._allowance_usdc = allowance_usdc
+        self._max_open_orders = max_open_orders
+        self._order_retry_limit = order_retry_limit
+        self._market_lifecycle: dict[str, MarketLifecycle] = {}
+        self._order_result_processor = TradingOrderResultProcessor(
+            host=self,
+            trading_decision_service=self._trading_decision_service,
+            trading_service=self._trading_service,
+            account_state_store=self._account_state_store,
+        )
+
+    async def run(self) -> None:
+        if self._event_bus is None:
+            raise RuntimeError("TradingDecisionWorker requires an EventBus to run")
+        while True:
+            await self.run_once()
+
+    async def run_once(self) -> "TradingDecisionWorkerResult | None":
+        if self._event_bus is None:
+            raise RuntimeError("TradingDecisionWorker requires an EventBus to run")
+        event = await self._event_bus.next_trading_event()
+        return await self.process_event(event)
+
+    async def process_event(self, event: DomainEvent) -> "TradingDecisionWorkerResult | None":
+        if is_self_emitted(event):
+            return None
+
+        event_name = str(event.event_type)
+        snapshot = self._snapshot()
+        if event_name == DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED.value:
+            return await self._handle_orderbook_snapshot_updated(event, snapshot)
+
+        order_result = coerce_order_result_from_event(event)
+        if order_result is not None:
+            return await self._handle_order_result(
+                source_event=event,
+                order_result=order_result,
+                snapshot=snapshot,
+            )
+
+        if event_name == DomainEventType.POSITION_UPDATED.value:
+            return await self._handle_position_updated(event, snapshot)
+
+        return None
+
+    async def _handle_orderbook_snapshot_updated(
+        self,
+        event: DomainEvent,
+        snapshot: AccountSnapshot | None,
+    ) -> "TradingDecisionWorkerResult | None":
+        plan = self._trading_decision_service.build_entry_plan(
+            trace_id=event.trace_id,
+            condition_id=event.condition_id,
+            token_id=event.token_id,
+            account_snapshot=snapshot,
+            portfolio_budget_usdc=self._portfolio_budget_usdc,
+            available_usdc=(
+                self._available_usdc if self._available_usdc is not None else snapshot_balance(snapshot)
+            ),
+            max_order_usdc=self._max_order_usdc,
+            max_market_usdc=self._max_market_usdc,
+            max_total_usdc=self._max_total_usdc,
+            positions=(snapshot.positions if snapshot is not None else tuple(self._positions_provider())),
+            open_orders=(
+                snapshot.open_orders if snapshot is not None else tuple(self._open_orders_provider())
+            ),
+        )
+        if plan.market is None or plan.orderbook is None or event.token_id != plan.orderbook.token_id:
+            return None
+
+        state = self._state_for_market(plan.market)
+        if state is None:
+            self._transition_market(plan.market, MarketLifecycle.WATCHING_ORDERBOOK)
+        elif state != MarketLifecycle.WATCHING_ORDERBOOK:
+            return None
+        return await self._execute_entry_plan(event=event, snapshot=snapshot, plan=plan)
+
+    async def _execute_entry_plan(
+        self,
+        *,
+        event: DomainEvent,
+        snapshot: AccountSnapshot | None,
+        plan: EntryPlan,
+    ) -> "TradingDecisionWorkerResult":
+        positions = snapshot.positions if snapshot is not None else tuple(self._positions_provider())
+        open_orders = (
+            snapshot.open_orders if snapshot is not None else tuple(self._open_orders_provider())
+        )
+        if snapshot is not None and not snapshot.allow_new_entries:
+            skipped = await self._publish(
+                DomainEventType.SKIPPED,
+                trace_id=event.trace_id,
+                market_slug=event.market_slug,
+                condition_id=event.condition_id,
+                token_id=event.token_id,
+                reason="entry_paused",
+                payload={
+                    "entry_event_id": event.event_id,
+                    "origin": TRADING_DECISION_WORKER_ORIGIN,
+                    "reason": "entry_paused",
+                    "account_snapshot": serialize_snapshot(snapshot),
+                },
+            )
+            self._transition_market(plan.market, MarketLifecycle.PAUSED if plan.market else None)
+            return TradingDecisionWorkerResult(
+                entry_event=event,
+                plan=plan,
+                review=None,
+                emitted_event=skipped,
+                state_after=self._state_for_market(plan.market),
+            )
+
+        if not plan.ready_to_trade or plan.intent is None or plan.market is None or plan.orderbook is None:
+            self._transition_market(plan.market, MarketLifecycle.WATCHING_ORDERBOOK if plan.market else None)
+            return TradingDecisionWorkerResult(
+                entry_event=event,
+                plan=plan,
+                review=None,
+                emitted_event=None,
+                state_after=self._state_for_market(plan.market),
+            )
+
+        focus_token_id = plan.intent.token_id
+        focus_position = _match_position(positions, plan.market.condition_id, focus_token_id)
+        focus_open_orders = _match_open_orders(open_orders, plan.market.condition_id, focus_token_id)
+        self._transition_market(plan.market, MarketLifecycle.ENTRY_SUBMITTING)
+        review = await self._trading_service.review_intent(
+            plan.intent,
+            market=plan.market,
+            orderbook=plan.orderbook,
+            position=focus_position,
+            open_orders=focus_open_orders,
+            allocation_plan=plan.allocation_plan,
+            classification_passed=True,
+            balance_usdc=self._balance_usdc if self._balance_usdc is not None else snapshot_balance(snapshot),
+            allowance_usdc=(
+                self._allowance_usdc if self._allowance_usdc is not None else snapshot_allowance(snapshot)
+            ),
+            max_order_usdc=self._max_order_usdc,
+            max_market_usdc=self._max_market_usdc,
+            max_total_usdc=self._max_total_usdc,
+            max_open_orders=self._max_open_orders,
+            order_retry_limit=self._order_retry_limit,
+            operation=plan.intent.side.value.lower(),
+        )
+        risk_event = await self._publish(
+            DomainEventType.RISK_CHECK_PASSED
+            if review.risk_decision is not None and review.risk_decision.passed
+            else DomainEventType.RISK_CHECK_FAILED,
+            trace_id=plan.trace_id,
+            market_slug=plan.market.market_slug,
+            condition_id=plan.market.condition_id,
+            token_id=plan.intent.token_id,
+            reason="" if review.risk_decision is None else review.risk_decision.reason,
+            payload={
+                "entry_event_id": event.event_id,
+                "origin": TRADING_DECISION_WORKER_ORIGIN,
+                "allocation_plan": serialize_allocation_plan(plan),
+                "allocation": serialize_allocation(plan),
+                "intent": serialize_intent(plan.intent),
+                "review": serialize_review(review),
+            },
+        )
+        result = await self._handle_order_result(
+            source_event=event,
+            order_result=review.order_result,
+            snapshot=snapshot,
+            execution=review,
+            plan=plan,
+        )
+        return TradingDecisionWorkerResult(
+            entry_event=event,
+            plan=plan,
+            review=review,
+            emitted_event=risk_event,
+            emitted_events=(risk_event, *result.emitted_events),
+            follow_up_intents=result.follow_up_intents,
+            follow_up_reviews=result.follow_up_reviews,
+            state_before=result.state_before,
+            state_after=result.state_after,
+        )
+
+    async def _handle_order_result(
+        self,
+        *,
+        source_event: DomainEvent,
+        order_result: OrderResult | None,
+        snapshot: AccountSnapshot | None,
+        execution: TradingReviewResult | None = None,
+        plan: EntryPlan | None = None,
+    ) -> "TradingDecisionWorkerResult":
+        return await self._order_result_processor.handle(
+            source_event=source_event,
+            order_result=order_result,
+            snapshot=snapshot,
+            execution=execution,
+            plan=plan,
+        )
+
+    async def _handle_position_updated(
+        self,
+        event: DomainEvent,
+        snapshot: AccountSnapshot | None,
+    ) -> "TradingDecisionWorkerResult":
+        if snapshot is None:
+            return TradingDecisionWorkerResult(
+                entry_event=event,
+                plan=None,
+                review=None,
+                emitted_event=event,
+                state_after=None,
+            )
+        market = self._market_fromsnapshot_position(snapshot, event.condition_id, event.token_id)
+        if market is not None:
+            self._transition_market(market, MarketLifecycle.POSITION_OPEN)
+        return TradingDecisionWorkerResult(
+            entry_event=event,
+            plan=None,
+            review=None,
+            emitted_event=event,
+            state_after=self._state_for_market(market),
+        )
+
+    async def _publish(
+        self,
+        event_type: DomainEventType,
+        *,
+        trace_id: str,
+        market_slug: str | None,
+        condition_id: str | None,
+        token_id: str | None,
+        reason: str = "",
+        payload: Mapping[str, object] | None = None,
+    ) -> DomainEvent:
+        payload_dict: dict[str, object] = {"origin": TRADING_DECISION_WORKER_ORIGIN}
+        if payload is not None:
+            payload_dict.update(payload)
+        event = DomainEvent(
+            trace_id=trace_id,
+            event_type=event_type,
+            event_id=uuid4().hex,
+            market_slug=market_slug,
+            condition_id=condition_id,
+            token_id=token_id,
+            reason=reason,
+            created_at=_utc_now(),
+            payload=payload_dict,
+        )
+        if self._event_bus is not None:
+            await self._event_bus.publish(OutboxPriority.P0, event)
+        return event
+
+    def _snapshot(self) -> AccountSnapshot | None:
+        if self._account_state_store is not None:
+            return self._account_state_store.snapshot()
+        if self._balance_usdc is None and self._allowance_usdc is None:
+            return None
+        return AccountSnapshot(
+            balance_usdc=self._balance_usdc or Decimal("0"),
+            allowance_usdc=self._allowance_usdc or Decimal("0"),
+            positions=tuple(self._positions_provider()),
+            open_orders=tuple(self._open_orders_provider()),
+            allow_new_entries=True,
+        )
+
+    def _build_positions_provider(self) -> PositionsProvider:
+        if self._account_state_store is None:
+            return lambda: ()
+        account_state_store = self._account_state_store
+        return lambda: account_state_store.snapshot().positions
+
+    def _build_open_orders_provider(self) -> OpenOrdersProvider:
+        if self._account_state_store is None:
+            return lambda: ()
+        account_state_store = self._account_state_store
+        return lambda: account_state_store.snapshot().open_orders
+
+    def _transition_market(self, market: Market | None, lifecycle: MarketLifecycle | None) -> None:
+        if market is None or lifecycle is None:
+            return
+        self._market_lifecycle[market.condition_id] = lifecycle
+
+    def _transition_market_by_result(self, order_result: OrderResult, lifecycle: MarketLifecycle) -> None:
+        market = market_from_result(order_result)
+        self._transition_market(market, lifecycle)
+
+    def _transition_from_order_result(self, order_result: OrderResult) -> None:
+        if order_result.side is None:
+            return
+        side = str(order_result.side).upper()
+        if side == "BUY":
+            if order_result.status in {OrderResultStatus.FULL_FILL, OrderResultStatus.PARTIAL_FILL}:
+                self._transition_market_by_result(order_result, MarketLifecycle.POSITION_OPEN)
+            elif order_result.status == OrderResultStatus.LIVE:
+                self._transition_market_by_result(order_result, MarketLifecycle.PAUSED)
+            elif order_result.status == OrderResultStatus.NO_FILL:
+                self._transition_market_by_result(order_result, MarketLifecycle.ENTRY_READY)
+            elif order_result.status in {OrderResultStatus.REJECTED, OrderResultStatus.FAILED, OrderResultStatus.UNKNOWN_TIMEOUT}:
+                self._transition_market_by_result(order_result, MarketLifecycle.ENTRY_REJECTED)
+        elif side == "SELL":
+            if order_result.status in {OrderResultStatus.LIVE, OrderResultStatus.PARTIAL_FILL}:
+                self._transition_market_by_result(order_result, MarketLifecycle.FOLLOW_UP_ORDER_OPEN)
+            elif order_result.status == OrderResultStatus.FULL_FILL:
+                self._transition_market_by_result(order_result, MarketLifecycle.POSITION_OPEN)
+
+    def _pause_market(self, condition_id: str | None, *, reason: str) -> None:
+        if condition_id is None:
+            return
+        self._market_lifecycle[condition_id] = MarketLifecycle.PAUSED
+        if self._account_state_store is not None:
+            self._account_state_store.pause_market(
+                condition_id,
+                reason=reason,
+                source=MarketPauseSource.RISK,
+            )
+
+    def _state_for_market(self, market: Market | None) -> MarketLifecycle | None:
+        if market is None:
+            return None
+        return self._market_lifecycle.get(market.condition_id)
+
+    def _state_for_market_by_key(self, condition_id: str | None) -> MarketLifecycle | None:
+        if condition_id is None:
+            return None
+        return self._market_lifecycle.get(condition_id)
+
+    def _market_fromsnapshot_position(
+        self,
+        snapshot: AccountSnapshot,
+        condition_id: str | None,
+        token_id: str | None,
+    ) -> Market | None:
+        if condition_id is None or token_id is None:
+            return None
+        position = snapshot.get_position(condition_id, token_id)
+        if position is None:
+            return None
+        market = self._trading_decision_service.resolve_market(condition_id=condition_id, token_id=token_id)
+        return market
+
+    async def _execute_managed_intent(
+        self,
+        intent: ManagedOrderIntent,
+        *,
+        snapshot: AccountSnapshot | None,
+    ) -> TradingReviewResult:
+        market = self._trading_decision_service.resolve_market(
+            condition_id=intent.condition_id,
+            token_id=intent.token_id,
+        )
+        if isinstance(intent, CancelOrderIntent):
+            return await self._trading_service.cancel(intent)
+        if isinstance(intent, ReplaceOrderIntent):
+            return await self._trading_service.replace(intent)
+        return await self._trading_service.review_intent(
+            intent,
+            market=market,
+            orderbook=self._trading_decision_service.lookup_orderbook(intent.token_id),
+            position=snapshot_position(snapshot, intent.condition_id, intent.token_id),
+            open_orders=(
+                snapshot.open_orders_for_market(intent.condition_id, intent.token_id)
+                if snapshot is not None
+                else ()
+            ),
+            classification_passed=True,
+            balance_usdc=self._balance_usdc if self._balance_usdc is not None else snapshot_balance(snapshot),
+            allowance_usdc=(
+                self._allowance_usdc if self._allowance_usdc is not None else snapshot_allowance(snapshot)
+            ),
+            max_order_usdc=self._max_order_usdc,
+            max_market_usdc=self._max_market_usdc,
+            max_total_usdc=self._max_total_usdc,
+            max_open_orders=self._max_open_orders,
+            order_retry_limit=self._order_retry_limit,
+            operation=intent.side.value.lower(),
+        )
+
+    def _account_projector(self) -> AccountStateProjector | None:
+        if self._account_state_store is None:
+            return None
+        return AccountStateProjector(self._account_state_store)
+
+
+def _match_position(
+    positions: tuple[Position, ...],
+    condition_id: str,
+    token_id: str,
+) -> Position | None:
+    for position in positions:
+        if position.condition_id == condition_id and position.token_id == token_id:
+            return position
+    return None
+
+
+def _match_open_orders(
+    open_orders: tuple[Order, ...],
+    condition_id: str,
+    token_id: str,
+) -> tuple[Order, ...]:
+    return tuple(
+        order
+        for order in open_orders
+        if order.condition_id == condition_id and order.token_id == token_id
+    )

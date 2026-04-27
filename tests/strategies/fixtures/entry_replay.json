@@ -1,0 +1,82 @@
+{
+  "trace_id": "replay-fixture-trace",
+  "target": {
+    "condition_id": "condition-1",
+    "token_id": "no-1"
+  },
+  "budgets": {
+    "portfolio_budget_usdc": "100",
+    "available_usdc": "100",
+    "max_order_usdc": "100",
+    "max_market_usdc": "100",
+    "max_total_usdc": "100"
+  },
+  "markets": [
+    {
+      "condition_id": "condition-1",
+      "market_slug": "token-1",
+      "outcomes": [
+        {"token_id": "yes-1", "outcome": "YES"},
+        {"token_id": "no-1", "outcome": "NO"}
+      ],
+      "market_name": "Will this project reach a threshold?",
+      "market_question": "Will this project hit $500M FDV?",
+      "event_id": "event-1",
+      "event_title": "Will token FDV reach a threshold?",
+      "event_slug": "token-fdv-threshold",
+      "category": "Crypto",
+      "matched_keywords": ["fdv", "500m"],
+      "trading_status": "eligible",
+      "tick_size": "0.01",
+      "min_order_size": "1"
+    },
+    {
+      "condition_id": "condition-2",
+      "market_slug": "token-2",
+      "outcomes": [
+        {"token_id": "yes-2", "outcome": "YES"},
+        {"token_id": "no-2", "outcome": "NO"}
+      ],
+      "market_name": "Will another project reach a threshold?",
+      "market_question": "Will this project hit $500M FDV?",
+      "event_id": "event-2",
+      "event_title": "Will token FDV reach a threshold?",
+      "event_slug": "token-fdv-threshold-2",
+      "category": "Crypto",
+      "matched_keywords": ["fdv", "500m"],
+      "trading_status": "eligible",
+      "tick_size": "0.01",
+      "min_order_size": "1"
+    }
+  ],
+  "orderbooks": [
+    {
+      "token_id": "no-1",
+      "condition_id": "condition-1",
+      "market_slug": "token-1",
+      "best_bid": "0.55",
+      "best_ask": "0.60",
+      "best_bid_size": "100",
+      "best_ask_size": "100",
+      "tick_size": "0.01",
+      "received_at": "2026-04-13T00:00:00+00:00",
+      "bids": [{"price": "0.55", "size": "100"}],
+      "asks": [{"price": "0.60", "size": "100"}]
+    },
+    {
+      "token_id": "no-2",
+      "condition_id": "condition-2",
+      "market_slug": "token-2",
+      "best_bid": "0.55",
+      "best_ask": "0.60",
+      "best_bid_size": "100",
+      "best_ask_size": "100",
+      "tick_size": "0.01",
+      "received_at": "2026-04-13T00:00:00+00:00",
+      "bids": [{"price": "0.55", "size": "100"}],
+      "asks": [{"price": "0.60", "size": "100"}]
+    }
+  ],
+  "positions": [],
+  "open_orders": []
+}
