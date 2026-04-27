@@ -246,6 +246,13 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
             market = registry.get_by_slug(event.market_slug)
         return entry_metadata_store.metadata_for_event(event, market=market)
 
+    def entry_metadata_for_market(market):
+        return entry_metadata_store.metadata_for(
+            condition_id=market.condition_id,
+            market_slug=market.market_slug,
+            event_slug=market.event_slug,
+        )
+
     trading_decision_worker = TradingDecisionWorker(
         event_bus=event_bus,
         trading_decision_service=trading_decision_service,
@@ -259,7 +266,10 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         order_retry_limit=settings.order_retry_limit,
         entry_metadata_provider=entry_metadata_for_event,
     )
-    reconcile_service = ReconcileService(extension_hooks=extension.hooks)
+    reconcile_service = ReconcileService(
+        extension_hooks=extension.hooks,
+        entry_metadata_provider=entry_metadata_for_market,
+    )
     reconcile_worker = ReconcileWorker(
         event_bus=event_bus,
         reconcile_service=reconcile_service,

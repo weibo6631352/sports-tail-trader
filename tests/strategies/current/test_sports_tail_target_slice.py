@@ -8,7 +8,8 @@ from types import SimpleNamespace
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
 from polymarket_trader.app.trading_service import TradingService
-from polymarket_trader.domain.events import DomainEvent, DomainEventType
+from polymarket_trader.domain.account import AccountSnapshot
+from polymarket_trader.domain.events import DomainEvent, DomainEventType, Fill
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.order import OrderResult, OrderResultStatus, OrderSide, OrderStatus, OrderType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
@@ -257,6 +258,118 @@ def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
     assert plan.metadata["sports_tail_confirm_reason"] == "score_verified"
 
 
+def test_strategy_risk_blocks_event_exposure_before_buy_intent() -> None:
+    market = _totals_market()
+    orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
+    service = TradingDecisionService(
+        extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+    )
+
+    plan = service.build_entry_plan(
+        market=market,
+        orderbook=orderbook,
+        token_id="over",
+        trace_id="trace-event-risk",
+        portfolio_budget_usdc=Decimal("10"),
+        available_usdc=Decimal("10"),
+        max_order_usdc=Decimal("10"),
+        max_market_usdc=Decimal("100"),
+        max_total_usdc=Decimal("100"),
+        positions=(
+            Position(
+                condition_id=market.condition_id,
+                token_id="over",
+                shares=Decimal("24"),
+                cost_usdc=Decimal("24"),
+                market_slug=market.market_slug,
+            ),
+        ),
+        metadata={"sports_tail_game": _totals_live_game()},
+    )
+
+    assert plan.intent is None
+    assert plan.allocation is not None
+    assert plan.allocation.buy_budget_usdc == Decimal("0")
+    assert plan.allocation.reason == "sports_event_exposure_limit"
+    assert plan.metadata is not None
+    assert plan.metadata["sports_risk_reason"] == "sports_event_exposure_limit"
+
+
+def test_strategy_risk_uses_account_fills_for_daily_entry_limit() -> None:
+    market = _totals_market()
+    orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
+    service = TradingDecisionService(
+        extension_hooks=CurrentStrategy(
+            config=CurrentStrategyConfig(sports_max_daily_entry_usdc=Decimal("15"))
+        ).hooks,
+    )
+
+    plan = service.build_entry_plan(
+        market=market,
+        orderbook=orderbook,
+        account_snapshot=AccountSnapshot(
+            balance_usdc=Decimal("100"),
+            allowance_usdc=Decimal("100"),
+            allow_new_entries=True,
+            fills=(
+                Fill(
+                    trace_id="old-buy",
+                    condition_id=market.condition_id,
+                    token_id="over",
+                    side="BUY",
+                    notional_usdc=Decimal("12"),
+                    confirmed_at=datetime(2026, 4, 27, 1, tzinfo=timezone.utc),
+                ),
+            ),
+        ),
+        token_id="over",
+        trace_id="trace-daily-risk",
+        portfolio_budget_usdc=Decimal("10"),
+        available_usdc=Decimal("100"),
+        max_order_usdc=Decimal("10"),
+        max_market_usdc=Decimal("100"),
+        max_total_usdc=Decimal("100"),
+        metadata={"sports_tail_game": _totals_live_game()},
+    )
+
+    assert plan.intent is None
+    assert plan.allocation is not None
+    assert plan.allocation.buy_budget_usdc == Decimal("0")
+    assert plan.allocation.reason == "sports_daily_entry_limit"
+    assert plan.metadata is not None
+    assert plan.metadata["sports_daily_entry_usdc"] == "12"
+
+
+def test_strategy_risk_blocks_consecutive_loss_pause() -> None:
+    market = _totals_market()
+    orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
+    service = TradingDecisionService(
+        extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+    )
+
+    plan = service.build_entry_plan(
+        market=market,
+        orderbook=orderbook,
+        token_id="over",
+        trace_id="trace-loss-risk",
+        portfolio_budget_usdc=Decimal("10"),
+        available_usdc=Decimal("10"),
+        max_order_usdc=Decimal("10"),
+        max_market_usdc=Decimal("100"),
+        max_total_usdc=Decimal("100"),
+        metadata={
+            "sports_tail_consecutive_losses": 3,
+            "sports_tail_game": _totals_live_game(),
+        },
+    )
+
+    assert plan.intent is None
+    assert plan.allocation is not None
+    assert plan.allocation.reason == "sports_consecutive_loss_pause"
+    assert plan.metadata is not None
+    assert plan.metadata["sports_consecutive_losses"] == 3
+
+
 def test_admin_live_state_store_projects_manual_candidate_and_confirmation() -> None:
     result = asyncio.run(_run_admin_manual_candidate_flow())
 
@@ -280,6 +393,19 @@ def test_admin_live_state_store_projects_manual_candidate_and_confirmation() -> 
     assert confirmation["review"]["submitted"] is True
     assert confirmation["review"]["risk_decision"]["passed"] is True
     assert confirmation["review"]["order_result"]["status"] == "no_fill"
+
+
+def test_admin_candidates_include_rejects_and_filter_by_action_permission_status() -> None:
+    result = asyncio.run(_run_admin_candidate_filter_flow())
+
+    assert result["all"]["total"] == 1
+    rejected = result["all"]["items"][0]
+    assert rejected["action"] == "reject"
+    assert rejected["accepted"] is False
+    assert rejected["reason"] == "outcome_not_locked"
+    assert result["rejects"]["total"] == 1
+    assert result["live_totals"]["total"] == 1
+    assert result["manual"]["total"] == 0
 
 
 def test_admin_confirmation_refuses_non_confirmable_candidate() -> None:
@@ -355,6 +481,98 @@ def test_moneyline_manual_permission_keeps_candidate_out_of_auto_buy_path() -> N
     assert decision.action.value == "skip"
     assert decision.reason == "sports_tail_manual_confirm"
     assert decision.metadata["sports_execution_permission"] == "manual_confirm"
+
+
+def test_spreads_alert_candidate_is_visible_but_not_auto_buy() -> None:
+    market = _spreads_market()
+    orderbook = _orderbook(token_id="home", best_ask=Decimal("0.95"))
+
+    decision = decide_entry(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-spread-alert",
+            market=market,
+            token_id="home",
+            orderbook=orderbook,
+            amount_usdc=Decimal("10"),
+            now=datetime(2026, 4, 27, tzinfo=timezone.utc),
+            metadata={
+                "sports_tail_game": {
+                    "league": "NBA",
+                    "home_name": "NYK",
+                    "away_name": "BOS",
+                    "home_score": 106,
+                    "away_score": 98,
+                    "period": "Q4",
+                    "seconds_remaining": 60,
+                    "status": "live",
+                    "observed_at": "2026-04-27T00:00:00+00:00",
+                }
+            },
+        ),
+    )
+
+    assert decision.action.value == "skip"
+    assert decision.reason == "sports_tail_alert"
+    assert decision.metadata["sports_tail_reason"] == "spreads_late_cover"
+    assert decision.metadata["sports_execution_permission"] == "alert_only"
+
+
+def test_follow_up_sell_carries_explicit_exit_plan_metadata() -> None:
+    market = _totals_market()
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+
+    decisions = strategy.decide_follow_up(
+        ExtensionContext(
+            trace_id="trace-follow-up",
+            market=market,
+            order_result=OrderResult(
+                trace_id="trace-follow-up",
+                condition_id=market.condition_id,
+                token_id="over",
+                status=OrderResultStatus.FULL_FILL,
+                market_slug=market.market_slug,
+                side=OrderSide.BUY,
+                matched_shares=Decimal("3"),
+            ),
+        )
+    )
+
+    assert len(decisions) == 1
+    decision = decisions[0]
+    assert decision.action.value == "sell"
+    assert decision.metadata["sports_exit_plan_version"] == "1"
+    assert decision.metadata["sports_exit_plan"]["primary_action"] == "place_follow_up_gtc_sell_after_buy_fill"
+    assert decision.metadata["sports_exit_plan"]["target_size_shares"] == "3"
+
+
+def test_recovery_pauses_new_entries_when_live_state_is_abnormal() -> None:
+    market = _totals_market()
+
+    decision = decide_recovery(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-abnormal-recovery",
+            market=market,
+            now=datetime(2026, 4, 27, 1, tzinfo=timezone.utc),
+            metadata={
+                "sports_tail_game": {
+                    "league": "NHL",
+                    "home_name": "TB",
+                    "away_name": "MON",
+                    "home_score": 3,
+                    "away_score": 2,
+                    "period": "P3",
+                    "seconds_remaining": 0,
+                    "status": "ended",
+                    "observed_at": "2026-04-27T00:59:55+00:00",
+                }
+            },
+        ),
+    )
+
+    assert decision.pause_trading is True
+    assert decision.pause_reason == "sports_live_state_ended"
 
 
 def test_recovery_manages_all_sports_target_tokens_instead_of_fixed_primary_token() -> None:
@@ -435,6 +653,20 @@ def _moneyline_live_game() -> dict[str, object]:
         "away_score": 94,
         "period": "Q4",
         "seconds_remaining": 90,
+        "status": "live",
+        "observed_at": "2026-04-27T00:00:00+00:00",
+    }
+
+
+def _totals_live_game() -> dict[str, object]:
+    return {
+        "league": "NHL",
+        "home_name": "TB",
+        "away_name": "MON",
+        "home_score": 3,
+        "away_score": 2,
+        "period": "P3",
+        "seconds_remaining": 420,
         "status": "live",
         "observed_at": "2026-04-27T00:00:00+00:00",
     }
@@ -596,6 +828,66 @@ async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
             token_id="over",
             operator="operator-1",
             note="should_not_submit",
+        ),
+    }
+
+
+async def _run_admin_candidate_filter_flow() -> dict[str, object]:
+    market = _totals_market()
+    orderbook = _orderbook(token_id="under", best_ask=Decimal("0.98"))
+    registry = MarketRegistry()
+    registry.upsert(market)
+    market_ws = _MarketWs({"under": orderbook})
+    account_state = AccountStateStore()
+    account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+    service = AdminService(
+        runtime=SimpleNamespace(
+            settings=SimpleNamespace(
+                portfolio_budget_usdc=Decimal("10"),
+                max_order_usdc=Decimal("10"),
+                max_market_usdc=Decimal("10"),
+                max_total_usdc=Decimal("10"),
+                max_open_orders=10,
+                order_retry_limit=2,
+            ),
+            registry=registry,
+            market_ws_worker=market_ws,
+            account_state_store=account_state,
+            entry_metadata_store=EntryMetadataStore(),
+            trading_decision_service=TradingDecisionService(
+                extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+                registry=registry,
+                orderbook_reader=market_ws.snapshot,
+            ),
+            trading_service=TradingService(executor=_NoFillExecutor()),
+            event_bus=None,
+        )
+    )
+
+    await service.upsert_sports_live_state(
+        sports_tail_game={
+            **_totals_live_game(),
+            "home_score": 1,
+            "away_score": 1,
+            "seconds_remaining": 900,
+        },
+        condition_id=market.condition_id,
+        source="unit_test",
+    )
+    return {
+        "all": await service.list_sports_tail_candidates(limit=10, offset=0),
+        "rejects": await service.list_sports_tail_candidates(limit=10, offset=0, action="reject", accepted=False),
+        "live_totals": await service.list_sports_tail_candidates(
+            limit=10,
+            offset=0,
+            market_type="totals",
+            game_status="live",
+            league="NHL",
+        ),
+        "manual": await service.list_sports_tail_candidates(
+            limit=10,
+            offset=0,
+            execution_permission="manual_confirm",
         ),
     }
 

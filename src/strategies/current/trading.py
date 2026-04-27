@@ -13,6 +13,7 @@ from typing import Mapping
 from polymarket_trader.domain.allocation import (
     Allocation,
     AllocationPlan,
+    MarketBuyBudgetChanged,
     current_exposure_usdc,
 )
 from polymarket_trader.domain.market import TradingStatus
@@ -20,11 +21,13 @@ from polymarket_trader.extension_api import EntryCandidate, EntrySizing, Extensi
 
 from strategies.current.allocation import AllocationMarketSnapshot, equal_weight_plan
 from strategies.current.config import CurrentStrategyConfig, sports_tail_policy_from_config
+from strategies.current.exit_plan import build_exit_plan_metadata
 from strategies.current.outcomes import (
     describe_sports_market,
     is_primary_token,
     target_for_token,
 )
+from strategies.current.risk import check_sports_entry_risk
 from strategies.current.sports_tail import (
     SportsMarketSnapshot,
     SportsTailEvaluation,
@@ -136,6 +139,13 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
         eligible_plan=eligible_plan,
         skipped_allocations=skipped_allocations,
     )
+    plan, risk_metadata = _apply_sports_risk_limits(
+        config,
+        context,
+        plan=plan,
+        candidate_snapshots=candidate_snapshots,
+    )
+    sizing_metadata.update(risk_metadata)
     allocation = _pick_allocation(
         plan.allocations,
         context.market.condition_id if context.market is not None else None,
@@ -188,13 +198,23 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
     if amount_usdc is None or amount_usdc <= Decimal("0"):
         return ExtensionDecision.skip(reason="missing_entry_amount")
 
+    token_id = context.token_id or context.orderbook.token_id
+    decision_metadata = dict(sports_metadata)
+    decision_metadata.update(
+        build_exit_plan_metadata(
+            config,
+            context,
+            token_id=token_id,
+            source_reason=str(sports_metadata.get("sports_tail_reason") or "strategy_entry"),
+        )
+    )
     return ExtensionDecision.buy(
         reason="strategy_entry",
-        token_id=context.token_id or context.orderbook.token_id,
+        token_id=token_id,
         price=allowed_price,
         amount_usdc=amount_usdc,
         market_slug=context.market.market_slug,
-        metadata=sports_metadata,
+        metadata=decision_metadata,
     )
 
 
@@ -224,18 +244,27 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
     if uncovered_shares <= Decimal("0"):
         return ExtensionDecision.skip(reason="no_uncovered_shares")
 
+    token_id = (
+        context.token_id
+        or (context.position.token_id if context.position is not None else None)
+        or _metadata_text(context, "token_id")
+    )
+    decision_metadata = build_exit_plan_metadata(
+        config,
+        context,
+        token_id=token_id,
+        source_reason="strategy_exit",
+        target_size_shares=uncovered_shares,
+    )
     return ExtensionDecision.sell(
         reason="strategy_exit",
-        token_id=(
-            context.token_id
-            or (context.position.token_id if context.position is not None else None)
-            or _metadata_text(context, "token_id")
-        ),
+        token_id=token_id,
         price=config.exit_no_price,
         size_shares=uncovered_shares,
         market_slug=(
             context.market.market_slug if context.market is not None else _metadata_text(context, "market_slug")
         ),
+        metadata=decision_metadata,
     )
 
 
@@ -454,11 +483,27 @@ def _sports_tail_entry_gate(
     )
     metadata = _sports_tail_evaluation_metadata(evaluation)
     metadata.update(_sports_tail_confirmation_metadata(context.metadata))
-
     if not evaluation.accepted:
         return (
             ExtensionDecision.skip(reason=evaluation.reason, metadata=metadata),
             market_snapshot.best_ask or config.entry_no_price_max,
+            metadata,
+        )
+    risk_decision = check_sports_entry_risk(
+        config,
+        market=context.market,
+        token_id=token_id,
+        buy_budget_usdc=_metadata_decimal(context, "amount_usdc", "buy_budget_usdc") or Decimal("0"),
+        candidate_snapshots=_candidate_snapshots(context),
+        metadata={**context.metadata, **metadata},
+        account_snapshot=context.account_snapshot,
+        now=context.now,
+    )
+    metadata.update(risk_decision.metadata or {})
+    if not risk_decision.passed:
+        return (
+            ExtensionDecision.skip(reason=risk_decision.reason, metadata=metadata),
+            _sports_tail_price_cap(config, context.market, token_id),
             metadata,
         )
     if evaluation.action == TailAction.MANUAL_CONFIRM and _sports_tail_manual_confirmed(context.metadata):
@@ -518,6 +563,80 @@ def _sports_tail_allocation_gate(
     if evaluation.action != TailAction.AUTO_EXECUTE:
         return f"sports_tail_{evaluation.action.value}", metadata
     return "", metadata
+
+
+def _apply_sports_risk_limits(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    *,
+    plan: AllocationPlan,
+    candidate_snapshots: tuple[AllocationMarketSnapshot, ...],
+) -> tuple[AllocationPlan, dict[str, object]]:
+    """按策略级风险上限修正 allocation plan。"""
+
+    snapshot_by_key = {
+        (snapshot.condition_id, snapshot.token_id): snapshot
+        for snapshot in candidate_snapshots
+    }
+    focus_condition_id = context.market.condition_id if context.market is not None else None
+    focus_token_id = context.token_id or (context.orderbook.token_id if context.orderbook is not None else None)
+    updated_allocations: list[Allocation] = []
+    extra_budget_changes: list[MarketBuyBudgetChanged] = []
+    focus_metadata: dict[str, object] = {}
+    for allocation in plan.allocations:
+        key = (allocation.condition_id, allocation.token_id or "")
+        snapshot = snapshot_by_key.get(key)
+        if snapshot is None or allocation.buy_budget_usdc <= Decimal("0"):
+            updated_allocations.append(allocation)
+            continue
+        risk_decision = check_sports_entry_risk(
+            config,
+            market=snapshot.market,
+            token_id=snapshot.token_id,
+            buy_budget_usdc=allocation.buy_budget_usdc,
+            candidate_snapshots=candidate_snapshots,
+            metadata=context.metadata,
+            account_snapshot=context.account_snapshot,
+            now=context.now,
+        )
+        if allocation.condition_id == focus_condition_id and allocation.token_id == focus_token_id:
+            focus_metadata.update(risk_decision.metadata or {})
+        if risk_decision.passed:
+            updated_allocations.append(allocation)
+            continue
+        updated = replace(
+            allocation,
+            buy_budget_usdc=Decimal("0"),
+            released_budget_usdc=allocation.target_budget_usdc,
+            reason=risk_decision.reason,
+            release_reason=risk_decision.reason,
+        )
+        updated_allocations.append(updated)
+        extra_budget_changes.append(
+            MarketBuyBudgetChanged(
+                condition_id=allocation.condition_id,
+                market_slug=allocation.market_slug,
+                token_id=allocation.token_id or "",
+                previous_buy_budget_usdc=allocation.buy_budget_usdc,
+                new_buy_budget_usdc=Decimal("0"),
+                released_budget_usdc=allocation.buy_budget_usdc,
+                release_reason=risk_decision.reason,
+                current_exposure_usdc=allocation.current_exposure_usdc,
+                target_budget_usdc=allocation.target_budget_usdc,
+                idempotency_key=allocation.idempotency_key,
+            )
+        )
+    if not extra_budget_changes:
+        return plan, focus_metadata
+    return (
+        replace(
+            plan,
+            allocations=tuple(updated_allocations),
+            budget_changes=(*plan.budget_changes, *extra_budget_changes),
+            reason=plan.reason if plan.reason else "sports_risk_limited",
+        ),
+        focus_metadata,
+    )
 
 
 def _sports_tail_evaluation_metadata(evaluation: SportsTailEvaluation) -> dict[str, object]:

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from polymarket_trader.app.trading_decision_service import decision_to_managed_intent
@@ -68,6 +69,7 @@ class ReconcileAction:
     target_notional_usdc: Decimal | None = None
     pause_reason: str | None = None
     intent: BuyOrderIntent | SellOrderIntent | CancelOrderIntent | ReplaceOrderIntent | None = None
+    metadata: Mapping[str, object] = field(default_factory=dict)
 
     @property
     def priority(self) -> int:
@@ -125,8 +127,10 @@ class ReconcileService:
         self,
         *,
         extension_hooks: ExtensionHooks,
+        entry_metadata_provider: Callable[[Market], Mapping[str, Any]] | None = None,
     ) -> None:
         self._extension_hooks = extension_hooks
+        self._entry_metadata_provider = entry_metadata_provider
 
     def build_reconcile_plan(
         self,
@@ -200,6 +204,8 @@ class ReconcileService:
                 account_snapshot=recovery_account_snapshot,
                 position=position,
                 open_orders=open_orders,
+                now=_utc_now(),
+                metadata=self._metadata_for_market(market),
             )
         )
 
@@ -251,6 +257,7 @@ class ReconcileService:
                 intent=intent,
                 reason=decision.reason,
                 order_index=order_index,
+                metadata=decision.metadata,
             )
             actions.append(action)
 
@@ -277,6 +284,11 @@ class ReconcileService:
             pause_reason=pause_reason,
         )
 
+    def _metadata_for_market(self, market: Market) -> Mapping[str, Any]:
+        if self._entry_metadata_provider is None:
+            return {}
+        return dict(self._entry_metadata_provider(market))
+
 
 def _action_from_intent(
     *,
@@ -285,6 +297,7 @@ def _action_from_intent(
     intent: BuyOrderIntent | SellOrderIntent | CancelOrderIntent | ReplaceOrderIntent,
     reason: str,
     order_index: dict[str, Order],
+    metadata: Mapping[str, object],
 ) -> ReconcileAction:
     if isinstance(intent, CancelOrderIntent):
         source = order_index.get(intent.order_id)
@@ -299,6 +312,7 @@ def _action_from_intent(
             source_order_side=None if source is None else source.side,
             target_size_shares=None if source is None else _order_open_size(source),
             intent=intent,
+            metadata=metadata,
         )
     if isinstance(intent, ReplaceOrderIntent):
         source = order_index.get(intent.order_id)
@@ -314,6 +328,7 @@ def _action_from_intent(
             target_size_shares=intent.size_shares,
             target_notional_usdc=intent.size_shares * intent.new_price,
             intent=intent,
+            metadata=metadata,
         )
     target_notional_usdc = getattr(intent, "amount_usdc", None)
     if target_notional_usdc is None and getattr(intent, "price", None) is not None:
@@ -331,6 +346,7 @@ def _action_from_intent(
         target_size_shares=getattr(intent, "size_shares", None),
         target_notional_usdc=target_notional_usdc,
         intent=intent,
+        metadata=metadata,
     )
 
 

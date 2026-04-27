@@ -25,6 +25,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import SportsLiveGame
 
 from strategies.current.config import CurrentStrategyConfig, load_current_strategy_config
+from strategies.current.exit_plan import build_exit_plan_metadata
 from strategies.current.live_state import sports_live_metadata_match
 from strategies.current.recovery import decide_recovery
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
@@ -179,6 +180,13 @@ class CurrentStrategy:
                 size_shares=context.order_result.matched_shares,
                 market_slug=context.order_result.market_slug or (
                     context.market.market_slug if context.market is not None else None
+                ),
+                metadata=build_exit_plan_metadata(
+                    self._config,
+                    context,
+                    token_id=context.order_result.token_id,
+                    source_reason="follow_up_after_buy_fill",
+                    target_size_shares=context.order_result.matched_shares,
                 ),
             ),
         )

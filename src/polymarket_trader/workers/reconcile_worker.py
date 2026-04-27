@@ -19,6 +19,7 @@ from polymarket_trader.domain.market import Market, TradingStatus
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry, MarketRegistrySnapshot
+from polymarket_trader.serialization import jsonable
 from polymarket_trader.workers.market_ws_worker import MarketWsWorker
 from polymarket_trader.workers.reconcile_action_applier import ReconcileActionApplier
 from polymarket_trader.workers.reconcile_authority_refresher import (
@@ -344,6 +345,7 @@ class ReconcileWorker:
                     "target_size_shares": None if action.target_size_shares is None else str(action.target_size_shares),
                     "target_notional_usdc": None if action.target_notional_usdc is None else str(action.target_notional_usdc),
                     "pause_reason": action.pause_reason,
+                    "metadata": jsonable(action.metadata),
                 },
             ),
         )

@@ -547,4 +547,5 @@ class AdminSerializer:
             "target_size_shares": decimal_text(action.target_size_shares),
             "target_notional_usdc": decimal_text(action.target_notional_usdc),
             "pause_reason": action.pause_reason,
+            "metadata": jsonable(action.metadata),
         }

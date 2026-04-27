@@ -114,6 +114,42 @@ def _sort_markets(
     return tuple(present + missing)
 
 
+def _candidate_matches_filters(
+    candidate: Mapping[str, Any],
+    *,
+    market_type: str | None,
+    game_status: str | None,
+    action: str | None,
+    execution_permission: str | None,
+    accepted: bool | None,
+    confirmable: bool | None,
+    league: str | None,
+) -> bool:
+    """判断候选投影是否满足管理台筛选条件。"""
+
+    if not _text_filter_matches(candidate.get("market_type"), market_type):
+        return False
+    if not _text_filter_matches(candidate.get("game_status"), game_status):
+        return False
+    if not _text_filter_matches(candidate.get("action"), action):
+        return False
+    if not _text_filter_matches(candidate.get("execution_permission"), execution_permission):
+        return False
+    if not _text_filter_matches(candidate.get("league"), league):
+        return False
+    if accepted is not None and bool(candidate.get("accepted")) is not accepted:
+        return False
+    if confirmable is not None and bool(candidate.get("confirmable")) is not confirmable:
+        return False
+    return True
+
+
+def _text_filter_matches(value: object, expected: str | None) -> bool:
+    if expected is None or not expected.strip():
+        return True
+    return str(value or "").strip().lower() == expected.strip().lower()
+
+
 @dataclass(frozen=True, slots=True)
 class AdminService:
     """Coordinates read-only admin queries and controlled manual operations."""
@@ -657,6 +693,13 @@ class AdminService:
         condition_id: str | None = None,
         token_id: str | None = None,
         market_slug: str | None = None,
+        market_type: str | None = None,
+        game_status: str | None = None,
+        action: str | None = None,
+        execution_permission: str | None = None,
+        accepted: bool | None = None,
+        confirmable: bool | None = None,
+        league: str | None = None,
     ) -> dict[str, Any]:
         """从热态 market、orderbook 与直播 metadata 投影体育扫尾候选。"""
 
@@ -682,9 +725,19 @@ class AdminService:
                 metadata = dict(plan.metadata or {})
                 if "sports_tail_reason" not in metadata:
                     continue
-                if metadata.get("sports_tail_action") == "reject":
+                candidate = self._candidate_payload(market, outcome.token_id, plan)
+                if not _candidate_matches_filters(
+                    candidate,
+                    market_type=market_type,
+                    game_status=game_status,
+                    action=action,
+                    execution_permission=execution_permission,
+                    accepted=accepted,
+                    confirmable=confirmable,
+                    league=league,
+                ):
                     continue
-                candidates.append(self._candidate_payload(market, outcome.token_id, plan))
+                candidates.append(candidate)
         page = self._slice_sequence(candidates, limit=limit, offset=offset)
         return page_payload(page, serializer=lambda item: item)
 
@@ -853,6 +906,7 @@ class AdminService:
 
     def _candidate_payload(self, market: Market, token_id: str, plan) -> dict[str, Any]:
         metadata = dict(plan.metadata or {})
+        sports_tail_game = metadata.get("sports_tail_game") if isinstance(metadata.get("sports_tail_game"), Mapping) else {}
         outcome = market.get_outcome_by_token_id(token_id)
         action = str(metadata.get("sports_tail_action") or "")
         execution_permission = metadata.get("sports_execution_permission")
@@ -875,6 +929,11 @@ class AdminService:
             "reason": str(metadata.get("sports_tail_reason") or plan.reason or ""),
             "action": action,
             "execution_permission": execution_permission,
+            "league": sports_tail_game.get("league") or metadata.get("sports_league"),
+            "home_name": sports_tail_game.get("home_name"),
+            "away_name": sports_tail_game.get("away_name"),
+            "period": sports_tail_game.get("period"),
+            "observed_at": sports_tail_game.get("observed_at"),
             "market_type": metadata.get("market_type"),
             "side": metadata.get("side"),
             "line": metadata.get("line"),
@@ -882,6 +941,8 @@ class AdminService:
             "total_score": metadata.get("total_score"),
             "seconds_remaining": metadata.get("seconds_remaining"),
             "game_status": metadata.get("game_status"),
+            "sports_risk_reason": metadata.get("sports_risk_reason"),
+            "exit_plan": metadata.get("sports_exit_plan"),
             "allocation": None if plan.allocation is None else {
                 "target_budget_usdc": decimal_text(plan.allocation.target_budget_usdc),
                 "buy_budget_usdc": decimal_text(plan.allocation.buy_budget_usdc),

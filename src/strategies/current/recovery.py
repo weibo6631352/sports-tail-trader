@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from polymarket_trader.domain.market import TradingStatus
@@ -9,7 +10,9 @@ from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.extension_api import RecoveryDecision, ExtensionContext, ExtensionDecision
 
 from strategies.current.config import CurrentStrategyConfig
+from strategies.current.exit_plan import build_exit_plan_metadata
 from strategies.current.outcomes import sports_token_targets
+from strategies.current.sports_tail import LiveGameStatus, live_game_state_from_metadata
 
 
 def decide_recovery(
@@ -46,6 +49,8 @@ def decide_recovery(
         )
 
     actions: list[ExtensionDecision] = []
+    abnormal_pause_reason = _abnormal_live_state_pause_reason(config, context)
+    recovery_metadata = _recovery_metadata(config, context, abnormal_pause_reason=abnormal_pause_reason)
     for order in open_orders:
         order_id = _order_identifier(order)
         if order_id is None or not _is_open_entry_order(order):
@@ -56,6 +61,7 @@ def decide_recovery(
                 token_id=order.token_id,
                 order_id=order_id,
                 market_slug=order.market_slug or context.market.market_slug,
+                metadata=recovery_metadata,
             )
         )
 
@@ -70,6 +76,16 @@ def decide_recovery(
         open_exit_shares = open_exit_by_token.get(position.token_id, Decimal("0"))
         uncovered_shares = position.shares - open_exit_shares
         if uncovered_shares > Decimal("0"):
+            exit_metadata = dict(recovery_metadata)
+            exit_metadata.update(
+                build_exit_plan_metadata(
+                    config,
+                    context,
+                    token_id=position.token_id,
+                    source_reason="recovery_exit_shortage",
+                    target_size_shares=uncovered_shares,
+                )
+            )
             actions.append(
                 ExtensionDecision.sell(
                     reason="recovery_exit_shortage",
@@ -77,6 +93,7 @@ def decide_recovery(
                     price=config.exit_no_price,
                     size_shares=uncovered_shares,
                     market_slug=position.market_slug or context.market.market_slug,
+                    metadata=exit_metadata,
                 )
             )
 
@@ -86,12 +103,12 @@ def decide_recovery(
         TradingStatus.RESOLVED,
     } or (
         account_snapshot is not None and account_snapshot.is_market_paused(context.market.condition_id)
-    )
+    ) or abnormal_pause_reason is not None
     return RecoveryDecision(
         reason="strategy_recovery",
         actions=tuple(actions),
         pause_trading=pause_trading,
-        pause_reason="market_not_tradable" if pause_trading else "",
+        pause_reason=abnormal_pause_reason or ("market_not_tradable" if pause_trading else ""),
     )
 
 
@@ -113,3 +130,60 @@ def _open_order_shares(order) -> Decimal:
     if order.size_shares is not None:
         return max(order.size_shares, Decimal("0"))
     return Decimal("0")
+
+
+def _abnormal_live_state_pause_reason(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+) -> str | None:
+    """根据已接入的直播状态判断是否需要暂停新增交易。"""
+
+    game = live_game_state_from_metadata(context.metadata)
+    if game is None:
+        return None
+    if game.status in {
+        LiveGameStatus.PAUSED,
+        LiveGameStatus.POSTPONED,
+        LiveGameStatus.CANCELLED,
+        LiveGameStatus.DISPUTED,
+        LiveGameStatus.RETIRED,
+        LiveGameStatus.ENDED,
+        LiveGameStatus.UNKNOWN,
+    }:
+        return f"sports_live_state_{game.status.value}"
+    if game.observed_at is not None and _live_state_age_seconds(context, game.observed_at) > (
+        config.sports_max_game_state_age_seconds
+    ):
+        return "sports_live_state_stale"
+    return None
+
+
+def _live_state_age_seconds(context: ExtensionContext, observed_at: datetime) -> float:
+    current_time = context.now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=timezone.utc)
+    return (current_time.astimezone(timezone.utc) - observed_at.astimezone(timezone.utc)).total_seconds()
+
+
+def _recovery_metadata(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    *,
+    abnormal_pause_reason: str | None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "sports_recovery_reason": abnormal_pause_reason or "strategy_recovery",
+    }
+    if abnormal_pause_reason is not None:
+        metadata["sports_recovery_pause_reason"] = abnormal_pause_reason
+        metadata.update(
+            build_exit_plan_metadata(
+                config,
+                context,
+                token_id=context.token_id,
+                source_reason=abnormal_pause_reason,
+            )
+        )
+    return metadata

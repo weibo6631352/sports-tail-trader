@@ -80,6 +80,8 @@
 - 配置：`src/strategies/current/config.py`
 - 远端 discovery 粗筛输入：`src/strategies/current/config.py` 的 `discovery_title_searches` / `discovery_tag_slugs`；当前默认面向体育直播相关搜索词与 sports tag，官方 Gamma Events keyset 文档：<https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination>
 - 体育扫尾模型和权限：`src/strategies/current/sports_tail.py`
+- 体育扫尾策略级风控：`src/strategies/current/risk.py`
+- 体育扫尾退出计划：`src/strategies/current/exit_plan.py`
 - 盘口方向解析：`src/strategies/current/outcomes.py`
 - 市场筛选：`src/strategies/current/universe.py`
 - 交易决策：`src/strategies/current/trading.py`

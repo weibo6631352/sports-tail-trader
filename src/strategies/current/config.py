@@ -54,6 +54,10 @@ class CurrentStrategyConfig:
             体育扫尾允许纳入 universe 的盘口类型。
         sports_*:
             体育扫尾策略自己的价格、流动性、时间窗口和执行权限参数。
+        sports_max_*:
+            体育扫尾策略级风险上限，用于约束同一比赛、同一联赛和当日新增
+            暴露。框架级 `MAX_ORDER_USDC / MAX_MARKET_USDC / MAX_TOTAL_USDC`
+            仍由 RiskManager 做最终门禁。
     """
 
     entry_no_price_max: Decimal = Decimal("0.99")
@@ -93,6 +97,10 @@ class CurrentStrategyConfig:
     sports_min_under_safety_margin: Decimal = Decimal("2")
     sports_min_moneyline_lead: int = 6
     sports_min_spread_safety_margin: Decimal = Decimal("2")
+    sports_max_event_exposure_usdc: Decimal = Decimal("25")
+    sports_max_league_exposure_usdc: Decimal = Decimal("75")
+    sports_max_daily_entry_usdc: Decimal = Decimal("150")
+    sports_max_consecutive_losses: int = 3
 
 
 def sports_tail_policy_from_config(config: CurrentStrategyConfig) -> SportsTailPolicy:

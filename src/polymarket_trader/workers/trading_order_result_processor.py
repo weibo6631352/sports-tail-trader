@@ -23,6 +23,7 @@ from polymarket_trader.domain.order import (
 from polymarket_trader.domain.state_machine import MarketLifecycle
 from polymarket_trader.extension_api import ExtensionContext, MarketTokenView
 from polymarket_trader.runtime.account_state import AccountStateStore
+from polymarket_trader.serialization import jsonable
 from polymarket_trader.workers.trading_decision_event_payloads import (
     TRADING_DECISION_WORKER_ORIGIN,
     coerce_order_result_from_event,
@@ -403,6 +404,7 @@ class TradingOrderResultProcessor:
                     "origin": TRADING_DECISION_WORKER_ORIGIN,
                     "phase": "follow_up",
                     "source_order_result": serialize_order_result(order_result),
+                    "decision_metadata": jsonable(decision.metadata),
                     "intent": serialize_intent(intent),
                     "review": serialize_review(follow_up_review),
                 },

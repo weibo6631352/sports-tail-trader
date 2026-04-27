@@ -2,7 +2,7 @@
 
 这里只写已经存在的 HTTP API。
 
-- 核对日期：2026-04-22
+- 核对日期：2026-04-27
 - 适用仓库：`polymarket-trader`
 - 服务入口：`src/polymarket_trader/api/app.py`
 - 默认无应用层鉴权，只放在本机或受控内网。
@@ -314,6 +314,13 @@
 | `condition_id` | `str` | `null` | 按 market 条件过滤 |
 | `token_id` | `str` | `null` | 按 token 过滤 |
 | `market_slug` | `str` | `null` | 按 market slug 过滤 |
+| `market_type` | `str` | `null` | 按 `totals` / `moneyline` / `spreads` 过滤 |
+| `game_status` | `str` | `null` | 按直播比赛状态过滤 |
+| `action` | `str` | `null` | 按 `reject` / `record` / `alert` / `manual_confirm` / `auto_execute` 过滤 |
+| `execution_permission` | `str` | `null` | 按执行权限过滤 |
+| `accepted` | `bool` | `null` | 按候选是否通过策略评估过滤 |
+| `confirmable` | `bool` | `null` | 按是否可人工确认过滤 |
+| `league` | `str` | `null` | 按联赛过滤 |
 
 单项关键字段：
 
@@ -330,18 +337,27 @@
 - `reason`
 - `action`
 - `execution_permission`
+- `league`
+- `home_name`
+- `away_name`
+- `period`
+- `observed_at`
 - `market_type`
 - `side`
 - `best_ask`
 - `seconds_remaining`
+- `game_status`
+- `sports_risk_reason`
+- `exit_plan`
 - `payload`
 
 说明：
 
 - 候选来自运行时 registry、orderbook 热态和 `EntryMetadataStore`，不查外部直播 API。
 - 外部直播源同步只由 `sports_live_state_sync` P2 job 更新 store；候选查询本身不触发外部请求。
-- 服务端只返回策略已识别的非 reject 体育候选；前端不能自行复写确认条件。
+- 服务端返回策略已识别的候选，包括 `reject`，用于管理台复盘和调参；前端不能自行复写确认条件。
 - `confirmable` 是人工确认按钮的唯一事实来源。
+- `exit_plan` 来自策略决策 metadata，用于展示买入后的目标卖出价、异常状态处理和恢复口径。
 
 ### 3.8 `GET /candidates/live-states`
 

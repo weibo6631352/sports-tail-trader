@@ -39,6 +39,13 @@ async def list_candidates(
     condition_id: str | None = Query(default=None),
     token_id: str | None = Query(default=None),
     market_slug: str | None = Query(default=None),
+    market_type: str | None = Query(default=None),
+    game_status: str | None = Query(default=None),
+    action: str | None = Query(default=None),
+    execution_permission: str | None = Query(default=None),
+    accepted: bool | None = Query(default=None),
+    confirmable: bool | None = Query(default=None),
+    league: str | None = Query(default=None),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
     return await service.list_sports_tail_candidates(
@@ -47,6 +54,13 @@ async def list_candidates(
         condition_id=condition_id,
         token_id=token_id,
         market_slug=market_slug,
+        market_type=market_type,
+        game_status=game_status,
+        action=action,
+        execution_permission=execution_permission,
+        accepted=accepted,
+        confirmable=confirmable,
+        league=league,
     )
 
 

@@ -9,6 +9,8 @@
 - `live_state.py`：外部直播比赛状态与当前策略 market 的匹配和 metadata 映射
 - `outcomes.py`：体育盘口类型、盘口线和目标 token 方向解析
 - `universe.py`：返回后本地 universe 精筛
+- `risk.py`：体育扫尾策略级风控，包括单场、联赛、单日和连续亏损暂停
+- `exit_plan.py`：买入、跟单卖出和恢复动作共用的退出计划 metadata
 - `trading.py`：分配、入场、退出
 - `recovery.py`：恢复语义
 - `tracking.py`：过滤后继续跟踪的规则
@@ -25,8 +27,8 @@
    理解扫回来的 market 为什么会被纳入或排除。
 4. `sports_tail.py` / `outcomes.py` / `live_state.py`
    理解 `Totals`、`Moneyline`、`Spreads` 如何被统一建模、解析和评估。
-5. `trading.py`
-   理解资金怎么分配、什么条件下会买、什么条件下会卖。
+5. `risk.py` / `exit_plan.py` / `trading.py`
+   理解资金怎么分配、什么条件下会买、什么条件下会卖，以及买入后怎么保留退出计划。
 6. `recovery.py` / `tracking.py`
    理解异常状态如何修复，以及 market 被排除后是否继续跟踪。
 
@@ -44,6 +46,10 @@
   改 `universe.py`
 - 想改预算分配、买卖逻辑：
   改 `trading.py`
+- 想改单场、联赛、单日或连续亏损暂停规则：
+  改 `risk.py`
+- 想改买入后的目标卖出、等待结算或异常处理口径：
+  改 `exit_plan.py` / `recovery.py`
 - 想改恢复策略或保留订阅规则：
   改 `recovery.py` / `tracking.py`
 

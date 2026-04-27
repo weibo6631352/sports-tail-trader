@@ -264,6 +264,11 @@ export interface CandidateRecord {
   accepted?: boolean
   action?: string | null
   execution_permission?: string | null
+  league?: string | null
+  home_name?: string | null
+  away_name?: string | null
+  period?: string | null
+  observed_at?: string | null
   reason?: string | null
   market_type?: string | null
   side?: string | null
@@ -272,6 +277,8 @@ export interface CandidateRecord {
   total_score?: number | string | null
   seconds_remaining?: number | string | null
   game_status?: string | null
+  sports_risk_reason?: string | null
+  exit_plan?: JsonValue
   confirmable: boolean
   allocation?: JsonValue
   intent?: JsonValue

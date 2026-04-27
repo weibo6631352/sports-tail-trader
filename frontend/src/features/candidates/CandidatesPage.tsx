@@ -82,6 +82,13 @@ export const CandidatesPage = () => {
   const [conditionId, setConditionId] = useState('')
   const [tokenId, setTokenId] = useState('')
   const [marketSlug, setMarketSlug] = useState('')
+  const [marketType, setMarketType] = useState('')
+  const [gameStatus, setGameStatus] = useState('')
+  const [actionFilter, setActionFilter] = useState('')
+  const [permissionFilter, setPermissionFilter] = useState('')
+  const [acceptedFilter, setAcceptedFilter] = useState('')
+  const [confirmableFilter, setConfirmableFilter] = useState('')
+  const [league, setLeague] = useState('')
   const [offset, setOffset] = useState(0)
   const [selectedCandidate, setSelectedCandidate] = useState<CandidateRecord | null>(null)
   const [operator, setOperator] = useState('人工')
@@ -89,7 +96,22 @@ export const CandidatesPage = () => {
   const [formError, setFormError] = useState<string | null>(null)
 
   const candidatesQuery = useQuery({
-    queryKey: ['candidates', { conditionId, tokenId, marketSlug, offset }],
+    queryKey: [
+      'candidates',
+      {
+        conditionId,
+        tokenId,
+        marketSlug,
+        marketType,
+        gameStatus,
+        actionFilter,
+        permissionFilter,
+        acceptedFilter,
+        confirmableFilter,
+        league,
+        offset,
+      },
+    ],
     queryFn: () =>
       adminApi.listCandidates({
         limit: pageSize,
@@ -97,6 +119,13 @@ export const CandidatesPage = () => {
         condition_id: conditionId || undefined,
         token_id: tokenId || undefined,
         market_slug: marketSlug || undefined,
+        market_type: marketType || undefined,
+        game_status: gameStatus || undefined,
+        action: actionFilter || undefined,
+        execution_permission: permissionFilter || undefined,
+        accepted: acceptedFilter || undefined,
+        confirmable: confirmableFilter || undefined,
+        league: league || undefined,
       }),
     refetchInterval: 8_000,
   })
@@ -177,6 +206,13 @@ export const CandidatesPage = () => {
         cell: (row) => row.action ?? '—',
       },
       {
+        key: 'accepted',
+        header: 'accepted',
+        cell: (row) => (
+          <StatusPill label={formatBool(Boolean(row.accepted))} tone={row.accepted ? 'success' : 'neutral'} />
+        ),
+      },
+      {
         key: 'permission',
         header: 'execution_permission',
         cell: (row) => (
@@ -190,6 +226,16 @@ export const CandidatesPage = () => {
         key: 'reason',
         header: 'reason',
         cell: (row) => row.reason ?? '—',
+      },
+      {
+        key: 'state',
+        header: '盘口 / 状态',
+        cell: (row) => (
+          <div className="table-primary">
+            <strong>{row.market_type ?? '—'}</strong>
+            <span>{[row.league, row.game_status, row.period].filter(Boolean).join(' / ') || '—'}</span>
+          </div>
+        ),
       },
       {
         key: 'bestAsk',
@@ -283,6 +329,42 @@ export const CandidatesPage = () => {
           <label>
             <span>市场标识</span>
             <input value={marketSlug} onChange={(event) => setMarketSlug(event.target.value)} />
+          </label>
+          <label>
+            <span>盘口类型</span>
+            <input value={marketType} onChange={(event) => setMarketType(event.target.value)} />
+          </label>
+          <label>
+            <span>比赛状态</span>
+            <input value={gameStatus} onChange={(event) => setGameStatus(event.target.value)} />
+          </label>
+          <label>
+            <span>动作</span>
+            <input value={actionFilter} onChange={(event) => setActionFilter(event.target.value)} />
+          </label>
+          <label>
+            <span>执行权限</span>
+            <input value={permissionFilter} onChange={(event) => setPermissionFilter(event.target.value)} />
+          </label>
+          <label>
+            <span>accepted</span>
+            <select value={acceptedFilter} onChange={(event) => setAcceptedFilter(event.target.value)}>
+              <option value="">全部</option>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label>
+            <span>confirmable</span>
+            <select value={confirmableFilter} onChange={(event) => setConfirmableFilter(event.target.value)}>
+              <option value="">全部</option>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label>
+            <span>联赛</span>
+            <input value={league} onChange={(event) => setLeague(event.target.value)} />
           </label>
         </div>
       </SectionCard>
