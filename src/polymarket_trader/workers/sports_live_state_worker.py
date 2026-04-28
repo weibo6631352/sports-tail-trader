@@ -14,7 +14,12 @@ from uuid import uuid4
 
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.sports_live import SportsLiveGame, SportsLiveSnapshot, SportsLiveSyncStatus
+from polymarket_trader.domain.sports_live import (
+    SportsLiveGame,
+    SportsLiveSnapshot,
+    SportsLiveSourceStatus,
+    SportsLiveSyncStatus,
+)
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry
@@ -45,6 +50,7 @@ class SportsLiveSyncResult:
     records_written: int
     unmatched_markets: int
     entry_signals_published: int
+    source_statuses: tuple[SportsLiveSourceStatus, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return jsonable(self)
@@ -89,6 +95,7 @@ class SportsLiveStateWorker:
         self._last_records_written = 0
         self._last_unmatched_markets = 0
         self._last_entry_signals_published = 0
+        self._last_source_statuses: tuple[SportsLiveSourceStatus, ...] = ()
 
     async def sync_once(self) -> SportsLiveSyncResult | None:
         """执行一次同步；供 scheduler 和测试直接驱动。"""
@@ -116,6 +123,7 @@ class SportsLiveStateWorker:
             self._last_records_written = result.records_written
             self._last_unmatched_markets = result.unmatched_markets
             self._last_entry_signals_published = result.entry_signals_published
+            self._last_source_statuses = result.source_statuses
             return result
         finally:
             self._running = False
@@ -139,6 +147,7 @@ class SportsLiveStateWorker:
             last_unmatched_markets=self._last_unmatched_markets,
             last_entry_signals_published=self._last_entry_signals_published,
             leagues=self._leagues,
+            source_statuses=self._last_source_statuses,
         )
 
     async def _apply_snapshot(
@@ -178,6 +187,7 @@ class SportsLiveStateWorker:
             records_written=records_written,
             unmatched_markets=max(0, len(markets) - len(matches)),
             entry_signals_published=entry_signals,
+            source_statuses=snapshot.source_statuses,
         )
 
     def _match_markets(

@@ -74,6 +74,15 @@ def sports_tail_game_metadata(game: SportsLiveGame) -> dict[str, Any]:
         "source": game.source,
         "source_event_id": game.source_event_id,
         "raw_status": game.raw_status,
+        "source_conflicts": game.source_payload.get("source_conflicts", ()),
+        "baseball_state": None if game.baseball_state is None else {
+            "current_inning": game.baseball_state.current_inning,
+            "inning_half": game.baseball_state.inning_half,
+            "outs": game.baseball_state.outs,
+            "offense_team": game.baseball_state.offense_team,
+            "defense_team": game.baseball_state.defense_team,
+            "occupied_bases": game.baseball_state.occupied_bases,
+        },
     }
 
 

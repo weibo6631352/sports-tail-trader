@@ -12,12 +12,17 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
-from polymarket_trader.domain.events import sanitize_raw_response
 from polymarket_trader.domain.sports_live import (
     SportsLiveGame,
     SportsLiveGameStatus,
     SportsLiveSnapshot,
     SportsLiveTeam,
+)
+from polymarket_trader.infra.sports.common import (
+    SportsDataClientError,
+    SportsDataResponseError,
+    json_mapping_from_response,
+    normalize_sports_data_error,
 )
 
 _DEFAULT_LEAGUE_PATHS: dict[str, str] = {
@@ -42,56 +47,6 @@ _LEAGUE_SECONDS = {
     "ncaaf": (4, 15 * 60),
     "nhl": (3, 20 * 60),
 }
-
-
-class SportsDataClientError(RuntimeError):
-    """外部体育数据源错误基类。"""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        operation: str,
-        url: str | None = None,
-        status_code: int | None = None,
-        code: str | None = None,
-        retry_after_s: float | None = None,
-        raw_response_summary: str | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.operation = operation
-        self.url = url
-        self.status_code = status_code
-        self.code = code
-        self.retry_after_s = retry_after_s
-        self.raw_response_summary = raw_response_summary
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "message": str(self),
-            "operation": self.operation,
-            "url": self.url,
-            "status_code": self.status_code,
-            "code": self.code,
-            "retry_after_s": self.retry_after_s,
-            "raw_response_summary": self.raw_response_summary,
-        }
-
-
-class SportsDataTimeoutError(SportsDataClientError):
-    """外部体育数据源请求超时。"""
-
-
-class SportsDataRateLimitError(SportsDataClientError):
-    """外部体育数据源限流。"""
-
-
-class SportsDataTransportError(SportsDataClientError):
-    """外部体育数据源网络或服务端错误。"""
-
-
-class SportsDataResponseError(SportsDataClientError):
-    """外部体育数据源响应格式错误。"""
 
 
 class EspnScoreboardClient:
@@ -145,9 +100,16 @@ class EspnScoreboardClient:
         )
         games: list[SportsLiveGame] = []
         seen_event_keys: set[tuple[str, str]] = set()
+        failures: list[SportsDataClientError] = []
+        successful_requests = 0
         for league in self._leagues:
             for scoreboard_date in scoreboard_dates:
-                payload = await self._get_scoreboard(league, scoreboard_date=scoreboard_date)
+                try:
+                    payload = await self._get_scoreboard(league, scoreboard_date=scoreboard_date)
+                except SportsDataClientError as exc:
+                    failures.append(exc)
+                    continue
+                successful_requests += 1
                 for game in parse_espn_scoreboard_payload(
                     payload,
                     league=league,
@@ -158,6 +120,8 @@ class EspnScoreboardClient:
                         continue
                     seen_event_keys.add(event_key)
                     games.append(game)
+        if successful_requests <= 0 and failures:
+            raise failures[0]
         return SportsLiveSnapshot(source="espn", observed_at=observed_at, games=tuple(games))
 
     async def _get_scoreboard(self, league: str, *, scoreboard_date: str) -> Mapping[str, Any]:
@@ -171,25 +135,7 @@ class EspnScoreboardClient:
             response.raise_for_status()
         except Exception as exc:
             raise _normalize_error(exc, operation=operation) from exc
-        try:
-            payload = response.json()
-        except Exception as exc:
-            raise SportsDataResponseError(
-                f"{operation} returned non-JSON payload",
-                operation=operation,
-                url=str(response.request.url),
-                status_code=response.status_code,
-                raw_response_summary=sanitize_raw_response(response.text, max_length=512),
-            ) from exc
-        if not isinstance(payload, Mapping):
-            raise SportsDataResponseError(
-                f"{operation} returned unexpected payload",
-                operation=operation,
-                url=str(response.request.url),
-                status_code=response.status_code,
-                raw_response_summary=sanitize_raw_response(payload, max_length=512),
-            )
-        return payload
+        return json_mapping_from_response(response, operation=operation)
 
     def _now(self) -> datetime:
         value = (
@@ -278,6 +224,7 @@ def _parse_event(
             "event_id": event.get("id"),
             "name": event.get("name"),
             "short_name": event.get("shortName"),
+            "start_time_utc": event.get("date") or competition.get("date"),
         },
     )
 
@@ -451,39 +398,7 @@ def _scoreboard_dates(
 
 
 def _normalize_error(exc: Exception, *, operation: str) -> SportsDataClientError:
-    if isinstance(exc, SportsDataClientError):
-        return exc
-    if isinstance(exc, httpx.TimeoutException):
-        return SportsDataTimeoutError(f"{operation} timed out", operation=operation)
-    if isinstance(exc, httpx.HTTPStatusError):
-        response = exc.response
-        retry_after_s: float | None = None
-        try:
-            retry_after = response.headers.get("retry-after")
-            retry_after_s = None if retry_after is None else float(retry_after)
-        except (TypeError, ValueError):
-            retry_after_s = None
-        payload: Any
-        try:
-            payload = response.json()
-        except Exception:
-            payload = response.text
-        error_cls = (
-            SportsDataRateLimitError
-            if response.status_code == 429
-            else SportsDataTransportError if response.status_code >= 500 else SportsDataResponseError
-        )
-        return error_cls(
-            f"{operation} failed with HTTP {response.status_code}",
-            operation=operation,
-            url=str(response.request.url),
-            status_code=response.status_code,
-            retry_after_s=retry_after_s,
-            raw_response_summary=sanitize_raw_response(payload, max_length=512),
-        )
-    if isinstance(exc, httpx.HTTPError):
-        return SportsDataTransportError(f"{operation} transport error: {exc}", operation=operation)
-    return SportsDataResponseError(f"{operation} failed: {exc}", operation=operation)
+    return normalize_sports_data_error(exc, operation=operation)
 
 
 def _int_value(value: Any) -> int | None:

@@ -405,7 +405,7 @@
 
 说明：
 
-- `source=sports_live:espn` 表示记录来自外部 ESPN 同步 worker。
+- `source=sports_live:sports_live_aggregate` 表示记录来自多源体育直播同步 worker；具体采用的底层源可看 `metadata.sports_tail_game.source` 和 `metadata.sports_live_match.source`。
 - `metadata.sports_tail_game.observed_at` 是外部源观测时间，`updated_at` 是本地 store 更新时间；两者可能相同，也可能因人工写入或重放不同。
 
 ### 3.9 `POST /candidates/live-states`

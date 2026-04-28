@@ -19,6 +19,7 @@ def test_entry_replay_fixture_metadata_drives_sports_tail_plan(tmp_path: Path) -
                         "market_question": "TB vs MON total over/under 4.5",
                         "event_title": "TB vs MON",
                         "category": "Sports",
+                        "tags": ["NHL"],
                         "trading_status": "eligible",
                         "outcomes": [
                             {"token_id": "over", "outcome": "Over"},

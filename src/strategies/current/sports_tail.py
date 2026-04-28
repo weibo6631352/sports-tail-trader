@@ -81,6 +81,23 @@ class TailRejectReason(StrEnum):
     INSUFFICIENT_SAFETY_MARGIN = "insufficient_safety_margin"
     UNSUPPORTED_MARKET_TYPE = "unsupported_market_type"
     UNSUPPORTED_MARKET_SIDE = "unsupported_market_side"
+    LIVE_SOURCE_CONFLICT = "live_source_conflict"
+    MISSING_BASEBALL_STATE = "missing_baseball_state"
+    BASEBALL_NOT_LATE_ENOUGH = "baseball_not_late_enough"
+    BASEBALL_THREAT_ON_BASE = "baseball_threat_on_base"
+    BASEBALL_OFFENSE_NOT_TRAILING = "baseball_offense_not_trailing"
+
+
+@dataclass(frozen=True, slots=True)
+class BaseballGameState:
+    """策略评估 MLB 扫尾所需的棒球局面。"""
+
+    current_inning: int | None = None
+    inning_half: str | None = None
+    outs: int | None = None
+    offense_team: str | None = None
+    defense_team: str | None = None
+    occupied_bases: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +113,8 @@ class LiveGameState:
     status: LiveGameStatus
     seconds_remaining: int | None = None
     observed_at: datetime | None = None
+    source_conflicts: tuple[Mapping[str, Any], ...] = ()
+    baseball_state: BaseballGameState | None = None
 
     @property
     def total_score(self) -> int:
@@ -206,6 +225,8 @@ def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState 
         status=_game_status(raw_game.get("status")),
         seconds_remaining=_optional_int(raw_game.get("seconds_remaining")),
         observed_at=observed_at,
+        source_conflicts=_source_conflicts(raw_game.get("source_conflicts")),
+        baseball_state=_baseball_state(raw_game.get("baseball_state")),
     )
 
 
@@ -225,6 +246,18 @@ def evaluate_tail_opportunity(
     common_reject_reason = _common_reject_reason(game, market, policy, now=now)
     if common_reject_reason:
         return _reject(candidate, common_reject_reason.value)
+
+    if _is_mlb_game(game):
+        if market.market_type == SportsMarketType.TOTALS:
+            return _evaluate_mlb_totals(candidate, policy)
+        if market.market_type == SportsMarketType.MONEYLINE:
+            return _evaluate_mlb_moneyline(candidate, policy)
+        if market.market_type == SportsMarketType.SPREADS:
+            return _evaluate_mlb_spreads(candidate, policy)
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+
+    if _is_nfl_game(game):
+        return _evaluate_nfl_manual_review(candidate, policy)
 
     if market.market_type == SportsMarketType.TOTALS:
         return _evaluate_totals(candidate, policy)
@@ -248,6 +281,14 @@ def _candidate(game: LiveGameState, market: SportsMarketSnapshot) -> SportsTailC
             "total_score": game.total_score,
             "seconds_remaining": game.seconds_remaining,
             "game_status": game.status.value,
+            "baseball_state": None if game.baseball_state is None else {
+                "current_inning": game.baseball_state.current_inning,
+                "inning_half": game.baseball_state.inning_half,
+                "outs": game.baseball_state.outs,
+                "offense_team": game.baseball_state.offense_team,
+                "defense_team": game.baseball_state.defense_team,
+                "occupied_bases": game.baseball_state.occupied_bases,
+            },
         },
     )
 
@@ -261,6 +302,8 @@ def _common_reject_reason(
 ) -> TailRejectReason | None:
     if game.status != LiveGameStatus.LIVE:
         return TailRejectReason.GAME_NOT_LIVE
+    if game.source_conflicts:
+        return TailRejectReason.LIVE_SOURCE_CONFLICT
     if _is_stale(game, policy, now=now):
         return TailRejectReason.STALE_GAME_STATE
     if market.best_ask is None:
@@ -335,6 +378,78 @@ def _evaluate_spreads(
     return _accept(candidate, "spreads_late_cover", policy.spreads_execution_permission)
 
 
+def _evaluate_mlb_totals(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    game = candidate.game
+    market = candidate.market
+    if market.line is None:
+        return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+    total_score = Decimal(game.total_score)
+    if market.side == SportsMarketSide.OVER and total_score > market.line:
+        return _accept(candidate, "totals_over_locked", policy.totals_execution_permission)
+    if market.side == SportsMarketSide.UNDER:
+        reject_reason = _mlb_low_scoring_tail_reject_reason(game)
+        if reject_reason is not None:
+            return _reject(candidate, reject_reason.value)
+        if market.line - total_score >= policy.min_under_safety_margin:
+            return _accept(candidate, "mlb_totals_under_late_low_risk", policy.totals_execution_permission)
+    return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+
+def _evaluate_mlb_moneyline(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    game = candidate.game
+    market = candidate.market
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    reject_reason = _mlb_side_tail_reject_reason(game, market.side)
+    if reject_reason is not None:
+        return _reject(candidate, reject_reason.value)
+    if game.score_diff_for(market.side) < policy.min_moneyline_lead:
+        return _reject(candidate, TailRejectReason.INSUFFICIENT_LEAD.value)
+    return _accept(candidate, "mlb_moneyline_late_lead", policy.moneyline_execution_permission)
+
+
+def _evaluate_mlb_spreads(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    game = candidate.game
+    market = candidate.market
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    if market.line is None:
+        return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+    reject_reason = _mlb_side_tail_reject_reason(game, market.side)
+    if reject_reason is not None:
+        return _reject(candidate, reject_reason.value)
+    safety_margin = Decimal(game.score_diff_for(market.side)) + market.line
+    if safety_margin < policy.min_spread_safety_margin:
+        return _reject(candidate, TailRejectReason.INSUFFICIENT_SAFETY_MARGIN.value)
+    return _accept(candidate, "mlb_spreads_late_cover", policy.spreads_execution_permission)
+
+
+def _evaluate_nfl_manual_review(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    if candidate.market.market_type == SportsMarketType.TOTALS:
+        evaluation = _evaluate_totals(candidate, policy)
+    elif candidate.market.market_type == SportsMarketType.MONEYLINE:
+        evaluation = _evaluate_moneyline(candidate, policy)
+    elif candidate.market.market_type == SportsMarketType.SPREADS:
+        evaluation = _evaluate_spreads(candidate, policy)
+    else:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+    if not evaluation.accepted:
+        return evaluation
+    return _accept(candidate, "nfl_requires_manual_review", ExecutionPermission.MANUAL_CONFIRM)
+
+
 def _accept(
     candidate: SportsTailCandidate,
     reason: str,
@@ -400,6 +515,77 @@ def _is_stale(
     return age_seconds > policy.max_game_state_age_seconds
 
 
+def _is_mlb_game(game: LiveGameState) -> bool:
+    return game.league.strip().lower() == "mlb"
+
+
+def _is_nfl_game(game: LiveGameState) -> bool:
+    return game.league.strip().lower() in {"nfl", "american football"}
+
+
+def _mlb_side_tail_reject_reason(
+    game: LiveGameState,
+    side: SportsMarketSide,
+) -> TailRejectReason | None:
+    state = game.baseball_state
+    if state is None:
+        return TailRejectReason.MISSING_BASEBALL_STATE
+    if (state.current_inning or 0) < 9 or (state.outs or 0) < 2:
+        return TailRejectReason.BASEBALL_NOT_LATE_ENOUGH
+    if state.occupied_bases:
+        return TailRejectReason.BASEBALL_THREAT_ON_BASE
+    offense_side = _baseball_offense_side(game, state)
+    if offense_side is None:
+        return TailRejectReason.MISSING_BASEBALL_STATE
+    if offense_side == side:
+        return TailRejectReason.BASEBALL_OFFENSE_NOT_TRAILING
+    return None
+
+
+def _mlb_low_scoring_tail_reject_reason(game: LiveGameState) -> TailRejectReason | None:
+    state = game.baseball_state
+    if state is None:
+        return TailRejectReason.MISSING_BASEBALL_STATE
+    if (state.current_inning or 0) < 9 or (state.outs or 0) < 2:
+        return TailRejectReason.BASEBALL_NOT_LATE_ENOUGH
+    if str(state.inning_half or "").strip().lower() != "bottom":
+        return TailRejectReason.BASEBALL_NOT_LATE_ENOUGH
+    if state.occupied_bases:
+        return TailRejectReason.BASEBALL_THREAT_ON_BASE
+    return None
+
+
+def _baseball_offense_side(
+    game: LiveGameState,
+    state: BaseballGameState,
+) -> SportsMarketSide | None:
+    offense_team = _normalize_team_name(state.offense_team)
+    if offense_team:
+        if offense_team in _team_name_aliases(game.home_name):
+            return SportsMarketSide.HOME
+        if offense_team in _team_name_aliases(game.away_name):
+            return SportsMarketSide.AWAY
+    inning_half = str(state.inning_half or "").strip().lower()
+    if inning_half == "top":
+        return SportsMarketSide.AWAY
+    if inning_half == "bottom":
+        return SportsMarketSide.HOME
+    return None
+
+
+def _team_name_aliases(name: str) -> set[str]:
+    normalized = _normalize_team_name(name)
+    tokens = normalized.split()
+    return {
+        normalized,
+        tokens[-1] if tokens else "",
+    } - {""}
+
+
+def _normalize_team_name(value: str | None) -> str:
+    return " ".join(str(value or "").lower().replace("&", " and ").split())
+
+
 def _game_status(value: object) -> LiveGameStatus:
     if isinstance(value, LiveGameStatus):
         return value
@@ -417,6 +603,32 @@ def _optional_int(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _source_conflicts(value: object) -> tuple[Mapping[str, Any], ...]:
+    if not isinstance(value, (tuple, list)):
+        return ()
+    return tuple(item for item in value if isinstance(item, Mapping))
+
+
+def _baseball_state(value: object) -> BaseballGameState | None:
+    if isinstance(value, BaseballGameState):
+        return value
+    if not isinstance(value, Mapping):
+        return None
+    occupied = value.get("occupied_bases")
+    occupied_bases = tuple(
+        base for base in (_optional_int(item) for item in occupied)
+        if base is not None
+    ) if isinstance(occupied, (tuple, list)) else ()
+    return BaseballGameState(
+        current_inning=_optional_int(value.get("current_inning")),
+        inning_half=None if value.get("inning_half") is None else str(value.get("inning_half")).strip().lower(),
+        outs=_optional_int(value.get("outs")),
+        offense_team=None if value.get("offense_team") is None else str(value.get("offense_team")),
+        defense_team=None if value.get("defense_team") is None else str(value.get("defense_team")),
+        occupied_bases=occupied_bases,
+    )
 
 
 def _datetime_value(value: object) -> datetime | None:

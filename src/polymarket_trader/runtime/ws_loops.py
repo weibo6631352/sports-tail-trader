@@ -61,6 +61,16 @@ def _drain_queue(queue: asyncio.Queue[Mapping[str, Any]]) -> None:
             queue.get_nowait()
 
 
+def _trigger_reconcile_after_user_ws_connect(runtime: Any) -> None:
+    """User WS 恢复后立即唤醒账户 reconcile，避免等待下一次周期调度。"""
+
+    scheduler = getattr(runtime, "scheduler", None)
+    if scheduler is None:
+        return
+    with suppress(KeyError):
+        scheduler.trigger_now("periodic_reconcile")
+
+
 async def stream_market_ws_messages(
     runtime: Any,
     token_ids: tuple[str, ...],
@@ -142,6 +152,7 @@ async def stream_user_ws_messages(
             trace_id=f"user-ws-connected-{uuid4().hex}",
             reason="user_ws_connected",
         )
+        _trigger_reconcile_after_user_ws_connect(runtime)
         runtime.supervisor.heartbeat_worker(
             "user_ws",
             state=WorkerLifecycleState.RUNNING,

@@ -105,6 +105,7 @@ def _load_market(item: Mapping[str, Any]) -> Market:
         event_title=_optional_text(item, "event_title"),
         event_slug=_optional_text(item, "event_slug"),
         category=_optional_text(item, "category"),
+        tags=_text_tuple(item, "tags"),
         matched_keywords=tuple(str(keyword) for keyword in item.get("matched_keywords", ())),
         trading_status=TradingStatus(str(item.get("trading_status", TradingStatus.CANDIDATE.value))),
         tick_size=_optional_decimal(item, "tick_size") or Decimal("0.01"),
@@ -238,6 +239,13 @@ def _list(item: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:
     if not isinstance(value, list):
         return []
     return [entry for entry in value if isinstance(entry, Mapping)]
+
+
+def _text_tuple(item: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = item.get(key, ())
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(str(entry) for entry in value if entry is not None)
 
 
 def _text(item: Mapping[str, Any], key: str) -> str:

@@ -22,6 +22,16 @@ class SportsLiveGameStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class SportsLiveSourceHealth(StrEnum):
+    """单个外部直播源在一次同步中的健康语义。"""
+
+    SUCCESS_WITH_LIVE_DATA = "success_with_live_data"
+    SUCCESS_EMPTY = "success_empty"
+    CACHED = "cached"
+    RATE_LIMITED = "rate_limited"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True, slots=True)
 class SportsLiveTeam:
     """外部比分源中的队伍或选手信息。"""
@@ -60,6 +70,18 @@ class SportsLiveTeam:
 
 
 @dataclass(frozen=True, slots=True)
+class BaseballGameState:
+    """棒球比赛当前局面。"""
+
+    current_inning: int | None = None
+    inning_half: str | None = None
+    outs: int | None = None
+    offense_team: str | None = None
+    defense_team: str | None = None
+    occupied_bases: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class SportsLiveGame:
     """策略入场前需要的归一化直播比赛状态。"""
 
@@ -73,6 +95,7 @@ class SportsLiveGame:
     seconds_remaining: int | None = None
     observed_at: datetime | None = None
     raw_status: str | None = None
+    baseball_state: BaseballGameState | None = None
     source_payload: Mapping[str, Any] = field(default_factory=dict)
 
     @property
@@ -93,7 +116,25 @@ class SportsLiveGame:
             "seconds_remaining": self.seconds_remaining,
             "observed_at": None if self.observed_at is None else self.observed_at.isoformat(),
             "raw_status": self.raw_status,
+            "baseball_state": None if self.baseball_state is None else jsonable(self.baseball_state),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class SportsLiveSourceStatus:
+    """一次聚合同步中单个外部源的状态摘要。"""
+
+    source: str
+    success: bool
+    health: SportsLiveSourceHealth = SportsLiveSourceHealth.SUCCESS_WITH_LIVE_DATA
+    games_seen: int = 0
+    observed_at: datetime | None = None
+    last_error: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """返回可序列化的来源状态。"""
+
+        return jsonable(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +144,7 @@ class SportsLiveSnapshot:
     source: str
     observed_at: datetime
     games: tuple[SportsLiveGame, ...]
+    source_statuses: tuple[SportsLiveSourceStatus, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +166,7 @@ class SportsLiveSyncStatus:
     last_unmatched_markets: int = 0
     last_entry_signals_published: int = 0
     leagues: tuple[str, ...] = ()
+    source_statuses: tuple[SportsLiveSourceStatus, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return jsonable(self)

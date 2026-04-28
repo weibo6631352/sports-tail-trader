@@ -49,7 +49,9 @@ class CurrentStrategyConfig:
             如果不确定 Gamma tag 是否覆盖目标市场，保持为空，并让
             ``select_market()`` 做本地最终过滤。
         sports_category_tokens:
-            本地 universe 精筛时用于识别体育市场的分类 token。
+            本地 universe 精筛时用于识别已接入直播源的体育联赛 token。
+            这里不使用泛化的 ``sports``，避免足球、网球等未建模联赛仅凭
+            大类标签进入自动交易候选。
         sports_enabled_market_types:
             体育扫尾允许纳入 universe 的盘口类型。
         sports_*:
@@ -64,17 +66,15 @@ class CurrentStrategyConfig:
     exit_no_price: Decimal = Decimal("0.995")
     min_liquidity_usdc: Decimal = Decimal("5")
     max_spread: Decimal | None = Decimal("0.10")
-    discovery_title_searches: tuple[str, ...] = ("sports", "nba", "nhl", "soccer", "tennis")
+    discovery_title_searches: tuple[str, ...] = ("sports", "nba", "nhl", "nfl", "mlb")
     discovery_tag_slugs: tuple[str, ...] = ("sports",)
     sports_category_tokens: tuple[str, ...] = (
-        "sports",
         "nba",
         "nfl",
         "nhl",
         "mlb",
-        "soccer",
-        "tennis",
         "basketball",
+        "baseball",
         "hockey",
         "football",
     )

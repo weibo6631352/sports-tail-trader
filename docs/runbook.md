@@ -13,8 +13,8 @@
 1. 先看 `/ready.blocking_reasons` 和 `/runtime.runtime.blocking_reasons`；配置问题再看 `/ready.blocking_issues`。
 2. 若是 `db_not_ready`，先修复 PostgreSQL 连通性。
 3. 若是 `trading_client_not_ready`，检查密钥、wallet signer 和运行环境。
-4. 若是 `user_ws_not_connected` 或 `market_ws_not_connected`，保持自动下单关闭，先做人工 reconcile。
-5. 若是 `reconcile_not_fresh`，执行 `POST /operations/reconcile`。
+4. 若是 `user_ws_not_connected` 或 `market_ws_not_connected`，保持自动下单关闭，先确认 WS 是否正在重连。
+5. User WS 连上后系统会主动唤醒账户 reconcile；若超过一个周期仍是 `reconcile_not_fresh`，再执行 `POST /operations/reconcile`。
 
 ## Market WS 断线
 

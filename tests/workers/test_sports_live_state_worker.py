@@ -9,6 +9,7 @@ from polymarket_trader.domain.sports_live import (
     SportsLiveGame,
     SportsLiveGameStatus,
     SportsLiveSnapshot,
+    SportsLiveSourceStatus,
     SportsLiveTeam,
 )
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
@@ -76,6 +77,39 @@ def test_sports_live_state_worker_keeps_unmatched_markets_auditable() -> None:
     asyncio.run(run())
 
 
+def test_sports_live_state_worker_exposes_source_statuses() -> None:
+    async def run() -> None:
+        registry = MarketRegistry()
+        registry.upsert(_market())
+        worker = SportsLiveStateWorker(
+            snapshot_provider=lambda: _snapshot(
+                _game(),
+                source="sports_live_aggregate",
+                source_statuses=(
+                    SportsLiveSourceStatus(source="espn", success=True, games_seen=1),
+                    SportsLiveSourceStatus(source="nba", success=False, last_error="timeout"),
+                ),
+            ),
+            match_live_state=sports_live_metadata_match,
+            registry=registry,
+            entry_metadata_store=EntryMetadataStore(),
+            enabled=True,
+            source="sports_live_aggregate",
+            leagues=("nba",),
+            publish_entry_signals=False,
+        )
+
+        sync_result = await worker.sync_once()
+        status = worker.status_snapshot()
+
+        assert sync_result is not None
+        assert sync_result.source_statuses[0].source == "espn"
+        assert status.source_statuses[1].source == "nba"
+        assert status.source_statuses[1].last_error == "timeout"
+
+    asyncio.run(run())
+
+
 async def _run_sync_with_match() -> dict[str, object]:
     registry = MarketRegistry()
     registry.upsert(_market())
@@ -103,11 +137,17 @@ async def _run_sync_with_match() -> dict[str, object]:
     }
 
 
-async def _snapshot(game: SportsLiveGame) -> SportsLiveSnapshot:
+async def _snapshot(
+    game: SportsLiveGame,
+    *,
+    source: str = "espn",
+    source_statuses: tuple[SportsLiveSourceStatus, ...] = (),
+) -> SportsLiveSnapshot:
     return SportsLiveSnapshot(
-        source="espn",
+        source=source,
         observed_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
         games=(game,),
+        source_statuses=source_statuses,
     )
 
 

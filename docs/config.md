@@ -43,25 +43,41 @@
 - `PORTFOLIO_BUDGET_USDC`、`MAX_ORDER_USDC`、`MAX_MARKET_USDC`、`MAX_TOTAL_USDC`、`MAX_OPEN_ORDERS` 任一不大于 `0` 时，系统不会进入自动交易态。
 - `POLYMARKET_API_KEY`、`POLYMARKET_API_SECRET`、`POLYMARKET_API_PASSPHRASE` 只填部分字段时，系统不会进入自动交易态。
 - `POLYMARKET_SIGNATURE_TYPE` 为 `1` 或 `2` 但未填写 `POLYMARKET_FUNDER_ADDRESS` 时，系统不会进入自动交易态。
-- `SPORTS_LIVE_STATE_ENABLED=true` 时，`SPORTS_LIVE_STATE_SOURCE` 当前只支持 `espn`，且 `SPORTS_LIVE_STATE_LEAGUES` 至少需要一个联赛代码；配置错误会阻止系统进入自动交易态。
+- `SPORTS_LIVE_STATE_ENABLED=true` 时，`SPORTS_LIVE_STATE_SOURCES` 只支持 `espn,nba,nhl,mlb,sofascore,thesportsdb`，且 `SPORTS_LIVE_STATE_LEAGUES` 至少需要一个可由启用源覆盖的联赛代码；配置错误会阻止系统进入自动交易态。
 
 ## 体育直播状态源
 
 这些配置只决定运行时从哪里读取比分、阶段和剩余时间，不属于策略参数：
 
 - `SPORTS_LIVE_STATE_ENABLED`：是否启用外部直播状态同步 worker。
-- `SPORTS_LIVE_STATE_SOURCE`：当前支持 `espn`。
-- `SPORTS_LIVE_STATE_BASE_URL`：ESPN site API 基础地址。
+- `SPORTS_LIVE_STATE_SOURCES`：逗号分隔的直播源代码，当前支持 `espn,nba,nhl,mlb,sofascore,thesportsdb`；默认启用全部。
+- `SPORTS_LIVE_STATE_ESPN_BASE_URL`：ESPN site API 基础地址。
+- `SPORTS_LIVE_STATE_NBA_BASE_URL`：NBA liveData 基础地址。
+- `SPORTS_LIVE_STATE_NHL_BASE_URL`：NHL score API 基础地址。
+- `SPORTS_LIVE_STATE_MLB_BASE_URL`：MLB Stats API 基础地址。
+- `SPORTS_LIVE_STATE_SOFASCORE_BASE_URL`：SofaScore 公开 scheduled-events API 基础地址。
+- `SPORTS_LIVE_STATE_THESPORTSDB_BASE_URL`：TheSportsDB 公开 eventsday API 基础地址；当前只启用已验证可用的 NHL/MLB 映射，并在适配器内做本地限频缓存。
 - `SPORTS_LIVE_STATE_LEAGUES`：逗号分隔的联赛代码，例如 `nba,nhl,nfl,mlb`。
-- `SPORTS_LIVE_STATE_INTERVAL_SECONDS`：P2 同步任务间隔，默认 `15` 秒。
+- `SPORTS_LIVE_STATE_INTERVAL_SECONDS`：P2 同步任务间隔，默认 `5` 秒。
 - `SPORTS_LIVE_STATE_TIMEOUT_S`：外部请求超时。
 - `SPORTS_LIVE_STATE_PUBLISH_ENTRY_SIGNALS`：直播状态更新后是否发布 `ENTRY_SIGNAL_TRIGGERED`，用于让交易主链路基于最新 metadata 重放入场判断。
 
 运行时行为：
 
-- 外部 API 请求只发生在 `sports_live_state_sync` P2 scheduler job 中。
+- 外部 API 请求只发生在 `sports_live_state_sync` P2 scheduler job 中；ESPN、NBA、NHL、MLB、SofaScore 和 TheSportsDB 会先聚合成单个 `sports_live_aggregate` 快照再进入匹配。
+- 聚合去重优先保留官方源状态；通用免费源与官方源状态冲突时，通用源只记录为 `source_conflicts`，交易侧会降级拒绝自动执行。
 - `TradingDecisionWorker.entry_metadata_provider` 只读取内存 `EntryMetadataStore`，不会在 P0 路径请求外部 API。
-- 同步状态通过 `/runtime`、`/workers`、`/metrics` 的 `sports_live_sync` 字段和前端候选页展示。
+- 同步状态通过 `/runtime`、`/workers`、`/metrics` 的 `sports_live_sync` 字段和前端候选页展示；`source_statuses.health` 区分 `success_with_live_data`、`success_empty`、`cached`、`rate_limited` 和 `failed`。
+
+默认覆盖边界：
+
+| 联赛 | 主要源 | 自动交易默认语义 |
+| --- | --- | --- |
+| NBA | ESPN、NBA liveData、SofaScore | 支持 Totals / Moneyline / Spreads 自动评估 |
+| NHL | ESPN、NHL score、SofaScore、TheSportsDB | 支持 Totals / Moneyline / Spreads 自动评估 |
+| MLB | ESPN、MLB Stats、SofaScore、TheSportsDB | 使用棒球局面字段评估，不使用伪造剩余秒数 |
+| NFL | ESPN、SofaScore | 只生成候选和人工确认，不默认自动下单 |
+| Soccer / Tennis / Esports | 默认不在自动交易发现范围 | 需补源和策略校准后再启用 |
 
 ## 数据库
 
@@ -78,7 +94,7 @@
 - manifest：`src/strategies/current/manifest.py`
 - 入口：`src/strategies/current/strategy.py`
 - 配置：`src/strategies/current/config.py`
-- 远端 discovery 粗筛输入：`src/strategies/current/config.py` 的 `discovery_title_searches` / `discovery_tag_slugs`；当前默认面向体育直播相关搜索词与 sports tag，官方 Gamma Events keyset 文档：<https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination>
+- 远端 discovery 粗筛输入：`src/strategies/current/config.py` 的 `discovery_title_searches` / `discovery_tag_slugs`；当前默认可以用 `sports` tag 扩大市场扫描，但本地 universe 只按已覆盖联赛 token 通过候选，官方 Gamma Events keyset 文档：<https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination>
 - 体育扫尾模型和权限：`src/strategies/current/sports_tail.py`
 - 体育扫尾策略级风控：`src/strategies/current/risk.py`
 - 体育扫尾退出计划：`src/strategies/current/exit_plan.py`

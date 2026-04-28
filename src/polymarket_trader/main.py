@@ -43,7 +43,17 @@ from polymarket_trader.infra.polymarket.order_executor import (
     InMemoryPolymarketOrderClient,
     PolymarketOrderExecutor,
 )
-from polymarket_trader.infra.sports import EspnScoreboardClient
+from polymarket_trader.infra.sports import (
+    EspnScoreboardClient,
+    MlbStatsApiClient,
+    NbaLiveScoreboardClient,
+    NhlScoreApiClient,
+    SofaScoreLiveClient,
+    SportsLiveAggregateClient,
+    TheSportsDbLiveClient,
+    sofascore_sports_for_leagues,
+    thesportsdb_sports_for_leagues,
+)
 from polymarket_trader.logging import LoggingRuntime, configure_logging
 from polymarket_trader.observability.metrics import MetricsRegistry
 from polymarket_trader.runtime import (
@@ -106,7 +116,7 @@ class RuntimeComponents:
     market_service: MarketService
     market_discovery_worker: MarketDiscoveryWorker
     market_discovery_scan: FullMarketDiscoveryState
-    sports_live_state_client: EspnScoreboardClient | None
+    sports_live_state_client: SportsLiveAggregateClient | None
     sports_live_state_worker: SportsLiveStateWorker | None
     trading_decision_service: TradingDecisionService
     trading_service: TradingService
@@ -122,6 +132,67 @@ class RuntimeComponents:
     background_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
     admin_service: object | None = None
     bootstrap_summary: dict[str, Any] = field(default_factory=dict)
+
+
+def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateClient:
+    """按配置构建多源体育直播状态聚合器。"""
+
+    source_codes = set(settings.sports_live_state_source_codes)
+    league_codes = set(settings.sports_live_state_league_codes)
+    providers = []
+    closers = []
+    if "espn" in source_codes:
+        espn_client = EspnScoreboardClient(
+            base_url=settings.sports_live_state_espn_base_url,
+            leagues=settings.sports_live_state_league_codes,
+            timeout_s=settings.sports_live_state_timeout_s,
+        )
+        providers.append(("espn", espn_client.list_games))
+        closers.append(espn_client.aclose)
+    if "nba" in source_codes and "nba" in league_codes:
+        nba_client = NbaLiveScoreboardClient(
+            base_url=settings.sports_live_state_nba_base_url,
+            timeout_s=settings.sports_live_state_timeout_s,
+        )
+        providers.append(("nba", nba_client.list_games))
+        closers.append(nba_client.aclose)
+    if "nhl" in source_codes and "nhl" in league_codes:
+        nhl_client = NhlScoreApiClient(
+            base_url=settings.sports_live_state_nhl_base_url,
+            timeout_s=settings.sports_live_state_timeout_s,
+        )
+        providers.append(("nhl", nhl_client.list_games))
+        closers.append(nhl_client.aclose)
+    if "mlb" in source_codes and "mlb" in league_codes:
+        mlb_client = MlbStatsApiClient(
+            base_url=settings.sports_live_state_mlb_base_url,
+            timeout_s=settings.sports_live_state_timeout_s,
+        )
+        providers.append(("mlb", mlb_client.list_games))
+        closers.append(mlb_client.aclose)
+    if "sofascore" in source_codes:
+        sofascore_sports = sofascore_sports_for_leagues(settings.sports_live_state_league_codes)
+        if sofascore_sports:
+            sofascore_client = SofaScoreLiveClient(
+                base_url=settings.sports_live_state_sofascore_base_url,
+                sports=sofascore_sports,
+                league_codes=settings.sports_live_state_league_codes,
+                timeout_s=settings.sports_live_state_timeout_s,
+            )
+            providers.append(("sofascore", sofascore_client.list_games))
+            closers.append(sofascore_client.aclose)
+    if "thesportsdb" in source_codes:
+        thesportsdb_sports = thesportsdb_sports_for_leagues(settings.sports_live_state_league_codes)
+        if thesportsdb_sports:
+            thesportsdb_client = TheSportsDbLiveClient(
+                base_url=settings.sports_live_state_thesportsdb_base_url,
+                sports=thesportsdb_sports,
+                league_codes=settings.sports_live_state_league_codes,
+                timeout_s=settings.sports_live_state_timeout_s,
+            )
+            providers.append(("thesportsdb", thesportsdb_client.list_games))
+            closers.append(thesportsdb_client.aclose)
+    return SportsLiveAggregateClient(providers=tuple(providers), closers=tuple(closers))
 
 
 def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
@@ -290,15 +361,10 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         retry_delay_seconds=MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS,
     )
     market_discovery_scan = FullMarketDiscoveryState()
-    sports_live_state_client: EspnScoreboardClient | None = None
+    sports_live_state_client: SportsLiveAggregateClient | None = None
     sports_live_state_worker: SportsLiveStateWorker | None = None
-    sports_live_state_source = settings.sports_live_state_source.strip().lower()
-    if settings.sports_live_state_enabled and sports_live_state_source == "espn":
-        sports_live_state_client = EspnScoreboardClient(
-            base_url=settings.sports_live_state_base_url,
-            leagues=settings.sports_live_state_league_codes,
-            timeout_s=settings.sports_live_state_timeout_s,
-        )
+    if settings.sports_live_state_enabled:
+        sports_live_state_client = _build_sports_live_state_client(settings)
         sports_live_state_matcher = getattr(extension.hooks, "match_sports_live_state", None)
         if callable(sports_live_state_matcher):
             sports_live_state_worker = SportsLiveStateWorker(
@@ -308,7 +374,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 entry_metadata_store=entry_metadata_store,
                 event_bus=event_bus,
                 enabled=True,
-                source=sports_live_state_source,
+                source="sports_live_aggregate",
                 leagues=settings.sports_live_state_league_codes,
                 publish_entry_signals=settings.sports_live_state_publish_entry_signals,
             )

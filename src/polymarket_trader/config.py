@@ -98,10 +98,15 @@ class Settings(BaseSettings):
 
     # 外部体育直播状态源只提供入场前事实，不承载策略阈值或交易参数。
     sports_live_state_enabled: bool = False
-    sports_live_state_source: str = "espn"
-    sports_live_state_base_url: str = "https://site.api.espn.com"
+    sports_live_state_sources: str = "espn,nba,nhl,mlb,sofascore,thesportsdb"
+    sports_live_state_espn_base_url: str = "https://site.api.espn.com"
+    sports_live_state_nba_base_url: str = "https://cdn.nba.com"
+    sports_live_state_nhl_base_url: str = "https://api-web.nhle.com"
+    sports_live_state_mlb_base_url: str = "https://statsapi.mlb.com"
+    sports_live_state_sofascore_base_url: str = "https://www.sofascore.com"
+    sports_live_state_thesportsdb_base_url: str = "https://www.thesportsdb.com/api/v1/json/3"
     sports_live_state_leagues: str = "nba,nhl,nfl,mlb"
-    sports_live_state_interval_seconds: int = Field(default=15, ge=5)
+    sports_live_state_interval_seconds: int = Field(default=5, ge=5)
     sports_live_state_timeout_s: float = Field(default=5.0, ge=0.1)
     sports_live_state_publish_entry_signals: bool = True
 
@@ -149,6 +154,51 @@ class Settings(BaseSettings):
     _STARTUP_REQUIRED_SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
         "wallet_private_key",
     )
+    _SUPPORTED_SPORTS_LIVE_STATE_SOURCES: ClassVar[tuple[str, ...]] = (
+        "espn",
+        "nba",
+        "nhl",
+        "mlb",
+        "sofascore",
+        "thesportsdb",
+    )
+    _ESPN_SUPPORTED_LEAGUES: ClassVar[tuple[str, ...]] = (
+        "nba",
+        "wnba",
+        "ncaamb",
+        "ncaawb",
+        "nfl",
+        "ncaaf",
+        "nhl",
+        "mlb",
+    )
+    _SOFASCORE_SUPPORTED_LEAGUES: ClassVar[tuple[str, ...]] = (
+        "nba",
+        "wnba",
+        "ncaamb",
+        "ncaawb",
+        "basketball",
+        "nhl",
+        "ice-hockey",
+        "hockey",
+        "mlb",
+        "baseball",
+        "nfl",
+        "ncaaf",
+        "american-football",
+        "soccer",
+        "epl",
+        "premier-league",
+        "football",
+        "tennis",
+    )
+    _THESPORTSDB_SUPPORTED_LEAGUES: ClassVar[tuple[str, ...]] = (
+        "nhl",
+        "ice-hockey",
+        "hockey",
+        "mlb",
+        "baseball",
+    )
 
     @field_validator(
         "polymarket_api_key",
@@ -191,15 +241,13 @@ class Settings(BaseSettings):
     def sports_live_state_league_codes(self) -> tuple[str, ...]:
         """返回外部体育直播状态源需要拉取的联赛代码。"""
 
-        seen: set[str] = set()
-        result: list[str] = []
-        for item in self.sports_live_state_leagues.split(","):
-            code = item.strip().lower()
-            if not code or code in seen:
-                continue
-            seen.add(code)
-            result.append(code)
-        return tuple(result)
+        return _csv_codes(self.sports_live_state_leagues)
+
+    @property
+    def sports_live_state_source_codes(self) -> tuple[str, ...]:
+        """返回启用的外部体育直播状态源代码。"""
+
+        return _csv_codes(self.sports_live_state_sources)
 
     def _compose_database_url(self, *, mask_password: bool) -> str:
         password = self._secret_value(self.database_password)
@@ -336,21 +384,49 @@ class Settings(BaseSettings):
             )
 
         if self.sports_live_state_enabled:
-            if self.sports_live_state_source.strip().lower() != "espn":
+            source_codes = self.sports_live_state_source_codes
+            unsupported_sources = tuple(
+                source for source in source_codes if source not in self._SUPPORTED_SPORTS_LIVE_STATE_SOURCES
+            )
+            if not source_codes:
                 blocking_issues.append(
                     ConfigIssue(
-                        field="sports_live_state_source",
-                        code="unsupported_source",
-                        message="SPORTS_LIVE_STATE_SOURCE 当前仅支持 espn",
-                        value=self.sports_live_state_source,
+                        field="sports_live_state_sources",
+                        code="missing_sources",
+                        message="启用体育直播状态源时至少需要配置一个 SPORTS_LIVE_STATE_SOURCES",
                     )
                 )
-            if not self.sports_live_state_base_url.strip():
+            if unsupported_sources:
                 blocking_issues.append(
                     ConfigIssue(
-                        field="sports_live_state_base_url",
+                        field="sports_live_state_sources",
+                        code="unsupported_source",
+                        message="SPORTS_LIVE_STATE_SOURCES 仅支持 espn,nba,nhl,mlb,sofascore,thesportsdb",
+                        value=",".join(unsupported_sources),
+                    )
+                )
+            if "espn" in source_codes and not self.sports_live_state_espn_base_url.strip():
+                blocking_issues.append(
+                    ConfigIssue(
+                        field="sports_live_state_espn_base_url",
                         code="missing_endpoint",
-                        message="启用体育直播状态源时必须配置 SPORTS_LIVE_STATE_BASE_URL",
+                        message="启用 ESPN 体育直播状态源时必须配置 SPORTS_LIVE_STATE_ESPN_BASE_URL",
+                    )
+                )
+            if "sofascore" in source_codes and not self.sports_live_state_sofascore_base_url.strip():
+                blocking_issues.append(
+                    ConfigIssue(
+                        field="sports_live_state_sofascore_base_url",
+                        code="missing_endpoint",
+                        message="启用 SofaScore 体育直播状态源时必须配置 SPORTS_LIVE_STATE_SOFASCORE_BASE_URL",
+                    )
+                )
+            if "thesportsdb" in source_codes and not self.sports_live_state_thesportsdb_base_url.strip():
+                blocking_issues.append(
+                    ConfigIssue(
+                        field="sports_live_state_thesportsdb_base_url",
+                        code="missing_endpoint",
+                        message="启用 TheSportsDB 体育直播状态源时必须配置 SPORTS_LIVE_STATE_THESPORTSDB_BASE_URL",
                     )
                 )
             if not self.sports_live_state_league_codes:
@@ -359,6 +435,36 @@ class Settings(BaseSettings):
                         field="sports_live_state_leagues",
                         code="missing_leagues",
                         message="启用体育直播状态源时至少需要配置一个联赛代码",
+                    )
+                )
+            league_codes = set(self.sports_live_state_league_codes)
+            has_source_league_overlap = (
+                (
+                    "espn" in source_codes
+                    and any(
+                        league in self._ESPN_SUPPORTED_LEAGUES or league.startswith("soccer:")
+                        for league in league_codes
+                    )
+                )
+                or ("nba" in source_codes and "nba" in league_codes)
+                or ("nhl" in source_codes and "nhl" in league_codes)
+                or ("mlb" in source_codes and "mlb" in league_codes)
+                or (
+                    "sofascore" in source_codes
+                    and bool(league_codes.intersection(self._SOFASCORE_SUPPORTED_LEAGUES))
+                )
+                or (
+                    "thesportsdb" in source_codes
+                    and bool(league_codes.intersection(self._THESPORTSDB_SUPPORTED_LEAGUES))
+                )
+            )
+            if source_codes and league_codes and not has_source_league_overlap:
+                blocking_issues.append(
+                    ConfigIssue(
+                        field="sports_live_state_sources",
+                        code="source_league_mismatch",
+                        message="SPORTS_LIVE_STATE_SOURCES 与 SPORTS_LIVE_STATE_LEAGUES 没有可拉取的交集",
+                        value=f"sources={','.join(source_codes)} leagues={','.join(self.sports_live_state_league_codes)}",
                     )
                 )
 
@@ -384,3 +490,17 @@ def load_settings() -> Settings:
         return Settings()
     except ValidationError as exc:
         raise ConfigLoadError.from_validation_error(exc) from exc
+
+
+def _csv_codes(value: str) -> tuple[str, ...]:
+    """解析逗号分隔的小写代码并去重。"""
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in value.split(","):
+        code = item.strip().lower()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        result.append(code)
+    return tuple(result)

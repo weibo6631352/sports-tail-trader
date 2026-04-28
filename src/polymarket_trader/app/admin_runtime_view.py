@@ -368,7 +368,7 @@ class AdminRuntimeView:
         settings = self._settings()
         return {
             "enabled": bool(getattr(settings, "sports_live_state_enabled", False)),
-            "source": str(getattr(settings, "sports_live_state_source", "espn")),
+            "source": "sports_live_aggregate",
             "running": False,
             "last_started_at": None,
             "last_completed_at": None,
@@ -386,6 +386,7 @@ class AdminRuntimeView:
             "last_unmatched_markets": 0,
             "last_entry_signals_published": 0,
             "leagues": list(getattr(settings, "sports_live_state_league_codes", ())),
+            "source_statuses": [],
         }
 
     def _market_ws_snapshot(self, token_id: str) -> OrderbookSnapshot | None:
