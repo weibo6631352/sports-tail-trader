@@ -36,6 +36,8 @@ class AllocationMarketSnapshot:
     best_ask: Decimal | None = None
     best_ask_size: Decimal | None = None
     idempotency_key: str | None = None
+    scale_in_allowed: bool = False
+    strategy_budget_cap_usdc: Decimal | None = None
 
     @property
     def condition_id(self) -> str:
@@ -274,11 +276,16 @@ def equal_weight_budget(portfolio_budget_usdc: Decimal, eligible_market_count: i
 def _allocation_skip_reason(
     snapshot: AllocationMarketSnapshot,
 ) -> str:
-    if _has_open_order(snapshot, OrderSide.SELL) or (
+    has_open_exit = _has_open_order(snapshot, OrderSide.SELL) or (
         snapshot.position is not None and snapshot.position.open_sell_shares > Decimal("0")
-    ):
+    )
+    if has_open_exit and not snapshot.scale_in_allowed:
         return "open_exit_detected"
-    if snapshot.position is not None and snapshot.position.shares > Decimal("0"):
+    if (
+        snapshot.position is not None
+        and snapshot.position.shares > Decimal("0")
+        and not snapshot.scale_in_allowed
+    ):
         return "position_already_open"
     if _has_open_order(snapshot, OrderSide.BUY):
         return "open_entry_detected"
@@ -328,6 +335,8 @@ def _market_hard_capacity_usdc(
         hard_capacity_usdc = available_usdc
     if liquidity_usdc < hard_capacity_usdc:
         hard_capacity_usdc = liquidity_usdc
+    if snapshot.strategy_budget_cap_usdc is not None and snapshot.strategy_budget_cap_usdc < hard_capacity_usdc:
+        hard_capacity_usdc = snapshot.strategy_budget_cap_usdc
     if hard_capacity_usdc < Decimal("0"):
         return Decimal("0")
     return hard_capacity_usdc

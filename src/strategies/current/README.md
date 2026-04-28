@@ -59,5 +59,6 @@
 - 策略通过 `polymarket_trader.extension_api` 提供的契约与框架交互。
 - 远端 discovery 粗筛通过 `CurrentStrategy.discovery_queries()` 暴露；当前实现从 `config.py` 的 `discovery_title_searches` 和 `discovery_tag_slugs` 生成 `DiscoveryQuery`。
 - 体育扫尾策略默认覆盖 `Totals`、`Moneyline`、`Spreads`，但不同盘口可以配置不同执行权限。
+- 策略机会类型包括普通直播扫尾、已结束但未封盘和受控加仓；受控加仓必须继续经过策略级风控、框架 RiskManager 和成交后 follow-up SELL。
 - 策略不直接操作交易客户端、事件总线、数据库或 worker。
 - 真正下单、撤单、改价仍然由框架统一执行。

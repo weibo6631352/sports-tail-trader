@@ -74,6 +74,14 @@ class TailAction(StrEnum):
     AUTO_EXECUTE = "auto_execute"
 
 
+class SportsTailOpportunityType(StrEnum):
+    """体育扫尾策略识别出的机会类型。"""
+
+    LIVE_TAIL = "live_tail"
+    ENDED_NOT_CLOSED = "ended_not_closed"
+    SCALE_IN_ADVANTAGE = "scale_in_advantage"
+
+
 class TailRejectReason(StrEnum):
     """体育扫尾评估拒绝原因。"""
 
@@ -254,6 +262,7 @@ class SportsTailEvaluation:
     reason: str
     candidate: SportsTailCandidate | None = None
     execution_permission: ExecutionPermission | None = None
+    opportunity_type: SportsTailOpportunityType = SportsTailOpportunityType.LIVE_TAIL
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -321,6 +330,12 @@ def evaluate_tail_opportunity(
         return _reject(None, TailRejectReason.MISSING_LIVE_GAME_STATE.value)
 
     candidate = _candidate(game, market)
+    if game.status == LiveGameStatus.ENDED:
+        market_reject_reason = _market_data_reject_reason(game, market, policy)
+        if market_reject_reason:
+            return _reject(candidate, market_reject_reason.value)
+        return _evaluate_ended_not_closed(candidate, policy)
+
     common_reject_reason = _common_reject_reason(game, market, policy, now=now)
     if common_reject_reason:
         return _reject(candidate, common_reject_reason.value)
@@ -352,6 +367,61 @@ def evaluate_tail_opportunity(
         return _evaluate_moneyline(candidate, policy)
     if market.market_type == SportsMarketType.SPREADS:
         return _evaluate_spreads(candidate, policy)
+    return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+
+
+def evaluate_scale_in_opportunity(
+    game: LiveGameState | None,
+    market: SportsMarketSnapshot,
+    *,
+    policy: SportsTailPolicy,
+    now: datetime | None = None,
+) -> SportsTailEvaluation:
+    """评估已有持仓是否达到受控加仓所需的更严格优势状态。"""
+
+    family_reject_reason = _market_family_reject_reason(market.market_family)
+    if family_reject_reason is not None:
+        return _reject(
+            None,
+            family_reject_reason.value,
+            metadata={
+                "market_family": market.market_family.value,
+                "market_type": market.market_type.value,
+                "side": market.side.value,
+                "line": str(market.line) if market.line is not None else None,
+                "best_ask": str(market.best_ask) if market.best_ask is not None else None,
+            },
+        )
+    if game is None:
+        return _reject(None, TailRejectReason.MISSING_LIVE_GAME_STATE.value)
+
+    candidate = _candidate(game, market)
+    if game.status == LiveGameStatus.ENDED:
+        market_reject_reason = _market_data_reject_reason(game, market, policy)
+        if market_reject_reason:
+            return _reject(candidate, market_reject_reason.value)
+        ended = _evaluate_ended_not_closed(candidate, policy)
+        if not ended.accepted:
+            return ended
+        return _accept(
+            candidate,
+            f"scale_in_{ended.reason.removeprefix('ended_not_closed_')}",
+            ended.execution_permission or ExecutionPermission.AUTO_EXECUTE,
+            opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
+        )
+
+    common_reject_reason = _common_reject_reason(game, market, policy, now=now)
+    if common_reject_reason:
+        return _reject(candidate, common_reject_reason.value)
+
+    if _is_tennis_game(game):
+        return _evaluate_tennis_scale_in(candidate, policy)
+    if market.market_type == SportsMarketType.TOTALS:
+        return _evaluate_totals_scale_in(candidate, policy)
+    if market.market_type == SportsMarketType.MONEYLINE:
+        return _evaluate_moneyline_scale_in(candidate, policy)
+    if market.market_type == SportsMarketType.SPREADS:
+        return _evaluate_spreads_scale_in(candidate, policy)
     return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
 
 
@@ -407,6 +477,24 @@ def _common_reject_reason(
         return TailRejectReason.LIVE_SOURCE_CONFLICT
     if _is_stale(game, policy, now=now):
         return TailRejectReason.STALE_GAME_STATE
+    if market.best_ask is None:
+        return TailRejectReason.MISSING_BEST_ASK
+    if market.best_ask > _max_entry_price(market.market_type, policy):
+        return TailRejectReason.PRICE_ABOVE_MAX
+    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
+        return TailRejectReason.LIQUIDITY_BELOW_MIN
+    return None
+
+
+def _market_data_reject_reason(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+) -> TailRejectReason | None:
+    """检查不依赖比赛是否 live 的盘口和来源门槛。"""
+
+    if game.source_conflicts:
+        return TailRejectReason.LIVE_SOURCE_CONFLICT
     if market.best_ask is None:
         return TailRejectReason.MISSING_BEST_ASK
     if market.best_ask > _max_entry_price(market.market_type, policy):
@@ -639,10 +727,288 @@ def _evaluate_tennis_set_winner(
     return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
 
 
+def _evaluate_ended_not_closed(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    """用最终比分判断已结束但未封盘 market 的确定性方向。"""
+
+    market = candidate.market
+    if _is_tennis_game(candidate.game):
+        return _evaluate_ended_tennis(candidate, policy)
+    if market.market_type == SportsMarketType.TOTALS:
+        return _evaluate_ended_totals(candidate, policy)
+    if market.market_type == SportsMarketType.MONEYLINE:
+        return _evaluate_ended_moneyline(candidate, policy)
+    if market.market_type == SportsMarketType.SPREADS:
+        return _evaluate_ended_spreads(candidate, policy)
+    return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+
+
+def _evaluate_ended_totals(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    market = candidate.market
+    if market.line is None:
+        return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+    total_score = Decimal(candidate.game.total_score)
+    if market.side == SportsMarketSide.OVER and total_score > market.line:
+        return _accept(
+            candidate,
+            "ended_not_closed_totals_over",
+            policy.totals_execution_permission,
+            opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+        )
+    if market.side == SportsMarketSide.UNDER and total_score < market.line:
+        return _accept(
+            candidate,
+            "ended_not_closed_totals_under",
+            policy.totals_execution_permission,
+            opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+        )
+    return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+
+def _evaluate_ended_moneyline(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    market = candidate.market
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    if candidate.game.score_diff_for(market.side) > 0:
+        return _accept(
+            candidate,
+            "ended_not_closed_moneyline",
+            policy.moneyline_execution_permission,
+            opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+        )
+    return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+
+def _evaluate_ended_spreads(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    market = candidate.market
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    if market.line is None:
+        return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+    if Decimal(candidate.game.score_diff_for(market.side)) + market.line > Decimal("0"):
+        return _accept(
+            candidate,
+            "ended_not_closed_spreads",
+            policy.spreads_execution_permission,
+            opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+        )
+    return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+
+def _evaluate_ended_tennis(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    market = candidate.market
+    state = candidate.game.tennis_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
+    if market.market_type == SportsMarketType.TOTALS:
+        if market.line is None:
+            return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+        total_scope = _tennis_total_scope(market)
+        if total_scope == "sets":
+            completed = Decimal(state.home_sets_won + state.away_sets_won)
+            if market.side == SportsMarketSide.OVER and completed > market.line:
+                return _accept(
+                    candidate,
+                    "ended_not_closed_tennis_sets_over",
+                    policy.totals_execution_permission,
+                    opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+                )
+            if market.side == SportsMarketSide.UNDER and completed < market.line:
+                return _accept(
+                    candidate,
+                    "ended_not_closed_tennis_sets_under",
+                    policy.totals_execution_permission,
+                    opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+                )
+        elif total_scope == "match_games":
+            total_games = Decimal(state.total_games)
+            if market.side == SportsMarketSide.OVER and total_games > market.line:
+                return _accept(
+                    candidate,
+                    "ended_not_closed_tennis_games_over",
+                    policy.totals_execution_permission,
+                    opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+                )
+            if market.side == SportsMarketSide.UNDER and total_games < market.line:
+                return _accept(
+                    candidate,
+                    "ended_not_closed_tennis_games_under",
+                    policy.totals_execution_permission,
+                    opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+                )
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+    if market.market_type == SportsMarketType.MONEYLINE:
+        if _is_tennis_set_winner_market(market):
+            return _evaluate_ended_tennis_set_winner(candidate, policy)
+        if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+            return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+        other_side = SportsMarketSide.AWAY if market.side == SportsMarketSide.HOME else SportsMarketSide.HOME
+        if state.sets_won_for(market.side) > state.sets_won_for(other_side):
+            return _accept(
+                candidate,
+                "ended_not_closed_tennis_moneyline",
+                policy.moneyline_execution_permission,
+                opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+            )
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+    return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+
+
+def _evaluate_ended_tennis_set_winner(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    market = candidate.market
+    state = candidate.game.tennis_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
+    set_number = _tennis_set_winner_number(market)
+    if set_number is None or len(state.set_scores) < set_number:
+        return _reject(candidate, TailRejectReason.TENNIS_SET_WINNER_NOT_SUPPORTED.value)
+    home_games, away_games = state.set_scores[set_number - 1]
+    side_games = home_games if market.side == SportsMarketSide.HOME else away_games
+    other_games = away_games if market.side == SportsMarketSide.HOME else home_games
+    if side_games > other_games:
+        return _accept(
+            candidate,
+            "ended_not_closed_tennis_set_winner",
+            policy.moneyline_execution_permission,
+            opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+        )
+    return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+
+def _evaluate_moneyline_scale_in(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    game = candidate.game
+    market = candidate.market
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    if game.seconds_remaining is None:
+        return _reject(candidate, TailRejectReason.MISSING_SECONDS_REMAINING.value)
+    if game.seconds_remaining > policy.max_moneyline_seconds_remaining // 2:
+        return _reject(candidate, TailRejectReason.GAME_NOT_LATE_ENOUGH.value)
+    if game.score_diff_for(market.side) < policy.min_moneyline_lead + 2:
+        return _reject(candidate, TailRejectReason.INSUFFICIENT_LEAD.value)
+    return _accept(
+        candidate,
+        "scale_in_moneyline_advantage",
+        policy.moneyline_execution_permission,
+        opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
+    )
+
+
+def _evaluate_spreads_scale_in(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    game = candidate.game
+    market = candidate.market
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    if market.line is None:
+        return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+    if game.seconds_remaining is None:
+        return _reject(candidate, TailRejectReason.MISSING_SECONDS_REMAINING.value)
+    if game.seconds_remaining > policy.max_spreads_seconds_remaining // 2:
+        return _reject(candidate, TailRejectReason.GAME_NOT_LATE_ENOUGH.value)
+    safety_margin = Decimal(game.score_diff_for(market.side)) + market.line
+    if safety_margin < policy.min_spread_safety_margin + Decimal("1"):
+        return _reject(candidate, TailRejectReason.INSUFFICIENT_SAFETY_MARGIN.value)
+    return _accept(
+        candidate,
+        "scale_in_spreads_advantage",
+        policy.spreads_execution_permission,
+        opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
+    )
+
+
+def _evaluate_totals_scale_in(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    game = candidate.game
+    market = candidate.market
+    if market.line is None:
+        return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+    total_score = Decimal(game.total_score)
+    if market.side == SportsMarketSide.OVER and total_score - market.line >= Decimal("1"):
+        return _accept(
+            candidate,
+            "scale_in_totals_over_advantage",
+            policy.totals_execution_permission,
+            opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
+        )
+    if market.side == SportsMarketSide.UNDER:
+        if game.seconds_remaining is None:
+            return _reject(candidate, TailRejectReason.MISSING_SECONDS_REMAINING.value)
+        if game.seconds_remaining > policy.max_under_seconds_remaining // 2:
+            return _reject(candidate, TailRejectReason.GAME_NOT_LATE_ENOUGH.value)
+        if market.line - total_score < policy.min_under_safety_margin + Decimal("1"):
+            return _reject(candidate, TailRejectReason.INSUFFICIENT_SAFETY_MARGIN.value)
+        return _accept(
+            candidate,
+            "scale_in_totals_under_advantage",
+            policy.totals_execution_permission,
+            opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
+        )
+    return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+
+def _evaluate_tennis_scale_in(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    market = candidate.market
+    if market.market_type == SportsMarketType.TOTALS:
+        return _evaluate_totals_scale_in(candidate, policy)
+    if market.market_type != SportsMarketType.MONEYLINE:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+    state = candidate.game.tennis_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
+    if _is_tennis_set_winner_market(market):
+        return _reject(candidate, TailRejectReason.TENNIS_SET_WINNER_NOT_SUPPORTED.value)
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    side_games = state.current_set_games_for(market.side)
+    other_side = SportsMarketSide.AWAY if market.side == SportsMarketSide.HOME else SportsMarketSide.HOME
+    other_games = state.current_set_games_for(other_side)
+    if side_games is None or other_games is None:
+        return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
+    set_lead = state.sets_won_for(market.side) - state.sets_won_for(other_side)
+    if side_games >= 5 and side_games - other_games >= 3 and set_lead >= 0:
+        return _accept(
+            candidate,
+            "scale_in_tennis_moneyline_advantage",
+            policy.moneyline_execution_permission,
+            opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
+        )
+    return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
+
+
 def _accept(
     candidate: SportsTailCandidate,
     reason: str,
     permission: ExecutionPermission,
+    *,
+    opportunity_type: SportsTailOpportunityType = SportsTailOpportunityType.LIVE_TAIL,
 ) -> SportsTailEvaluation:
     return SportsTailEvaluation(
         accepted=True,
@@ -650,6 +1016,7 @@ def _accept(
         reason=reason,
         candidate=candidate,
         execution_permission=permission,
+        opportunity_type=opportunity_type,
         metadata=candidate.metadata,
     )
 

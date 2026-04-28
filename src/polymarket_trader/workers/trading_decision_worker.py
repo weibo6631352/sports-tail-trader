@@ -184,7 +184,7 @@ class TradingDecisionWorker:
         state = self._state_for_market(plan.market)
         if state is None:
             self._transition_market(plan.market, MarketLifecycle.WATCHING_ORDERBOOK)
-        elif state != MarketLifecycle.WATCHING_ORDERBOOK:
+        elif state != MarketLifecycle.WATCHING_ORDERBOOK and not _plan_allows_position_increase(plan):
             return None
         return await self._execute_entry_plan(event=event, snapshot=snapshot, plan=plan)
 
@@ -679,6 +679,16 @@ def _match_position(
         if position.condition_id == condition_id and position.token_id == token_id:
             return position
     return None
+
+
+def _plan_allows_position_increase(plan: EntryPlan) -> bool:
+    """判断计划是否是策略显式标记的受控加仓。"""
+
+    return (
+        plan.intent is not None
+        and getattr(plan.intent, "allow_open_exit_overlap", False)
+        and dict(plan.metadata or {}).get("sports_tail_opportunity_type") == "scale_in_advantage"
+    )
 
 
 def _match_open_orders(

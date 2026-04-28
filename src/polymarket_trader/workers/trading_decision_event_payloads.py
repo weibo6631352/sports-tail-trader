@@ -117,6 +117,7 @@ def serialize_intent(intent: ManagedOrderIntent) -> dict[str, object]:
         "size_shares": None if size_shares is None else str(size_shares),
         "order_id": getattr(intent, "order_id", None),
         "reason": getattr(intent, "reason", ""),
+        "allow_open_exit_overlap": bool(getattr(intent, "allow_open_exit_overlap", False)),
         "market_slug": intent.market_slug,
     }
 

@@ -63,6 +63,7 @@ class BuyOrderIntent:
     idempotency_key: str | None = None
     post_only: bool = False
     retry_count: int = 0
+    allow_open_exit_overlap: bool = False
 
     @property
     def side(self) -> OrderSide:

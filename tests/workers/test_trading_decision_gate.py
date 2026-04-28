@@ -8,15 +8,16 @@ from typing import Any
 from polymarket_trader.app.extension_intent_builder import decision_to_managed_intent
 from polymarket_trader.app.entry_plan import EntryPlan
 from polymarket_trader.app.trading_service import TradingService
-from polymarket_trader.domain.allocation import AllocationPlan
+from polymarket_trader.domain.allocation import Allocation, AllocationPlan
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.account import MarketPauseSource
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
-from polymarket_trader.domain.order import ManagedOrderIntent, OrderResult, OrderResultStatus, OrderSide
+from polymarket_trader.domain.order import BuyOrderIntent, ManagedOrderIntent, OrderResult, OrderResultStatus, OrderSide
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.position import Position
 from polymarket_trader.extension_api import ExtensionContext, ExtensionDecision
 from polymarket_trader.runtime.account_state import AccountStateStore
+from polymarket_trader.domain.state_machine import MarketLifecycle
 from polymarket_trader.workers.trading_decision_worker import TradingDecisionWorker
 
 
@@ -108,6 +109,57 @@ class _ExitDecisionService:
             default_token_id=default_token_id,
             decision=decision,
         )
+
+
+class _ScaleInDecisionService:
+    def __init__(self, market: Market, orderbook: OrderbookSnapshot) -> None:
+        self.market = market
+        self.orderbook = orderbook
+
+    def build_entry_plan(self, **kwargs: Any) -> EntryPlan:
+        trace_id = str(kwargs.get("trace_id") or "trace-scale")
+        allocation = Allocation(
+            condition_id=self.market.condition_id,
+            token_id=self.orderbook.token_id,
+            market_slug=self.market.market_slug,
+            target_budget_usdc=Decimal("3"),
+            buy_budget_usdc=Decimal("3"),
+        )
+        allocation_plan = AllocationPlan(
+            trace_id=trace_id,
+            total_budget_usdc=Decimal("5"),
+            allocations=(allocation,),
+        )
+        intent = BuyOrderIntent(
+            trace_id=trace_id,
+            condition_id=self.market.condition_id,
+            token_id=self.orderbook.token_id,
+            price=Decimal("0.99"),
+            amount_usdc=Decimal("3"),
+            market_slug=self.market.market_slug,
+            allow_open_exit_overlap=True,
+        )
+        return EntryPlan(
+            trace_id=trace_id,
+            market=self.market,
+            orderbook=self.orderbook,
+            allocation_plan=allocation_plan,
+            allocation=allocation,
+            intent=intent,
+            reason="strategy_scale_in",
+            metadata={"sports_tail_opportunity_type": "scale_in_advantage"},
+        )
+
+    def resolve_market(self, *, condition_id: str | None, token_id: str | None) -> Market | None:
+        if condition_id == self.market.condition_id or token_id in self.market.token_ids:
+            return self.market
+        return None
+
+    def lookup_orderbook(self, token_id: str) -> OrderbookSnapshot | None:
+        return self.orderbook if token_id == self.orderbook.token_id else None
+
+    def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
+        return ()
 
 
 class _LiveSellExecutor:
@@ -255,6 +307,35 @@ def test_user_ws_projected_buy_fill_triggers_exit_without_double_counting_positi
         assert position is not None
         assert position.shares == Decimal("7")
         assert position.open_sell_shares == Decimal("7")
+
+    asyncio.run(run())
+
+
+def test_entry_signal_scale_in_plan_is_not_dropped_while_exit_order_is_open() -> None:
+    async def run() -> None:
+        market, orderbook = _exit_market_and_orderbook()
+        account_state = _open_entry_gate()
+        account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+        decision_service = _ScaleInDecisionService(market, orderbook)
+        executor = _LiveSellExecutor()
+        worker = TradingDecisionWorker(
+            trading_decision_service=decision_service,
+            trading_service=TradingService(executor=executor),
+            account_state_store=account_state,
+            max_order_usdc=Decimal("5"),
+            max_market_usdc=Decimal("20"),
+            max_total_usdc=Decimal("20"),
+        )
+        worker._market_lifecycle[market.condition_id] = MarketLifecycle.FOLLOW_UP_ORDER_OPEN
+
+        result = await worker.process_event(_entry_signal_event(event_id="event-scale-in"))
+
+        assert result is not None
+        assert result.plan is not None
+        assert result.plan.intent is not None
+        assert result.plan.intent.side == OrderSide.BUY
+        assert result.review is not None
+        assert result.review.risk_decision.passed
 
     asyncio.run(run())
 

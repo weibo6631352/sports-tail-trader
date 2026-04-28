@@ -33,6 +33,7 @@ from strategies.current.sports_tail import (
     SportsMarketSnapshot,
     SportsTailEvaluation,
     TailAction,
+    evaluate_scale_in_opportunity,
     evaluate_tail_opportunity,
     live_game_state_from_metadata,
 )
@@ -103,18 +104,32 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
             snapshot.orderbook,
             price_cap=price_cap,
         )
-        skip_reason = _allocation_skip_reason(
+        scale_in_allowed, scale_in_metadata, scale_in_budget_cap = _scale_in_allocation_gate(
             config,
+            context,
             snapshot,
             buyable_liquidity_usdc=buyable_liquidity_usdc,
         )
+        snapshot_for_allocation = replace(
+            snapshot,
+            scale_in_allowed=scale_in_allowed,
+            strategy_budget_cap_usdc=scale_in_budget_cap,
+        )
+        skip_reason = _allocation_skip_reason(
+            config,
+            snapshot_for_allocation,
+            buyable_liquidity_usdc=buyable_liquidity_usdc,
+        )
         if not skip_reason:
-            skip_reason, sports_metadata = _sports_tail_allocation_gate(
-                config,
-                context,
-                snapshot,
-                buyable_liquidity_usdc=buyable_liquidity_usdc,
-            )
+            if scale_in_allowed:
+                sports_metadata = scale_in_metadata
+            else:
+                skip_reason, sports_metadata = _sports_tail_allocation_gate(
+                    config,
+                    context,
+                    snapshot,
+                    buyable_liquidity_usdc=buyable_liquidity_usdc,
+                )
             if _is_focus_snapshot(context, snapshot):
                 sizing_metadata.update(sports_metadata)
         if skip_reason:
@@ -125,7 +140,7 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
                 reason=skip_reason,
             )
             continue
-        eligible_snapshots.append(replace(snapshot, liquidity_usdc=buyable_liquidity_usdc))
+        eligible_snapshots.append(replace(snapshot_for_allocation, liquidity_usdc=buyable_liquidity_usdc))
 
     eligible_plan = equal_weight_plan(
         trace_id=context.trace_id,
@@ -183,7 +198,8 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
     if context.market is None or context.orderbook is None:
         return ExtensionDecision.skip(reason="missing_market_state")
 
-    sports_gate = _sports_tail_entry_gate(config, context)
+    scale_in_gate = _scale_in_entry_gate(config, context)
+    sports_gate = scale_in_gate or _sports_tail_entry_gate(config, context)
     if sports_gate is not None:
         decision, allowed_price, sports_metadata = sports_gate
         if decision is not None:
@@ -212,8 +228,11 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
             source_reason=str(sports_metadata.get("sports_tail_reason") or "strategy_entry"),
         )
     )
+    decision_reason = "strategy_scale_in" if sports_metadata.get("sports_tail_opportunity_type") == (
+        "scale_in_advantage"
+    ) else "strategy_entry"
     return ExtensionDecision.buy(
-        reason="strategy_entry",
+        reason=decision_reason,
         token_id=token_id,
         price=best_ask,
         amount_usdc=amount_usdc,
@@ -392,14 +411,19 @@ def _allocation_skip_reason(
     *,
     buyable_liquidity_usdc: Decimal,
 ) -> str:
-    if _has_open_order(snapshot, OrderSide.SELL) or (
-        snapshot.position is not None and snapshot.position.open_sell_shares > Decimal("0")
-    ):
-        return "open_exit_detected"
-    if snapshot.position is not None and snapshot.position.shares > Decimal("0"):
-        return "position_already_open"
     if _has_open_order(snapshot, OrderSide.BUY):
         return "open_entry_detected"
+    has_open_exit = _has_open_order(snapshot, OrderSide.SELL) or (
+        snapshot.position is not None and snapshot.position.open_sell_shares > Decimal("0")
+    )
+    if has_open_exit and not snapshot.scale_in_allowed:
+        return "open_exit_detected"
+    if (
+        snapshot.position is not None
+        and snapshot.position.shares > Decimal("0")
+        and not snapshot.scale_in_allowed
+    ):
+        return "position_already_open"
     universe_decision = select_market(config, snapshot.market)
     if not universe_decision.selected:
         return universe_decision.reason or "market_out_of_universe"
@@ -550,6 +574,32 @@ def _sports_tail_entry_gate(
     return None, _sports_tail_price_cap(config, context.market, token_id), metadata
 
 
+def _scale_in_entry_gate(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+) -> tuple[ExtensionDecision | None, Decimal, dict[str, object]] | None:
+    """判断当前入场请求是否属于已有持仓的受控加仓。"""
+
+    if context.market is None or context.orderbook is None:
+        return None
+    snapshot = _fallback_snapshot(context)
+    if snapshot is None:
+        return None
+    buyable_liquidity_usdc = _ask_depth_notional(
+        context.orderbook,
+        price_cap=_sports_tail_price_cap(config, context.market, snapshot.token_id),
+    )
+    allowed, metadata, _budget_cap = _scale_in_allocation_gate(
+        config,
+        context,
+        snapshot,
+        buyable_liquidity_usdc=buyable_liquidity_usdc,
+    )
+    if not allowed:
+        return None
+    return None, _sports_tail_price_cap(config, context.market, snapshot.token_id), metadata
+
+
 def _sports_tail_allocation_gate(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
@@ -598,6 +648,76 @@ def _sports_tail_allocation_gate(
     if evaluation.action != TailAction.AUTO_EXECUTE:
         return f"sports_tail_{evaluation.action.value}", metadata
     return "", metadata
+
+
+def _scale_in_allocation_gate(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    snapshot: AllocationMarketSnapshot,
+    *,
+    buyable_liquidity_usdc: Decimal,
+) -> tuple[bool, dict[str, object], Decimal | None]:
+    """返回当前候选是否允许按受控加仓参与预算分配。"""
+
+    position = snapshot.position
+    if position is None or position.shares <= Decimal("0"):
+        return False, {}, None
+    if _has_open_order(snapshot, OrderSide.BUY):
+        return False, {}, None
+    covered_shares = _covered_exit_shares(snapshot)
+    if covered_shares < position.shares:
+        return False, {}, None
+
+    descriptor = describe_sports_market(snapshot.market)
+    if not descriptor.accepted or descriptor.market_type is None:
+        return False, {}, None
+    if descriptor.market_family.value != "single_game":
+        return False, {}, None
+    target = target_for_token(snapshot.market, snapshot.token_id)
+    if target is None:
+        return False, {}, None
+
+    best_ask = snapshot.best_ask if snapshot.best_ask is not None else (
+        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
+    )
+    evaluation = evaluate_scale_in_opportunity(
+        live_game_state_from_metadata(context.metadata),
+        SportsMarketSnapshot(
+            market_type=descriptor.market_type,
+            side=target.side,
+            token_id=target.token_id,
+            line=descriptor.line,
+            best_ask=best_ask,
+            buyable_liquidity_usdc=buyable_liquidity_usdc,
+            market_family=descriptor.market_family,
+            market_slug=snapshot.market_slug,
+        ),
+        policy=sports_tail_policy_from_config(config),
+        now=context.now,
+    )
+    if not evaluation.accepted or evaluation.action != TailAction.AUTO_EXECUTE:
+        return False, {}, None
+
+    buy_fill_count, first_buy_notional = _buy_fill_summary(context, snapshot)
+    if buy_fill_count >= config.sports_scale_in_max_buy_fills:
+        return False, {}, None
+    budget_cap = first_buy_notional * config.sports_scale_in_budget_fraction
+    if budget_cap <= Decimal("0"):
+        return False, {}, None
+
+    metadata = _sports_tail_evaluation_metadata(evaluation)
+    metadata.update(
+        {
+            "sports_market_family": descriptor.market_family.value,
+            "sports_scale_in_existing_shares": str(position.shares),
+            "sports_scale_in_covered_shares": str(covered_shares),
+            "sports_scale_in_buy_fill_count": buy_fill_count,
+            "sports_scale_in_max_buy_fills": config.sports_scale_in_max_buy_fills,
+            "sports_scale_in_budget_cap_usdc": str(budget_cap),
+            "allow_open_exit_overlap": True,
+        }
+    )
+    return True, metadata, budget_cap
 
 
 def _sports_market_skip_metadata(
@@ -701,9 +821,52 @@ def _sports_tail_evaluation_metadata(evaluation: SportsTailEvaluation) -> dict[s
     metadata = dict(evaluation.metadata)
     metadata["sports_tail_action"] = evaluation.action.value
     metadata["sports_tail_reason"] = evaluation.reason
+    metadata["sports_tail_opportunity_type"] = evaluation.opportunity_type.value
     if evaluation.execution_permission is not None:
         metadata["sports_execution_permission"] = evaluation.execution_permission.value
     return metadata
+
+
+def _covered_exit_shares(snapshot: AllocationMarketSnapshot) -> Decimal:
+    """返回已有持仓被开放退出单覆盖的份额。"""
+
+    position_covered = (
+        Decimal("0")
+        if snapshot.position is None
+        else snapshot.position.open_sell_shares
+    )
+    order_covered = Decimal("0")
+    for order in snapshot.open_orders:
+        if order.side != OrderSide.SELL or not order.open:
+            continue
+        if order.remaining_shares is not None:
+            order_covered += order.remaining_shares
+        elif order.size_shares is not None:
+            order_covered += order.size_shares
+    return max(position_covered, order_covered)
+
+
+def _buy_fill_summary(
+    context: ExtensionContext,
+    snapshot: AllocationMarketSnapshot,
+) -> tuple[int, Decimal]:
+    """统计当前 token 的 BUY 成交次数和首笔入场金额，用于限制加仓。"""
+
+    fills = tuple(getattr(context.account_snapshot, "fills", ()) or ())
+    buy_fills = [
+        fill
+        for fill in fills
+        if getattr(fill, "condition_id", None) == snapshot.condition_id
+        and getattr(fill, "token_id", None) == snapshot.token_id
+        and str(getattr(fill, "side", "") or "").upper() == "BUY"
+    ]
+    if not buy_fills:
+        fallback_notional = Decimal("0") if snapshot.position is None else snapshot.position.cost_usdc
+        return (1 if snapshot.position is not None else 0), fallback_notional
+    first_notional = _fill_notional_usdc(buy_fills[0])
+    if first_notional <= Decimal("0") and snapshot.position is not None:
+        first_notional = snapshot.position.cost_usdc
+    return len(buy_fills), first_notional
 
 
 def _sports_tail_manual_confirmed(metadata: Mapping[str, object]) -> bool:
@@ -837,6 +1000,23 @@ def _pick_allocation(
         if allocation.condition_id == condition_id and allocation.token_id == token_id:
             return allocation
     return None
+
+
+def _fill_notional_usdc(fill: object) -> Decimal:
+    notional = getattr(fill, "notional_usdc", None)
+    if notional is not None:
+        try:
+            return Decimal(str(notional))
+        except Exception:
+            return Decimal("0")
+    price = getattr(fill, "price", None)
+    size = getattr(fill, "size", None)
+    if price is None or size is None:
+        return Decimal("0")
+    try:
+        return Decimal(str(price)) * Decimal(str(size))
+    except Exception:
+        return Decimal("0")
 
 
 def _sizing_reason(plan: AllocationPlan, allocation: Allocation | None) -> str:

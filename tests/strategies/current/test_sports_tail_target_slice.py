@@ -295,6 +295,109 @@ def test_totals_over_locked_can_create_buy_only_after_full_sports_gate_passes() 
     assert decision.metadata["sports_execution_permission"] == "auto_execute"
 
 
+def test_ended_moneyline_can_create_buy_before_polymarket_closes_market() -> None:
+    market = _moneyline_market()
+    orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
+
+    decision = decide_entry(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-ended-moneyline",
+            market=market,
+            token_id="home",
+            orderbook=orderbook,
+            amount_usdc=Decimal("10"),
+            now=datetime(2026, 4, 27, tzinfo=timezone.utc),
+            metadata={
+                "sports_tail_game": {
+                    "league": "NBA",
+                    "home_name": "NYK",
+                    "away_name": "BOS",
+                    "home_score": 111,
+                    "away_score": 104,
+                    "period": "Final",
+                    "seconds_remaining": 0,
+                    "status": "ended",
+                    "observed_at": "2026-04-27T00:00:00+00:00",
+                }
+            },
+        ),
+    )
+
+    assert decision.action.value == "buy"
+    assert decision.token_id == "home"
+    assert decision.metadata["sports_tail_reason"] == "ended_not_closed_moneyline"
+    assert decision.metadata["sports_tail_opportunity_type"] == "ended_not_closed"
+
+
+def test_ended_totals_under_can_create_buy_when_final_score_is_below_line() -> None:
+    market = _totals_market()
+    orderbook = _orderbook(token_id="under", best_ask=Decimal("0.98"))
+
+    decision = decide_entry(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-ended-under",
+            market=market,
+            token_id="under",
+            orderbook=orderbook,
+            amount_usdc=Decimal("10"),
+            now=datetime(2026, 4, 27, tzinfo=timezone.utc),
+            metadata={
+                "sports_tail_game": {
+                    "league": "NHL",
+                    "home_name": "TB",
+                    "away_name": "MON",
+                    "home_score": 2,
+                    "away_score": 1,
+                    "period": "Final",
+                    "seconds_remaining": 0,
+                    "status": "ended",
+                    "observed_at": "2026-04-27T00:00:00+00:00",
+                }
+            },
+        ),
+    )
+
+    assert decision.action.value == "buy"
+    assert decision.token_id == "under"
+    assert decision.metadata["sports_tail_reason"] == "ended_not_closed_totals_under"
+    assert decision.metadata["sports_tail_opportunity_type"] == "ended_not_closed"
+
+
+def test_ended_moneyline_tie_is_not_traded_as_deterministic_result() -> None:
+    market = _moneyline_market()
+    orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
+
+    decision = decide_entry(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-ended-tie",
+            market=market,
+            token_id="home",
+            orderbook=orderbook,
+            amount_usdc=Decimal("10"),
+            now=datetime(2026, 4, 27, tzinfo=timezone.utc),
+            metadata={
+                "sports_tail_game": {
+                    "league": "NBA",
+                    "home_name": "NYK",
+                    "away_name": "BOS",
+                    "home_score": 104,
+                    "away_score": 104,
+                    "period": "Final",
+                    "seconds_remaining": 0,
+                    "status": "ended",
+                    "observed_at": "2026-04-27T00:00:00+00:00",
+                }
+            },
+        ),
+    )
+
+    assert decision.action.value == "skip"
+    assert decision.reason == "outcome_not_locked"
+
+
 def test_entry_plan_preserves_event_metadata_through_application_entry_path() -> None:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
@@ -663,6 +766,88 @@ def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_orde
     assert plan.allocation.reason == "open_exit_detected"
     assert plan.metadata is not None
     assert plan.metadata["sports_tail_reason"] == "open_exit_detected"
+
+
+def test_entry_plan_allows_scale_in_when_existing_position_is_covered_and_advantage_strengthens() -> None:
+    market = _moneyline_market()
+    position = Position(
+        condition_id=market.condition_id,
+        token_id="home",
+        shares=Decimal("12"),
+        cost_usdc=Decimal("12"),
+        market_slug=market.market_slug,
+        open_sell_shares=Decimal("12"),
+    )
+    exit_order = Order(
+        trace_id="trace-exit-scale",
+        condition_id=market.condition_id,
+        token_id="home",
+        market_slug=market.market_slug,
+        side=OrderSide.SELL,
+        order_type=OrderType.GTC,
+        price=Decimal("0.99"),
+        size_shares=Decimal("12"),
+        remaining_shares=Decimal("12"),
+        status=OrderStatus.LIVE,
+        order_id="exit-scale-order",
+    )
+    account_snapshot = AccountSnapshot(
+        balance_usdc=Decimal("50"),
+        allowance_usdc=Decimal("50"),
+        allow_new_entries=True,
+        positions=(position,),
+        open_orders=(exit_order,),
+        fills=(
+            Fill(
+                trace_id="trace-initial-buy",
+                condition_id=market.condition_id,
+                token_id="home",
+                side="BUY",
+                notional_usdc=Decimal("12"),
+                confirmed_at=datetime(2026, 4, 27, 0, 1, tzinfo=timezone.utc),
+            ),
+        ),
+    )
+    service = TradingDecisionService(
+        extension_hooks=CurrentStrategy(
+            config=CurrentStrategyConfig(sports_max_event_exposure_usdc=Decimal("40"))
+        ).hooks,
+    )
+
+    plan = service.build_entry_plan(
+        market=market,
+        orderbook=_orderbook(token_id="home", best_ask=Decimal("0.94")),
+        account_snapshot=account_snapshot,
+        token_id="home",
+        trace_id="trace-scale-in-plan",
+        portfolio_budget_usdc=Decimal("20"),
+        available_usdc=Decimal("50"),
+        max_order_usdc=Decimal("20"),
+        max_market_usdc=Decimal("40"),
+        max_total_usdc=Decimal("60"),
+        metadata={
+            "sports_tail_game": {
+                "league": "NBA",
+                "home_name": "NYK",
+                "away_name": "BOS",
+                "home_score": 112,
+                "away_score": 100,
+                "period": "Q4",
+                "seconds_remaining": 80,
+                "status": "live",
+                "observed_at": "2026-04-27T00:00:00+00:00",
+            },
+        },
+    )
+
+    assert plan.ready_to_trade is True
+    assert plan.intent is not None
+    assert plan.intent.token_id == "home"
+    assert plan.intent.amount_usdc == Decimal("6")
+    assert getattr(plan.intent, "allow_open_exit_overlap") is True
+    assert plan.metadata is not None
+    assert plan.metadata["sports_tail_reason"] == "scale_in_moneyline_advantage"
+    assert plan.metadata["sports_tail_opportunity_type"] == "scale_in_advantage"
 
 
 def test_admin_live_state_store_projects_manual_candidate_and_confirmation() -> None:

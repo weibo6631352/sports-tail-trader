@@ -186,7 +186,7 @@ class RiskManager:
         if decision is not None:
             return decision
 
-        decision = self._check_open_exit_orders(intent, checks, open_orders)
+        decision = self._check_open_exit_orders(intent, checks, open_orders, position=position)
         if decision is not None:
             return decision
 
@@ -600,12 +600,48 @@ class RiskManager:
         intent: OrderIntent,
         checks: list[RiskCheck],
         open_orders: tuple[Order, ...],
+        *,
+        position: Position | None,
     ) -> RiskDecision | None:
         # 退出卖单存在时，同 token 再次买入会把“止盈/清仓中”的仓位重新放大。
         # 即使持仓快照暂时滞后，也必须等退出订单完成或撤销后再允许新入场。
         if intent.side != OrderSide.BUY:
             return None
         open_exit_orders = _open_sell_orders_for_subject(open_orders, intent)
+        if open_exit_orders and getattr(intent, "allow_open_exit_overlap", False):
+            covered_shares = _covered_sell_shares(position, open_exit_orders)
+            position_shares = Decimal("0") if position is None else position.shares
+            if position is None or position_shares <= Decimal("0") or covered_shares < position_shares:
+                return self._fail(
+                    trace_id=intent.trace_id,
+                    checks=checks,
+                    name="open_exit_gate",
+                    reason="open_exit_overlap_without_covered_position",
+                    field="open_orders.sell",
+                    value={
+                        "position_shares": position_shares,
+                        "covered_shares": covered_shares,
+                    },
+                    suggested_action="wait_exit",
+                    retryable=False,
+                )
+            checks.append(
+                RiskCheck(
+                    name="open_exit_gate",
+                    passed=True,
+                    field="open_orders.sell",
+                    value={
+                        "allowed_for_controlled_scale_in": True,
+                        "position_shares": position_shares,
+                        "covered_shares": covered_shares,
+                        "orders": [
+                            order.order_id or order.idempotency_key or order.token_id
+                            for order in open_exit_orders
+                        ],
+                    },
+                )
+            )
+            return None
         if open_exit_orders:
             return self._fail(
                 trace_id=intent.trace_id,
@@ -824,3 +860,14 @@ def _open_sell_orders_for_subject(
             continue
         subject_orders.append(order)
     return tuple(subject_orders)
+
+
+def _covered_sell_shares(position: Position | None, open_exit_orders: tuple[Order, ...]) -> Decimal:
+    position_covered = Decimal("0") if position is None else position.open_sell_shares
+    order_covered = Decimal("0")
+    for order in open_exit_orders:
+        if order.remaining_shares is not None:
+            order_covered += order.remaining_shares
+        elif order.size_shares is not None:
+            order_covered += order.size_shares
+    return max(position_covered, order_covered)

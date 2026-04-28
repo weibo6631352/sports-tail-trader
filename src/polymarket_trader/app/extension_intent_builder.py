@@ -61,6 +61,7 @@ def decision_to_managed_intent(
             amount_usdc=decision.amount_usdc,
             order_type=decision.order_type or OrderType.FAK,
             market_slug=resolved_market_slug,
+            allow_open_exit_overlap=bool(decision.metadata.get("allow_open_exit_overlap")),
         )
     if decision.action == ExtensionAction.SELL:
         if decision.price is None or decision.size_shares is None or decision.size_shares <= Decimal("0"):

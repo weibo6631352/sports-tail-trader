@@ -111,6 +111,8 @@ class CurrentStrategyConfig:
     sports_max_league_exposure_usdc: Decimal = Decimal("75")
     sports_max_daily_entry_usdc: Decimal = Decimal("150")
     sports_max_consecutive_losses: int = 3
+    sports_scale_in_budget_fraction: Decimal = Decimal("0.5")
+    sports_scale_in_max_buy_fills: int = 2
 
 
 def sports_tail_policy_from_config(config: CurrentStrategyConfig) -> SportsTailPolicy:

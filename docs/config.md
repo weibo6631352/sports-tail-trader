@@ -78,7 +78,7 @@
 | NHL | ESPN、NHL score、SofaScore、TheSportsDB | 支持 Totals / Moneyline / Spreads 自动评估 |
 | MLB | ESPN、MLB Stats、SofaScore、TheSportsDB | 使用棒球局面字段评估，不使用伪造剩余秒数 |
 | NFL | ESPN、SofaScore | 只生成候选和人工确认，不默认自动下单 |
-| Tennis | SofaScore | 优先发现 ATP/WTA；Totals 区分整场总局数和总盘数，只自动评估已锁定 Over；Moneyline 只评估整场胜负的当前盘接近锁定局面；set winner、Under 和 Spreads 暂不自动执行 |
+| Tennis | SofaScore | 优先发现 ATP/WTA；Totals 区分整场总局数和总盘数；直播中只自动评估已锁定 Over 和整场胜负接近锁定局面，已结束未封盘时可按最终结构化盘分/局分判断 set winner、Over/Under 和 Moneyline；Spreads 暂不自动执行 |
 | Soccer / Esports | 默认不在自动交易发现范围 | 需补源和策略校准后再启用 |
 
 ## 数据库
@@ -98,6 +98,7 @@
 - 配置：`src/strategies/current/config.py`
 - 远端 discovery 粗筛输入：`src/strategies/current/config.py` 的 `discovery_title_searches` / `discovery_tag_slugs`；当前默认可以用 `sports` tag 扩大市场扫描，但本地 universe 只按已覆盖联赛 token 通过候选，官方 Gamma Events keyset 文档：<https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination>
 - 直播比赛驱动 discovery：`sports_live_discovery_max_games` 控制每轮最多取多少个直播源比赛生成高意图查询，`sports_live_discovery_max_queries` 控制追加 query 上限；默认会先按 live 状态排序，再按 Polymarket 单场盘口覆盖度优先使用 NBA/NHL/MLB/ATP/WTA，避免 ITF 等低覆盖赛事消耗扫描预算。这两个字段属于策略配置，不写入框架 `.env`。
+- 受控加仓参数：`sports_scale_in_budget_fraction` 控制单次加仓预算相对首笔 BUY 成交额的比例，`sports_scale_in_max_buy_fills` 控制同 token BUY 成交次数上限；这两个字段属于策略配置，不写入框架 `.env`。
 - 体育扫尾模型和权限：`src/strategies/current/sports_tail.py`
 - 体育扫尾策略级风控：`src/strategies/current/risk.py`
 - 体育扫尾退出计划：`src/strategies/current/exit_plan.py`
