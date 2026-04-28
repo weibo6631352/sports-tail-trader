@@ -81,6 +81,7 @@ class ClobClient(PolymarketRestClientBase):
         timeout_s: float = 10.0,
         headers: Mapping[str, str] | None = None,
         auth_client: PolymarketTradingClient | None = None,
+        user_address: str | None = None,
         book_path: str = "/book",
         balance_allowance_path: str = "/balance-allowance",
         order_write_path: str = "/orders",
@@ -92,6 +93,7 @@ class ClobClient(PolymarketRestClientBase):
     ) -> None:
         super().__init__(base_url, client=client, timeout_s=timeout_s, headers=headers)
         self._auth_client = auth_client
+        self._user_address = user_address
         self._book_path = book_path
         self._balance_allowance_path = balance_allowance_path
         self._order_write_path = order_write_path
@@ -309,7 +311,8 @@ class ClobClient(PolymarketRestClientBase):
             timeout_s=timeout_s,
             operation="clob.list_fills",
         )
-        return tuple(normalize_fill_payload(item) for item in payload)
+        user_address = self._user_address or self.default_wallet_address
+        return tuple(normalize_fill_payload(item, user_address=user_address) for item in payload)
 
     async def create_order(
         self,

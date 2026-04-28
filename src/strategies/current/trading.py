@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 from decimal import Decimal
-from typing import Mapping
+import re
+from typing import Any, Mapping
 
 from polymarket_trader.domain.allocation import (
     Allocation,
@@ -24,13 +25,16 @@ from strategies.current.allocation import AllocationMarketSnapshot, equal_weight
 from strategies.current.config import CurrentStrategyConfig, sports_tail_policy_from_config
 from strategies.current.exit_plan import build_exit_plan_metadata, exit_price_for_context
 from strategies.current.outcomes import (
+    SportsTokenTarget,
     describe_sports_market,
     is_primary_token,
     target_for_token,
 )
 from strategies.current.risk import check_sports_entry_risk
 from strategies.current.sports_tail import (
+    LiveGameState,
     SportsMarketSnapshot,
+    SportsMarketSide,
     SportsTailEvaluation,
     TailAction,
     evaluate_scale_in_opportunity,
@@ -506,12 +510,18 @@ def _sports_tail_entry_gate(
         )
 
     token_id = context.token_id or context.orderbook.token_id
-    target = target_for_token(context.market, token_id)
+    game = live_game_state_from_metadata(context.metadata)
+    target, target_reason = _sports_target_for_live_game(
+        context.market,
+        token_id,
+        metadata=context.metadata,
+        game=game,
+    )
     if target is None:
         return (
             ExtensionDecision.skip(
-                reason="unsupported_sports_token",
-                metadata={"sports_parse_reason": descriptor.reason},
+                reason=target_reason,
+                metadata={**family_metadata, "sports_parse_reason": descriptor.reason},
             ),
             config.entry_no_price_max,
             {},
@@ -532,7 +542,7 @@ def _sports_tail_entry_gate(
         market_slug=context.market.market_slug,
     )
     evaluation = evaluate_tail_opportunity(
-        live_game_state_from_metadata(context.metadata),
+        game,
         market_snapshot,
         policy=policy,
         now=context.now,
@@ -618,16 +628,22 @@ def _sports_tail_allocation_gate(
     family_metadata = {"sports_market_family": descriptor.market_family.value}
     if descriptor.market_family.value != "single_game":
         return descriptor.reason, family_metadata
-    target = target_for_token(snapshot.market, snapshot.token_id)
+    game = live_game_state_from_metadata(context.metadata)
+    target, target_reason = _sports_target_for_live_game(
+        snapshot.market,
+        snapshot.token_id,
+        metadata=context.metadata,
+        game=game,
+    )
     if target is None:
-        return "unsupported_sports_token", {"sports_parse_reason": descriptor.reason}
+        return target_reason, {**family_metadata, "sports_parse_reason": descriptor.reason}
 
     policy = sports_tail_policy_from_config(config)
     best_ask = snapshot.best_ask if snapshot.best_ask is not None else (
         snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
     )
     evaluation = evaluate_tail_opportunity(
-        live_game_state_from_metadata(context.metadata),
+        game,
         SportsMarketSnapshot(
             market_type=descriptor.market_type,
             side=target.side,
@@ -676,7 +692,13 @@ def _scale_in_allocation_gate(
         return False, {}, None
     if descriptor.market_family.value != "single_game":
         return False, {}, None
-    target = target_for_token(snapshot.market, snapshot.token_id)
+    game = live_game_state_from_metadata(context.metadata)
+    target, _target_reason = _sports_target_for_live_game(
+        snapshot.market,
+        snapshot.token_id,
+        metadata=context.metadata,
+        game=game,
+    )
     if target is None:
         return False, {}, None
 
@@ -684,7 +706,7 @@ def _scale_in_allocation_gate(
         snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
     )
     evaluation = evaluate_scale_in_opportunity(
-        live_game_state_from_metadata(context.metadata),
+        game,
         SportsMarketSnapshot(
             market_type=descriptor.market_type,
             side=target.side,
@@ -742,6 +764,125 @@ def _sports_market_skip_metadata(
     if snapshot.best_ask is not None:
         metadata["best_ask"] = str(snapshot.best_ask)
     return metadata
+
+
+def _sports_target_for_live_game(
+    market,
+    token_id: str | None,
+    *,
+    metadata: Mapping[str, Any],
+    game: LiveGameState | None,
+) -> tuple[SportsTokenTarget | None, str]:
+    """用直播源主客队修正 side token 的 HOME/AWAY 方向。
+
+    Polymarket 体育 market 的 outcomes 顺序不稳定，尤其常见“客队 vs 主队”的
+    展示顺序。只在有直播比赛状态时按队名重映射方向；没有直播状态时保留
+    descriptor 的静态结果，让历史回放和非体育兜底路径不被误伤。
+    """
+
+    target = target_for_token(market, token_id)
+    if target is None:
+        return None, "unsupported_sports_token"
+    if target.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return target, ""
+    if game is None:
+        return target, ""
+
+    live_side = _live_side_for_outcome_label(target.label, game=game, metadata=metadata)
+    if live_side is None:
+        return None, "sports_token_live_side_mismatch"
+    return replace(target, side=live_side), ""
+
+
+def _live_side_for_outcome_label(
+    label: str,
+    *,
+    game: LiveGameState,
+    metadata: Mapping[str, Any],
+) -> SportsMarketSide | None:
+    """根据 token 文案判断它对应直播源的主队还是客队。"""
+
+    label_text = _normalize_competitor_text(label)
+    if not label_text:
+        return None
+
+    match_metadata = metadata.get("sports_live_match")
+    match_mapping = match_metadata if isinstance(match_metadata, Mapping) else {}
+    home_aliases = _competitor_aliases(
+        game.home_name,
+        match_mapping.get("matched_home_alias"),
+        match_mapping.get("home_name"),
+    )
+    away_aliases = _competitor_aliases(
+        game.away_name,
+        match_mapping.get("matched_away_alias"),
+        match_mapping.get("away_name"),
+    )
+    home_score = _label_alias_score(label_text, home_aliases)
+    away_score = _label_alias_score(label_text, away_aliases)
+    if home_score > away_score:
+        return SportsMarketSide.HOME
+    if away_score > home_score:
+        return SportsMarketSide.AWAY
+    return None
+
+
+def _competitor_aliases(*values: object) -> set[str]:
+    """生成队名匹配别名，兼容全名、队名末尾和较长单词 token。"""
+
+    aliases: set[str] = set()
+    for value in values:
+        normalized = _normalize_competitor_text(value)
+        if not normalized:
+            continue
+        tokens = tuple(token for token in normalized.split() if token not in _GENERIC_COMPETITOR_TOKENS)
+        if not tokens:
+            continue
+        phrase = " ".join(tokens)
+        aliases.add(phrase)
+        if len(tokens) >= 2:
+            aliases.add(tokens[-1])
+        aliases.update(token for token in tokens if len(token) >= 3)
+    return aliases
+
+
+def _label_alias_score(label_text: str, aliases: set[str]) -> int:
+    """返回 outcome 文案命中一侧别名的强度，完整队名会强于共享地区词。"""
+
+    padded = f" {label_text} "
+    return max(
+        (
+            len(alias.replace(" ", ""))
+            for alias in aliases
+            if alias and (label_text == alias or f" {alias} " in padded)
+        ),
+        default=0,
+    )
+
+
+def _normalize_competitor_text(value: object) -> str:
+    text = str(value or "").lower().replace("&", " and ")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return " ".join(text.split())
+
+
+_GENERIC_COMPETITOR_TOKENS = {
+    "a",
+    "an",
+    "and",
+    "at",
+    "club",
+    "fc",
+    "game",
+    "match",
+    "men",
+    "team",
+    "the",
+    "to",
+    "vs",
+    "v",
+    "women",
+}
 
 
 def _apply_sports_risk_limits(

@@ -694,7 +694,7 @@ def _evaluate_tennis_moneyline(
         return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
     game_lead = side_games - other_games
     set_lead = state.sets_won_for(market.side) - state.sets_won_for(other_side)
-    if side_games >= 5 and game_lead >= 2 and set_lead >= 0:
+    if side_games >= 5 and game_lead >= 2 and set_lead >= 1:
         return _accept(candidate, "tennis_moneyline_near_locked", policy.moneyline_execution_permission)
     return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
 

@@ -217,6 +217,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     clob_client = ClobClient(
         base_url=settings.polymarket_clob_host,
         auth_client=trading_client,
+        user_address=settings.polymarket_funder_address,
     )
     data_client = DataClient(
         base_url=settings.polymarket_data_host,

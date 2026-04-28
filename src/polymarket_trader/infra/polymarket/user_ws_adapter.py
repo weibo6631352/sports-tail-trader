@@ -314,46 +314,147 @@ def iter_fill_snapshots(payload: Mapping[str, Any]) -> Iterable[Fill]:
     for item in candidates:
         if not isinstance(item, Mapping):
             continue
-        condition_id = extract_condition_id(item)
-        token_id = extract_token_id(item)
+        if _is_maker_trade_message(item):
+            yield from _maker_fill_snapshots(item)
+            continue
+        fill = _top_level_fill_snapshot(item)
+        if fill is not None:
+            yield fill
+
+
+def _top_level_fill_snapshot(item: Mapping[str, Any]) -> Fill | None:
+    """按 taker 或普通 fill 语义读取顶层成交。"""
+
+    condition_id = extract_condition_id(item)
+    token_id = extract_token_id(item)
+    if condition_id is None or token_id is None:
+        return None
+    size = coalesce_decimal(
+        item.get("size"),
+        item.get("filled_size"),
+        item.get("quantity"),
+        item.get("matched_amount"),
+    )
+    price = coalesce_decimal(item.get("price"), item.get("avg_price"))
+    side_text = normalized_status(item.get("side"))
+    status = _fill_status(item)
+    notional_usdc = coalesce_decimal(item.get("notional_usdc"), item.get("amount"), default=Decimal("0"))
+    if notional_usdc == Decimal("0") and size is not None and price is not None:
+        notional_usdc = price * size
+    return Fill(
+        trace_id=extract_trace_id(item),
+        event_id=extract_event_id(item),
+        market_slug=extract_market_slug(item),
+        condition_id=condition_id,
+        token_id=token_id,
+        reason=text_value(item.get("reason")) or status,
+        created_at=datetime_value(item.get("created_at") or item.get("timestamp")) or datetime.now(timezone.utc),
+        order_id=text_value(item.get("order_id") or item.get("taker_order_id")),
+        trade_id=text_value(item.get("trade_id") or item.get("matched_trade_id") or item.get("id")),
+        side=side_text,
+        price=price,
+        size=size,
+        notional_usdc=notional_usdc,
+        status=status,
+        confirmed_at=_fill_confirmed_at(item),
+    )
+
+
+def _is_maker_trade_message(item: Mapping[str, Any]) -> bool:
+    """识别用户 WS 中“我是 maker”的 trade 事件。
+
+    这类事件的顶层 size/side/order_id 描述的是对手方 taker，用户自己的订单在
+    maker_orders 里；如果继续读取顶层，会把对手的大额成交错误记成自己的仓位。
+    """
+
+    trader_side = normalized_status(first_value(item, "trader_side", "traderSide"))
+    return trader_side == "maker" and _maker_orders(item) is not None
+
+
+def _maker_orders(item: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...] | None:
+    value = first_value(item, "maker_orders", "makerOrders")
+    if not is_mapping_sequence(value):
+        return None
+    return tuple(value)
+
+
+def _maker_fill_snapshots(item: Mapping[str, Any]) -> Iterable[Fill]:
+    """从 maker_orders 中抽取用户自己的成交腿。"""
+
+    maker_orders = _maker_orders(item)
+    if maker_orders is None:
+        return
+    parent_status = _fill_status(item)
+    parent_side = normalized_status(item.get("side"))
+    for maker in maker_orders:
+        condition_id = extract_condition_id(maker) or extract_condition_id(item)
+        token_id = extract_token_id(maker) or extract_token_id(item)
         if condition_id is None or token_id is None:
             continue
         size = coalesce_decimal(
-            item.get("size"),
-            item.get("filled_size"),
-            item.get("quantity"),
-            item.get("matched_amount"),
+            maker.get("matched_amount"),
+            maker.get("matched_size"),
+            maker.get("filled_size"),
+            maker.get("size"),
+            maker.get("quantity"),
         )
-        price = coalesce_decimal(item.get("price"), item.get("avg_price"))
-        side_text = normalized_status(item.get("side"))
-        status = normalized_status(item.get("status")) or normalized_status(item.get("trade_status"))
-        if not status:
-            status = "confirmed" if item.get("confirmed", False) else "matched"
-        notional_usdc = coalesce_decimal(item.get("notional_usdc"), item.get("amount"), default=Decimal("0"))
+        price = coalesce_decimal(maker.get("price"), item.get("price"), item.get("avg_price"))
+        side_text = normalized_status(first_value(maker, "side", "order_side", "orderSide"))
+        if not side_text:
+            side_text = _opposite_side(parent_side)
+        notional_usdc = coalesce_decimal(
+            maker.get("notional_usdc"),
+            maker.get("amount"),
+            default=Decimal("0"),
+        )
         if notional_usdc == Decimal("0") and size is not None and price is not None:
             notional_usdc = price * size
         yield Fill(
-            trace_id=extract_trace_id(item),
+            trace_id=text_value(first_value(maker, "trace_id", "traceId")) or extract_trace_id(item),
             event_id=extract_event_id(item),
-            market_slug=extract_market_slug(item),
+            market_slug=extract_market_slug(maker) or extract_market_slug(item),
             condition_id=condition_id,
             token_id=token_id,
-            reason=text_value(item.get("reason")) or status,
-            created_at=datetime_value(item.get("created_at") or item.get("timestamp")) or datetime.now(timezone.utc),
-            order_id=text_value(item.get("order_id") or item.get("taker_order_id")),
-            trade_id=text_value(item.get("trade_id") or item.get("matched_trade_id") or item.get("id")),
+            reason=text_value(maker.get("reason")) or parent_status,
+            created_at=datetime_value(
+                first_value(maker, "created_at", "timestamp")
+                or item.get("created_at")
+                or item.get("timestamp")
+            )
+            or datetime.now(timezone.utc),
+            order_id=text_value(first_value(maker, "order_id", "orderId", "id")),
+            trade_id=text_value(first_value(item, "trade_id", "matched_trade_id", "id")),
             side=side_text,
             price=price,
             size=size,
             notional_usdc=notional_usdc,
-            status=status,
-            confirmed_at=datetime_value(
-                item.get("confirmed_at")
-                or item.get("matchtime")
-                or item.get("last_update")
-                or item.get("timestamp")
-            ),
+            status=parent_status,
+            confirmed_at=_fill_confirmed_at(item),
         )
+
+
+def _fill_status(item: Mapping[str, Any]) -> str:
+    status = normalized_status(item.get("status")) or normalized_status(item.get("trade_status"))
+    if not status:
+        status = "confirmed" if item.get("confirmed", False) else "matched"
+    return status
+
+
+def _fill_confirmed_at(item: Mapping[str, Any]) -> datetime | None:
+    return datetime_value(
+        item.get("confirmed_at")
+        or item.get("matchtime")
+        or item.get("last_update")
+        or item.get("timestamp")
+    )
+
+
+def _opposite_side(side: str) -> str:
+    if side == "buy":
+        return "sell"
+    if side == "sell":
+        return "buy"
+    return ""
 
 
 def order_from_fill(fill: Fill) -> Order:

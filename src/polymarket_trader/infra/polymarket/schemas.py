@@ -1211,8 +1211,62 @@ def normalize_order_payload(payload: Mapping[str, Any]) -> ClobOrderDTO:
     )
 
 
-def normalize_fill_payload(payload: Mapping[str, Any]) -> ClobFillDTO:
+def normalize_fill_payload(
+    payload: Mapping[str, Any],
+    *,
+    user_address: str | None = None,
+) -> ClobFillDTO:
     normalized = _unwrap_mapping(payload)
+    maker_order = _maker_fill_order(normalized, user_address=user_address)
+    if maker_order is not None:
+        parent_side = (_first_text(normalized, "side") or "").upper()
+        maker_side = _first_text(maker_order, "side", "order_side", "orderSide")
+        if maker_side is None:
+            maker_side = _opposite_trade_side(parent_side)
+        return ClobFillDTO(
+            raw=normalized,
+            token_id=_first_text(maker_order, "token_id", "tokenId", "asset_id", "assetId")
+            or _first_text(normalized, "token_id", "tokenId", "asset_id", "assetId")
+            or "",
+            side=OrderSide((maker_side or OrderSide.BUY.value).upper()),
+            price=_coerce_decimal(_first_value(maker_order, "price"))
+            or _coerce_decimal(_first_value(normalized, "price", "trade_price", "tradePrice"))
+            or Decimal("0"),
+            size_shares=_coerce_decimal(
+                _first_value(
+                    maker_order,
+                    "matched_amount",
+                    "matchedAmount",
+                    "matched_size",
+                    "matchedSize",
+                    "filled_size",
+                    "filledSize",
+                    "size",
+                    "quantity",
+                )
+            )
+            or Decimal("0"),
+            order_id=_first_text(maker_order, "order_id", "orderId", "id"),
+            trade_id=_first_text(normalized, "trade_id", "tradeId", "id"),
+            condition_id=_first_text(maker_order, "condition_id", "conditionId", "condition", "market")
+            or _first_text(normalized, "condition_id", "conditionId", "condition", "market"),
+            market_slug=_first_text(maker_order, "market_slug", "marketSlug", "slug")
+            or _first_text(normalized, "market_slug", "marketSlug", "slug"),
+            notional_usdc=_coerce_decimal(_first_value(maker_order, "notional_usdc", "notional", "value")),
+            status=_normalize_trade_status_text(_first_text(normalized, "status")) or "confirmed",
+            confirmed_at=_coerce_datetime(
+                _first_value(
+                    normalized,
+                    "confirmed_at",
+                    "confirmedAt",
+                    "match_time",
+                    "matchTime",
+                    "last_update",
+                    "lastUpdate",
+                )
+            )
+            or _utc_now(),
+        )
     side_text = _first_text(normalized, "side") or OrderSide.BUY.value
     return ClobFillDTO(
         raw=normalized,
@@ -1228,6 +1282,43 @@ def normalize_fill_payload(payload: Mapping[str, Any]) -> ClobFillDTO:
         status=_normalize_trade_status_text(_first_text(normalized, "status")) or "confirmed",
         confirmed_at=_coerce_datetime(_first_value(normalized, "confirmed_at", "confirmedAt", "match_time", "matchTime", "last_update", "lastUpdate")) or _utc_now(),
     )
+
+
+def _maker_fill_order(
+    payload: Mapping[str, Any],
+    *,
+    user_address: str | None,
+) -> Mapping[str, Any] | None:
+    """返回用户作为 maker 时应计入我方账户的 maker order 腿。"""
+
+    trader_side = (_first_text(payload, "trader_side", "traderSide") or "").lower()
+    maker_orders = _first_value(payload, "maker_orders", "makerOrders")
+    if trader_side != "maker" or not isinstance(maker_orders, list):
+        return None
+    orders = tuple(item for item in maker_orders if isinstance(item, Mapping))
+    normalized_user_address = _normalize_address(user_address)
+    if normalized_user_address is not None:
+        for item in orders:
+            maker_address = _normalize_address(_first_text(item, "maker_address", "makerAddress"))
+            if maker_address == normalized_user_address:
+                return item
+        return None
+    if len(orders) == 1:
+        return orders[0]
+    return None
+
+
+def _opposite_trade_side(side: str) -> str:
+    if side.upper() == OrderSide.BUY.value:
+        return OrderSide.SELL.value
+    if side.upper() == OrderSide.SELL.value:
+        return OrderSide.BUY.value
+    return ""
+
+
+def _normalize_address(value: str | None) -> str | None:
+    text = str(value or "").strip().lower()
+    return text if text.startswith("0x") else None
 
 
 def normalize_position_payload(payload: Mapping[str, Any]) -> DataPositionDTO:

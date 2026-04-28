@@ -53,17 +53,29 @@ def decide_recovery(
     recovery_metadata = _recovery_metadata(config, context, abnormal_pause_reason=abnormal_pause_reason)
     for order in open_orders:
         order_id = _order_identifier(order)
-        if order_id is None or not _is_open_entry_order(order):
+        if order_id is None:
             continue
-        actions.append(
-            ExtensionDecision.cancel(
-                reason="open_entry_order_detected",
-                token_id=order.token_id,
-                order_id=order_id,
-                market_slug=order.market_slug or context.market.market_slug,
-                metadata=recovery_metadata,
+        if _is_open_entry_order(order):
+            actions.append(
+                ExtensionDecision.cancel(
+                    reason="open_entry_order_detected",
+                    token_id=order.token_id,
+                    order_id=order_id,
+                    market_slug=order.market_slug or context.market.market_slug,
+                    metadata=recovery_metadata,
+                )
             )
-        )
+            continue
+        if not config.auto_exit_enabled and _is_open_exit_order(order):
+            actions.append(
+                ExtensionDecision.cancel(
+                    reason="settlement_only_open_exit_order_detected",
+                    token_id=order.token_id,
+                    order_id=order_id,
+                    market_slug=order.market_slug or context.market.market_slug,
+                    metadata=recovery_metadata,
+                )
+            )
 
     open_exit_by_token: dict[str, Decimal] = {}
     for order in open_orders:
@@ -72,30 +84,31 @@ def decide_recovery(
                 _open_order_shares(order)
             )
 
-    for position in positions:
-        open_exit_shares = open_exit_by_token.get(position.token_id, Decimal("0"))
-        uncovered_shares = position.shares - open_exit_shares
-        if uncovered_shares > Decimal("0"):
-            exit_metadata = dict(recovery_metadata)
-            exit_metadata.update(
-                build_exit_plan_metadata(
-                    config,
-                    context,
-                    token_id=position.token_id,
-                    source_reason="recovery_exit_shortage",
-                    target_size_shares=uncovered_shares,
+    if config.auto_exit_enabled:
+        for position in positions:
+            open_exit_shares = open_exit_by_token.get(position.token_id, Decimal("0"))
+            uncovered_shares = position.shares - open_exit_shares
+            if uncovered_shares > Decimal("0"):
+                exit_metadata = dict(recovery_metadata)
+                exit_metadata.update(
+                    build_exit_plan_metadata(
+                        config,
+                        context,
+                        token_id=position.token_id,
+                        source_reason="recovery_exit_shortage",
+                        target_size_shares=uncovered_shares,
+                    )
                 )
-            )
-            actions.append(
-                ExtensionDecision.sell(
-                    reason="recovery_exit_shortage",
-                    token_id=position.token_id,
-                    price=exit_price_for_context(config, context),
-                    size_shares=uncovered_shares,
-                    market_slug=position.market_slug or context.market.market_slug,
-                    metadata=exit_metadata,
+                actions.append(
+                    ExtensionDecision.sell(
+                        reason="recovery_exit_shortage",
+                        token_id=position.token_id,
+                        price=exit_price_for_context(config, context),
+                        size_shares=uncovered_shares,
+                        market_slug=position.market_slug or context.market.market_slug,
+                        metadata=exit_metadata,
+                    )
                 )
-            )
 
     pause_trading = context.market.trading_status in {
         TradingStatus.PAUSED,

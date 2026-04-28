@@ -398,6 +398,72 @@ def test_ended_moneyline_tie_is_not_traded_as_deterministic_result() -> None:
     assert decision.reason == "outcome_not_locked"
 
 
+def test_moneyline_uses_live_home_away_names_instead_of_outcome_order() -> None:
+    market = Market(
+        condition_id="kbo-condition",
+        market_slug="kbo-kia-nc-2026-04-28",
+        market_question="KBO: Kia Tigers vs. NC Dinos",
+        event_title="KBO: Kia Tigers vs. NC Dinos",
+        category="Sports",
+        tags=("KBO",),
+        outcomes=(
+            MarketOutcome(token_id="kia", outcome="Kia Tigers"),
+            MarketOutcome(token_id="nc", outcome="NC Dinos"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    metadata = {
+        "sports_tail_game": {
+            "league": "KBO",
+            "home_name": "NC Dinos",
+            "away_name": "Kia Tigers",
+            "home_score": 5,
+            "away_score": 4,
+            "period": "Final",
+            "seconds_remaining": 0,
+            "status": "ended",
+            "observed_at": "2026-04-28T12:55:00+00:00",
+        },
+        "sports_live_match": {
+            "matched_home_alias": "NC Dinos",
+            "matched_away_alias": "Kia Tigers",
+        },
+    }
+
+    config = CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01"))
+
+    losing_token = decide_entry(
+        config,
+        ExtensionContext(
+            trace_id="trace-kbo-loser",
+            market=market,
+            token_id="kia",
+            orderbook=_orderbook(token_id="kia", best_ask=Decimal("0.01")),
+            amount_usdc=Decimal("5"),
+            now=datetime(2026, 4, 28, 12, 55, tzinfo=timezone.utc),
+            metadata=metadata,
+        ),
+    )
+    winning_token = decide_entry(
+        config,
+        ExtensionContext(
+            trace_id="trace-kbo-winner",
+            market=market,
+            token_id="nc",
+            orderbook=_orderbook(token_id="nc", best_ask=Decimal("0.96")),
+            amount_usdc=Decimal("5"),
+            now=datetime(2026, 4, 28, 12, 55, tzinfo=timezone.utc),
+            metadata=metadata,
+        ),
+    )
+
+    assert losing_token.action.value == "skip"
+    assert losing_token.reason == "outcome_not_locked"
+    assert winning_token.action.value == "buy"
+    assert winning_token.token_id == "nc"
+    assert winning_token.metadata["sports_tail_reason"] == "ended_not_closed_moneyline"
+
+
 def test_entry_plan_preserves_event_metadata_through_application_entry_path() -> None:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
@@ -550,12 +616,13 @@ def test_tennis_allocation_filters_opposite_side_before_equal_weight_budget() ->
                 "observed_at": "2026-04-27T00:00:00+00:00",
                 "tennis_state": {
                     "home_sets_won": 0,
-                    "away_sets_won": 0,
-                    "current_set": 1,
+                    "away_sets_won": 1,
+                    "current_set": 2,
                     "home_current_set_games": 3,
                     "away_current_set_games": 5,
-                    "home_total_games": 3,
-                    "away_total_games": 5,
+                    "home_total_games": 6,
+                    "away_total_games": 11,
+                    "set_scores": ((3, 6), (3, 5)),
                 },
             },
         },
@@ -567,6 +634,74 @@ def test_tennis_allocation_filters_opposite_side_before_equal_weight_budget() ->
     assert plan.intent is not None
     assert plan.intent.token_id == "tennis-away"
     assert plan.intent.amount_usdc == Decimal("5")
+
+
+def test_tennis_moneyline_first_set_lead_is_not_tail_enough() -> None:
+    market = _tennis_moneyline_market()
+
+    decision = decide_entry(
+        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        ExtensionContext(
+            trace_id="trace-tennis-first-set",
+            market=market,
+            token_id="tennis-home",
+            orderbook=_orderbook(token_id="tennis-home", best_ask=Decimal("0.56")),
+            amount_usdc=Decimal("5"),
+            now=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
+            metadata={
+                "sports_tail_game": {
+                    **_tennis_near_locked_live_game(),
+                    "tennis_state": {
+                        "home_sets_won": 0,
+                        "away_sets_won": 0,
+                        "current_set": 1,
+                        "home_current_set_games": 5,
+                        "away_current_set_games": 3,
+                        "home_total_games": 5,
+                        "away_total_games": 3,
+                        "set_scores": ((5, 3),),
+                    },
+                }
+            },
+        ),
+    )
+
+    assert decision.action.value == "skip"
+    assert decision.reason == "tennis_not_late_enough"
+
+
+def test_tennis_moneyline_requires_current_set_tail_after_set_lead() -> None:
+    market = _tennis_moneyline_market()
+
+    decision = decide_entry(
+        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        ExtensionContext(
+            trace_id="trace-tennis-too-early-second-set",
+            market=market,
+            token_id="tennis-home",
+            orderbook=_orderbook(token_id="tennis-home", best_ask=Decimal("0.56")),
+            amount_usdc=Decimal("5"),
+            now=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
+            metadata={
+                "sports_tail_game": {
+                    **_tennis_near_locked_live_game(),
+                    "tennis_state": {
+                        "home_sets_won": 1,
+                        "away_sets_won": 0,
+                        "current_set": 2,
+                        "home_current_set_games": 3,
+                        "away_current_set_games": 2,
+                        "home_total_games": 9,
+                        "away_total_games": 5,
+                        "set_scores": ((6, 3), (3, 2)),
+                    },
+                }
+            },
+        ),
+    )
+
+    assert decision.action.value == "skip"
+    assert decision.reason == "tennis_not_late_enough"
 
 
 def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
@@ -1222,7 +1357,82 @@ def test_recovery_manages_all_sports_target_tokens_instead_of_fixed_primary_toke
     assert decision.reason == "strategy_recovery"
     assert [(action.action.value, action.token_id) for action in decision.actions] == [
         ("cancel", "home"),
-        ("sell", "away"),
+    ]
+
+
+def test_recovery_does_not_create_exit_order_in_settlement_only_mode() -> None:
+    market = _moneyline_market()
+    position = Position(
+        condition_id=market.condition_id,
+        token_id="away",
+        shares=Decimal("4"),
+        cost_usdc=Decimal("3.5"),
+        market_slug=market.market_slug,
+    )
+
+    decision = decide_recovery(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-settlement-only-recovery",
+            market=market,
+            position=position,
+        ),
+    )
+
+    assert decision.reason == "strategy_recovery"
+    assert decision.actions == ()
+
+
+def test_recovery_cancels_historical_open_exit_order_in_settlement_only_mode() -> None:
+    market = _moneyline_market()
+    open_sell = Order(
+        condition_id=market.condition_id,
+        token_id="away",
+        side=OrderSide.SELL,
+        order_type=OrderType.GTC,
+        price=Decimal("0.99"),
+        size_shares=Decimal("4"),
+        remaining_shares=Decimal("4"),
+        status=OrderStatus.LIVE,
+        order_id="sell-1",
+        market_slug=market.market_slug,
+    )
+
+    decision = decide_recovery(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-settlement-only-open-exit",
+            market=market,
+            open_orders=(open_sell,),
+        ),
+    )
+
+    assert [(action.action.value, action.reason, action.order_id) for action in decision.actions] == [
+        ("cancel", "settlement_only_open_exit_order_detected", "sell-1"),
+    ]
+
+
+def test_recovery_can_cover_position_when_auto_exit_is_explicitly_enabled() -> None:
+    market = _moneyline_market()
+    position = Position(
+        condition_id=market.condition_id,
+        token_id="away",
+        shares=Decimal("4"),
+        cost_usdc=Decimal("3.5"),
+        market_slug=market.market_slug,
+    )
+
+    decision = decide_recovery(
+        CurrentStrategyConfig(auto_exit_enabled=True),
+        ExtensionContext(
+            trace_id="trace-auto-exit-recovery",
+            market=market,
+            position=position,
+        ),
+    )
+
+    assert [(action.action.value, action.reason, action.token_id) for action in decision.actions] == [
+        ("sell", "recovery_exit_shortage", "away"),
     ]
 
 
@@ -1313,14 +1523,14 @@ def _tennis_near_locked_live_game() -> dict[str, object]:
         "status": "live",
         "observed_at": "2026-04-27T00:00:00+00:00",
         "tennis_state": {
-            "home_sets_won": 0,
+            "home_sets_won": 1,
             "away_sets_won": 0,
-            "current_set": 1,
+            "current_set": 2,
             "home_current_set_games": 5,
             "away_current_set_games": 3,
-            "home_total_games": 5,
-            "away_total_games": 3,
-            "set_scores": ((5, 3),),
+            "home_total_games": 11,
+            "away_total_games": 6,
+            "set_scores": ((6, 3), (5, 3)),
         },
     }
 
