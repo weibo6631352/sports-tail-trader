@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, ROUND_FLOOR
 from typing import Mapping
 
 from polymarket_trader.extension_api import ExtensionContext
@@ -40,13 +40,14 @@ def build_exit_plan_metadata(
             如已知卖出份额，则写入计划，便于后续复盘。
     """
 
+    exit_price = exit_price_for_context(config, context)
     plan: dict[str, object] = {
         "version": EXIT_PLAN_VERSION,
         "source_reason": source_reason,
         "condition_id": None if context.market is None else context.market.condition_id,
         "market_slug": None if context.market is None else context.market.market_slug,
         "token_id": token_id,
-        "target_exit_price": str(config.exit_no_price),
+        "target_exit_price": str(exit_price),
         "primary_action": "place_follow_up_gtc_sell_after_buy_fill",
         "settlement_rule": "keep_exit_order_until_fill_or_authoritative_resolution",
         "recovery_rule": "cancel_open_entry_orders_and_cover_unprotected_positions",
@@ -64,10 +65,39 @@ def build_exit_plan_metadata(
         plan["live_state"] = game_snapshot
     return {
         "sports_exit_plan_version": EXIT_PLAN_VERSION,
-        "sports_exit_target_price": str(config.exit_no_price),
+        "sports_exit_target_price": str(exit_price),
         "sports_exit_source_reason": source_reason,
         "sports_exit_plan": plan,
     }
+
+
+def exit_price_for_context(config: CurrentStrategyConfig, context: ExtensionContext) -> Decimal:
+    """返回符合当前 market tick size 的退出挂单价格。"""
+
+    return align_price_to_tick(config.exit_no_price, tick_size=_effective_tick_size(context))
+
+
+def align_price_to_tick(price: Decimal, *, tick_size: Decimal | None) -> Decimal:
+    """把策略目标价格向下对齐到交易所允许的 tick。
+
+    卖出退出价是“目标上限”，当市场只支持 0.01 tick 时，0.995 应落到 0.99；
+    如果 tick 缺失或异常，保持原价并交给框架风控继续审计。
+    """
+
+    if tick_size is None or tick_size <= Decimal("0"):
+        return price
+    units = (price / tick_size).to_integral_value(rounding=ROUND_FLOOR)
+    if units <= 0:
+        return price
+    return units * tick_size
+
+
+def _effective_tick_size(context: ExtensionContext) -> Decimal | None:
+    if context.orderbook is not None and context.orderbook.tick_size is not None:
+        return context.orderbook.tick_size
+    if context.market is not None:
+        return context.market.tick_size
+    return None
 
 
 def _game_snapshot(metadata: Mapping[str, object]) -> dict[str, object]:

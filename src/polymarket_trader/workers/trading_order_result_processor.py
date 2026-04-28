@@ -131,6 +131,10 @@ class TradingOrderResultProcessor:
         follow_up_intents: list[ManagedOrderIntent] = []
         follow_up_results: list[TradingReviewResult] = []
         active_snapshot = snapshot
+        position_already_projected = bool(
+            source_event.payload.get("position_projected")
+            or source_event.payload.get("account_projected")
+        )
 
         if order_result.side == OrderSide.BUY and order_result.status in {
             OrderResultStatus.FULL_FILL,
@@ -138,7 +142,7 @@ class TradingOrderResultProcessor:
             OrderResultStatus.NO_FILL,
         }:
             projector = self._host._account_projector()
-            if projector is not None:
+            if projector is not None and not position_already_projected:
                 projector.apply_buy_result(order_result, snapshot=snapshot)
             active_snapshot = (
                 self._account_state_store.snapshot()
@@ -151,7 +155,7 @@ class TradingOrderResultProcessor:
             and order_result.side == OrderSide.SELL
         ):
             projector = self._host._account_projector()
-            if projector is not None:
+            if projector is not None and not position_already_projected:
                 projector.apply_sell_result(
                     order_result,
                     snapshot=snapshot,

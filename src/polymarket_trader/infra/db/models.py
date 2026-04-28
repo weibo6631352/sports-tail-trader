@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -47,6 +48,19 @@ def _text(value: Any | None) -> str | None:
         return None
     text_value = str(value).strip()
     return text_value or None
+
+
+def _db_key(value: Any | None, *, limit: int = 255) -> str | None:
+    """将本地长幂等键稳定压缩到数据库索引字段长度内。"""
+
+    text_value = _text(value)
+    if text_value is None:
+        return None
+    if len(text_value) <= limit:
+        return text_value
+    digest = hashlib.sha256(text_value.encode("utf-8")).hexdigest()
+    suffix = f":sha256:{digest}"
+    return f"{text_value[: limit - len(suffix)]}{suffix}"
 
 
 def _datetime_value(value: Any | None) -> datetime | None:
@@ -167,9 +181,11 @@ def _level_from_json(value: Any) -> PriceLevel:
 
 def _order_key(order: Order | OrderResult) -> str:
     if isinstance(order, Order):
+        if order.order_id:
+            return order.order_id
         if order.idempotency_key:
-            return order.idempotency_key
-        return "|".join(
+            return _db_key(order.idempotency_key) or ""
+        return _db_key("|".join(
             [
                 order.trace_id or "",
                 order.condition_id,
@@ -177,12 +193,12 @@ def _order_key(order: Order | OrderResult) -> str:
                 order.side.value,
                 order.order_type.value,
             ]
-        )
-    if order.intent is not None and getattr(order.intent, "idempotency_key", None):
-        return str(order.intent.idempotency_key)
+        )) or ""
     if order.order_id:
         return order.order_id
-    return "|".join(
+    if order.intent is not None and getattr(order.intent, "idempotency_key", None):
+        return _db_key(order.intent.idempotency_key) or ""
+    return _db_key("|".join(
         [
             order.trace_id,
             order.condition_id,
@@ -190,7 +206,7 @@ def _order_key(order: Order | OrderResult) -> str:
             "" if order.side is None else order.side.value,
             "" if order.order_type is None else order.order_type.value,
         ]
-    )
+    )) or ""
 
 
 class Base(DeclarativeBase):
@@ -689,7 +705,7 @@ class OrderModel(Base, TimestampMixin):
                 order_id=order.order_id,
                 trade_id=order.trade_id,
                 status=order.status.value,
-                idempotency_key=order.idempotency_key,
+                idempotency_key=_db_key(order.idempotency_key),
                 reason=order.reason,
                 post_only=order.post_only,
                 raw_payload=payload,
@@ -742,7 +758,11 @@ class OrderModel(Base, TimestampMixin):
             order_id=order.order_id,
             trade_id=order.trade_id,
             status=order.status.value,
-            idempotency_key=order.intent.idempotency_key if order.intent and getattr(order.intent, "idempotency_key", None) else None,
+            idempotency_key=(
+                _db_key(order.intent.idempotency_key)
+                if order.intent and getattr(order.intent, "idempotency_key", None)
+                else None
+            ),
             reason=order.reason,
             post_only=False if order.intent is None else getattr(order.intent, "post_only", False),
             raw_payload=payload,

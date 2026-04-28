@@ -41,6 +41,7 @@
 
 - `validate_startup_readiness` 会在 `WALLET_PRIVATE_KEY` 为空时阻止系统进入 `ready_to_trade=true`。
 - `PORTFOLIO_BUDGET_USDC`、`MAX_ORDER_USDC`、`MAX_MARKET_USDC`、`MAX_TOTAL_USDC`、`MAX_OPEN_ORDERS` 任一不大于 `0` 时，系统不会进入自动交易态。
+- `MAX_ORDER_USDC`、`MAX_MARKET_USDC` 和 `MAX_TOTAL_USDC` 需要覆盖目标市场的 `min_order_size`；Polymarket 体育市场常见最小下单金额为 `5` USDC，低于该值时即使策略发现 `auto_execute` 机会也会被风控拒绝。
 - `POLYMARKET_API_KEY`、`POLYMARKET_API_SECRET`、`POLYMARKET_API_PASSPHRASE` 只填部分字段时，系统不会进入自动交易态。
 - `POLYMARKET_SIGNATURE_TYPE` 为 `1` 或 `2` 但未填写 `POLYMARKET_FUNDER_ADDRESS` 时，系统不会进入自动交易态。
 - `SPORTS_LIVE_STATE_ENABLED=true` 时，`SPORTS_LIVE_STATE_SOURCES` 只支持 `espn,nba,nhl,mlb,sofascore,thesportsdb`，且 `SPORTS_LIVE_STATE_LEAGUES` 至少需要一个可由启用源覆盖的联赛代码；配置错误会阻止系统进入自动交易态。
@@ -57,7 +58,7 @@
 - `SPORTS_LIVE_STATE_MLB_BASE_URL`：MLB Stats API 基础地址。
 - `SPORTS_LIVE_STATE_SOFASCORE_BASE_URL`：SofaScore 公开 scheduled-events API 基础地址。
 - `SPORTS_LIVE_STATE_THESPORTSDB_BASE_URL`：TheSportsDB 公开 eventsday API 基础地址；当前只启用已验证可用的 NHL/MLB 映射，并在适配器内做本地限频缓存。
-- `SPORTS_LIVE_STATE_LEAGUES`：逗号分隔的联赛代码，例如 `nba,nhl,nfl,mlb`。
+- `SPORTS_LIVE_STATE_LEAGUES`：逗号分隔的联赛代码，例如 `nba,nhl,nfl,mlb,tennis`。
 - `SPORTS_LIVE_STATE_INTERVAL_SECONDS`：P2 同步任务间隔，默认 `5` 秒。
 - `SPORTS_LIVE_STATE_TIMEOUT_S`：外部请求超时。
 - `SPORTS_LIVE_STATE_PUBLISH_ENTRY_SIGNALS`：直播状态更新后是否发布 `ENTRY_SIGNAL_TRIGGERED`，用于让交易主链路基于最新 metadata 重放入场判断。
@@ -77,7 +78,8 @@
 | NHL | ESPN、NHL score、SofaScore、TheSportsDB | 支持 Totals / Moneyline / Spreads 自动评估 |
 | MLB | ESPN、MLB Stats、SofaScore、TheSportsDB | 使用棒球局面字段评估，不使用伪造剩余秒数 |
 | NFL | ESPN、SofaScore | 只生成候选和人工确认，不默认自动下单 |
-| Soccer / Tennis / Esports | 默认不在自动交易发现范围 | 需补源和策略校准后再启用 |
+| Tennis | SofaScore | 优先发现 ATP/WTA；Totals 区分整场总局数和总盘数，只自动评估已锁定 Over；Moneyline 只评估整场胜负的当前盘接近锁定局面；set winner、Under 和 Spreads 暂不自动执行 |
+| Soccer / Esports | 默认不在自动交易发现范围 | 需补源和策略校准后再启用 |
 
 ## 数据库
 
@@ -95,6 +97,7 @@
 - 入口：`src/strategies/current/strategy.py`
 - 配置：`src/strategies/current/config.py`
 - 远端 discovery 粗筛输入：`src/strategies/current/config.py` 的 `discovery_title_searches` / `discovery_tag_slugs`；当前默认可以用 `sports` tag 扩大市场扫描，但本地 universe 只按已覆盖联赛 token 通过候选，官方 Gamma Events keyset 文档：<https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination>
+- 直播比赛驱动 discovery：`sports_live_discovery_max_games` 控制每轮最多取多少个直播源比赛生成高意图查询，`sports_live_discovery_max_queries` 控制追加 query 上限；默认会先按 live 状态排序，再按 Polymarket 单场盘口覆盖度优先使用 NBA/NHL/MLB/ATP/WTA，避免 ITF 等低覆盖赛事消耗扫描预算。这两个字段属于策略配置，不写入框架 `.env`。
 - 体育扫尾模型和权限：`src/strategies/current/sports_tail.py`
 - 体育扫尾策略级风控：`src/strategies/current/risk.py`
 - 体育扫尾退出计划：`src/strategies/current/exit_plan.py`

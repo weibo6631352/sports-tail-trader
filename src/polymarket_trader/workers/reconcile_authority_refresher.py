@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Awaitable, Callable, Protocol, TypeVar, cast
 
+from polymarket_trader.app.order_projection import AccountStateProjector
 from polymarket_trader.domain.events import Fill
-from polymarket_trader.domain.market import Market, TradingStatus
+from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.order import OrderRecord
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
@@ -173,20 +174,6 @@ class ReconcileAuthorityRefresher:
         refresh_market_authority: bool = True,
     ) -> AuthoritativeRefreshSummary:
         markets = self._target_markets(condition_ids=condition_ids)
-        if not markets:
-            return AuthoritativeRefreshSummary(
-                trace_id=trace_id,
-                market_count=0,
-                refreshed_markets=0,
-                refreshed_orderbooks=0,
-                refreshed_fee_rates=0,
-                refreshed_positions=0,
-                refreshed_open_orders=0,
-                refreshed_fills=0,
-                refreshed_balance=False,
-                refreshed_allowance=False,
-                user_refresh_enabled=self._trading_client is not None,
-            )
 
         market_authority_targets = self._market_authority_targets(
             markets,
@@ -226,9 +213,38 @@ class ReconcileAuthorityRefresher:
         account_summary = await self.refresh_account(trace_id=trace_id, markets=markets)
         refresh_failures.extend(account_summary.failures)
 
+        missing_exposure_targets = self._missing_account_exposure_targets(
+            existing_markets=markets,
+            condition_ids=condition_ids,
+        )
+        missing_market_refreshes = await self._refresh_market_authority_targets(missing_exposure_targets)
+        for item in missing_market_refreshes:
+            if isinstance(item, BaseException):
+                refresh_failures.append(
+                    AuthoritativeRefreshFailure(
+                        component="reconcile",
+                        operation="account_exposure_market_refresh",
+                        reason="exception",
+                        detail=str(item),
+                    )
+                )
+                continue
+            if item.refreshed_market is not None:
+                refreshed_markets += 1
+                self._apply_refreshed_market(item.refreshed_market)
+            if item.orderbook_snapshots:
+                refreshed_orderbooks += len(item.orderbook_snapshots)
+                await self._apply_refreshed_orderbooks(
+                    item.refreshed_market or item.requested_market,
+                    item.orderbook_snapshots,
+                )
+            if item.fee_rate_refreshed:
+                refreshed_fee_rates += 1
+            refresh_failures.extend(item.failures)
+
         return AuthoritativeRefreshSummary(
             trace_id=trace_id,
-            market_count=len(markets),
+            market_count=len(markets) + len(missing_exposure_targets),
             refreshed_markets=refreshed_markets,
             refreshed_orderbooks=refreshed_orderbooks,
             refreshed_fee_rates=refreshed_fee_rates,
@@ -248,15 +264,9 @@ class ReconcileAuthorityRefresher:
         markets: tuple[Market, ...],
     ) -> AuthoritativeRefreshSummary:
         failures: list[AuthoritativeRefreshFailure] = []
-        user_refresh_enabled = bool(
-            self._trading_client is not None
-            or (
-                self._data_client is not None
-                and self._clob_client is not None
-                and self._data_client.has_auth_client
-                and self._clob_client.has_auth_client
-            )
-        )
+        data_refresh_enabled = self._data_client is not None and self._data_client.has_auth_client
+        clob_refresh_enabled = self._clob_client is not None and self._clob_client.has_auth_client
+        user_refresh_enabled = bool(self._trading_client is not None or data_refresh_enabled or clob_refresh_enabled)
         if not user_refresh_enabled:
             return AuthoritativeRefreshSummary(
                 trace_id=trace_id,
@@ -290,6 +300,8 @@ class ReconcileAuthorityRefresher:
                 self._account_state_store.replace_positions(positions)
             if open_orders is not None:
                 self._account_state_store.replace_open_orders(open_orders)
+            if positions is not None or open_orders is not None:
+                self._refresh_authoritative_position_coverage()
             if fills is not None:
                 self._account_state_store.replace_fills(fills)
             if balance_refreshed or allowance_refreshed:
@@ -312,6 +324,43 @@ class ReconcileAuthorityRefresher:
             user_refresh_enabled=True,
             failures=tuple(failures),
         )
+
+    def _refresh_authoritative_position_coverage(self) -> None:
+        """用权威持仓和权威开放订单重建持仓覆盖字段。"""
+
+        if self._account_state_store is None:
+            return
+        snapshot = self._account_state_store.snapshot()
+        projector = AccountStateProjector(self._account_state_store)
+        coverage_targets: dict[tuple[str, str], str | None] = {}
+        for position in snapshot.positions:
+            coverage_targets[(position.condition_id, position.token_id)] = position.market_slug
+        for order in snapshot.open_orders:
+            coverage_targets.setdefault((order.condition_id, order.token_id), order.market_slug)
+
+        for (condition_id, token_id), market_slug in coverage_targets.items():
+            current_snapshot = self._account_state_store.snapshot()
+            current_position = current_snapshot.get_position(condition_id, token_id)
+            resolved_market_slug = (
+                current_position.market_slug
+                if current_position is not None and current_position.market_slug
+                else market_slug
+            )
+            # Data API 的持仓不携带本地挂单覆盖量；权威刷新必须把 CLOB 开放订单重新投影回 Position，
+            # 否则风控和前端会误判仍有未覆盖持仓并重复提交退出单。
+            projector.refresh_position_coverage(
+                condition_id=condition_id,
+                token_id=token_id,
+                market_slug=resolved_market_slug,
+                last_order_id=None if current_position is None else current_position.last_order_id,
+                last_trade_id=None if current_position is None else current_position.last_trade_id,
+                confirmation_status=(
+                    "authority_refresh"
+                    if current_position is None
+                    else current_position.confirmation_status
+                ),
+                updated_at=None if current_position is None else current_position.updated_at,
+            )
 
     def _target_markets(self, *, condition_ids: tuple[str, ...] | None = None) -> tuple[Market, ...]:
         condition_id_filter = set(condition_ids or ())
@@ -340,6 +389,43 @@ class ReconcileAuthorityRefresher:
             return ()
         account_snapshot = self._account_state_store.snapshot()
         return tuple(market for market in markets if _market_has_account_exposure(account_snapshot, market))
+
+    def _missing_account_exposure_targets(
+        self,
+        *,
+        existing_markets: tuple[Market, ...],
+        condition_ids: tuple[str, ...] | None,
+    ) -> tuple[Market, ...]:
+        """从账户持仓反向补齐 registry 缺失的 market。
+
+        全量扫描和 registry 是市场发现视角；账户持仓是风险管理视角。
+        只要账户里仍有敞口，reconcile 就必须能恢复 market 快照并生成退出计划。
+        """
+
+        if self._account_state_store is None:
+            return ()
+        account_snapshot = self._account_state_store.snapshot()
+        condition_id_filter = set(condition_ids or ())
+        known_condition_ids = {market.condition_id for market in existing_markets}
+        if self._registry is not None:
+            known_condition_ids.update(market.condition_id for market in self._registry.snapshot().markets)
+
+        targets: dict[str, Market] = {}
+        for condition_id, token_id, market_slug in _account_exposure_market_refs(account_snapshot):
+            if condition_id in known_condition_ids or condition_id in targets:
+                continue
+            if condition_id_filter and condition_id not in condition_id_filter:
+                continue
+            if not market_slug:
+                continue
+            targets[condition_id] = Market(
+                condition_id=condition_id,
+                market_slug=market_slug,
+                event_slug=market_slug,
+                outcomes=(MarketOutcome(token_id=token_id, outcome=""),),
+                trading_status=TradingStatus.CANDIDATE,
+            )
+        return tuple(targets.values())
 
     async def _refresh_market_authority_targets(
         self,
@@ -629,6 +715,30 @@ def _market_has_account_exposure(account_snapshot: Any, market: Market) -> bool:
         if account_snapshot.open_orders_for_market(market.condition_id, token_id):
             return True
     return False
+
+
+def _account_exposure_market_refs(account_snapshot: Any) -> tuple[tuple[str, str, str | None], ...]:
+    refs: dict[tuple[str, str], str | None] = {}
+    for position in account_snapshot.positions:
+        if (
+            position.shares <= 0
+            and position.open_buy_shares <= 0
+            and position.open_sell_shares <= 0
+            and position.pending_buy_shares <= 0
+        ):
+            continue
+        refs[(position.condition_id, position.token_id)] = position.market_slug
+    for order in account_snapshot.open_orders:
+        refs[(order.condition_id, order.token_id)] = order.market_slug or refs.get(
+            (order.condition_id, order.token_id)
+        )
+    for fill in account_snapshot.fills:
+        if fill.condition_id is None or fill.token_id is None:
+            continue
+        refs[(fill.condition_id, fill.token_id)] = fill.market_slug or refs.get(
+            (fill.condition_id, fill.token_id)
+        )
+    return tuple((condition_id, token_id, market_slug) for (condition_id, token_id), market_slug in refs.items())
 
 
 async def _await_authority(

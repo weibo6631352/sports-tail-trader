@@ -17,11 +17,12 @@ from polymarket_trader.domain.allocation import (
     current_exposure_usdc,
 )
 from polymarket_trader.domain.market import TradingStatus
+from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.extension_api import EntryCandidate, EntrySizing, ExtensionContext, ExtensionDecision
 
 from strategies.current.allocation import AllocationMarketSnapshot, equal_weight_plan
 from strategies.current.config import CurrentStrategyConfig, sports_tail_policy_from_config
-from strategies.current.exit_plan import build_exit_plan_metadata
+from strategies.current.exit_plan import build_exit_plan_metadata, exit_price_for_context
 from strategies.current.outcomes import (
     describe_sports_market,
     is_primary_token,
@@ -107,15 +108,18 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
             snapshot,
             buyable_liquidity_usdc=buyable_liquidity_usdc,
         )
-        if not skip_reason and _is_focus_snapshot(context, snapshot):
+        if not skip_reason:
             skip_reason, sports_metadata = _sports_tail_allocation_gate(
                 config,
                 context,
                 snapshot,
                 buyable_liquidity_usdc=buyable_liquidity_usdc,
             )
-            sizing_metadata.update(sports_metadata)
+            if _is_focus_snapshot(context, snapshot):
+                sizing_metadata.update(sports_metadata)
         if skip_reason:
+            if _is_focus_snapshot(context, snapshot) and "sports_tail_reason" not in sizing_metadata:
+                sizing_metadata.update(_sports_market_skip_metadata(snapshot, skip_reason))
             skipped_allocations[(snapshot.condition_id, snapshot.token_id)] = _skipped_allocation(
                 snapshot,
                 reason=skip_reason,
@@ -211,7 +215,7 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
     return ExtensionDecision.buy(
         reason="strategy_entry",
         token_id=token_id,
-        price=allowed_price,
+        price=best_ask,
         amount_usdc=amount_usdc,
         market_slug=context.market.market_slug,
         metadata=decision_metadata,
@@ -259,7 +263,7 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
     return ExtensionDecision.sell(
         reason="strategy_exit",
         token_id=token_id,
-        price=config.exit_no_price,
+        price=exit_price_for_context(config, context),
         size_shares=uncovered_shares,
         market_slug=(
             context.market.market_slug if context.market is not None else _metadata_text(context, "market_slug")
@@ -388,6 +392,14 @@ def _allocation_skip_reason(
     *,
     buyable_liquidity_usdc: Decimal,
 ) -> str:
+    if _has_open_order(snapshot, OrderSide.SELL) or (
+        snapshot.position is not None and snapshot.position.open_sell_shares > Decimal("0")
+    ):
+        return "open_exit_detected"
+    if snapshot.position is not None and snapshot.position.shares > Decimal("0"):
+        return "position_already_open"
+    if _has_open_order(snapshot, OrderSide.BUY):
+        return "open_entry_detected"
     universe_decision = select_market(config, snapshot.market)
     if not universe_decision.selected:
         return universe_decision.reason or "market_out_of_universe"
@@ -431,6 +443,12 @@ def _allocation_skip_reason(
     return ""
 
 
+def _has_open_order(snapshot: AllocationMarketSnapshot, side: OrderSide) -> bool:
+    """判断当前 token 是否已有开放订单，避免入场计划重复占仓。"""
+
+    return any(order.side == side and order.open for order in snapshot.open_orders)
+
+
 def _sports_tail_entry_gate(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
@@ -449,6 +467,16 @@ def _sports_tail_entry_gate(
     descriptor = describe_sports_market(context.market)
     if not descriptor.accepted or descriptor.market_type is None:
         return None
+    family_metadata = {"sports_market_family": descriptor.market_family.value}
+    if descriptor.market_family.value != "single_game":
+        return (
+            ExtensionDecision.skip(
+                reason=descriptor.reason,
+                metadata=family_metadata,
+            ),
+            config.entry_no_price_max,
+            family_metadata,
+        )
 
     token_id = context.token_id or context.orderbook.token_id
     target = target_for_token(context.market, token_id)
@@ -473,6 +501,7 @@ def _sports_tail_entry_gate(
             context.orderbook,
             price_cap=_sports_tail_price_cap(config, context.market, token_id),
         ),
+        market_family=descriptor.market_family,
         market_slug=context.market.market_slug,
     )
     evaluation = evaluate_tail_opportunity(
@@ -482,6 +511,7 @@ def _sports_tail_entry_gate(
         now=context.now,
     )
     metadata = _sports_tail_evaluation_metadata(evaluation)
+    metadata.update(family_metadata)
     metadata.update(_sports_tail_confirmation_metadata(context.metadata))
     if not evaluation.accepted:
         return (
@@ -532,6 +562,9 @@ def _sports_tail_allocation_gate(
     descriptor = describe_sports_market(snapshot.market)
     if not descriptor.accepted or descriptor.market_type is None:
         return "", {}
+    family_metadata = {"sports_market_family": descriptor.market_family.value}
+    if descriptor.market_family.value != "single_game":
+        return descriptor.reason, family_metadata
     target = target_for_token(snapshot.market, snapshot.token_id)
     if target is None:
         return "unsupported_sports_token", {"sports_parse_reason": descriptor.reason}
@@ -549,12 +582,14 @@ def _sports_tail_allocation_gate(
             line=descriptor.line,
             best_ask=best_ask,
             buyable_liquidity_usdc=buyable_liquidity_usdc,
+            market_family=descriptor.market_family,
             market_slug=snapshot.market_slug,
         ),
         policy=policy,
         now=context.now,
     )
     metadata = _sports_tail_evaluation_metadata(evaluation)
+    metadata.update(family_metadata)
     metadata.update(_sports_tail_confirmation_metadata(context.metadata))
     if not evaluation.accepted:
         return evaluation.reason, metadata
@@ -563,6 +598,27 @@ def _sports_tail_allocation_gate(
     if evaluation.action != TailAction.AUTO_EXECUTE:
         return f"sports_tail_{evaluation.action.value}", metadata
     return "", metadata
+
+
+def _sports_market_skip_metadata(
+    snapshot: AllocationMarketSnapshot,
+    reason: str,
+) -> dict[str, object]:
+    """把 universe / allocation 早期跳过原因补成候选可读的体育审计字段。"""
+
+    descriptor = describe_sports_market(snapshot.market)
+    metadata: dict[str, object] = {
+        "sports_tail_action": "reject",
+        "sports_tail_reason": reason,
+        "sports_market_family": descriptor.market_family.value,
+    }
+    if descriptor.market_type is not None:
+        metadata["market_type"] = descriptor.market_type.value
+    if descriptor.line is not None:
+        metadata["line"] = str(descriptor.line)
+    if snapshot.best_ask is not None:
+        metadata["best_ask"] = str(snapshot.best_ask)
+    return metadata
 
 
 def _apply_sports_risk_limits(

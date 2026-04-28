@@ -17,10 +17,12 @@ from polymarket_trader.domain.order import (
     OrderResult,
     OrderResultStatus,
     ReplaceOrderIntent,
+    SellOrderIntent,
 )
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.state_machine import MarketLifecycle
 from polymarket_trader.domain.account import AccountSnapshot, MarketPauseSource
+from polymarket_trader.extension_api import ExtensionAction, ExtensionContext, MarketTokenView
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.workers.trading_decision_event_payloads import (
@@ -345,8 +347,25 @@ class TradingDecisionWorker:
                 state_after=None,
             )
         market = self._market_fromsnapshot_position(snapshot, event.condition_id, event.token_id)
+        position = _match_position_for_event(snapshot, event)
         if market is not None:
             self._transition_market(market, MarketLifecycle.POSITION_OPEN)
+        if position is None:
+            return TradingDecisionWorkerResult(
+                entry_event=event,
+                plan=None,
+                review=None,
+                emitted_event=event,
+                state_after=self._state_for_market(market),
+            )
+
+        exit_result = await self._execute_position_exit_if_needed(
+            event=event,
+            snapshot=snapshot,
+            position=position,
+        )
+        if exit_result is not None:
+            return exit_result
         return TradingDecisionWorkerResult(
             entry_event=event,
             plan=None,
@@ -354,6 +373,119 @@ class TradingDecisionWorker:
             emitted_event=event,
             state_after=self._state_for_market(market),
         )
+
+    async def _execute_position_exit_if_needed(
+        self,
+        *,
+        event: DomainEvent,
+        snapshot: AccountSnapshot,
+        position: Position,
+    ) -> "TradingDecisionWorkerResult | None":
+        """在真实持仓更新后补齐退出保护单。
+
+        用户 WS 的成交可能晚于初次下单响应到达。此时热态里已经有持仓，但
+        同步 BUY 结果没有触发跟单 SELL；这里以 position/open_orders 为事实，
+        调策略 ``decide_exit`` 生成受控 SELL intent，仍走统一风控和执行器。
+        """
+
+        market = self._trading_decision_service.resolve_market(
+            condition_id=position.condition_id,
+            token_id=position.token_id,
+        )
+        open_orders = snapshot.open_orders_for_market(position.condition_id, position.token_id)
+        decision = self._trading_decision_service.decide_exit(
+            ExtensionContext(
+                trace_id=event.trace_id,
+                market=market,
+                token_id=position.token_id,
+                orderbook=self._trading_decision_service.lookup_orderbook(position.token_id),
+                market_token_views=tuple(
+                    MarketTokenView(
+                        token_id=outcome.token_id,
+                        outcome=outcome.outcome,
+                    )
+                    for outcome in (() if market is None else market.outcomes)
+                ),
+                account_snapshot=snapshot,
+                position=position,
+                open_orders=open_orders,
+                metadata={
+                    "exit_trigger": "position_updated",
+                    "source_event_id": event.event_id,
+                    "source_reason": event.reason,
+                },
+            )
+        )
+        if decision.action != ExtensionAction.SELL:
+            return None
+        intent = self._trading_decision_service.build_intent_from_decision(
+            trace_id=event.trace_id,
+            condition_id=position.condition_id,
+            market_slug=event.market_slug or position.market_slug or (
+                None if market is None else market.market_slug
+            ),
+            default_token_id=position.token_id,
+            decision=decision,
+        )
+        if intent is None:
+            return None
+
+        review = await self._execute_managed_intent(intent, snapshot=snapshot)
+        emitted = await self._publish(
+            DomainEventType.ORDER_SUBMITTED,
+            trace_id=intent.trace_id,
+            market_slug=intent.market_slug,
+            condition_id=intent.condition_id,
+            token_id=intent.token_id,
+            reason="" if review.order_result is None else review.order_result.reason,
+            payload={
+                "phase": "position_exit",
+                "source_event_id": event.event_id,
+                "decision_metadata": dict(decision.metadata),
+                "intent": serialize_intent(intent),
+                "review": serialize_review(review),
+            },
+        )
+        self._apply_position_exit_result(
+            review,
+            intent=intent,
+            snapshot=snapshot,
+        )
+        return TradingDecisionWorkerResult(
+            entry_event=event,
+            plan=None,
+            review=review,
+            emitted_event=emitted,
+            emitted_events=(emitted,),
+            follow_up_intents=(intent,),
+            follow_up_reviews=(review,),
+            state_after=self._state_for_market_by_key(position.condition_id),
+        )
+
+    def _apply_position_exit_result(
+        self,
+        review: TradingReviewResult,
+        *,
+        intent: ManagedOrderIntent,
+        snapshot: AccountSnapshot,
+    ) -> AccountSnapshot:
+        """把持仓触发的退出单结果投影回热态。"""
+
+        if review.order_result is None:
+            return snapshot
+        self._transition_from_order_result(review.order_result)
+        projector = self._account_projector()
+        if projector is not None and isinstance(intent, SellOrderIntent):
+            projector.apply_sell_result(
+                review.order_result,
+                snapshot=snapshot,
+                intent=intent,
+            )
+        if projector is not None:
+            projector.apply_result_flags(review.order_result, snapshot=snapshot)
+        if self._account_state_store is not None:
+            return self._account_state_store.snapshot()
+        return snapshot
 
     async def _publish(
         self,
@@ -559,3 +691,32 @@ def _match_open_orders(
         for order in open_orders
         if order.condition_id == condition_id and order.token_id == token_id
     )
+
+
+def _match_position_for_event(
+    snapshot: AccountSnapshot,
+    event: DomainEvent,
+) -> Position | None:
+    """从当前热态中找到 position update 对应的持仓。"""
+
+    if event.condition_id is not None and event.token_id is not None:
+        return snapshot.get_position(event.condition_id, event.token_id)
+    payload_position = event.payload.get("position")
+    if isinstance(payload_position, Mapping):
+        condition_id = payload_position.get("condition_id")
+        token_id = payload_position.get("token_id")
+        if condition_id is not None and token_id is not None:
+            return snapshot.get_position(str(condition_id), str(token_id))
+    payload_positions = event.payload.get("positions")
+    if isinstance(payload_positions, (list, tuple)):
+        for payload_item in payload_positions:
+            if not isinstance(payload_item, Mapping):
+                continue
+            condition_id = payload_item.get("condition_id")
+            token_id = payload_item.get("token_id")
+            if condition_id is None or token_id is None:
+                continue
+            position = snapshot.get_position(str(condition_id), str(token_id))
+            if position is not None:
+                return position
+    return None

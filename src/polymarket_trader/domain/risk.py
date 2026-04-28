@@ -186,6 +186,10 @@ class RiskManager:
         if decision is not None:
             return decision
 
+        decision = self._check_open_exit_orders(intent, checks, open_orders)
+        if decision is not None:
+            return decision
+
         return RiskDecision(
             trace_id=intent.trace_id,
             passed=True,
@@ -393,6 +397,16 @@ class RiskManager:
         max_market_usdc: Decimal | None,
         max_total_usdc: Decimal | None,
     ) -> RiskDecision | None:
+        if intent.side != OrderSide.BUY:
+            checks.append(
+                RiskCheck(
+                    name="buy_budget_gate",
+                    passed=True,
+                    field="intent.side",
+                    value={"side": intent.side.value, "budget_consuming": False},
+                )
+            )
+            return None
         if max_order_usdc is not None and notional_usdc > max_order_usdc:
             return self._fail(
                 trace_id=intent.trace_id,
@@ -498,6 +512,8 @@ class RiskManager:
                 suggested_action="reject",
                 retryable=False,
             )
+        if intent.side != OrderSide.BUY:
+            return None
         if balance_usdc is not None and notional_usdc > balance_usdc:
             return self._fail(
                 trace_id=intent.trace_id,
@@ -531,6 +547,8 @@ class RiskManager:
         notional_usdc: Decimal,
     ) -> RiskDecision | None:
         if orderbook is None:
+            return None
+        if intent.side != OrderSide.BUY:
             return None
         depth_usdc = _orderbook_depth_usdc(orderbook, price_cap=intent.price)
         if depth_usdc < notional_usdc:
@@ -572,6 +590,41 @@ class RiskManager:
                 name="open_buy_gate",
                 passed=True,
                 field="open_orders.buy",
+                value=0,
+            )
+        )
+        return None
+
+    def _check_open_exit_orders(
+        self,
+        intent: OrderIntent,
+        checks: list[RiskCheck],
+        open_orders: tuple[Order, ...],
+    ) -> RiskDecision | None:
+        # 退出卖单存在时，同 token 再次买入会把“止盈/清仓中”的仓位重新放大。
+        # 即使持仓快照暂时滞后，也必须等退出订单完成或撤销后再允许新入场。
+        if intent.side != OrderSide.BUY:
+            return None
+        open_exit_orders = _open_sell_orders_for_subject(open_orders, intent)
+        if open_exit_orders:
+            return self._fail(
+                trace_id=intent.trace_id,
+                checks=checks,
+                name="open_exit_gate",
+                reason="open_exit_detected",
+                field="open_orders.sell",
+                value=[
+                    order.order_id or order.idempotency_key or order.token_id
+                    for order in open_exit_orders
+                ],
+                suggested_action="wait_exit",
+                retryable=False,
+            )
+        checks.append(
+            RiskCheck(
+                name="open_exit_gate",
+                passed=True,
+                field="open_orders.sell",
                 value=0,
             )
         )
@@ -736,6 +789,30 @@ def _open_buy_orders_for_subject(
         if order.token_id != intent.token_id:
             continue
         if order.side != OrderSide.BUY:
+            continue
+        if order.status in {
+            OrderStatus.CANCELLED,
+            OrderStatus.REJECTED,
+            OrderStatus.FAILED,
+            OrderStatus.NO_FILL,
+            OrderStatus.MATCHED,
+        }:
+            continue
+        subject_orders.append(order)
+    return tuple(subject_orders)
+
+
+def _open_sell_orders_for_subject(
+    open_orders: tuple[Order, ...],
+    intent: OrderIntent,
+) -> tuple[Order, ...]:
+    subject_orders: list[Order] = []
+    for order in open_orders:
+        if order.condition_id != intent.condition_id:
+            continue
+        if order.token_id != intent.token_id:
+            continue
+        if order.side != OrderSide.SELL:
             continue
         if order.status in {
             OrderStatus.CANCELLED,

@@ -11,9 +11,10 @@ from decimal import Decimal, InvalidOperation
 import re
 
 from polymarket_trader.domain.market import Market
-from strategies.current.sports_tail import SportsMarketSide, SportsMarketType
+from strategies.current.sports_tail import SportsMarketFamily, SportsMarketSide, SportsMarketType
 
 _GENERIC_OUTCOMES = {"yes", "no"}
+_LINE_MARKER_PATTERN = r"(?:over|under|total(?:[\s:_/-]+games)?|spread|handicap)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +32,7 @@ class SportsMarketDescriptor:
 
     accepted: bool
     reason: str
+    market_family: SportsMarketFamily = SportsMarketFamily.UNSUPPORTED
     market_type: SportsMarketType | None = None
     line: Decimal | None = None
     targets: tuple[SportsTokenTarget, ...] = ()
@@ -68,11 +70,12 @@ def describe_sports_market(market: Market) -> SportsMarketDescriptor:
     """从 market 文本和 outcomes 中解析体育盘口类型、盘口线和方向。"""
 
     text = _market_text(market)
+    market_family = _market_family(market, text)
     market_type = _market_type(market, text)
     if market_type is None:
         return SportsMarketDescriptor(accepted=False, reason="unsupported_sports_market_type")
 
-    line = _market_line(text)
+    line = _market_line(text) if market_type in {SportsMarketType.TOTALS, SportsMarketType.SPREADS} else None
     if market_type in {SportsMarketType.TOTALS, SportsMarketType.SPREADS} and line is None:
         return SportsMarketDescriptor(accepted=False, reason="missing_market_line")
 
@@ -81,7 +84,8 @@ def describe_sports_market(market: Market) -> SportsMarketDescriptor:
         return SportsMarketDescriptor(accepted=False, reason="missing_target_token")
     return SportsMarketDescriptor(
         accepted=True,
-        reason="sports_market_selected",
+        reason=_market_family_reason(market_family),
+        market_family=market_family,
         market_type=market_type,
         line=line,
         targets=targets,
@@ -108,6 +112,65 @@ def _market_type(market: Market, text: str) -> SportsMarketType | None:
     if len(market.outcomes) >= 2:
         return SportsMarketType.MONEYLINE
     return None
+
+
+def _market_family(market: Market, text: str) -> SportsMarketFamily:
+    """按结算对象划分市场，避免把系列赛或冠军归属误当单场盘口。"""
+
+    tag_text = _normalize_text(" ".join(_non_empty(market.category, *market.tags)))
+    combined_text = f"{text} {tag_text}".strip()
+    if _contains_any(
+        combined_text,
+        (
+            "esports",
+            "e sports",
+            "honor of kings",
+            "league of legends",
+            "dota",
+            "counter strike",
+            "bo3",
+            "bo5",
+        ),
+    ):
+        return SportsMarketFamily.ESPORTS
+    series_phrases = (
+        "who will win series",
+        "win series",
+        "series winner",
+        "games o u",
+        "games ou",
+        "game handicap",
+    )
+    if _contains_any(text, series_phrases) or (
+        " total games " in f" {text} " and not _is_tennis_text(combined_text)
+    ):
+        return SportsMarketFamily.SERIES
+    if _contains_any(
+        text,
+        (
+            "championship winner",
+            "cup winner",
+            "stanley cup winner",
+            "tournament winner",
+            "winner nation",
+            "to win the",
+            "will win the",
+        ),
+    ) and not _has_matchup_marker(text):
+        return SportsMarketFamily.OUTRIGHT
+    return SportsMarketFamily.SINGLE_GAME
+
+
+def _market_family_reason(market_family: SportsMarketFamily) -> str:
+    if market_family == SportsMarketFamily.SINGLE_GAME:
+        return "sports_market_selected"
+    if market_family == SportsMarketFamily.SERIES:
+        return "series_market_not_auto_tradable"
+    if market_family == SportsMarketFamily.OUTRIGHT:
+        return "outright_market_not_auto_tradable"
+    if market_family == SportsMarketFamily.ESPORTS:
+        return "esports_market_not_auto_tradable"
+    return "unsupported_market_family"
 
 
 def _token_targets(
@@ -163,6 +226,26 @@ def _side_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
 
 
 def _market_line(text: str) -> Decimal | None:
+    point_decimal = re.search(
+        r"(?:spread|handicap)[\s:_/-]*(?:minus|negative)[\s:_/-]*(\d+)pt(\d+)(?![a-z0-9])",
+        text,
+    )
+    if point_decimal is not None:
+        try:
+            return Decimal(f"-{point_decimal.group(1)}.{point_decimal.group(2)}")
+        except InvalidOperation:
+            return None
+
+    point_decimal = re.search(
+        rf"{_LINE_MARKER_PATTERN}[\s:_/-]*([-+]?\d+)pt(\d+)(?![a-z0-9])",
+        text,
+    )
+    if point_decimal is not None:
+        try:
+            return Decimal(f"{point_decimal.group(1)}.{point_decimal.group(2)}")
+        except InvalidOperation:
+            return None
+
     hyphen_decimal = re.search(
         r"(?:spread|handicap)[\s:_/-]*(?:minus|negative)[\s:_/-]*(\d+)-(\d+)",
         text,
@@ -174,7 +257,7 @@ def _market_line(text: str) -> Decimal | None:
             return None
 
     hyphen_decimal = re.search(
-        r"(?:over|under|total|spread|handicap)[\s:_/-]*([-+]?\d+)-(\d+)",
+        rf"{_LINE_MARKER_PATTERN}[\s:_/-]*([-+]?\d+)-(\d+)",
         text,
     )
     if hyphen_decimal is not None:
@@ -184,7 +267,7 @@ def _market_line(text: str) -> Decimal | None:
             return None
 
     marker_decimal = re.search(
-        r"(?:over|under|total|spread|handicap)[\s:_/-]*([-+]?\d+(?:\.\d+)?)",
+        rf"{_LINE_MARKER_PATTERN}[\s:_/-]*([-+]?\d+(?:\.\d+)?)(?![a-z0-9])",
         text,
     )
     if marker_decimal is not None:
@@ -204,6 +287,23 @@ def _market_line(text: str) -> Decimal | None:
 
 def _has_signed_number(text: str) -> bool:
     return bool(re.search(r"(?<![a-z0-9])[-+]\d+(?:\.\d+)?(?![a-z0-9])", text))
+
+
+def _has_matchup_marker(text: str) -> bool:
+    return bool(re.search(r"(?<![a-z0-9])(?:vs|v|at)(?![a-z0-9])", text))
+
+
+def _is_tennis_text(text: str) -> bool:
+    return _contains_any(text, ("tennis", "atp", "wta"))
+
+
+def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
+    padded = f" {text} "
+    return any(f" {phrase} " in padded for phrase in phrases)
+
+
+def _non_empty(*values: str | None) -> tuple[str, ...]:
+    return tuple(value for value in values if value)
 
 
 def _market_text(market: Market) -> str:

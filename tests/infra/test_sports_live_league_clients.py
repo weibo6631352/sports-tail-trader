@@ -275,6 +275,66 @@ def test_sofascore_parser_normalizes_finished_baseball_game_without_clock() -> N
     assert game.seconds_remaining is None
 
 
+def test_sofascore_parser_preserves_tennis_live_state() -> None:
+    games = parse_sofascore_events_payload(
+        {
+            "events": [
+                {
+                    "id": 16078142,
+                    "slug": "rada-zolotareva-despina-papamichail",
+                    "status": {"code": 9, "description": "2nd set", "type": "inprogress"},
+                    "tournament": {
+                        "name": "Huzhou, China",
+                        "slug": "huzhou-china",
+                        "uniqueTournament": {
+                            "name": "WTA 125K Huzhou, China Women Singles",
+                            "slug": "wta-125k-huzhou-china-women-singles",
+                        },
+                    },
+                    "homeTeam": {"name": "Rada Zolotareva", "shortName": "R. Zolotareva"},
+                    "awayTeam": {"name": "Despina Papamichail", "shortName": "D. Papamichail"},
+                    "homeScore": {
+                        "current": 0,
+                        "display": 0,
+                        "period1": 4,
+                        "period2": 0,
+                        "point": "15",
+                    },
+                    "awayScore": {
+                        "current": 1,
+                        "display": 1,
+                        "period1": 6,
+                        "period2": 0,
+                        "point": "0",
+                    },
+                }
+            ]
+        },
+        sport="tennis",
+        league_codes=("tennis",),
+        observed_at=datetime(2026, 4, 28, 7, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(games) == 1
+    game = games[0]
+    assert game.source == "sofascore"
+    assert game.league == "WTA 125K Huzhou, China Women Singles"
+    assert game.status == SportsLiveGameStatus.LIVE
+    assert game.period == "S2"
+    assert game.seconds_remaining is None
+    assert game.home.score == 0
+    assert game.away.score == 1
+    tennis_state = game.source_payload["tennis_state"]
+    assert tennis_state["current_set"] == 2
+    assert tennis_state["home_sets_won"] == 0
+    assert tennis_state["away_sets_won"] == 1
+    assert tennis_state["home_total_games"] == 4
+    assert tennis_state["away_total_games"] == 6
+    assert tennis_state["total_games"] == 10
+    assert tennis_state["set_scores"] == ((4, 6), (0, 0))
+    assert tennis_state["home_point"] == "15"
+
+
 def test_thesportsdb_parser_normalizes_filtered_nhl_live_game() -> None:
     games = parse_thesportsdb_events_payload(
         {

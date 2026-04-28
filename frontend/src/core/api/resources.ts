@@ -22,6 +22,8 @@ import type {
   RuntimePayload,
   SportsLiveStateRecord,
   TradeReplayRecord,
+  VirtualPaperTradeRequest,
+  VirtualPaperTradeResult,
   WorkersPayload,
 } from './types'
 
@@ -71,4 +73,6 @@ export const adminApi = {
     apiClient.get<PageResponse<OutboxEventRecord>>(`/outbox/pending${buildSearch(params)}`),
   reconcile: (payload: { trace_id?: string; condition_ids: string[] }) =>
     apiClient.post<ReconcileResult>('/operations/reconcile', payload),
+  runVirtualPaperTrade: (payload: VirtualPaperTradeRequest) =>
+    apiClient.post<VirtualPaperTradeResult>('/operations/virtual-paper-trade', payload),
 }

@@ -535,33 +535,47 @@ class OrderRepository(BaseRepository):
             _row_dict(OrderModel.from_domain(order, raw_payload=payload))
             for order, payload in zip(orders, payloads, strict=False)
         ]
-        return await self._bulk_upsert(
-            OrderModel,
-            rows,
-            conflict_columns=("order_key",),
-            update_columns=(
-                "trace_id",
-                "condition_id",
-                "token_id",
-                "market_slug",
-                "side",
-                "order_type",
-                "price",
-                "amount_usdc",
-                "size_shares",
-                "filled_shares",
-                "remaining_shares",
-                "notional_usdc",
-                "order_id",
-                "trade_id",
-                "status",
-                "idempotency_key",
-                "reason",
-                "post_only",
-                "raw_payload",
-                "updated_at",
-            ),
+        # 交易所订单号出现后，它就是订单快照的权威身份；本地 idempotency/trace 只用于
+        # 订单未提交前的暂态记录，避免同一 exchange order 在重放时撞上 order_id 唯一约束。
+        exchange_rows = tuple(row for row in rows if row.get("order_id"))
+        local_rows = tuple(row for row in rows if not row.get("order_id"))
+        update_columns = (
+            "order_key",
+            "trace_id",
+            "condition_id",
+            "token_id",
+            "market_slug",
+            "side",
+            "order_type",
+            "price",
+            "amount_usdc",
+            "size_shares",
+            "filled_shares",
+            "remaining_shares",
+            "notional_usdc",
+            "order_id",
+            "trade_id",
+            "status",
+            "idempotency_key",
+            "reason",
+            "post_only",
+            "raw_payload",
+            "updated_at",
         )
+        total = 0
+        total += await self._bulk_upsert(
+            OrderModel,
+            exchange_rows,
+            conflict_columns=("order_id",),
+            update_columns=update_columns,
+        )
+        total += await self._bulk_upsert(
+            OrderModel,
+            local_rows,
+            conflict_columns=("order_key",),
+            update_columns=update_columns,
+        )
+        return total
 
     async def get_order(self, order_id: str) -> Order | None:
         row = await self._session.scalar(select(OrderModel).where(OrderModel.order_id == order_id))

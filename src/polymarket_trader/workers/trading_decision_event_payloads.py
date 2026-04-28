@@ -184,9 +184,15 @@ def serialize_order_result(order_result: OrderResult | None) -> dict[str, object
 
 def coerce_order_result_from_event(event: DomainEvent) -> OrderResult | None:
     payload = dict(event.payload)
+    if payload.get("skip_trading_decision_order_result"):
+        return None
+
     order_result_payload = payload.get("order_result")
     if isinstance(order_result_payload, Mapping):
         payload = {**payload, **dict(order_result_payload)}
+    else:
+        payload = _merge_nested_order_payload(payload)
+
     status_value = payload.get("status") or payload.get("order_status")
     if status_value is None and event.event_type not in {
         DomainEventType.ORDER_MATCHED,
@@ -211,16 +217,82 @@ def coerce_order_result_from_event(event: DomainEvent) -> OrderResult | None:
         side=coerce_side(payload.get("side")),
         order_type=coerce_order_type(payload.get("order_type")),
         price=decimal_or_none(payload.get("price")),
-        requested_amount_usdc=decimal_or_none(payload.get("requested_amount_usdc")),
-        requested_size_shares=decimal_or_none(payload.get("requested_size_shares")),
-        matched_shares=decimal_or_none(payload.get("matched_shares")) or Decimal("0"),
+        requested_amount_usdc=decimal_or_none(
+            payload.get("requested_amount_usdc") or payload.get("amount_usdc")
+        ),
+        requested_size_shares=decimal_or_none(
+            payload.get("requested_size_shares") or payload.get("size_shares")
+        ),
+        matched_shares=decimal_or_none(
+            payload.get("matched_shares")
+            or payload.get("filled_shares")
+            or payload.get("fill_size")
+        ) or Decimal("0"),
         remaining_shares=decimal_or_none(payload.get("remaining_shares")) or Decimal("0"),
-        spent_usdc=decimal_or_none(payload.get("spent_usdc")) or Decimal("0"),
-        notional_usdc=decimal_or_none(payload.get("notional_usdc")) or Decimal("0"),
+        spent_usdc=decimal_or_none(payload.get("spent_usdc") or payload.get("fill_notional_usdc")) or Decimal("0"),
+        notional_usdc=decimal_or_none(
+            payload.get("notional_usdc")
+            or payload.get("fill_notional_usdc")
+        ) or Decimal("0"),
         reason=str(payload.get("reason", event.reason or "")),
         retryable=bool(payload.get("retryable", False)),
         raw_response_summary=payload.get("raw_response_summary"),
     )
+
+
+def _merge_nested_order_payload(payload: dict[str, object]) -> dict[str, object]:
+    """把用户 WS 的 nested order/fill 事件规范成 OrderResult 字段。
+
+    用户 WS 投影事件通常把订单和成交分别放在 ``order`` / ``fill`` 中；
+    交易 worker 只消费框架内部 ``OrderResult`` 语义，所以这里在 worker
+    边界做一次 DTO 规整，避免策略或 app 层理解外部 payload 结构。
+    """
+
+    order_payload = payload.get("order")
+    fill_payload = payload.get("fill")
+    merged = dict(payload)
+    if isinstance(order_payload, Mapping):
+        order = dict(order_payload)
+        merged.update(
+            {
+                "trace_id": order.get("trace_id") or merged.get("trace_id"),
+                "condition_id": order.get("condition_id") or merged.get("condition_id"),
+                "token_id": order.get("token_id") or merged.get("token_id"),
+                "market_slug": order.get("market_slug") or merged.get("market_slug"),
+                "side": order.get("side") or merged.get("side"),
+                "order_type": order.get("order_type") or merged.get("order_type"),
+                "price": order.get("price") or merged.get("price"),
+                "amount_usdc": order.get("amount_usdc") or merged.get("amount_usdc"),
+                "size_shares": order.get("size_shares") or merged.get("size_shares"),
+                "filled_shares": order.get("filled_shares") or merged.get("filled_shares"),
+                "remaining_shares": order.get("remaining_shares") or merged.get("remaining_shares"),
+                "notional_usdc": order.get("notional_usdc") or merged.get("notional_usdc"),
+                "order_id": order.get("order_id") or merged.get("order_id"),
+                "trade_id": order.get("trade_id") or merged.get("trade_id"),
+                "status": order.get("status") or merged.get("status"),
+                "idempotency_key": order.get("idempotency_key") or merged.get("idempotency_key"),
+                "reason": order.get("reason") or merged.get("reason"),
+            }
+        )
+    if isinstance(fill_payload, Mapping):
+        fill = dict(fill_payload)
+        merged.update(
+            {
+                "trace_id": fill.get("trace_id") or merged.get("trace_id"),
+                "condition_id": fill.get("condition_id") or merged.get("condition_id"),
+                "token_id": fill.get("token_id") or merged.get("token_id"),
+                "market_slug": fill.get("market_slug") or merged.get("market_slug"),
+                "side": fill.get("side") or merged.get("side"),
+                "price": fill.get("price") or merged.get("price"),
+                "fill_size": fill.get("size") or fill.get("filled_size") or merged.get("fill_size"),
+                "fill_notional_usdc": fill.get("notional_usdc") or fill.get("amount") or merged.get("fill_notional_usdc"),
+                "order_id": fill.get("order_id") or merged.get("order_id"),
+                "trade_id": fill.get("trade_id") or merged.get("trade_id"),
+                "status": fill.get("status") or merged.get("status"),
+                "reason": fill.get("reason") or merged.get("reason"),
+            }
+        )
+    return merged
 
 
 def coerce_status(
@@ -230,6 +302,36 @@ def coerce_status(
     if isinstance(status_value, OrderResultStatus):
         return status_value
     if isinstance(status_value, str):
+        text = status_value.strip().lower().replace("-", "_").replace(" ", "_")
+        mapping = {
+            "full_fill": OrderResultStatus.FULL_FILL,
+            "full": OrderResultStatus.FULL_FILL,
+            "filled": OrderResultStatus.FULL_FILL,
+            "matched": OrderResultStatus.FULL_FILL,
+            "match": OrderResultStatus.FULL_FILL,
+            "confirmed": OrderResultStatus.FULL_FILL,
+            "mined": OrderResultStatus.FULL_FILL,
+            "partial_fill": OrderResultStatus.PARTIAL_FILL,
+            "partial": OrderResultStatus.PARTIAL_FILL,
+            "partially_filled": OrderResultStatus.PARTIAL_FILL,
+            "no_fill": OrderResultStatus.NO_FILL,
+            "nofill": OrderResultStatus.NO_FILL,
+            "live": OrderResultStatus.LIVE,
+            "resting": OrderResultStatus.LIVE,
+            "open_live": OrderResultStatus.LIVE,
+            "submitted": OrderResultStatus.LIVE,
+            "signed": OrderResultStatus.LIVE,
+            "created": OrderResultStatus.LIVE,
+            "cancelled": OrderResultStatus.CANCELLED,
+            "canceled": OrderResultStatus.CANCELLED,
+            "rejected": OrderResultStatus.REJECTED,
+            "failed": OrderResultStatus.FAILED,
+            "error": OrderResultStatus.FAILED,
+            "unknown_timeout": OrderResultStatus.UNKNOWN_TIMEOUT,
+            "timeout": OrderResultStatus.UNKNOWN_TIMEOUT,
+        }
+        if text in mapping:
+            return mapping[text]
         try:
             return OrderResultStatus(status_value)
         except ValueError:
@@ -256,7 +358,7 @@ def coerce_side(value: object | None) -> OrderSide | None:
     try:
         if isinstance(value, OrderSide):
             return value
-        return OrderSide(str(value))
+        return OrderSide(str(value).strip().upper())
     except Exception:
         return None
 
@@ -267,7 +369,7 @@ def coerce_order_type(value: object | None) -> OrderType | None:
     try:
         if isinstance(value, OrderType):
             return value
-        return OrderType(str(value))
+        return OrderType(str(value).strip().upper())
     except Exception:
         return None
 

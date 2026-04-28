@@ -25,7 +25,11 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import SportsLiveGame
 
 from strategies.current.config import CurrentStrategyConfig, load_current_strategy_config
-from strategies.current.exit_plan import build_exit_plan_metadata
+from strategies.current.discovery import (
+    build_configured_discovery_queries,
+    build_live_game_discovery_queries,
+)
+from strategies.current.exit_plan import build_exit_plan_metadata, exit_price_for_context
 from strategies.current.live_state import sports_live_metadata_match
 from strategies.current.recovery import decide_recovery
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
@@ -114,34 +118,15 @@ class CurrentStrategy:
     def discovery_queries(self) -> tuple[DiscoveryQuery, ...]:
         """返回当前策略希望远端 discovery 使用的粗筛查询。"""
 
-        title_searches = tuple(
-            title_search.strip()
-            for title_search in self._config.discovery_title_searches
-            if title_search.strip()
-        )
-        tag_slugs = tuple(
-            tag_slug.strip()
-            for tag_slug in self._config.discovery_tag_slugs
-            if tag_slug.strip()
-        )
-        if not tag_slugs:
-            return tuple(DiscoveryQuery.title_search(title_search) for title_search in title_searches)
-        if not title_searches:
-            return tuple(
-                DiscoveryQuery(
-                    name=f"tag_slug:{tag_slug}",
-                    params={"tag_slug": tag_slug},
-                )
-                for tag_slug in tag_slugs
-            )
-        return tuple(
-            DiscoveryQuery(
-                name=f"title_search:{title_search}|tag_slug:{tag_slug}",
-                params={"title_search": title_search, "tag_slug": tag_slug},
-            )
-            for title_search in title_searches
-            for tag_slug in tag_slugs
-        )
+        return build_configured_discovery_queries(self._config)
+
+    def discovery_queries_for_live_games(
+        self,
+        games: tuple[SportsLiveGame, ...],
+    ) -> tuple[DiscoveryQuery, ...]:
+        """用直播源里的真实比赛补充高意图 market discovery 查询。"""
+
+        return build_live_game_discovery_queries(self._config, games)
 
     def size_entry(self, context: ExtensionContext) -> EntrySizing:
         """为当前 market 生成入场预算分配结果。"""
@@ -176,7 +161,7 @@ class CurrentStrategy:
             ExtensionDecision.sell(
                 reason="strategy_exit",
                 token_id=context.order_result.token_id,
-                price=self._config.exit_no_price,
+                price=exit_price_for_context(self._config, context),
                 size_shares=context.order_result.matched_shares,
                 market_slug=context.order_result.market_slug or (
                     context.market.market_slug if context.market is not None else None

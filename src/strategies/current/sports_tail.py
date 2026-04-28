@@ -22,6 +22,16 @@ class SportsMarketType(StrEnum):
     SPREADS = "spreads"
 
 
+class SportsMarketFamily(StrEnum):
+    """体育扫尾按结算语义划分的市场家族。"""
+
+    SINGLE_GAME = "single_game"
+    SERIES = "series"
+    OUTRIGHT = "outright"
+    ESPORTS = "esports"
+    UNSUPPORTED = "unsupported"
+
+
 class SportsMarketSide(StrEnum):
     """体育盘口方向。"""
 
@@ -81,11 +91,21 @@ class TailRejectReason(StrEnum):
     INSUFFICIENT_SAFETY_MARGIN = "insufficient_safety_margin"
     UNSUPPORTED_MARKET_TYPE = "unsupported_market_type"
     UNSUPPORTED_MARKET_SIDE = "unsupported_market_side"
+    SERIES_MARKET_NOT_AUTO_TRADABLE = "series_market_not_auto_tradable"
+    OUTRIGHT_MARKET_NOT_AUTO_TRADABLE = "outright_market_not_auto_tradable"
+    ESPORTS_MARKET_NOT_AUTO_TRADABLE = "esports_market_not_auto_tradable"
+    UNSUPPORTED_MARKET_FAMILY = "unsupported_market_family"
     LIVE_SOURCE_CONFLICT = "live_source_conflict"
     MISSING_BASEBALL_STATE = "missing_baseball_state"
     BASEBALL_NOT_LATE_ENOUGH = "baseball_not_late_enough"
     BASEBALL_THREAT_ON_BASE = "baseball_threat_on_base"
     BASEBALL_OFFENSE_NOT_TRAILING = "baseball_offense_not_trailing"
+    MISSING_TENNIS_STATE = "missing_tennis_state"
+    TENNIS_NOT_LATE_ENOUGH = "tennis_not_late_enough"
+    TENNIS_TOTALS_UNDER_NOT_SUPPORTED = "tennis_totals_under_not_supported"
+    TENNIS_SET_WINNER_NOT_SUPPORTED = "tennis_set_winner_not_supported"
+    TENNIS_TOTAL_SCOPE_UNSUPPORTED = "tennis_total_scope_unsupported"
+    TENNIS_SPREADS_NOT_SUPPORTED = "tennis_spreads_not_supported"
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +118,46 @@ class BaseballGameState:
     offense_team: str | None = None
     defense_team: str | None = None
     occupied_bases: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TennisGameState:
+    """策略评估网球扫尾所需的盘分、局分和即时分状态。"""
+
+    home_sets_won: int = 0
+    away_sets_won: int = 0
+    current_set: int | None = None
+    home_current_set_games: int | None = None
+    away_current_set_games: int | None = None
+    home_total_games: int = 0
+    away_total_games: int = 0
+    set_scores: tuple[tuple[int, int], ...] = ()
+    home_point: str | None = None
+    away_point: str | None = None
+
+    @property
+    def total_games(self) -> int:
+        """返回当前已完成和正在进行的总局数。"""
+
+        return self.home_total_games + self.away_total_games
+
+    def sets_won_for(self, side: SportsMarketSide) -> int:
+        """返回指定方向已赢盘数。"""
+
+        if side == SportsMarketSide.HOME:
+            return self.home_sets_won
+        if side == SportsMarketSide.AWAY:
+            return self.away_sets_won
+        return 0
+
+    def current_set_games_for(self, side: SportsMarketSide) -> int | None:
+        """返回指定方向当前盘局数。"""
+
+        if side == SportsMarketSide.HOME:
+            return self.home_current_set_games
+        if side == SportsMarketSide.AWAY:
+            return self.away_current_set_games
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +175,7 @@ class LiveGameState:
     observed_at: datetime | None = None
     source_conflicts: tuple[Mapping[str, Any], ...] = ()
     baseball_state: BaseballGameState | None = None
+    tennis_state: TennisGameState | None = None
 
     @property
     def total_score(self) -> int:
@@ -149,6 +210,7 @@ class SportsTailPolicy:
     spreads_max_entry_price: Decimal = Decimal("0.96")
     min_liquidity_usdc: Decimal = Decimal("5")
     max_game_state_age_seconds: int = 10
+    tennis_max_game_state_age_seconds: int = 35
     max_under_seconds_remaining: int = 30
     max_moneyline_seconds_remaining: int = 180
     max_spreads_seconds_remaining: int = 120
@@ -167,6 +229,7 @@ class SportsMarketSnapshot:
     line: Decimal | None
     best_ask: Decimal | None
     buyable_liquidity_usdc: Decimal
+    market_family: SportsMarketFamily = SportsMarketFamily.SINGLE_GAME
     market_slug: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
@@ -227,6 +290,7 @@ def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState 
         observed_at=observed_at,
         source_conflicts=_source_conflicts(raw_game.get("source_conflicts")),
         baseball_state=_baseball_state(raw_game.get("baseball_state")),
+        tennis_state=_tennis_state(raw_game.get("tennis_state")),
     )
 
 
@@ -238,6 +302,20 @@ def evaluate_tail_opportunity(
     now: datetime | None = None,
 ) -> SportsTailEvaluation:
     """评估体育盘口是否构成扫尾机会。"""
+
+    family_reject_reason = _market_family_reject_reason(market.market_family)
+    if family_reject_reason is not None:
+        return _reject(
+            None,
+            family_reject_reason.value,
+            metadata={
+                "market_family": market.market_family.value,
+                "market_type": market.market_type.value,
+                "side": market.side.value,
+                "line": str(market.line) if market.line is not None else None,
+                "best_ask": str(market.best_ask) if market.best_ask is not None else None,
+            },
+        )
 
     if game is None:
         return _reject(None, TailRejectReason.MISSING_LIVE_GAME_STATE.value)
@@ -259,6 +337,15 @@ def evaluate_tail_opportunity(
     if _is_nfl_game(game):
         return _evaluate_nfl_manual_review(candidate, policy)
 
+    if _is_tennis_game(game):
+        if market.market_type == SportsMarketType.TOTALS:
+            return _evaluate_tennis_totals(candidate, policy)
+        if market.market_type == SportsMarketType.MONEYLINE:
+            return _evaluate_tennis_moneyline(candidate, policy)
+        if market.market_type == SportsMarketType.SPREADS:
+            return _reject(candidate, TailRejectReason.TENNIS_SPREADS_NOT_SUPPORTED.value)
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+
     if market.market_type == SportsMarketType.TOTALS:
         return _evaluate_totals(candidate, policy)
     if market.market_type == SportsMarketType.MONEYLINE:
@@ -274,6 +361,7 @@ def _candidate(game: LiveGameState, market: SportsMarketSnapshot) -> SportsTailC
         market=market,
         reason="sports_tail_candidate",
         metadata={
+            "market_family": market.market_family.value,
             "market_type": market.market_type.value,
             "side": market.side.value,
             "line": str(market.line) if market.line is not None else None,
@@ -288,6 +376,19 @@ def _candidate(game: LiveGameState, market: SportsMarketSnapshot) -> SportsTailC
                 "offense_team": game.baseball_state.offense_team,
                 "defense_team": game.baseball_state.defense_team,
                 "occupied_bases": game.baseball_state.occupied_bases,
+            },
+            "tennis_state": None if game.tennis_state is None else {
+                "home_sets_won": game.tennis_state.home_sets_won,
+                "away_sets_won": game.tennis_state.away_sets_won,
+                "current_set": game.tennis_state.current_set,
+                "home_current_set_games": game.tennis_state.home_current_set_games,
+                "away_current_set_games": game.tennis_state.away_current_set_games,
+                "home_total_games": game.tennis_state.home_total_games,
+                "away_total_games": game.tennis_state.away_total_games,
+                "total_games": game.tennis_state.total_games,
+                "set_scores": game.tennis_state.set_scores,
+                "home_point": game.tennis_state.home_point,
+                "away_point": game.tennis_state.away_point,
             },
         },
     )
@@ -450,6 +551,94 @@ def _evaluate_nfl_manual_review(
     return _accept(candidate, "nfl_requires_manual_review", ExecutionPermission.MANUAL_CONFIRM)
 
 
+def _evaluate_tennis_totals(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    """评估网球 totals 盘口。
+
+    网球 totals 至少分为整场总局数和总盘数两类。这里先按 market slug 区分
+    结算对象，避免把 ``set-totals-2.5`` 错当成整场总局数。
+    """
+
+    market = candidate.market
+    state = candidate.game.tennis_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
+    if market.line is None:
+        return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+    if market.side == SportsMarketSide.UNDER:
+        return _reject(candidate, TailRejectReason.TENNIS_TOTALS_UNDER_NOT_SUPPORTED.value)
+    if market.side != SportsMarketSide.OVER:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    total_scope = _tennis_total_scope(market)
+    if total_scope == "match_games" and Decimal(state.total_games) > market.line:
+        return _accept(candidate, "tennis_totals_over_locked", policy.totals_execution_permission)
+    if total_scope == "sets" and _tennis_sets_total_is_over(state, market.line):
+        return _accept(candidate, "tennis_set_totals_over_locked", policy.totals_execution_permission)
+    if total_scope == "unsupported":
+        return _reject(candidate, TailRejectReason.TENNIS_TOTAL_SCOPE_UNSUPPORTED.value)
+    return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
+
+
+def _evaluate_tennis_moneyline(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    """评估网球胜负线的临近锁定场景。
+
+    网球没有固定倒计时，因此只使用“已领先盘数 + 当前盘接近拿下”的结构化状态。
+    这比按页面价格或普通比分硬推更保守，也便于后续用回放校准阈值。
+    """
+
+    market = candidate.market
+    state = candidate.game.tennis_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
+    if _is_tennis_set_winner_market(market):
+        return _evaluate_tennis_set_winner(candidate, policy)
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    side_games = state.current_set_games_for(market.side)
+    other_side = SportsMarketSide.AWAY if market.side == SportsMarketSide.HOME else SportsMarketSide.HOME
+    other_games = state.current_set_games_for(other_side)
+    if side_games is None or other_games is None:
+        return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
+    game_lead = side_games - other_games
+    set_lead = state.sets_won_for(market.side) - state.sets_won_for(other_side)
+    if side_games >= 5 and game_lead >= 2 and set_lead >= 0:
+        return _accept(candidate, "tennis_moneyline_near_locked", policy.moneyline_execution_permission)
+    return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
+
+
+def _evaluate_tennis_set_winner(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    """用 SofaScore 每盘局分判断 set winner 盘口是否已经锁定。"""
+
+    market = candidate.market
+    state = candidate.game.tennis_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    set_number = _tennis_set_winner_number(market)
+    if set_number is None or not state.set_scores:
+        return _reject(candidate, TailRejectReason.TENNIS_SET_WINNER_NOT_SUPPORTED.value)
+    if state.current_set is not None and state.current_set <= set_number:
+        return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
+    if len(state.set_scores) < set_number:
+        return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
+
+    home_games, away_games = state.set_scores[set_number - 1]
+    side_games = home_games if market.side == SportsMarketSide.HOME else away_games
+    other_games = away_games if market.side == SportsMarketSide.HOME else home_games
+    if side_games > other_games:
+        return _accept(candidate, "tennis_set_winner_locked", policy.moneyline_execution_permission)
+    return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+
 def _accept(
     candidate: SportsTailCandidate,
     reason: str,
@@ -468,6 +657,8 @@ def _accept(
 def _reject(
     candidate: SportsTailCandidate | None,
     reason: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
 ) -> SportsTailEvaluation:
     return SportsTailEvaluation(
         accepted=False,
@@ -475,7 +666,7 @@ def _reject(
         reason=reason,
         candidate=candidate,
         execution_permission=None,
-        metadata={} if candidate is None else candidate.metadata,
+        metadata=dict(metadata or {}) if candidate is None else candidate.metadata,
     )
 
 
@@ -499,6 +690,18 @@ def _max_entry_price(market_type: SportsMarketType, policy: SportsTailPolicy) ->
     return Decimal("0")
 
 
+def _market_family_reject_reason(market_family: SportsMarketFamily) -> TailRejectReason | None:
+    if market_family == SportsMarketFamily.SINGLE_GAME:
+        return None
+    if market_family == SportsMarketFamily.SERIES:
+        return TailRejectReason.SERIES_MARKET_NOT_AUTO_TRADABLE
+    if market_family == SportsMarketFamily.OUTRIGHT:
+        return TailRejectReason.OUTRIGHT_MARKET_NOT_AUTO_TRADABLE
+    if market_family == SportsMarketFamily.ESPORTS:
+        return TailRejectReason.ESPORTS_MARKET_NOT_AUTO_TRADABLE
+    return TailRejectReason.UNSUPPORTED_MARKET_FAMILY
+
+
 def _is_stale(
     game: LiveGameState,
     policy: SportsTailPolicy,
@@ -512,7 +715,12 @@ def _is_stale(
     if observed_at.tzinfo is None:
         observed_at = observed_at.replace(tzinfo=timezone.utc)
     age_seconds = (current_time - observed_at).total_seconds()
-    return age_seconds > policy.max_game_state_age_seconds
+    max_age_seconds = (
+        policy.tennis_max_game_state_age_seconds
+        if _is_tennis_game(game)
+        else policy.max_game_state_age_seconds
+    )
+    return age_seconds > max_age_seconds
 
 
 def _is_mlb_game(game: LiveGameState) -> bool:
@@ -521,6 +729,59 @@ def _is_mlb_game(game: LiveGameState) -> bool:
 
 def _is_nfl_game(game: LiveGameState) -> bool:
     return game.league.strip().lower() in {"nfl", "american football"}
+
+
+def _is_tennis_game(game: LiveGameState) -> bool:
+    league = game.league.strip().lower()
+    return game.tennis_state is not None or "tennis" in league or league in {"atp", "wta"}
+
+
+def _tennis_total_scope(market: SportsMarketSnapshot) -> str:
+    """识别网球 totals 盘口的结算范围。"""
+
+    text = _normalized_market_slug(market)
+    if "set total" in text or "set totals" in text or "total sets" in text:
+        return "sets"
+    if "match total" in text or "total games" in text:
+        return "match_games"
+    if market.line is not None and market.line <= Decimal("5"):
+        return "unsupported"
+    return "match_games"
+
+
+def _tennis_sets_total_is_over(state: TennisGameState, line: Decimal | None) -> bool:
+    if line is None:
+        return False
+    completed_sets = state.home_sets_won + state.away_sets_won
+    if Decimal(completed_sets) > line:
+        return True
+    if state.current_set is None:
+        return False
+    return Decimal(state.current_set) > line
+
+
+def _is_tennis_set_winner_market(market: SportsMarketSnapshot) -> bool:
+    """识别网球单盘胜者盘口。"""
+
+    text = _normalized_market_slug(market)
+    return "set winner" in text or "first set winner" in text
+
+
+def _tennis_set_winner_number(market: SportsMarketSnapshot) -> int | None:
+    """从 market slug 识别第几盘胜者盘口。"""
+
+    text = _normalized_market_slug(market)
+    if "first set winner" in text or "1st set winner" in text or "set 1 winner" in text:
+        return 1
+    if "second set winner" in text or "2nd set winner" in text or "set 2 winner" in text:
+        return 2
+    if "third set winner" in text or "3rd set winner" in text or "set 3 winner" in text:
+        return 3
+    return None
+
+
+def _normalized_market_slug(market: SportsMarketSnapshot) -> str:
+    return (market.market_slug or "").strip().lower().replace("_", " ").replace("-", " ")
 
 
 def _mlb_side_tail_reject_reason(
@@ -629,6 +890,46 @@ def _baseball_state(value: object) -> BaseballGameState | None:
         defense_team=None if value.get("defense_team") is None else str(value.get("defense_team")),
         occupied_bases=occupied_bases,
     )
+
+
+def _tennis_state(value: object) -> TennisGameState | None:
+    if isinstance(value, TennisGameState):
+        return value
+    if not isinstance(value, Mapping):
+        return None
+    return TennisGameState(
+        home_sets_won=_optional_int(value.get("home_sets_won")) or 0,
+        away_sets_won=_optional_int(value.get("away_sets_won")) or 0,
+        current_set=_optional_int(value.get("current_set")),
+        home_current_set_games=_optional_int(value.get("home_current_set_games")),
+        away_current_set_games=_optional_int(value.get("away_current_set_games")),
+        home_total_games=_optional_int(value.get("home_total_games")) or 0,
+        away_total_games=_optional_int(value.get("away_total_games")) or 0,
+        set_scores=_tennis_set_scores(value.get("set_scores")),
+        home_point=None if value.get("home_point") is None else str(value.get("home_point")),
+        away_point=None if value.get("away_point") is None else str(value.get("away_point")),
+    )
+
+
+def _tennis_set_scores(value: object) -> tuple[tuple[int, int], ...]:
+    """解析直播源透传的每盘局分。"""
+
+    if not isinstance(value, (tuple, list)):
+        return ()
+    scores: list[tuple[int, int]] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            home_games = _optional_int(item.get("home"))
+            away_games = _optional_int(item.get("away"))
+        elif isinstance(item, (tuple, list)) and len(item) >= 2:
+            home_games = _optional_int(item[0])
+            away_games = _optional_int(item[1])
+        else:
+            continue
+        if home_games is None or away_games is None:
+            continue
+        scores.append((home_games, away_games))
+    return tuple(scores)
 
 
 def _datetime_value(value: object) -> datetime | None:

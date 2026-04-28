@@ -89,7 +89,7 @@ class SofaScoreLiveClient:
         league_codes: Sequence[str] = ("nba", "nhl", "nfl", "mlb"),
         client: httpx.AsyncClient | None = None,
         timeout_s: float = 5.0,
-        min_fetch_interval_s: float = 60.0,
+        min_fetch_interval_s: float = 20.0,
         max_stale_on_error_s: float = 300.0,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
@@ -272,6 +272,7 @@ def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datet
     status = _map_status(status_mapping)
     raw_status = first_text(status_mapping, "description", "type") or ""
     tournament = _tournament_payload(raw_event)
+    tennis_state = _tennis_state_from_payload(raw_event, raw_status=raw_status) if sport == "tennis" else None
     return SportsLiveGame(
         source="sofascore",
         source_event_id=str(raw_event.get("id") or raw_event.get("customId") or ""),
@@ -293,6 +294,7 @@ def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datet
             "start_timestamp": raw_event.get("startTimestamp"),
             "tournament": tournament.get("name"),
             "tournament_slug": tournament.get("slug"),
+            "tennis_state": tennis_state,
         },
     )
 
@@ -321,6 +323,84 @@ def _score_value(payload: Mapping[str, Any]) -> int:
     if value is None:
         value = int_value(payload.get("display"))
     return value or 0
+
+
+def _tennis_state_from_payload(raw_event: Mapping[str, Any], *, raw_status: str) -> dict[str, Any]:
+    """提取网球当前盘分和总局数，供策略层做尾盘判断。
+
+    SofaScore 的 ``current`` 表示已赢盘数，``periodN`` 表示每盘局数，
+    ``point`` 表示当前局即时分。这里不推断赛制，只提供结构化事实。
+    """
+
+    home_score = raw_event.get("homeScore")
+    away_score = raw_event.get("awayScore")
+    home_mapping = home_score if isinstance(home_score, Mapping) else {}
+    away_mapping = away_score if isinstance(away_score, Mapping) else {}
+    current_set = _tennis_current_set(raw_status, home_mapping, away_mapping)
+    home_current_games = _period_score(home_mapping, current_set)
+    away_current_games = _period_score(away_mapping, current_set)
+    home_total_games = _period_total(home_mapping)
+    away_total_games = _period_total(away_mapping)
+    return {
+        "home_sets_won": _score_value(home_mapping),
+        "away_sets_won": _score_value(away_mapping),
+        "current_set": current_set,
+        "home_current_set_games": home_current_games,
+        "away_current_set_games": away_current_games,
+        "home_total_games": home_total_games,
+        "away_total_games": away_total_games,
+        "total_games": home_total_games + away_total_games,
+        "set_scores": _tennis_set_scores(home_mapping, away_mapping),
+        "home_point": first_text(home_mapping, "point"),
+        "away_point": first_text(away_mapping, "point"),
+    }
+
+
+def _tennis_current_set(
+    raw_status: str,
+    home_score: Mapping[str, Any],
+    away_score: Mapping[str, Any],
+) -> int | None:
+    match = re.search(r"(\d+)(?:st|nd|rd|th)\s+set", raw_status.strip().lower())
+    if match:
+        return int(match.group(1))
+    periods = [
+        index
+        for index in range(1, 6)
+        if _period_score(home_score, index) is not None or _period_score(away_score, index) is not None
+    ]
+    return periods[-1] if periods else None
+
+
+def _period_score(score: Mapping[str, Any], period: int | None) -> int | None:
+    if period is None:
+        return None
+    return int_value(score.get(f"period{period}"))
+
+
+def _period_total(score: Mapping[str, Any]) -> int:
+    total = 0
+    for index in range(1, 6):
+        value = _period_score(score, index)
+        if value is not None:
+            total += value
+    return total
+
+
+def _tennis_set_scores(
+    home_score: Mapping[str, Any],
+    away_score: Mapping[str, Any],
+) -> tuple[tuple[int, int], ...]:
+    """返回 SofaScore 每盘局分，供 set winner 类盘口做确定性判断。"""
+
+    scores: list[tuple[int, int]] = []
+    for index in range(1, 6):
+        home_games = _period_score(home_score, index)
+        away_games = _period_score(away_score, index)
+        if home_games is None and away_games is None:
+            continue
+        scores.append((home_games or 0, away_games or 0))
+    return tuple(scores)
 
 
 def _map_status(status: Mapping[str, Any]) -> SportsLiveGameStatus:

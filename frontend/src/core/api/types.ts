@@ -507,6 +507,108 @@ export interface ReconcileResult {
   skipped_orders?: JsonValue
 }
 
+export interface VirtualPaperTradeRequest {
+  condition_id?: string
+  token_id?: string
+  market_slug?: string
+}
+
+export interface VirtualPaperSelection {
+  condition_id?: string | null
+  market_slug?: string | null
+  event_slug?: string | null
+  token_id?: string | null
+  plan_ready?: boolean | null
+  plan_reason?: string | null
+  action?: string | null
+  sports_reason?: string | null
+  execution_permission?: string | null
+  metadata?: JsonValue
+}
+
+export interface VirtualPaperStep {
+  key: string
+  label: string
+  status: string
+  detail?: string | null
+}
+
+export interface VirtualPaperOrderRequest {
+  phase: string
+  action: string
+  virtual: boolean
+  side?: string | null
+  price?: string | number | null
+  amount_usdc?: string | number | null
+  size_shares?: string | number | null
+  order_type?: string | null
+  idempotency_key?: string | null
+}
+
+export interface VirtualPaperOpportunityFunnel {
+  scan_scope?: string | null
+  scan_completed?: boolean | null
+  source_market_count?: number | null
+  source_token_count?: number | null
+  evaluated_token_count?: number | null
+  orderbook_available_count?: number | null
+  metadata_available_count?: number | null
+  plan_built_count?: number | null
+  plan_ready_count?: number | null
+  auto_execute_count?: number | null
+  selected_for_execution_count?: number | null
+  market_family_counts?: Record<string, number>
+  market_type_counts?: Record<string, number>
+  game_status_counts?: Record<string, number>
+  action_counts?: Record<string, number>
+  execution_permission_counts?: Record<string, number>
+}
+
+export interface VirtualPaperRejectionSummary {
+  total: number
+  truncated: boolean
+  by_reason: Record<string, number>
+  by_action: Record<string, number>
+  by_execution_permission: Record<string, number>
+  by_stage: Record<string, number>
+}
+
+export interface VirtualPaperPnl {
+  basis: string
+  realized: boolean
+  profitable: boolean
+  entry_price?: string | number | null
+  entry_spent_usdc?: string | number | null
+  entry_size_shares?: string | number | null
+  exit_price?: string | number | null
+  exit_order_status?: string | null
+  projected_exit_value_usdc?: string | number | null
+  projected_gross_pnl_usdc?: string | number | null
+  projected_return_pct?: string | number | null
+  warning?: string | null
+}
+
+export interface VirtualPaperTradeResult {
+  status: string
+  reason?: string | null
+  data_source: string
+  execution: string
+  virtual_boundary?: string | null
+  trace_id?: string | null
+  signing?: JsonObject
+  selection?: VirtualPaperSelection
+  summary?: JsonObject
+  opportunity_funnel?: VirtualPaperOpportunityFunnel
+  rejection_summary?: VirtualPaperRejectionSummary
+  paper_pnl?: VirtualPaperPnl
+  steps?: VirtualPaperStep[]
+  order_requests?: VirtualPaperOrderRequest[]
+  outbox_events?: JsonObject[]
+  virtual_account_positions?: JsonValue
+  rejections?: JsonObject[]
+  raw?: JsonValue
+}
+
 export interface CancelReplaceSellPayload {
   status: string
   trace_id: string

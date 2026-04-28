@@ -4,6 +4,7 @@ import asyncio
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass, field
+import hashlib
 import logging
 from typing import Any
 from uuid import uuid4
@@ -220,6 +221,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     data_client = DataClient(
         base_url=settings.polymarket_data_host,
         auth_client=trading_client,
+        default_user_address=settings.polymarket_funder_address,
     )
     polymarket_ws_client = PolymarketWebSocketClient(
         market_url=settings.polymarket_market_ws,
@@ -750,7 +752,7 @@ async def _publish_reconcile_trigger(
     await runtime.event_bus.publish(
         OutboxPriority.P2,
         DomainEvent(
-            trace_id=f"reconcile-trigger-{source}-{uuid4().hex}",
+            trace_id=_runtime_trace_id("reconcile-trigger", source=source),
             event_type=f"reconcile_{source}",
             event_id=uuid4().hex,
             reason=source,
@@ -765,6 +767,21 @@ def _is_reconcile_trigger(event: DomainEvent) -> bool:
     if event_type.startswith("reconcile_"):
         return True
     return event_type == "market_resolved_or_disabled"
+
+
+def _runtime_trace_id(prefix: str, *, source: str | None = None) -> str:
+    """生成能落入持久化 trace_id 字段的运行时 trace。
+
+    source 仍通过事件 reason、payload 和 supervisor detail 保留；trace_id 只承担
+    关联用途，不能把完整 source 拼进去导致审计写库失败。
+    """
+
+    safe_prefix = "".join(ch if ch.isalnum() else "-" for ch in prefix.strip().lower()).strip("-")
+    safe_prefix = safe_prefix or "trace"
+    if source:
+        source_digest = hashlib.sha1(source.encode("utf-8")).hexdigest()[:8]
+        safe_prefix = f"{safe_prefix[:22]}-{source_digest}"
+    return f"{safe_prefix[:31]}-{uuid4().hex}"
 
 
 def _coalesce_reconcile_scope(
@@ -834,7 +851,7 @@ async def _run_reconcile_once(
     started_at = asyncio.get_running_loop().time()
     try:
         result = await runtime.reconcile_worker.reconcile_once(
-            trace_id=f"reconcile-{source}-{uuid4().hex}",
+            trace_id=_runtime_trace_id("reconcile", source=source),
             trigger_event=trigger_event,
             condition_ids=condition_ids,
             refresh_market_authority=refresh_market_authority,

@@ -358,7 +358,9 @@ class AdminService:
         token_id: str | None = None,
     ) -> dict[str, Any]:
         snapshot = self._account_snapshot()
-        if snapshot.positions or not self._has_db_session_factory():
+        # 已完成权威账户同步后，空持仓本身就是当前交易事实；DB 只保留审计/恢复参考，
+        # 不能在热状态为空时把旧快照重新投影成“当前持仓”。
+        if snapshot.positions or snapshot.last_reconcile_at is not None or not self._has_db_session_factory():
             positions = [
                 position
                 for position in snapshot.positions

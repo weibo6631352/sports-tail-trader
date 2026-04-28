@@ -36,6 +36,7 @@ def test_sports_live_state_worker_writes_metadata_and_entry_signals() -> None:
     assert status.last_matches == 1
     assert status.last_records_written == 1
     assert status.last_entry_signals_published == 2
+    assert result["last_games"][0].source_event_id == "game-1"
     assert first_event.event_type == DomainEventType.ENTRY_SIGNAL_TRIGGERED
     assert second_event.event_type == DomainEventType.ENTRY_SIGNAL_TRIGGERED
     assert {first_event.token_id, second_event.token_id} == {"home", "away"}
@@ -132,6 +133,7 @@ async def _run_sync_with_match() -> dict[str, object]:
     return {
         "metadata": store.metadata_for(condition_id="moneyline-condition"),
         "status": worker.status_snapshot(),
+        "last_games": worker.last_games(),
         "first_event": await event_bus.next_trading_event(),
         "second_event": await event_bus.next_trading_event(),
     }

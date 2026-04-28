@@ -22,7 +22,7 @@ from polymarket_trader.workers.trading_decision_worker import TradingDecisionWor
 from polymarket_trader.extension_api import ExtensionContext
 
 from strategies.current.config import CurrentStrategyConfig, sports_tail_policy_from_config
-from strategies.current.outcomes import describe_sports_market
+from strategies.current.outcomes import SportsMarketFamily, describe_sports_market
 from strategies.current.recovery import decide_recovery
 from strategies.current.sports_tail import (
     ExecutionPermission,
@@ -95,6 +95,100 @@ def test_universe_accepts_totals_moneyline_and_spreads_with_shared_descriptor_sh
     assert [decision.selected for decision in decisions] == [True, True, True]
 
 
+def test_universe_accepts_tennis_single_game_market_for_live_tail_scope() -> None:
+    decision = select_market(CurrentStrategyConfig(), _tennis_totals_market())
+    descriptor = describe_sports_market(_tennis_totals_market())
+
+    assert decision.selected is True
+    assert descriptor.market_family == SportsMarketFamily.SINGLE_GAME
+    assert descriptor.line == Decimal("21.5")
+
+
+def test_universe_accepts_tennis_market_when_gamma_tags_are_missing_but_slug_has_league() -> None:
+    market = Market(
+        condition_id="tagless-tennis-condition",
+        market_slug="atp-donald-mejia-2026-04-28",
+        market_question="Matthew William Donald vs Nicolas Mejia",
+        event_title="Mauthausen: Matthew William Donald vs Nicolas Mejia",
+        event_slug="atp-donald-mejia-2026-04-28",
+        category=None,
+        tags=(),
+        outcomes=(
+            MarketOutcome(token_id="donald", outcome="Matthew William Donald"),
+            MarketOutcome(token_id="mejia", outcome="Nicolas Mejia"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+    decision = select_market(CurrentStrategyConfig(), market)
+
+    assert decision.selected is True
+    assert decision.reason == "sports_market_selected"
+
+
+def test_market_descriptor_separates_single_game_from_series_outright_and_esports() -> None:
+    single_game = _moneyline_market()
+    series_winner = _series_winner_market()
+    series_totals = _series_totals_market()
+    outright = _outright_market()
+    esports = _esports_series_market()
+
+    descriptors = {
+        "single_game": describe_sports_market(single_game),
+        "series_winner": describe_sports_market(series_winner),
+        "series_totals": describe_sports_market(series_totals),
+        "outright": describe_sports_market(outright),
+        "esports": describe_sports_market(esports),
+    }
+
+    assert descriptors["single_game"].market_family == SportsMarketFamily.SINGLE_GAME
+    assert descriptors["series_winner"].market_family == SportsMarketFamily.SERIES
+    assert descriptors["series_totals"].market_family == SportsMarketFamily.SERIES
+    assert descriptors["outright"].market_family == SportsMarketFamily.OUTRIGHT
+    assert descriptors["esports"].market_family == SportsMarketFamily.ESPORTS
+
+
+def test_universe_excludes_non_single_game_markets_from_auto_strategy_scope() -> None:
+    config = CurrentStrategyConfig()
+
+    decisions = {
+        "series_winner": select_market(config, _series_winner_market()),
+        "series_totals": select_market(config, _series_totals_market()),
+        "outright": select_market(config, _outright_market()),
+        "esports": select_market(config, _esports_series_market()),
+    }
+
+    assert decisions["series_winner"].selected is False
+    assert decisions["series_winner"].reason == "series_market_not_auto_tradable"
+    assert decisions["series_totals"].selected is False
+    assert decisions["series_totals"].reason == "series_market_not_auto_tradable"
+    assert decisions["outright"].selected is False
+    assert decisions["outright"].reason == "outright_market_not_auto_tradable"
+    assert decisions["esports"].selected is False
+    assert decisions["esports"].reason == "esports_market_not_auto_tradable"
+
+
+def test_entry_rejects_series_market_before_single_game_live_score_can_create_buy() -> None:
+    market = _series_winner_market()
+    orderbook = _orderbook(token_id="series-home", best_ask=Decimal("0.45"))
+
+    decision = decide_entry(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-series",
+            market=market,
+            token_id="series-home",
+            orderbook=orderbook,
+            amount_usdc=Decimal("10"),
+            metadata={"sports_tail_game": _moneyline_live_game()},
+        ),
+    )
+
+    assert decision.action.value == "skip"
+    assert decision.reason == "series_market_not_auto_tradable"
+    assert decision.metadata["sports_market_family"] == "series"
+
+
 def test_sports_market_line_parser_handles_slug_decimal_without_using_event_date() -> None:
     market = Market(
         condition_id="slug-line-condition",
@@ -113,6 +207,35 @@ def test_sports_market_line_parser_handles_slug_decimal_without_using_event_date
     descriptor = describe_sports_market(market)
 
     assert descriptor.accepted is True
+    assert descriptor.line == Decimal("4.5")
+
+
+def test_sports_market_line_parser_handles_pt_decimal_without_truncating_integer() -> None:
+    market = Market(
+        condition_id="slug-pt-line-condition",
+        market_slug="nba-atl-nyk-2026-04-28-total-214pt5",
+        market_question="Atlanta Hawks vs New York Knicks total",
+        event_title="Atlanta Hawks vs New York Knicks 2026-04-28",
+        category="Sports",
+        tags=("NBA",),
+        outcomes=(
+            MarketOutcome(token_id="over", outcome="Over"),
+            MarketOutcome(token_id="under", outcome="Under"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+    descriptor = describe_sports_market(market)
+
+    assert descriptor.accepted is True
+    assert descriptor.line == Decimal("214.5")
+
+
+def test_sports_market_line_parser_handles_total_games_pt_decimal_without_using_event_date() -> None:
+    descriptor = describe_sports_market(_esports_series_market())
+
+    assert descriptor.accepted is True
+    assert descriptor.market_family == SportsMarketFamily.ESPORTS
     assert descriptor.line == Decimal("4.5")
 
 
@@ -166,7 +289,7 @@ def test_totals_over_locked_can_create_buy_only_after_full_sports_gate_passes() 
 
     assert decision.action.value == "buy"
     assert decision.token_id == "over"
-    assert decision.price == Decimal("0.99")
+    assert decision.price == Decimal("0.98")
     assert decision.amount_usdc == Decimal("10")
     assert decision.metadata["sports_tail_reason"] == "totals_over_locked"
     assert decision.metadata["sports_execution_permission"] == "auto_execute"
@@ -177,6 +300,9 @@ def test_entry_plan_preserves_event_metadata_through_application_entry_path() ->
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
     service = TradingDecisionService(
         extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+        orderbook_reader=lambda token_id: _orderbook(token_id=token_id, best_ask=Decimal("0.02"))
+        if token_id == "under"
+        else None,
     )
 
     plan = service.build_entry_plan(
@@ -208,11 +334,41 @@ def test_entry_plan_preserves_event_metadata_through_application_entry_path() ->
     assert plan.ready_to_trade is True
     assert plan.intent is not None
     assert plan.intent.token_id == "over"
-    assert plan.intent.price == Decimal("0.99")
+    assert plan.intent.price == Decimal("0.98")
     assert plan.metadata is not None
     assert plan.metadata["source"] == "worker_payload"
     assert plan.metadata["sports_tail_reason"] == "totals_over_locked"
     assert plan.metadata["sports_execution_permission"] == "auto_execute"
+
+
+def test_follow_up_exit_price_aligns_to_market_tick_size() -> None:
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+
+    decisions = strategy.decide_follow_up(
+        ExtensionContext(
+            trace_id="trace-follow-up-tick",
+            market=market,
+            token_id="over",
+            order_result=OrderResult(
+                trace_id="trace-follow-up-tick",
+                condition_id=market.condition_id,
+                token_id="over",
+                market_slug=market.market_slug,
+                status=OrderResultStatus.FULL_FILL,
+                side=OrderSide.BUY,
+                price=Decimal("0.99"),
+                requested_amount_usdc=Decimal("3"),
+                matched_shares=Decimal("3"),
+                spent_usdc=Decimal("3"),
+                reason="virtual_fill",
+            ),
+        )
+    )
+
+    assert len(decisions) == 1
+    assert decisions[0].price == Decimal("0.99")
+    assert decisions[0].metadata["sports_exit_target_price"] == "0.99"
 
 
 def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -> None:
@@ -256,6 +412,61 @@ def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -
     assert plan.metadata["sports_execution_permission"] == "manual_confirm"
 
 
+def test_tennis_allocation_filters_opposite_side_before_equal_weight_budget() -> None:
+    market = _tennis_moneyline_market()
+    registry = MarketRegistry()
+    registry.upsert(market)
+    orderbooks = {
+        "tennis-home": _orderbook(token_id="tennis-home", best_ask=Decimal("0.24")),
+        "tennis-away": _orderbook(token_id="tennis-away", best_ask=Decimal("0.77")),
+    }
+    service = TradingDecisionService(
+        extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+        registry=registry,
+        orderbook_reader=lambda token_id: orderbooks.get(token_id),
+    )
+
+    plan = service.build_entry_plan(
+        market=market,
+        orderbook=orderbooks["tennis-away"],
+        token_id="tennis-away",
+        trace_id="trace-tennis-allocation",
+        portfolio_budget_usdc=Decimal("5"),
+        available_usdc=Decimal("5"),
+        max_order_usdc=Decimal("5"),
+        max_market_usdc=Decimal("5"),
+        max_total_usdc=Decimal("5"),
+        metadata={
+            "sports_tail_game": {
+                "league": "ATP Challenger",
+                "home_name": "Amir Omarkhanov",
+                "away_name": "Denis Yevseyev",
+                "home_score": 0,
+                "away_score": 0,
+                "period": "S1",
+                "status": "live",
+                "observed_at": "2026-04-27T00:00:00+00:00",
+                "tennis_state": {
+                    "home_sets_won": 0,
+                    "away_sets_won": 0,
+                    "current_set": 1,
+                    "home_current_set_games": 3,
+                    "away_current_set_games": 5,
+                    "home_total_games": 3,
+                    "away_total_games": 5,
+                },
+            },
+        },
+    )
+
+    assert plan.ready_to_trade is True
+    assert plan.allocation is not None
+    assert plan.allocation.buy_budget_usdc == Decimal("5")
+    assert plan.intent is not None
+    assert plan.intent.token_id == "tennis-away"
+    assert plan.intent.amount_usdc == Decimal("5")
+
+
 def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
@@ -295,6 +506,9 @@ def test_strategy_risk_blocks_event_exposure_before_buy_intent() -> None:
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
     service = TradingDecisionService(
         extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+        orderbook_reader=lambda token_id: _orderbook(token_id=token_id, best_ask=Decimal("0.02"))
+        if token_id == "under"
+        else None,
     )
 
     plan = service.build_entry_plan(
@@ -310,7 +524,7 @@ def test_strategy_risk_blocks_event_exposure_before_buy_intent() -> None:
         positions=(
             Position(
                 condition_id=market.condition_id,
-                token_id="over",
+                token_id="under",
                 shares=Decimal("24"),
                 cost_usdc=Decimal("24"),
                 market_slug=market.market_slug,
@@ -400,6 +614,55 @@ def test_strategy_risk_blocks_consecutive_loss_pause() -> None:
     assert plan.allocation.reason == "sports_consecutive_loss_pause"
     assert plan.metadata is not None
     assert plan.metadata["sports_consecutive_losses"] == 3
+
+
+def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_order() -> None:
+    market = _tennis_moneyline_market()
+    position = Position(
+        condition_id=market.condition_id,
+        token_id="tennis-home",
+        shares=Decimal("8"),
+        cost_usdc=Decimal("4.5"),
+        market_slug=market.market_slug,
+        open_sell_shares=Decimal("8"),
+    )
+    exit_order = Order(
+        trace_id="trace-exit",
+        condition_id=market.condition_id,
+        token_id="tennis-home",
+        market_slug=market.market_slug,
+        side=OrderSide.SELL,
+        order_type=OrderType.GTC,
+        price=Decimal("0.99"),
+        size_shares=Decimal("8"),
+        remaining_shares=Decimal("8"),
+        status=OrderStatus.LIVE,
+        order_id="exit-order",
+    )
+    service = TradingDecisionService(
+        extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+    )
+
+    plan = service.build_entry_plan(
+        market=market,
+        orderbook=_orderbook(token_id="tennis-home", best_ask=Decimal("0.56")),
+        token_id="tennis-home",
+        trace_id="trace-reentry",
+        portfolio_budget_usdc=Decimal("10"),
+        available_usdc=Decimal("10"),
+        max_order_usdc=Decimal("10"),
+        max_market_usdc=Decimal("10"),
+        max_total_usdc=Decimal("20"),
+        positions=(position,),
+        open_orders=(exit_order,),
+        metadata={"sports_tail_game": _tennis_near_locked_live_game()},
+    )
+
+    assert plan.intent is None
+    assert plan.allocation is not None
+    assert plan.allocation.reason == "open_exit_detected"
+    assert plan.metadata is not None
+    assert plan.metadata["sports_tail_reason"] == "open_exit_detected"
 
 
 def test_admin_live_state_store_projects_manual_candidate_and_confirmation() -> None:
@@ -521,7 +784,7 @@ def test_moneyline_default_permission_enters_auto_buy_path() -> None:
 
     assert decision.action.value == "buy"
     assert decision.token_id == "home"
-    assert decision.price == Decimal("0.97")
+    assert decision.price == Decimal("0.96")
     assert decision.metadata["sports_execution_permission"] == "auto_execute"
 
 
@@ -556,7 +819,7 @@ def test_spreads_default_permission_enters_auto_buy_path() -> None:
 
     assert decision.action.value == "buy"
     assert decision.token_id == "home"
-    assert decision.price == Decimal("0.96")
+    assert decision.price == Decimal("0.95")
     assert decision.metadata["sports_tail_reason"] == "spreads_late_cover"
     assert decision.metadata["sports_execution_permission"] == "auto_execute"
 
@@ -731,6 +994,29 @@ def _totals_live_game() -> dict[str, object]:
     }
 
 
+def _tennis_near_locked_live_game() -> dict[str, object]:
+    return {
+        "league": "ATP",
+        "home_name": "Amir Omarkhanov",
+        "away_name": "Denis Yevseyev",
+        "home_score": 0,
+        "away_score": 0,
+        "period": "S1",
+        "status": "live",
+        "observed_at": "2026-04-27T00:00:00+00:00",
+        "tennis_state": {
+            "home_sets_won": 0,
+            "away_sets_won": 0,
+            "current_set": 1,
+            "home_current_set_games": 5,
+            "away_current_set_games": 3,
+            "home_total_games": 5,
+            "away_total_games": 3,
+            "set_scores": ((5, 3),),
+        },
+    }
+
+
 def _spreads_market() -> Market:
     return Market(
         condition_id="spreads-condition",
@@ -744,6 +1030,105 @@ def _spreads_market() -> Market:
             MarketOutcome(token_id="away", outcome="BOS +3.5"),
         ),
         trading_status=TradingStatus.ELIGIBLE,
+    )
+
+
+def _series_winner_market() -> Market:
+    return Market(
+        condition_id="series-winner-condition",
+        market_slug="nba-playoffs-who-will-win-series-knicks-vs-hawks",
+        market_question="NBA Playoffs: Who Will Win Series? - Knicks vs. Hawks",
+        event_title="NBA Playoffs: Who Will Win Series? - Knicks vs. Hawks",
+        category="Sports",
+        tags=("NBA", "2026 NBA Playoffs", "Basketball"),
+        outcomes=(
+            MarketOutcome(token_id="series-home", outcome="Knicks"),
+            MarketOutcome(token_id="series-away", outcome="Hawks"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+
+def _series_totals_market() -> Market:
+    return Market(
+        condition_id="series-total-condition",
+        market_slug="nhl-playoffs-ducks-vs-oilers-total-games-ou-5pt5",
+        market_question="NHL Playoffs: Ducks vs. Oilers Total Games O/U 5.5",
+        event_title="NHL Playoffs: Ducks vs. Oilers Total Games O/U 5.5",
+        category="Sports",
+        tags=("NHL", "2026 NHL Playoffs", "Hockey"),
+        outcomes=(
+            MarketOutcome(token_id="series-over", outcome="Over 5.5"),
+            MarketOutcome(token_id="series-under", outcome="Under 5.5"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+
+def _outright_market() -> Market:
+    return Market(
+        condition_id="outright-condition",
+        market_slug="nhl-stanley-cup-winner-nation",
+        market_question="NHL: Stanley Cup Winner USA or Canada?",
+        event_title="NHL: Stanley Cup Winner USA or Canada?",
+        category="Sports",
+        tags=("NHL", "Stanley Cup", "Hockey"),
+        outcomes=(
+            MarketOutcome(token_id="usa", outcome="USA"),
+            MarketOutcome(token_id="canada", outcome="Canada"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+
+def _esports_series_market() -> Market:
+    return Market(
+        condition_id="esports-condition",
+        market_slug="hok-esp-ge-2026-04-27-total-games-4pt5",
+        market_question="Honor of Kings: eStar Pro vs Geekay Esports total games 4.5",
+        event_title="Honor of Kings: eStar Pro vs Geekay Esports (BO5)",
+        category="Sports",
+        tags=("Esports", "Honor of Kings", "Games", "Sports"),
+        outcomes=(
+            MarketOutcome(token_id="esports-over", outcome="Over"),
+            MarketOutcome(token_id="esports-under", outcome="Under"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+
+def _tennis_totals_market() -> Market:
+    return Market(
+        condition_id="tennis-total-condition",
+        market_slug="wta-zolotar-papamic-2026-04-27-total-21pt5",
+        market_question="Rada Zolotareva vs Despina Papamichail total games 21.5",
+        event_title="Rada Zolotareva vs Despina Papamichail",
+        event_slug="wta-zolotar-papamic-2026-04-27",
+        category="Sports",
+        tags=("WTA", "Tennis"),
+        outcomes=(
+            MarketOutcome(token_id="tennis-over", outcome="Over"),
+            MarketOutcome(token_id="tennis-under", outcome="Under"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+
+def _tennis_moneyline_market() -> Market:
+    return Market(
+        condition_id="tennis-moneyline-condition",
+        market_slug="atp-omarkha-yevseye-2026-04-27",
+        market_question="Amir Omarkhanov vs Denis Yevseyev",
+        event_title="Amir Omarkhanov vs Denis Yevseyev",
+        event_slug="atp-omarkha-yevseye-2026-04-27",
+        category="Sports",
+        tags=("ATP", "Tennis"),
+        outcomes=(
+            MarketOutcome(token_id="tennis-home", outcome="Amir Omarkhanov"),
+            MarketOutcome(token_id="tennis-away", outcome="Denis Yevseyev"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+        min_order_size=Decimal("5"),
     )
 
 

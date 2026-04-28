@@ -11,7 +11,7 @@ from polymarket_trader.domain.allocation import (
     current_exposure_usdc,
 )
 from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.order import Order
+from polymarket_trader.domain.order import Order, OrderSide
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 
@@ -274,6 +274,14 @@ def equal_weight_budget(portfolio_budget_usdc: Decimal, eligible_market_count: i
 def _allocation_skip_reason(
     snapshot: AllocationMarketSnapshot,
 ) -> str:
+    if _has_open_order(snapshot, OrderSide.SELL) or (
+        snapshot.position is not None and snapshot.position.open_sell_shares > Decimal("0")
+    ):
+        return "open_exit_detected"
+    if snapshot.position is not None and snapshot.position.shares > Decimal("0"):
+        return "position_already_open"
+    if _has_open_order(snapshot, OrderSide.BUY):
+        return "open_entry_detected"
     if not snapshot.tradable:
         return "market_not_tradable"
     if not snapshot.market_active:
@@ -292,6 +300,12 @@ def _allocation_skip_reason(
         return "risk_limit_reached"
 
     return ""
+
+
+def _has_open_order(snapshot: AllocationMarketSnapshot, side: OrderSide) -> bool:
+    """判断当前 token 是否已有同方向开放订单，避免入场路径重复占仓。"""
+
+    return any(order.side == side and order.open for order in snapshot.open_orders)
 
 
 def _market_hard_capacity_usdc(

@@ -26,6 +26,9 @@ const AuditPage = lazy(() =>
 const OperationsPage = lazy(() =>
   import('../features/operations/OperationsPage').then((module) => ({ default: module.OperationsPage })),
 )
+const PaperTradingPage = lazy(() =>
+  import('../features/paper/PaperTradingPage').then((module) => ({ default: module.PaperTradingPage })),
+)
 
 export const App = () => {
   return (
@@ -40,6 +43,7 @@ export const App = () => {
           <Route path="/replay" element={<TradeReplaysPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/operations" element={<OperationsPage />} />
+          <Route path="/paper" element={<PaperTradingPage />} />
         </Routes>
       </Suspense>
     </AppShell>

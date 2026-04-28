@@ -26,6 +26,7 @@ const navigation = [
   { to: '/replay', label: '复盘' },
   { to: '/audit', label: '审计' },
   { to: '/operations', label: '操作' },
+  { to: '/paper', label: '虚拟盘' },
 ]
 
 const statusTone = (ready: boolean, phase: string | undefined): 'success' | 'warning' | 'danger' | 'neutral' => {

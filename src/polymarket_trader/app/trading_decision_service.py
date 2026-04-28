@@ -72,6 +72,15 @@ class TradingDecisionService:
     def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
         return self._extension_hooks.decide_follow_up(context)
 
+    def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
+        """根据当前热态持仓生成退出决策。
+
+        该方法只桥接策略 hook，不直接解释具体策略字段；调用侧仍需把
+        返回的决策转换为受控 intent，并统一经过 TradingService/RiskManager。
+        """
+
+        return self._extension_hooks.decide_exit(context)
+
     def resolve_market(
         self,
         *,

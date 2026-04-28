@@ -21,6 +21,8 @@ from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.account import AccountSnapshot, MarketPause
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.extension_api import (
+    ExtensionAction,
+    ExtensionDecision,
     ExtensionHooks,
     MarketTokenView,
     ExtensionContext,
@@ -172,7 +174,13 @@ class ReconcileService:
         trace_id: str | None = None,
     ) -> ReconcileMarketPlan:
         trace_id = trace_id or uuid4().hex
-        position = None
+        # Reconcile plan 需要携带当前 market 的主持仓，供审计、展示和后续动作解释使用。
+        positions = tuple(
+            position
+            for outcome in market.outcomes
+            if (position := account_snapshot.get_position(market.condition_id, outcome.token_id)) is not None
+        )
+        position = positions[0] if positions else None
         open_orders = tuple(
             order
             for token_id in market.token_ids
@@ -196,6 +204,7 @@ class ReconcileService:
             condition_id=market.condition_id,
             account_pause=account_pause,
         )
+        metadata = self._metadata_for_market(market)
         recovery = self._extension_hooks.decide_recovery(
             ExtensionContext(
                 trace_id=trace_id,
@@ -205,9 +214,25 @@ class ReconcileService:
                 position=position,
                 open_orders=open_orders,
                 now=_utc_now(),
-                metadata=self._metadata_for_market(market),
+                metadata=metadata,
             )
         )
+        recovery_decisions = list(recovery.actions)
+        recovery_exit_tokens = {
+            decision.token_id
+            for decision in recovery_decisions
+            if decision.action == ExtensionAction.SELL and decision.token_id is not None
+        }
+        for decision in self._position_exit_decisions(
+            trace_id=trace_id,
+            market=market,
+            account_snapshot=account_snapshot,
+            market_token_views=market_token_views,
+            metadata=metadata,
+        ):
+            if decision.token_id in recovery_exit_tokens:
+                continue
+            recovery_decisions.append(decision)
 
         sticky_account_pause = account_pause is not None and not account_pause.recoverable
         pause_trading = (
@@ -241,7 +266,7 @@ class ReconcileService:
                     pause_reason=account_pause.reason,
                 )
             )
-        for decision in recovery.actions:
+        for decision in recovery_decisions:
             intent = decision_to_managed_intent(
                 trace_id=trace_id,
                 condition_id=market.condition_id,
@@ -288,6 +313,54 @@ class ReconcileService:
         if self._entry_metadata_provider is None:
             return {}
         return dict(self._entry_metadata_provider(market))
+
+    def _position_exit_decisions(
+        self,
+        *,
+        trace_id: str,
+        market: Market,
+        account_snapshot: AccountSnapshot,
+        market_token_views: tuple[MarketTokenView, ...],
+        metadata: Mapping[str, Any],
+    ) -> tuple[ExtensionDecision, ...]:
+        """为已有未覆盖持仓补充退出决策。
+
+        recovery 可以因为比赛结束、状态异常或 market 暂停而拒绝新入场；
+        但已有仓位的退出保护不能被“没有 live”阻断。这里仍只调用策略
+        ``decide_exit``，不在 app 层写具体策略价格或仓位规则。
+        """
+
+        decisions: list[ExtensionDecision] = []
+        for outcome in market.outcomes:
+            position = account_snapshot.get_position(market.condition_id, outcome.token_id)
+            if position is None or position.shares <= Decimal("0"):
+                continue
+            open_orders = account_snapshot.open_orders_for_market(market.condition_id, outcome.token_id)
+            open_sell_shares = account_snapshot.open_sell_shares_for_market(
+                market.condition_id,
+                outcome.token_id,
+            )
+            adjusted_position = position.with_open_sell_shares(
+                max(position.open_sell_shares, open_sell_shares)
+            )
+            decision = self._extension_hooks.decide_exit(
+                ExtensionContext(
+                    trace_id=trace_id,
+                    market=market,
+                    token_id=outcome.token_id,
+                    market_token_views=market_token_views,
+                    account_snapshot=account_snapshot,
+                    position=adjusted_position,
+                    open_orders=open_orders,
+                    metadata={
+                        **dict(metadata),
+                        "exit_trigger": "reconcile_position",
+                    },
+                )
+            )
+            if decision.action == ExtensionAction.SELL:
+                decisions.append(decision)
+        return tuple(decisions)
 
 
 def _action_from_intent(

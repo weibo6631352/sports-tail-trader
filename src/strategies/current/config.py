@@ -48,10 +48,14 @@ class CurrentStrategyConfig:
             ``/events/keyset?title_search=nba&tag_slug=sports``。
             如果不确定 Gamma tag 是否覆盖目标市场，保持为空，并让
             ``select_market()`` 做本地最终过滤。
+        sports_live_discovery_*:
+            用外部直播源里的真实比赛队名补充高意图 discovery 查询，避免通用
+            ``nba/nhl/mlb`` 搜索长期停留在冠军、系列赛、选秀或电竞市场。
         sports_category_tokens:
             本地 universe 精筛时用于识别已接入直播源的体育联赛 token。
-            这里不使用泛化的 ``sports``，避免足球、网球等未建模联赛仅凭
-            大类标签进入自动交易候选。
+            识别文本以 category/tags 为优先信号，并用 market/event slug、
+            问题和标题兜底处理 Gamma 缺失标签的真实赛事。这里不使用泛化的
+            ``sports``，避免未建模联赛仅凭大类标签进入自动交易候选。
         sports_enabled_market_types:
             体育扫尾允许纳入 universe 的盘口类型。
         sports_*:
@@ -66,8 +70,10 @@ class CurrentStrategyConfig:
     exit_no_price: Decimal = Decimal("0.995")
     min_liquidity_usdc: Decimal = Decimal("5")
     max_spread: Decimal | None = Decimal("0.10")
-    discovery_title_searches: tuple[str, ...] = ("sports", "nba", "nhl", "nfl", "mlb")
+    discovery_title_searches: tuple[str, ...] = ("sports", "nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
     discovery_tag_slugs: tuple[str, ...] = ("sports",)
+    sports_live_discovery_max_games: int = 40
+    sports_live_discovery_max_queries: int = 120
     sports_category_tokens: tuple[str, ...] = (
         "nba",
         "nfl",
@@ -77,6 +83,9 @@ class CurrentStrategyConfig:
         "baseball",
         "hockey",
         "football",
+        "tennis",
+        "atp",
+        "wta",
     )
     sports_enabled_market_types: tuple[SportsMarketType, ...] = (
         SportsMarketType.TOTALS,
@@ -91,6 +100,7 @@ class CurrentStrategyConfig:
     sports_spreads_max_entry_price: Decimal = Decimal("0.96")
     sports_min_liquidity_usdc: Decimal = Decimal("5")
     sports_max_game_state_age_seconds: int = 10
+    sports_tennis_max_game_state_age_seconds: int = 35
     sports_max_under_seconds_remaining: int = 30
     sports_max_moneyline_seconds_remaining: int = 180
     sports_max_spreads_seconds_remaining: int = 120
@@ -116,6 +126,7 @@ def sports_tail_policy_from_config(config: CurrentStrategyConfig) -> SportsTailP
         spreads_max_entry_price=config.sports_spreads_max_entry_price,
         min_liquidity_usdc=config.sports_min_liquidity_usdc,
         max_game_state_age_seconds=config.sports_max_game_state_age_seconds,
+        tennis_max_game_state_age_seconds=config.sports_tennis_max_game_state_age_seconds,
         max_under_seconds_remaining=config.sports_max_under_seconds_remaining,
         max_moneyline_seconds_remaining=config.sports_max_moneyline_seconds_remaining,
         max_spreads_seconds_remaining=config.sports_max_spreads_seconds_remaining,

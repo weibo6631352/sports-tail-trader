@@ -41,10 +41,14 @@ class DataClient(PolymarketRestClientBase):
         timeout_s: float = 10.0,
         headers: Mapping[str, str] | None = None,
         auth_client: PolymarketTradingClient | None = None,
+        default_user_address: str | None = None,
         positions_path: str = "/positions",
     ) -> None:
         super().__init__(base_url, client=client, timeout_s=timeout_s, headers=headers)
         self._auth_client = auth_client
+        # Data API 的 positions 查询应使用实际持仓账户。代理钱包场景下，
+        # 签名钱包没有仓位，直接用 signer 会把热状态错误刷新为空。
+        self._default_user_address = default_user_address
         self._positions_path = positions_path
 
     @property
@@ -59,7 +63,7 @@ class DataClient(PolymarketRestClientBase):
 
     @property
     def default_user_address(self) -> str | None:
-        return self.default_wallet_address
+        return self._default_user_address or self.default_wallet_address
 
     def _resolve_user_address(self, user_address: str | None) -> str:
         resolved = user_address or self.default_user_address

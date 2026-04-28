@@ -2,7 +2,7 @@
 
 这里只写已经存在的 HTTP API。
 
-- 核对日期：2026-04-27
+- 核对日期：2026-04-28
 - 适用仓库：`polymarket-trader`
 - 服务入口：`src/polymarket_trader/api/app.py`
 - 默认无应用层鉴权，只放在本机或受控内网。
@@ -41,6 +41,7 @@
 | `GET` | `/portfolio` | 组合与账户摘要 |
 | `GET` | `/outbox/pending` | outbox 待处理事件 |
 | `POST` | `/operations/reconcile` | 手动触发 reconcile |
+| `POST` | `/operations/virtual-paper-trade` | 真实数据虚拟盘提交演练 |
 
 不对外暴露的路由：
 
@@ -941,7 +942,49 @@
 
 - 若 `reconcile_worker` 不可用，返回 `{"status":"failed","reason":"reconcile_worker_unavailable"}`。
 
-### 4.2 `POST /orders/replace`
+### 4.2 `POST /operations/virtual-paper-trade`
+
+用途：
+
+- 使用当前真实运行态数据跑一次虚拟盘。
+- 市场、盘口、直播 metadata、账户快照、策略判断、风控和可用时的订单签名都走当前真实链路。
+- 只有最后 `submit_order` 付款提交步骤被替换为内存响应，不向 Polymarket 提交真实订单。
+
+请求体：
+
+```json
+{
+  "condition_id": "condition-sample",
+  "token_id": "token-sample",
+  "market_slug": "nhl-tb-mon-total-4-5"
+}
+```
+
+字段都可选。不传时服务端从当前 registry、orderbook 和 `EntryMetadataStore` 中选择第一个真实 `auto_execute` 候选；如果当前没有满足条件的候选，返回 `status=no_trade` 和真实拒绝原因样本。
+
+返回重点：
+
+- `status`：`ok`、`failed` 或 `no_trade`
+- `data_source`：固定为 `real_runtime`
+- `execution`：`paper_submit_only` 表示只虚拟最后提交步骤
+- `virtual_boundary`：`order_submission_payment`
+- `signing.source`：`real_trading_client` 或 `paper_fallback`
+- `selection`：本次选中的真实候选
+- `opportunity_funnel`：本次虚拟扫描的机会漏斗，包括源市场数、token 数、盘口可用数、直播 metadata 数、计划通过数、`auto_execute` 数和市场家族 / 盘口 / 比赛状态分布
+- `rejection_summary`：全部未执行原因聚合，包括 `by_reason`、`by_action`、`by_execution_permission` 和 `by_stage`
+- `paper_pnl`：纸面收益口径；当前为 `entry_fill_vs_follow_up_limit_gross_no_fees` 时，只表示虚拟 BUY 成交价与后续 SELL 限价之间的未实现毛收益，不代表真实已成交利润
+- `steps`：交易主链路步骤
+- `order_requests`：签名和提交请求；其中 `virtual=true` 的行不会真实提交
+- `rejections`：没有可执行候选时的真实拒绝样本
+
+边界：
+
+- 该接口用于网页验收和链路排障，不作为真实下单入口。
+- 不能用它伪造直播状态、盘口或策略结果。
+- `paper_pnl.profitable=true` 只说明本次虚拟链路在目标退出限价下存在正向纸面毛收益；真实盈利仍取决于退出单成交、手续费、滑点、盘口撤单和结算。
+- 若当前账户状态、直播状态或盘口不满足真实链路要求，接口必须返回未交易或失败原因。
+
+### 4.3 `POST /orders/replace`
 
 用途：
 

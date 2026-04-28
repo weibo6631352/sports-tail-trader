@@ -268,11 +268,46 @@ _FRAMEWORK_DISCOVERY_PARAM_KEYS = {"limit", "after_cursor"}
 
 def _discovery_queries(runtime: Any) -> tuple[DiscoveryQuery, ...]:
     hooks = getattr(getattr(runtime, "extension", None), "hooks", None)
+    queries = (*_live_game_discovery_queries(runtime, hooks), *_configured_discovery_queries(hooks))
+    return _dedupe_discovery_queries(queries) or (DEFAULT_DISCOVERY_QUERY,)
+
+
+def _configured_discovery_queries(hooks: Any) -> tuple[DiscoveryQuery, ...]:
     method = getattr(hooks, "discovery_queries", None)
     if not callable(method):
         return (DEFAULT_DISCOVERY_QUERY,)
     queries = tuple(query for query in method() if isinstance(query, DiscoveryQuery) and query.name.strip())
     return queries or (DEFAULT_DISCOVERY_QUERY,)
+
+
+def _live_game_discovery_queries(runtime: Any, hooks: Any) -> tuple[DiscoveryQuery, ...]:
+    """从直播状态 worker 的最近比赛快照中提取策略高意图查询。"""
+
+    worker = getattr(runtime, "sports_live_state_worker", None)
+    last_games = getattr(worker, "last_games", None)
+    if not callable(last_games):
+        return ()
+    games = tuple(last_games())
+    if not games:
+        return ()
+    method = getattr(hooks, "discovery_queries_for_live_games", None)
+    if not callable(method):
+        return ()
+    return tuple(query for query in method(games) if isinstance(query, DiscoveryQuery) and query.name.strip())
+
+
+def _dedupe_discovery_queries(queries: tuple[DiscoveryQuery, ...]) -> tuple[DiscoveryQuery, ...]:
+    """按查询参数去重，保持直播高意图查询优先。"""
+
+    result: list[DiscoveryQuery] = []
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    for query in queries:
+        key = tuple(sorted((str(name), str(value)) for name, value in query.params.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(query)
+    return tuple(result)
 
 
 def _safe_query_params(params: Mapping[str, Any]) -> dict[str, Any]:

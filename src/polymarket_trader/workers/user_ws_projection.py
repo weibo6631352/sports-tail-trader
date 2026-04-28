@@ -192,6 +192,8 @@ class UserWsAccountProjector:
                         payload={
                             "order": order_to_payload(order),
                             "fill": fill_to_payload(fill),
+                            "position_projected": position is not None,
+                            "account_projected": True,
                             "snapshot": snapshot_to_payload(snapshot),
                         },
                     )
@@ -208,6 +210,11 @@ class UserWsAccountProjector:
                     payload={
                         "fill": fill_to_payload(fill),
                         "position": None if position is None else position_to_payload(position),
+                        # 同一笔成交已通过上面的 ORDER_STATE_UPDATED 进入交易决策；
+                        # 成交审计事件只落库复盘，避免重复触发跟单 SELL。
+                        "skip_trading_decision_order_result": True,
+                        "position_projected": position is not None,
+                        "account_projected": True,
                         "snapshot": snapshot_to_payload(snapshot),
                     },
                 )

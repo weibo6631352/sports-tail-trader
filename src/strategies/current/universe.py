@@ -35,20 +35,23 @@ def select_market(config: CurrentStrategyConfig, market: Market) -> UniverseDeci
         - 盘口类型在策略白名单内。
     """
 
-    category_tokens = _normalized_tokens(" ".join(_non_empty(market.category, *market.tags)))
-    if not set(config.sports_category_tokens) & category_tokens:
-        return UniverseDecision.exclude(reason="sports_category_not_matched")
-
     from strategies.current.outcomes import describe_sports_market
 
     descriptor = describe_sports_market(market)
     if not descriptor.accepted or descriptor.market_type is None:
         return UniverseDecision.exclude(reason=descriptor.reason or "sports_market_parse_failed")
+    if descriptor.market_family.value != "single_game":
+        return UniverseDecision.exclude(reason=descriptor.reason)
+
+    category_tokens = _normalized_tokens(_sports_universe_text(market))
+    if not set(config.sports_category_tokens) & category_tokens:
+        return UniverseDecision.exclude(reason="sports_category_not_matched")
     if descriptor.market_type not in config.sports_enabled_market_types:
         return UniverseDecision.exclude(reason="sports_market_type_disabled")
     return UniverseDecision.include(
         reason="sports_market_selected",
         metadata={
+            "sports_market_family": descriptor.market_family.value,
             "sports_market_type": descriptor.market_type.value,
             "sports_line": str(descriptor.line) if descriptor.line is not None else None,
             "sports_target_count": len(descriptor.targets),
@@ -60,6 +63,28 @@ def _non_empty(*values: str | None) -> tuple[str, ...]:
     """过滤掉空值文本，方便后续统一拼接。"""
 
     return tuple(value for value in values if value)
+
+
+def _sports_universe_text(market: Market) -> str:
+    """汇总用于识别目标体育联赛的稳定市场文本。
+
+    Gamma 部分网球市场会缺失 category/tags，但 slug 和 event_slug 仍然包含
+    ATP/WTA 等联赛信号。universe 精筛先完成盘口和市场家族解析，再用这些
+    稳定文本做联赛兜底，避免把真实直播候选误挡在交易链路之前。
+    """
+
+    return " ".join(
+        _non_empty(
+            market.category,
+            *market.tags,
+            *market.matched_keywords,
+            market.market_slug,
+            market.event_slug,
+            market.market_question,
+            market.market_name,
+            market.event_title,
+        )
+    )
 
 
 def _normalized_tokens(text: str | None) -> set[str]:

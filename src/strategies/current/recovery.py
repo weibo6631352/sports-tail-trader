@@ -10,7 +10,7 @@ from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.extension_api import RecoveryDecision, ExtensionContext, ExtensionDecision
 
 from strategies.current.config import CurrentStrategyConfig
-from strategies.current.exit_plan import build_exit_plan_metadata
+from strategies.current.exit_plan import build_exit_plan_metadata, exit_price_for_context
 from strategies.current.outcomes import sports_token_targets
 from strategies.current.sports_tail import LiveGameStatus, live_game_state_from_metadata
 
@@ -90,7 +90,7 @@ def decide_recovery(
                 ExtensionDecision.sell(
                     reason="recovery_exit_shortage",
                     token_id=position.token_id,
-                    price=config.exit_no_price,
+                    price=exit_price_for_context(config, context),
                     size_shares=uncovered_shares,
                     market_slug=position.market_slug or context.market.market_slug,
                     metadata=exit_metadata,
@@ -152,7 +152,7 @@ def _abnormal_live_state_pause_reason(
     }:
         return f"sports_live_state_{game.status.value}"
     if game.observed_at is not None and _live_state_age_seconds(context, game.observed_at) > (
-        config.sports_max_game_state_age_seconds
+        _max_live_state_age_seconds(config, game)
     ):
         return "sports_live_state_stale"
     return None
@@ -165,6 +165,15 @@ def _live_state_age_seconds(context: ExtensionContext, observed_at: datetime) ->
     if observed_at.tzinfo is None:
         observed_at = observed_at.replace(tzinfo=timezone.utc)
     return (current_time.astimezone(timezone.utc) - observed_at.astimezone(timezone.utc)).total_seconds()
+
+
+def _max_live_state_age_seconds(config: CurrentStrategyConfig, game) -> int:
+    """按运动项目选择恢复侧的新鲜度窗口。"""
+
+    league = str(getattr(game, "league", "") or "").strip().lower()
+    if getattr(game, "tennis_state", None) is not None or "tennis" in league or league in {"atp", "wta"}:
+        return config.sports_tennis_max_game_state_age_seconds
+    return config.sports_max_game_state_age_seconds
 
 
 def _recovery_metadata(

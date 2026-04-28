@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 import re
 from typing import Any, Mapping
 
@@ -83,6 +84,7 @@ def sports_tail_game_metadata(game: SportsLiveGame) -> dict[str, Any]:
             "defense_team": game.baseball_state.defense_team,
             "occupied_bases": game.baseball_state.occupied_bases,
         },
+        "tennis_state": _tennis_state_metadata(game.source_payload.get("tennis_state")),
     }
 
 
@@ -93,6 +95,15 @@ def match_sports_live_game(market: Market, game: SportsLiveGame) -> SportsLiveMa
     """
 
     market_text = _market_text(market)
+    market_date = _market_event_date(market_text)
+    game_date = _game_event_date(game)
+    if (
+        market_date is not None
+        and game_date is not None
+        and market_date != game_date
+        and not _allows_adjacent_event_date(game, market_date, game_date)
+    ):
+        return None
     market_tokens = set(market_text.split())
     home_alias = _best_alias(market_text, market_tokens, game.home.match_aliases())
     away_alias = _best_alias(market_text, market_tokens, game.away.match_aliases())
@@ -150,6 +161,86 @@ def _market_text(market: Market) -> str:
             if part
         )
     )
+
+
+def _tennis_state_metadata(value: Any) -> dict[str, Any] | None:
+    """透传 SofaScore 网球结构化局面，保持策略层和源适配层解耦。"""
+
+    if not isinstance(value, Mapping):
+        return None
+    return {
+        "home_sets_won": value.get("home_sets_won"),
+        "away_sets_won": value.get("away_sets_won"),
+        "current_set": value.get("current_set"),
+        "home_current_set_games": value.get("home_current_set_games"),
+        "away_current_set_games": value.get("away_current_set_games"),
+        "home_total_games": value.get("home_total_games"),
+        "away_total_games": value.get("away_total_games"),
+        "total_games": value.get("total_games"),
+        "set_scores": value.get("set_scores"),
+        "home_point": value.get("home_point"),
+        "away_point": value.get("away_point"),
+    }
+
+
+def _market_event_date(market_text: str) -> date | None:
+    match = re.search(r"(?<!\d)(20\d{2})\s+([01]\d)\s+([0-3]\d)(?!\d)", market_text)
+    if match is None:
+        return None
+    return _date_from_parts(match.group(1), match.group(2), match.group(3))
+
+
+def _game_event_date(game: SportsLiveGame) -> date | None:
+    for key in (
+        "start_time_utc",
+        "game_time_utc",
+        "game_date",
+        "official_date",
+        "start_timestamp",
+    ):
+        parsed = _parse_event_date_value(game.source_payload.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _allows_adjacent_event_date(game: SportsLiveGame, market_date: date, game_date: date) -> bool:
+    """处理网球跨时区开赛日期。
+
+    Polymarket 网球 slug 常按页面本地日期命名，SofaScore 使用 UTC 开赛时间；
+    同一场可能相差一天。团队联赛不使用该宽松规则，避免 MLB/NBA 同队多日赛串场。
+    """
+
+    if str(game.source_payload.get("sport") or "").strip().lower() != "tennis":
+        return False
+    return abs((market_date - game_date).days) <= 1
+
+
+def _parse_event_date_value(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(value, tz=timezone.utc).date()
+        except (OverflowError, OSError, ValueError):
+            return None
+    text = str(value).strip()
+    if not text:
+        return None
+    match = re.search(r"(?<!\d)(20\d{2})-([01]\d)-([0-3]\d)(?!\d)", text)
+    if match is not None:
+        return _date_from_parts(match.group(1), match.group(2), match.group(3))
+    match = re.search(r"(?<!\d)(20\d{2})([01]\d)([0-3]\d)(?!\d)", text)
+    if match is not None:
+        return _date_from_parts(match.group(1), match.group(2), match.group(3))
+    return None
+
+
+def _date_from_parts(year: str, month: str, day: str) -> date | None:
+    try:
+        return date(int(year), int(month), int(day))
+    except ValueError:
+        return None
 
 
 def _best_alias(

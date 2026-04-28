@@ -8,6 +8,7 @@ import pytest
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market, MarketOutcome
+from polymarket_trader.domain.order import Order, OrderSide, OrderStatus, OrderType
 from polymarket_trader.domain.position import Position
 from polymarket_trader.extension_api import ExtensionContext
 from polymarket_trader.extension_api.decisions import (
@@ -20,7 +21,9 @@ from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry, MarketRegistrySnapshot
 from polymarket_trader.app.reconcile_service import ReconcileService
+from polymarket_trader.app.reconcile_service import ReconcileActionType
 from polymarket_trader.main import _is_reconcile_trigger
+from polymarket_trader.main import _runtime_trace_id
 from polymarket_trader.workers.market_ws_worker import MarketWsWorker
 from polymarket_trader.workers.reconcile_authority_refresher import ReconcileAuthorityRefresher
 from polymarket_trader.workers.reconcile_worker import ReconcileWorker
@@ -80,12 +83,101 @@ class _CountingGammaClient:
         return ()
 
 
+class _GammaMarketCandidate:
+    def __init__(self, market: Market) -> None:
+        self.condition_id = market.condition_id
+        self.market_slug = market.market_slug
+        self.clob_enabled = True
+        self.outcomes = market.outcomes
+        self._market = market
+
+    def to_market(self) -> Market:
+        return self._market
+
+
+class _MarketBySlugGammaClient:
+    def __init__(self, market: Market) -> None:
+        self.market = market
+        self.slugs: list[str | None] = []
+
+    async def list_markets(
+        self,
+        *,
+        active: bool | None = True,
+        closed: bool | None = False,
+        tag: str | None = None,
+        slug: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        timeout_s: float | None = None,
+    ) -> tuple[_GammaMarketCandidate, ...]:
+        self.slugs.append(slug)
+        if slug == self.market.market_slug:
+            return (_GammaMarketCandidate(self.market),)
+        return ()
+
+
+class _PositionDTO:
+    def __init__(self, position: Position) -> None:
+        self._position = position
+
+    def to_position(self) -> Position:
+        return self._position
+
+
+class _PositionDataClient:
+    has_auth_client = True
+
+    def __init__(self, positions: tuple[Position, ...]) -> None:
+        self.positions = positions
+
+    async def list_positions(self) -> tuple[_PositionDTO, ...]:
+        return tuple(_PositionDTO(position) for position in self.positions)
+
+
+class _OrderDTO:
+    def __init__(self, order: Order) -> None:
+        self._order = order
+
+    def to_order_record(self) -> Order:
+        return self._order
+
+
+class _OpenOrdersClient:
+    has_auth_client = True
+
+    def __init__(self, orders: tuple[Order, ...]) -> None:
+        self.orders = orders
+
+    async def list_open_orders(self) -> tuple[_OrderDTO, ...]:
+        return tuple(_OrderDTO(order) for order in self.orders)
+
+    async def list_fills(self) -> tuple[object, ...]:
+        return ()
+
+    async def get_balance_allowance(self) -> None:
+        return None
+
+
 class _TerminalLiveStateHooks(_NoopHooks):
     def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:
         return RecoveryDecision(
             reason="test",
             pause_trading=True,
             pause_reason="sports_live_state_ended",
+        )
+
+
+class _TerminalLiveStateExitHooks(_TerminalLiveStateHooks):
+    def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
+        assert context.position is not None
+        return ExtensionDecision.sell(
+            reason="strategy_exit",
+            token_id=context.position.token_id,
+            price=Decimal("0.99"),
+            size_shares=context.position.shares - context.position.open_sell_shares,
+            market_slug=context.market.market_slug if context.market is not None else None,
+            metadata={"exit_trigger": context.metadata.get("exit_trigger")},
         )
 
 
@@ -110,6 +202,13 @@ def test_market_discovery_events_do_not_drive_reconcile_queue() -> None:
     )
 
     assert _is_reconcile_trigger(event) is False
+
+
+def test_runtime_trace_id_fits_persistence_columns() -> None:
+    trace_id = _runtime_trace_id("reconcile", source="event:reconcile_scheduled")
+
+    assert len(trace_id) <= 64
+    assert trace_id.startswith("reconcile-")
 
 
 @pytest.mark.asyncio
@@ -157,6 +256,77 @@ async def test_refresher_skips_market_authority_when_disabled() -> None:
     assert summary.market_count == 1
     assert summary.refreshed_markets == 0
     assert gamma.slugs == []
+
+
+@pytest.mark.asyncio
+async def test_refresher_recovers_missing_registry_market_from_account_position_slug() -> None:
+    base_market = _market(3)
+    market = base_market.with_metadata(event_slug=base_market.market_slug)
+    account_state = AccountStateStore()
+    registry = MarketRegistry()
+    gamma = _MarketBySlugGammaClient(market)
+    refresher = ReconcileAuthorityRefresher(
+        registry_snapshot_provider=lambda: MarketRegistrySnapshot(()),
+        account_state_store=account_state,
+        registry=registry,
+        gamma_client=gamma,
+        data_client=_PositionDataClient(
+            (
+                Position(
+                    condition_id=market.condition_id,
+                    token_id=market.token_ids[0],
+                    shares=Decimal("1"),
+                    cost_usdc=Decimal("0.5"),
+                    market_slug=market.market_slug,
+                ),
+            )
+        ),
+    )
+
+    summary = await refresher.refresh(trace_id="trace-1")
+
+    assert summary.refreshed_positions == 1
+    assert summary.refreshed_markets == 1
+    assert gamma.slugs == [market.market_slug]
+    assert registry.get_by_condition_id(market.condition_id) == market
+
+
+@pytest.mark.asyncio
+async def test_refresher_refreshes_position_coverage_from_authoritative_open_orders() -> None:
+    market = _market(4)
+    position = Position(
+        condition_id=market.condition_id,
+        token_id=market.token_ids[0],
+        shares=Decimal("7"),
+        cost_usdc=Decimal("5"),
+        market_slug=market.market_slug,
+    )
+    sell_order = Order(
+        trace_id="trace-sell",
+        condition_id=market.condition_id,
+        token_id=market.token_ids[0],
+        market_slug=market.market_slug,
+        side=OrderSide.SELL,
+        order_type=OrderType.GTC,
+        price=Decimal("0.99"),
+        size_shares=Decimal("6"),
+        remaining_shares=Decimal("6"),
+        status=OrderStatus.LIVE,
+        order_id="sell-order",
+    )
+    account_state = AccountStateStore()
+    refresher = ReconcileAuthorityRefresher(
+        registry_snapshot_provider=lambda: MarketRegistrySnapshot((market,)),
+        account_state_store=account_state,
+        data_client=_PositionDataClient((position,)),
+        clob_client=_OpenOrdersClient((sell_order,)),
+    )
+
+    await refresher.refresh(trace_id="trace-coverage")
+
+    refreshed = account_state.snapshot().get_position(market.condition_id, market.token_ids[0])
+    assert refreshed is not None
+    assert refreshed.open_sell_shares == Decimal("6")
 
 
 @pytest.mark.asyncio
@@ -272,3 +442,33 @@ async def test_reconcile_prunes_idle_market_after_terminal_live_state_pause() ->
     assert registry.get_by_condition_id(market.condition_id) is None
     status = market_ws_worker.status_snapshot()
     assert not set(market.token_ids) & set(status.tracked_token_ids)
+
+
+def test_terminal_live_state_pause_keeps_existing_position_exit_in_plan() -> None:
+    market = _market(1)
+    position = Position(
+        condition_id=market.condition_id,
+        token_id=market.token_ids[0],
+        shares=Decimal("7"),
+        cost_usdc=Decimal("5"),
+    )
+    service = ReconcileService(extension_hooks=_TerminalLiveStateExitHooks())
+
+    plan = service.build_market_plan(
+        market=market,
+        account_snapshot=AccountSnapshot(positions=(position,)),
+        trace_id="trace-1",
+    )
+
+    assert plan.pause_trading is True
+    assert plan.position == position
+    action_types = [action.action_type for action in plan.actions]
+    assert action_types == [
+        ReconcileActionType.SUBMIT_ORDER,
+        ReconcileActionType.PAUSE_TRADING,
+    ]
+    submit_action = plan.actions[0]
+    assert submit_action.token_id == market.token_ids[0]
+    assert submit_action.source_order_side is not None
+    assert submit_action.target_size_shares == Decimal("7")
+    assert submit_action.metadata["exit_trigger"] == "reconcile_position"

@@ -58,7 +58,11 @@ export const DataTable = <T,>({
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
               >
                 {columns.map((column) => (
-                  <td key={column.key} className={column.align === 'right' ? 'align-right' : undefined}>
+                  <td
+                    key={column.key}
+                    className={column.align === 'right' ? 'align-right' : undefined}
+                    data-label={column.header}
+                  >
                     {column.cell(row)}
                   </td>
                 ))}

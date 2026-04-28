@@ -7,7 +7,7 @@
 - `src/app/`：应用壳体、provider、路由。
 - `src/core/api/`：HTTP client、DTO、资源访问函数。
 - `src/shared/`：布局、通用组件、格式化工具。
-- `src/features/`：总览、市场、候选、订单、持仓、审计、操作。
+- `src/features/`：总览、市场、候选、订单、持仓、复盘、审计、操作、虚拟盘。
 - `src/extensions/`：扩展展示注册表和具体扩展展示实现。
 
 约束：

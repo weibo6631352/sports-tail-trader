@@ -96,6 +96,7 @@ class SportsLiveStateWorker:
         self._last_unmatched_markets = 0
         self._last_entry_signals_published = 0
         self._last_source_statuses: tuple[SportsLiveSourceStatus, ...] = ()
+        self._last_games: tuple[SportsLiveGame, ...] = ()
 
     async def sync_once(self) -> SportsLiveSyncResult | None:
         """执行一次同步；供 scheduler 和测试直接驱动。"""
@@ -127,6 +128,11 @@ class SportsLiveStateWorker:
             return result
         finally:
             self._running = False
+
+    def last_games(self) -> tuple[SportsLiveGame, ...]:
+        """返回最近一次成功同步的直播比赛集合，供高意图 discovery 只读使用。"""
+
+        return self._last_games
 
     def status_snapshot(self) -> SportsLiveSyncStatus:
         """返回轻量运行态快照，不做 I/O。"""
@@ -177,6 +183,7 @@ class SportsLiveStateWorker:
             )
 
         completed_at = _utc_now()
+        self._last_games = snapshot.games
         return SportsLiveSyncResult(
             source=snapshot.source,
             started_at=started_at,
