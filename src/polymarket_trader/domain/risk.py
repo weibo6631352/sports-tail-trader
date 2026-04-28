@@ -372,17 +372,42 @@ class RiskManager:
         notional_usdc: Decimal,
         market_min_order_size: Decimal,
     ) -> RiskDecision | None:
-        if notional_usdc < market_min_order_size:
+        order_size_shares = _intent_order_size_shares(intent)
+        if order_size_shares < market_min_order_size:
             return self._fail(
                 trace_id=intent.trace_id,
                 checks=checks,
                 name="min_order_gate",
                 reason="min_order_not_met",
-                field="intent.amount_usdc",
-                value={"notional_usdc": notional_usdc, "min_order_size": market_min_order_size},
+                field=(
+                    "intent.amount_usdc/intent.price"
+                    if intent.side == OrderSide.BUY
+                    else "intent.size_shares"
+                ),
+                value={
+                    "order_size_shares": order_size_shares,
+                    "min_order_size": market_min_order_size,
+                    "notional_usdc": notional_usdc,
+                },
                 suggested_action="reject",
                 retryable=False,
             )
+        checks.append(
+            RiskCheck(
+                name="min_order_gate",
+                passed=True,
+                field=(
+                    "intent.amount_usdc/intent.price"
+                    if intent.side == OrderSide.BUY
+                    else "intent.size_shares"
+                ),
+                value={
+                    "order_size_shares": order_size_shares,
+                    "min_order_size": market_min_order_size,
+                    "notional_usdc": notional_usdc,
+                },
+            )
+        )
         return None
 
     def _check_exposure_limits(
@@ -727,6 +752,21 @@ def _intent_notional_usdc(intent: OrderIntent) -> Decimal:
     return Decimal("0")
 
 
+def _intent_order_size_shares(intent: OrderIntent) -> Decimal:
+    """把订单意图换算为 Polymarket CLOB 校验的 size 口径。
+
+    CLOB 的 `min_order_size` 是条件代币份额下限。BUY market order 传入的是
+    USDC amount，因此风控要用 `amount_usdc / price` 还原为份额；SELL 本身
+    直接传 size_shares。
+    """
+
+    if intent.size_shares is not None:
+        return max(intent.size_shares, Decimal("0"))
+    if intent.amount_usdc is not None and intent.price > Decimal("0"):
+        return intent.amount_usdc / intent.price
+    return Decimal("0")
+
+
 def _resolve_market_flags(
     *,
     market: Market | None,
@@ -758,6 +798,8 @@ def _effective_min_order_size(
     market: Market | None,
     min_order_size: Decimal | None,
 ) -> Decimal:
+    # Polymarket 字段是 market 级交易参数；min_order_size 参数是框架调用侧
+    # 额外传入的本地保护下限。两者不是同一个配置来源。
     market_min_order_size = market.min_order_size if market is not None else min_order_size
     if market_min_order_size is None:
         market_min_order_size = Decimal("0")

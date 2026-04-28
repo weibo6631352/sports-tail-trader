@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import re
 from typing import Any, Mapping
 
@@ -32,6 +32,8 @@ _GENERIC_ALIAS_TOKENS = {
     "v",
     "women",
 }
+_TEAM_EVENT_START_TOLERANCE = timedelta(hours=3)
+_TENNIS_EVENT_START_TOLERANCE = timedelta(hours=24)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,10 +97,22 @@ def match_sports_live_game(market: Market, game: SportsLiveGame) -> SportsLiveMa
     """
 
     market_text = _market_text(market)
+    market_start = _market_event_start_time(market)
+    game_start = _game_event_start_time(game)
+    precise_start_matched = False
+    if (
+        market_start is not None
+        and game_start is not None
+        and not _allows_event_start_time_match(game, market_start, game_start)
+    ):
+        return None
+    if market_start is not None and game_start is not None:
+        precise_start_matched = True
     market_date = _market_event_date(market_text)
     game_date = _game_event_date(game)
     if (
-        market_date is not None
+        not precise_start_matched
+        and market_date is not None
         and game_date is not None
         and market_date != game_date
         and not _allows_adjacent_event_date(game, market_date, game_date)
@@ -190,6 +204,26 @@ def _market_event_date(market_text: str) -> date | None:
     return _date_from_parts(match.group(1), match.group(2), match.group(3))
 
 
+def _market_event_start_time(market: Market) -> datetime | None:
+    """返回 Polymarket 标注的比赛真实开赛时间，而不是 resolution/endDate。"""
+
+    return _ensure_utc(market.game_start_time)
+
+
+def _game_event_start_time(game: SportsLiveGame) -> datetime | None:
+    for key in (
+        "start_timestamp",
+        "start_time_utc",
+        "game_time_utc",
+        "game_date",
+        "date",
+    ):
+        parsed = _parse_event_datetime_value(game.source_payload.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _game_event_date(game: SportsLiveGame) -> date | None:
     for key in (
         "start_time_utc",
@@ -204,6 +238,25 @@ def _game_event_date(game: SportsLiveGame) -> date | None:
     return None
 
 
+def _allows_event_start_time_match(
+    game: SportsLiveGame,
+    market_start: datetime,
+    game_start: datetime,
+) -> bool:
+    """用精确开赛时间防止同队多场比赛串场。
+
+    团队联赛常有同队连续多日比赛，不能只靠队名或日期匹配。网球允许较宽的
+    赛程漂移窗口，因为资格赛/小赛会的页面时间和直播源时间可能被重排。
+    """
+
+    tolerance = (
+        _TENNIS_EVENT_START_TOLERANCE
+        if str(game.source_payload.get("sport") or "").strip().lower() == "tennis"
+        else _TEAM_EVENT_START_TOLERANCE
+    )
+    return abs(market_start - game_start) <= tolerance
+
+
 def _allows_adjacent_event_date(game: SportsLiveGame, market_date: date, game_date: date) -> bool:
     """处理网球跨时区开赛日期。
 
@@ -214,6 +267,34 @@ def _allows_adjacent_event_date(game: SportsLiveGame, market_date: date, game_da
     if str(game.source_payload.get("sport") or "").strip().lower() != "tennis":
         return False
     return abs((market_date - game_date).days) <= 1
+
+
+def _parse_event_datetime_value(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return _ensure_utc(value)
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(_timestamp_seconds(value), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if re.fullmatch(r"\d+(\.\d+)?", text):
+        try:
+            return datetime.fromtimestamp(_timestamp_seconds(float(text)), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    # 纯日期只能用于日期兜底，不能伪装成精确开赛时间参与硬匹配。
+    if re.fullmatch(r"20\d{2}-[01]\d-[0-3]\d", text):
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return _ensure_utc(parsed)
 
 
 def _parse_event_date_value(value: Any) -> date | None:
@@ -234,6 +315,21 @@ def _parse_event_date_value(value: Any) -> date | None:
     if match is not None:
         return _date_from_parts(match.group(1), match.group(2), match.group(3))
     return None
+
+
+def _timestamp_seconds(value: int | float) -> float:
+    timestamp = float(value)
+    if timestamp > 10_000_000_000:
+        timestamp = timestamp / 1000
+    return timestamp
+
+
+def _ensure_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _date_from_parts(year: str, month: str, day: str) -> date | None:

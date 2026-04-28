@@ -28,6 +28,74 @@ def test_live_state_match_accepts_same_date_team_match() -> None:
     assert match.game.source_event_id == "401869408"
 
 
+def test_live_state_match_rejects_same_teams_on_different_start_times() -> None:
+    market = Market(
+        condition_id="mlb-market",
+        market_slug="mlb-mia-lad-2026-04-28",
+        event_title="Miami Marlins vs. Los Angeles Dodgers",
+        event_slug="mlb-mia-lad-2026-04-28",
+        game_start_time=datetime(2026, 4, 29, 2, 10, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("MLB",),
+        outcomes=(
+            MarketOutcome(token_id="mia", outcome="Miami Marlins"),
+            MarketOutcome(token_id="lad", outcome="Los Angeles Dodgers"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    previous_game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="15508565",
+        league="MLB",
+        home=SportsLiveTeam(name="Los Angeles Dodgers", score=5, abbreviation="LAD"),
+        away=SportsLiveTeam(name="Miami Marlins", score=4, abbreviation="MIA"),
+        status=SportsLiveGameStatus.ENDED,
+        period="Ended",
+        observed_at=datetime(2026, 4, 28, 11, 4, tzinfo=timezone.utc),
+        raw_status="Ended",
+        source_payload={
+            "sport": "baseball",
+            "start_time_utc": "2026-04-28T02:10:00Z",
+        },
+    )
+
+    assert match_sports_live_game(market, previous_game) is None
+
+
+def test_live_state_match_accepts_same_teams_on_matching_start_times() -> None:
+    market = Market(
+        condition_id="mlb-market",
+        market_slug="mlb-mia-lad-2026-04-28",
+        event_title="Miami Marlins vs. Los Angeles Dodgers",
+        event_slug="mlb-mia-lad-2026-04-28",
+        game_start_time=datetime(2026, 4, 29, 2, 10, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("MLB",),
+        outcomes=(
+            MarketOutcome(token_id="mia", outcome="Miami Marlins"),
+            MarketOutcome(token_id="lad", outcome="Los Angeles Dodgers"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    scheduled_game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="upcoming",
+        league="MLB",
+        home=SportsLiveTeam(name="Los Angeles Dodgers", score=0, abbreviation="LAD"),
+        away=SportsLiveTeam(name="Miami Marlins", score=0, abbreviation="MIA"),
+        status=SportsLiveGameStatus.SCHEDULED,
+        period="Not started",
+        observed_at=datetime(2026, 4, 28, 11, 4, tzinfo=timezone.utc),
+        raw_status="Not started",
+        source_payload={
+            "sport": "baseball",
+            "start_time_utc": "2026-04-29T02:10:00Z",
+        },
+    )
+
+    assert match_sports_live_game(market, scheduled_game) is not None
+
+
 def test_live_state_metadata_preserves_tennis_state() -> None:
     market = Market(
         condition_id="tennis-condition",

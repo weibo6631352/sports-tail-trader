@@ -55,6 +55,51 @@ def test_sell_exit_does_not_consume_buy_budget_or_balance() -> None:
     assert decision.passed is True
 
 
+def test_buy_min_order_uses_share_size_not_usdc_amount() -> None:
+    decision = RiskManager().check_order_intent(
+        BuyOrderIntent(
+            trace_id="trace-buy-below-five-usdc",
+            condition_id="condition",
+            token_id="yes",
+            price=Decimal("0.25"),
+            amount_usdc=Decimal("2"),
+        ),
+        market=_market(min_order_size=Decimal("5")),
+        max_order_usdc=Decimal("10"),
+        max_market_usdc=Decimal("10"),
+        max_total_usdc=Decimal("10"),
+        balance_usdc=Decimal("10"),
+        allowance_usdc=Decimal("10"),
+    )
+
+    assert decision.passed is True
+    min_order_check = next(check for check in decision.checks if check.name == "min_order_gate")
+    assert min_order_check.value["order_size_shares"] == Decimal("8")
+
+
+def test_buy_min_order_rejects_when_converted_share_size_is_too_small() -> None:
+    decision = RiskManager().check_order_intent(
+        BuyOrderIntent(
+            trace_id="trace-buy-small-share-size",
+            condition_id="condition",
+            token_id="yes",
+            price=Decimal("0.50"),
+            amount_usdc=Decimal("2"),
+        ),
+        market=_market(min_order_size=Decimal("5")),
+        max_order_usdc=Decimal("10"),
+        max_market_usdc=Decimal("10"),
+        max_total_usdc=Decimal("10"),
+        balance_usdc=Decimal("10"),
+        allowance_usdc=Decimal("10"),
+    )
+
+    assert decision.passed is False
+    assert decision.reason == "min_order_not_met"
+    assert decision.failed_field == "intent.amount_usdc/intent.price"
+    assert decision.checks[-1].value["order_size_shares"] == Decimal("4")
+
+
 def test_buy_entry_rejects_when_exit_order_is_already_open_for_same_token() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
@@ -132,7 +177,7 @@ def test_controlled_scale_in_buy_can_pass_open_exit_gate_when_explicitly_allowed
     assert decision.passed is True
 
 
-def _market() -> Market:
+def _market(*, min_order_size: Decimal = Decimal("1")) -> Market:
     return Market(
         condition_id="condition",
         market_slug="virtual-market",
@@ -142,5 +187,5 @@ def _market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
         tick_size=Decimal("0.01"),
-        min_order_size=Decimal("1"),
+        min_order_size=min_order_size,
     )

@@ -33,7 +33,10 @@ class Market:
     event_slug: str | None = None
     icon_url: str | None = None
     end_date: datetime | None = None
+    game_start_time: datetime | None = None
     tick_size: Decimal = Decimal("0.01")
+    # 来自 Polymarket 的 orderMinSize / min_order_size；这是市场订单 size 下限，
+    # 不是本系统 .env 里的单笔 USDC 配置。BUY 时需结合价格理解其名义金额影响。
     min_order_size: Decimal = Decimal("1")
     neg_risk: bool = False
     fees_enabled: bool | None = None
@@ -147,6 +150,7 @@ class Market:
         event_slug: str | None = None,
         icon_url: str | None = None,
         end_date: datetime | None = None,
+        game_start_time: datetime | None = None,
         category: str | None = None,
         tags: tuple[str, ...] | None = None,
         matched_keywords: tuple[str, ...] | None = None,
@@ -162,6 +166,9 @@ class Market:
             event_slug=self.event_slug if event_slug is None else event_slug,
             icon_url=self.icon_url if icon_url is None else icon_url,
             end_date=self.end_date if end_date is None else end_date,
+            game_start_time=(
+                self.game_start_time if game_start_time is None else game_start_time
+            ),
             category=self.category if category is None else category,
             tags=self.tags if tags is None else tags,
             matched_keywords=(

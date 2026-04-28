@@ -305,6 +305,12 @@ def market_from_record(record: Mapping[str, Any]) -> Market | None:
             or _datetime(raw_market.get("end_date"))
             or _datetime(raw_market.get("endDate"))
         ),
+        game_start_time=(
+            _datetime(record.get("game_start_time"))
+            or _datetime(raw_market.get("game_start_time"))
+            or _datetime(raw_market.get("gameStartTime"))
+            or _datetime(raw_market.get("gameStart"))
+        ),
         tick_size=_decimal(record.get("tick_size"), Decimal("0.01")) or Decimal("0.01"),
         min_order_size=_decimal(record.get("min_order_size"), Decimal("1")) or Decimal("1"),
         neg_risk=_bool(record.get("neg_risk")),

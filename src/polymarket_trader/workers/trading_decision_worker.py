@@ -50,6 +50,10 @@ POSITION_INCREASE_LIFECYCLES = {
     MarketLifecycle.POSITION_OPEN,
     MarketLifecycle.FOLLOW_UP_ORDER_OPEN,
 }
+ENTRY_ATTEMPT_LIFECYCLES = {
+    MarketLifecycle.WATCHING_ORDERBOOK,
+    MarketLifecycle.ENTRY_READY,
+}
 
 
 def _utc_now() -> datetime:
@@ -188,7 +192,7 @@ class TradingDecisionWorker:
         state = self._state_for_market(plan.market)
         if state is None:
             self._transition_market(plan.market, MarketLifecycle.WATCHING_ORDERBOOK)
-        elif state != MarketLifecycle.WATCHING_ORDERBOOK and not _state_allows_position_increase(
+        elif not _state_allows_entry_attempt(
             state,
             plan,
         ):
@@ -388,11 +392,12 @@ class TradingDecisionWorker:
         snapshot: AccountSnapshot,
         position: Position,
     ) -> "TradingDecisionWorkerResult | None":
-        """在真实持仓更新后补齐退出保护单。
+        """在真实持仓更新后让策略决定是否需要退出保护单。
 
         用户 WS 的成交可能晚于初次下单响应到达。此时热态里已经有持仓，但
-        同步 BUY 结果没有触发跟单 SELL；这里以 position/open_orders 为事实，
-        调策略 ``decide_exit`` 生成受控 SELL intent，仍走统一风控和执行器。
+        同步 BUY 结果不一定触发跟单 SELL；这里以 position/open_orders 为事实，
+        调策略 ``decide_exit``。当前策略默认等待结算会返回 SKIP；如策略返回
+        SELL intent，仍走统一风控和执行器。
         """
 
         market = self._trading_decision_service.resolve_market(
@@ -702,6 +707,17 @@ def _state_allows_position_increase(state: MarketLifecycle, plan: EntryPlan) -> 
     """只有持仓相关生命周期允许策略受控加仓继续走主链路。"""
 
     return state in POSITION_INCREASE_LIFECYCLES and _plan_allows_position_increase(plan)
+
+
+def _state_allows_entry_attempt(state: MarketLifecycle, plan: EntryPlan) -> bool:
+    """判断当前生命周期是否允许继续处理新的入场信号。
+
+    ENTRY_READY 表示上一轮没有形成外部持仓副作用，例如 FAK no-fill
+    或风控层可重试拒绝；后续盘口变好时应继续评估。已有持仓或退出单时，
+    仍只允许策略显式标记的受控加仓进入 BUY 主链路。
+    """
+
+    return state in ENTRY_ATTEMPT_LIFECYCLES or _state_allows_position_increase(state, plan)
 
 
 def _match_open_orders(

@@ -54,7 +54,7 @@ class _AllocationCandidate:
     exposure_usdc: Decimal
     hard_capacity_usdc: Decimal
     liquidity_usdc: Decimal
-    market_min_order_size: Decimal
+    min_buy_budget_usdc: Decimal
     target_budget_usdc: Decimal = field(default_factory=lambda: Decimal("0"))
     buy_budget_usdc: Decimal = field(default_factory=lambda: Decimal("0"))
     release_reason: str = ""
@@ -114,7 +114,7 @@ def equal_weight_plan(
                 exposure_usdc=exposure_usdc,
                 hard_capacity_usdc=hard_capacity_usdc,
                 liquidity_usdc=liquidity_usdc,
-                market_min_order_size=snapshot.market.min_order_size,
+                min_buy_budget_usdc=_min_buy_budget_usdc(snapshot),
             )
         )
 
@@ -143,7 +143,7 @@ def equal_weight_plan(
     active_candidates = [
         candidate
         for candidate in candidate_details
-        if candidate.hard_capacity_usdc >= candidate.market_min_order_size
+        if candidate.hard_capacity_usdc >= candidate.min_buy_budget_usdc
     ]
     skipped_for_min_order = [candidate for candidate in candidate_details if candidate not in active_candidates]
     for candidate in skipped_for_min_order:
@@ -151,7 +151,7 @@ def equal_weight_plan(
     if not active_candidates:
         plan_reason = "no_market_meets_min_order_size"
     elif remaining_pool_usdc < min(
-        (candidate.market_min_order_size for candidate in active_candidates),
+        (candidate.min_buy_budget_usdc for candidate in active_candidates),
         default=Decimal("0"),
     ):
         for candidate in active_candidates:
@@ -172,12 +172,12 @@ def equal_weight_plan(
             next_active_candidates: list[_AllocationCandidate] = []
             allocated_this_round_usdc = Decimal("0")
             for candidate in active_candidates:
-                market_min_order_size = candidate.market_min_order_size
+                min_buy_budget_usdc = candidate.min_buy_budget_usdc
                 hard_capacity_usdc = candidate.hard_capacity_usdc
                 previous_buy_budget_usdc = candidate.buy_budget_usdc
                 available_capacity_usdc = hard_capacity_usdc - previous_buy_budget_usdc
 
-                if available_capacity_usdc < market_min_order_size:
+                if available_capacity_usdc < min_buy_budget_usdc:
                     candidate.release_reason = candidate.release_reason or "market_limit_reached"
                     continue
 
@@ -191,7 +191,7 @@ def equal_weight_plan(
                         liquidity_usdc=candidate.liquidity_usdc,
                     )
 
-                if buy_budget_usdc < market_min_order_size:
+                if buy_budget_usdc < min_buy_budget_usdc:
                     next_active_candidates.append(candidate)
                     continue
 
@@ -202,7 +202,7 @@ def equal_weight_plan(
                     candidate.release_reason = candidate.release_reason or release_reason or "reallocated"
 
                 remaining_capacity_after_buy_usdc = hard_capacity_usdc - candidate.buy_budget_usdc
-                if remaining_capacity_after_buy_usdc >= market_min_order_size:
+                if remaining_capacity_after_buy_usdc >= min_buy_budget_usdc:
                     next_active_candidates.append(candidate)
 
             if allocated_this_round_usdc <= Decimal("0"):
@@ -220,7 +220,7 @@ def equal_weight_plan(
                 remaining_pool_usdc,
                 len(active_candidates),
             ) < min(
-                (candidate.market_min_order_size for candidate in active_candidates),
+                (candidate.min_buy_budget_usdc for candidate in active_candidates),
                 default=Decimal("0"),
             ):
                 plan_reason = "budget_remaining_below_min_order_size"
@@ -348,6 +348,25 @@ def _market_liquidity_usdc(
     if snapshot.liquidity_usdc is not None:
         return snapshot.liquidity_usdc
     return _ask_depth_notional(snapshot.orderbook)
+
+
+def _min_buy_budget_usdc(snapshot: AllocationMarketSnapshot) -> Decimal:
+    """把 Polymarket 最小订单 size 换算为入场预算下限。
+
+    `Market.min_order_size` 是份额下限；当前策略 BUY 意图传 USDC amount。
+    因此预算分配阶段必须用计划入场价格估算 `size * price`，否则会把 5 shares
+    误判成 5 USDC，导致尾盘低价机会被系统性跳过。
+    """
+
+    min_order_size = snapshot.market.min_order_size
+    if min_order_size <= Decimal("0"):
+        return Decimal("0")
+    price = snapshot.best_ask if snapshot.best_ask is not None else (
+        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
+    )
+    if price is None or price <= Decimal("0"):
+        return min_order_size
+    return min_order_size * price
 
 
 def _ask_depth_notional(

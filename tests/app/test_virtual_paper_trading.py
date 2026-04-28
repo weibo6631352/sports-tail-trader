@@ -28,27 +28,24 @@ def test_virtual_paper_trade_uses_real_runtime_and_only_virtualizes_final_submit
     assert result["execution"] == "paper_submit_only"
     assert result["virtual_boundary"] == "order_submission_payment"
     assert result["signing"]["source"] == "real_trading_client"
-    assert len(runtime.trading_client.signed_requests) == 2
+    assert len(runtime.trading_client.signed_requests) == 1
     assert [request["phase"] for request in result["order_requests"]] == [
-        "sign",
-        "submit",
         "sign",
         "submit",
     ]
     assert [request["virtual"] for request in result["order_requests"]] == [
         False,
         True,
-        False,
-        True,
     ]
     assert result["summary"]["entry_order_status"] == "full_fill"
-    assert result["summary"]["follow_up_order_status"] == "live"
+    assert result["summary"]["follow_up_count"] == 0
+    assert result["summary"]["follow_up_order_status"] is None
     assert result["opportunity_funnel"]["auto_execute_count"] == 1
     assert result["rejection_summary"]["total"] == 0
-    assert result["paper_pnl"]["basis"] == "entry_fill_vs_follow_up_limit_gross_no_fees"
+    assert result["paper_pnl"]["basis"] == "entry_fill_waiting_for_settlement_gross_no_fees"
     assert result["paper_pnl"]["realized"] is False
     assert result["paper_pnl"]["profitable"] is True
-    assert result["paper_pnl"]["projected_gross_pnl_usdc"] == "0.102040816326530612"
+    assert result["paper_pnl"]["projected_gross_pnl_usdc"] == "0.204081632653061224"
 
 
 def test_virtual_paper_trade_does_not_fabricate_trade_without_live_metadata() -> None:

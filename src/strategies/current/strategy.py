@@ -151,6 +151,8 @@ class CurrentStrategy:
     def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
         """根据成交结果生成后续动作。"""
 
+        if not self._config.auto_exit_enabled:
+            return ()
         if context.order_result is None:
             return ()
         if context.order_result.side is None or context.order_result.side.value != "BUY":

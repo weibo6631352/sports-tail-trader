@@ -134,6 +134,7 @@ class AdminSerializer:
             ],
             "icon_url": market.icon_url,
             "end_date": jsonable(market.end_date),
+            "game_start_time": jsonable(market.game_start_time),
             "tick_size": decimal_text(market.tick_size),
             "min_order_size": decimal_text(market.min_order_size),
             "neg_risk": market.neg_risk,

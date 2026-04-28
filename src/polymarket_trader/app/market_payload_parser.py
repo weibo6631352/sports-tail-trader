@@ -49,6 +49,7 @@ class MarketParseResult:
     event_id: str | None
     icon_url: str | None
     end_date: datetime | None
+    game_start_time: datetime | None
     matched_fields: tuple[str, ...] = field(default_factory=tuple)
     matched_keywords: tuple[str, ...] = field(default_factory=tuple)
     reject_reason: MarketParseRejectReason | None = None
@@ -100,6 +101,7 @@ class MarketParseResult:
             "event_id": self.event_id,
             "icon_url": self.icon_url,
             "end_date": self.end_date,
+            "game_start_time": self.game_start_time,
             "matched_fields": self.matched_fields,
             "matched_keywords": self.matched_keywords,
             "parse_reason": self.reject_reason.value if self.reject_reason else None,
@@ -145,6 +147,7 @@ class MarketParseResult:
             event_slug=self.event_slug,
             icon_url=self.icon_url,
             end_date=self.end_date,
+            game_start_time=self.game_start_time,
             tick_size=self.tick_size,
             min_order_size=self.min_order_size,
             neg_risk=self.neg_risk,
@@ -214,6 +217,7 @@ class MarketPayloadParser:
             event_id=parsed["event_id"],
             icon_url=parsed["icon_url"],
             end_date=parsed["end_date"],
+            game_start_time=parsed["game_start_time"],
             matched_fields=tuple(signal.field_name for signal in match_signals),
             matched_keywords=tuple(signal.keyword for signal in match_signals),
         )
@@ -250,6 +254,7 @@ class MarketPayloadParser:
             event_id=parsed["event_id"],
             icon_url=parsed["icon_url"],
             end_date=parsed["end_date"],
+            game_start_time=parsed["game_start_time"],
             matched_fields=fields,
             matched_keywords=keywords,
             reject_reason=reason,
@@ -266,6 +271,8 @@ class MarketPayloadParser:
             tick_size = self._parse_decimal(
                 self._first_value(raw_market, "orderPriceMinTickSize", "tickSize", "tick")
             )
+            # orderMinSize 是 Polymarket 市场字段，语义是最小订单 size；
+            # 不要和本系统 MAX_ORDER_USDC 这类单笔资金配置混用。
             min_order_size = self._parse_decimal(
                 self._first_value(
                     raw_market,
@@ -344,6 +351,23 @@ class MarketPayloadParser:
             end_date = self._parse_datetime(self._first_value(raw_market, "endDate", "end_date"))
             if end_date is None and event is not None:
                 end_date = self._parse_datetime(self._first_value(event, "endDate", "end_date"))
+            game_start_time = self._parse_datetime(
+                self._first_value(
+                    raw_market,
+                    "gameStartTime",
+                    "game_start_time",
+                    "gameStart",
+                )
+            )
+            if game_start_time is None and event is not None:
+                game_start_time = self._parse_datetime(
+                    self._first_value(
+                        event,
+                        "gameStartTime",
+                        "game_start_time",
+                        "gameStart",
+                    )
+                )
         except (TypeError, ValueError) as exc:
             return {
                 "condition_id": None,
@@ -364,6 +388,7 @@ class MarketPayloadParser:
                 "event_id": None,
                 "icon_url": None,
                 "end_date": None,
+                "game_start_time": None,
                 "parse_error": f"{type(exc).__name__}: {exc}",
             }
 
@@ -386,6 +411,7 @@ class MarketPayloadParser:
             "event_id": event_id,
             "icon_url": icon_url,
             "end_date": end_date,
+            "game_start_time": game_start_time,
             "parse_error": None,
         }
 
@@ -439,9 +465,12 @@ class MarketPayloadParser:
         if not text:
             return None
         try:
-            return datetime.fromisoformat(text.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError:
             return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     @staticmethod
     def _parse_nullable_bool(value: Any | None) -> bool | None:

@@ -162,6 +162,62 @@ class _ScaleInDecisionService:
         return ()
 
 
+class _RetryableEntryDecisionService:
+    def __init__(self, market: Market, orderbooks: tuple[OrderbookSnapshot, ...]) -> None:
+        self.market = market
+        self.orderbooks = orderbooks
+        self.calls = 0
+
+    def build_entry_plan(self, **kwargs: Any) -> EntryPlan:
+        index = min(self.calls, len(self.orderbooks) - 1)
+        self.calls += 1
+        orderbook = self.orderbooks[index]
+        trace_id = str(kwargs.get("trace_id") or f"trace-retry-{self.calls}")
+        allocation = Allocation(
+            condition_id=self.market.condition_id,
+            token_id=orderbook.token_id,
+            market_slug=self.market.market_slug,
+            target_budget_usdc=Decimal("5"),
+            buy_budget_usdc=Decimal("5"),
+        )
+        allocation_plan = AllocationPlan(
+            trace_id=trace_id,
+            total_budget_usdc=Decimal("5"),
+            allocations=(allocation,),
+        )
+        intent = BuyOrderIntent(
+            trace_id=trace_id,
+            condition_id=self.market.condition_id,
+            token_id=orderbook.token_id,
+            price=Decimal("0.99"),
+            amount_usdc=Decimal("5"),
+            market_slug=self.market.market_slug,
+        )
+        return EntryPlan(
+            trace_id=trace_id,
+            market=self.market,
+            orderbook=orderbook,
+            allocation_plan=allocation_plan,
+            allocation=allocation,
+            intent=intent,
+            reason="retryable_entry",
+        )
+
+    def resolve_market(self, *, condition_id: str | None, token_id: str | None) -> Market | None:
+        if condition_id == self.market.condition_id or token_id in self.market.token_ids:
+            return self.market
+        return None
+
+    def lookup_orderbook(self, token_id: str) -> OrderbookSnapshot | None:
+        for orderbook in self.orderbooks:
+            if orderbook.token_id == token_id:
+                return orderbook
+        return None
+
+    def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
+        return ()
+
+
 class _LiveSellExecutor:
     def __init__(self) -> None:
         self.intents: list[ManagedOrderIntent] = []
@@ -183,6 +239,29 @@ class _LiveSellExecutor:
             remaining_shares=getattr(intent, "size_shares", Decimal("0")) or Decimal("0"),
             notional_usdc=getattr(intent, "notional_usdc", Decimal("0")),
             reason="paper_sell_live",
+        )
+
+
+class _NoFillBuyExecutor:
+    def __init__(self) -> None:
+        self.intents: list[ManagedOrderIntent] = []
+
+    async def submit(self, intent: ManagedOrderIntent) -> OrderResult:
+        self.intents.append(intent)
+        return OrderResult(
+            trace_id=intent.trace_id,
+            condition_id=intent.condition_id,
+            token_id=intent.token_id,
+            market_slug=intent.market_slug,
+            status=OrderResultStatus.NO_FILL,
+            intent=intent,
+            order_id=f"buy-{intent.trace_id}",
+            side=getattr(intent, "side", None),
+            order_type=getattr(intent, "order_type", None),
+            price=getattr(intent, "price", None),
+            requested_amount_usdc=getattr(intent, "amount_usdc", None),
+            notional_usdc=getattr(intent, "notional_usdc", Decimal("0")),
+            reason="test_no_fill",
         )
 
 
@@ -365,6 +444,41 @@ def test_entry_signal_scale_in_plan_is_dropped_while_market_lifecycle_is_paused(
     asyncio.run(run())
 
 
+def test_retryable_entry_rejection_keeps_market_observable_for_next_signal() -> None:
+    async def run() -> None:
+        market, _ = _exit_market_and_orderbook()
+        insufficient_orderbook = _orderbook_with_ask_size(size=Decimal("1"))
+        sufficient_orderbook = _orderbook_with_ask_size(size=Decimal("20"))
+        account_state = _open_entry_gate()
+        account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+        decision_service = _RetryableEntryDecisionService(
+            market,
+            (insufficient_orderbook, sufficient_orderbook),
+        )
+        executor = _NoFillBuyExecutor()
+        worker = TradingDecisionWorker(
+            trading_decision_service=decision_service,
+            trading_service=TradingService(executor=executor),
+            account_state_store=account_state,
+            max_order_usdc=Decimal("5"),
+            max_market_usdc=Decimal("20"),
+            max_total_usdc=Decimal("20"),
+        )
+
+        first_result = await worker.process_event(_entry_signal_event(event_id="event-retryable-1"))
+        second_result = await worker.process_event(_entry_signal_event(event_id="event-retryable-2"))
+
+        assert first_result is not None
+        assert first_result.review is not None
+        assert first_result.review.risk_decision.reason == "liquidity_insufficient"
+        assert second_result is not None
+        assert second_result.review is not None
+        assert second_result.review.risk_decision.passed
+        assert len(executor.intents) == 1
+
+    asyncio.run(run())
+
+
 def _orderbook_event(*, event_id: str = "event-orderbook") -> DomainEvent:
     return _event(DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED, event_id=event_id)
 
@@ -413,6 +527,23 @@ def _exit_market_and_orderbook() -> tuple[Market, OrderbookSnapshot]:
         condition_id=market.condition_id,
     )
     return market, orderbook
+
+
+def _orderbook_with_ask_size(*, size: Decimal) -> OrderbookSnapshot:
+    market, orderbook = _exit_market_and_orderbook()
+    return OrderbookSnapshot(
+        token_id=orderbook.token_id,
+        best_bid=Decimal("0.98"),
+        best_ask=Decimal("0.99"),
+        best_bid_size=Decimal("20"),
+        best_ask_size=size,
+        bids=(PriceLevel(price=Decimal("0.98"), size=Decimal("20")),),
+        asks=(PriceLevel(price=Decimal("0.99"), size=size),),
+        received_at=datetime(2026, 4, 28, tzinfo=timezone.utc),
+        tick_size=Decimal("0.01"),
+        market_slug=market.market_slug,
+        condition_id=market.condition_id,
+    )
 
 
 def _position(*, shares: Decimal, open_sell_shares: Decimal) -> Position:

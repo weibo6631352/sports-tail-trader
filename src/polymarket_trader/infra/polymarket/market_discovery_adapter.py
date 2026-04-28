@@ -81,6 +81,12 @@ def payload_signature(payload: Mapping[str, Any]) -> str:
         ),
         "fee_schedule": normalize_fee_schedule(first_value(payload, "feeSchedule", "fee_schedule")),
         "end_date": first_text(payload, "endDate", "end_date", "endDateIso"),
+        "game_start_time": first_text(
+            payload,
+            "gameStartTime",
+            "game_start_time",
+            "gameStart",
+        ),
         "icon_url": first_text(payload, "icon"),
     }
     return dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=True)

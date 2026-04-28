@@ -379,7 +379,7 @@ def _result_payload(
     follow_up_review = None if result is None or not result.follow_up_reviews else result.follow_up_reviews[0]
     entry_order = None if review is None else review.order_result
     follow_up_order = None if follow_up_review is None else follow_up_review.order_result
-    success = bool(
+    entry_success = bool(
         plan is not None
         and plan.ready_to_trade
         and review is not None
@@ -387,12 +387,19 @@ def _result_payload(
         and review.risk_decision.passed
         and entry_order is not None
         and entry_order.status == OrderResultStatus.FULL_FILL
-        and follow_up_review is not None
-        and follow_up_review.risk_decision is not None
-        and follow_up_review.risk_decision.passed
-        and follow_up_order is not None
-        and follow_up_order.status == OrderResultStatus.LIVE
     )
+    follow_up_required = bool(result is not None and result.follow_up_intents)
+    follow_up_success = bool(
+        not follow_up_required
+        or (
+            follow_up_review is not None
+            and follow_up_review.risk_decision is not None
+            and follow_up_review.risk_decision.passed
+            and follow_up_order is not None
+            and follow_up_order.status == OrderResultStatus.LIVE
+        )
+    )
+    success = entry_success and follow_up_success
     return jsonable(
         {
             "status": "ok" if success else "failed",
@@ -466,6 +473,14 @@ def _steps(result: TradingDecisionWorkerResult | None) -> tuple[dict[str, Any], 
     follow_up_review = result.follow_up_reviews[0] if result.follow_up_reviews else None
     follow_up_order = None if follow_up_review is None else follow_up_review.order_result
     follow_up_intent = result.follow_up_intents[0] if result.follow_up_intents else None
+    if follow_up_intent is None:
+        return (
+            {"key": "real_data", "label": "真实候选数据", "status": "success", "detail": "来自当前 registry/orderbook/live metadata"},
+            {"key": "plan", "label": "入场计划", "status": "success" if plan is not None and plan.ready_to_trade else "failed", "detail": None if plan is None else plan.reason or plan.metadata.get("sports_tail_reason", "")},
+            {"key": "entry_risk", "label": "BUY 风控", "status": _risk_status(review), "detail": _risk_reason(review)},
+            {"key": "entry_order", "label": "BUY 虚拟提交", "status": "success" if entry_order is not None and entry_order.status == OrderResultStatus.FULL_FILL else "failed", "detail": None if entry_order is None else entry_order.reason},
+            {"key": "settlement", "label": "等待结算", "status": "success", "detail": "不自动挂 follow-up SELL"},
+        )
     return (
         {"key": "real_data", "label": "真实候选数据", "status": "success", "detail": "来自当前 registry/orderbook/live metadata"},
         {"key": "plan", "label": "入场计划", "status": "success" if plan is not None and plan.ready_to_trade else "failed", "detail": None if plan is None else plan.reason or plan.metadata.get("sports_tail_reason", "")},
@@ -700,10 +715,28 @@ def _paper_pnl_payload(
     follow_up_intent: Any | None,
     follow_up_order: Any | None,
 ) -> dict[str, Any]:
-    if entry_order is None or follow_up_intent is None:
+    if entry_order is None:
         return _empty_paper_pnl()
     entry_spent = Decimal(str(getattr(entry_order, "spent_usdc", "0") or "0"))
     entry_shares = Decimal(str(getattr(entry_order, "matched_shares", "0") or "0"))
+    if follow_up_intent is None:
+        projected_exit_value = entry_shares
+        projected_pnl = projected_exit_value - entry_spent
+        projected_return_pct = Decimal("0") if entry_spent <= Decimal("0") else projected_pnl / entry_spent * Decimal("100")
+        return {
+            "basis": "entry_fill_waiting_for_settlement_gross_no_fees",
+            "realized": False,
+            "profitable": projected_pnl > Decimal("0"),
+            "entry_price": _decimal_text(getattr(entry_order, "price", None)),
+            "entry_spent_usdc": _decimal_text(entry_spent),
+            "entry_size_shares": _decimal_text(entry_shares),
+            "exit_price": _decimal_text(Decimal("1")),
+            "exit_order_status": None,
+            "projected_exit_value_usdc": _decimal_text(projected_exit_value),
+            "projected_gross_pnl_usdc": _decimal_text(projected_pnl),
+            "projected_return_pct": _decimal_text(projected_return_pct),
+            "warning": "projected_settlement_profit_not_realized_until_resolution",
+        }
     exit_price = Decimal(str(getattr(follow_up_intent, "price", "0") or "0"))
     projected_exit_value = entry_shares * exit_price
     projected_pnl = projected_exit_value - entry_spent

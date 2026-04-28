@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 import logging
 from typing import Any, Mapping
 
@@ -13,6 +14,7 @@ from polymarket_trader.serialization import utc_now
 
 logger = logging.getLogger(__name__)
 _RUNTIME_MARKET_SAMPLE_LIMIT = 20
+_LOW_ENTRY_FUNDS_WARNING = "available_usdc_below_configured_order_size"
 
 
 def _text_or_none(value: Any) -> str | None:
@@ -20,6 +22,34 @@ def _text_or_none(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    return parsed if parsed.is_finite() else None
+
+
+def _warning_key(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return str(value.get("code") or value)
+    return str(value)
+
+
+def _dedupe_warnings(values: list[Any]) -> list[Any]:
+    seen: set[str] = set()
+    result: list[Any] = []
+    for value in values:
+        key = _warning_key(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,13 +71,16 @@ class AdminRuntimeView:
             "phase": self._phase_text(supervisor, readiness),
             "blocking_issues": self._blocking_issues(config_readiness, readiness),
             "blocking_reasons": list(readiness.get("blocking_reasons", ())),
-            "warnings": list(readiness.get("warnings") or config_readiness.get("warnings", ())),
+            "warnings": self._readiness_warnings(config_readiness, readiness),
             "runtime": self._runtime_status_snapshot(supervisor, readiness),
         }
 
     async def runtime_snapshot(self) -> dict[str, Any]:
         supervisor = self._supervisor_snapshot()
         readiness = self._readiness_payload(supervisor)
+        config_readiness = self._config_readiness_snapshot()
+        readiness_view = dict(readiness)
+        readiness_view["warnings"] = tuple(self._readiness_warnings(config_readiness, readiness))
         runtime_status = self._runtime_status_snapshot(supervisor, readiness)
         account = self._account_snapshot()
         registry = self._registry_snapshot()
@@ -59,7 +92,7 @@ class AdminRuntimeView:
         return {
             "phase": runtime_status["phase"],
             "ready_to_trade": runtime_status["ready_to_trade"],
-            "readiness": readiness,
+            "readiness": readiness_view,
             "settings": self._settings_snapshot(),
             "identity": await self._identity_snapshot(),
             "runtime": runtime_status,
@@ -174,7 +207,7 @@ class AdminRuntimeView:
             "queue_depth": supervisor.get("queue_depths") or jsonable(self._event_bus_snapshot()),
             "persistence": supervisor.get("persistence") or jsonable(self._persistence_snapshot()),
             "blocking_reasons": tuple(readiness.get("blocking_reasons", ())),
-            "warnings": tuple(readiness.get("warnings", ())),
+            "warnings": tuple(self._readiness_warnings(self._config_readiness_snapshot(), readiness)),
         }
 
     def _phase_text(self, supervisor: Mapping[str, Any], readiness: Mapping[str, Any]) -> str:
@@ -197,6 +230,37 @@ class AdminRuntimeView:
             }
             for reason in readiness.get("blocking_reasons", ())
         ]
+
+    def _readiness_warnings(
+        self,
+        config_readiness: Mapping[str, Any],
+        readiness: Mapping[str, Any],
+    ) -> list[Any]:
+        warnings = list(readiness.get("warnings") or config_readiness.get("warnings", ()))
+        warnings.extend(self._funding_warnings())
+        return _dedupe_warnings(warnings)
+
+    def _funding_warnings(self) -> tuple[str, ...]:
+        account = self._account_snapshot()
+        floor = self._configured_entry_floor_usdc()
+        if floor is None or floor <= Decimal("0"):
+            return ()
+        if account.available_usdc < floor:
+            return (_LOW_ENTRY_FUNDS_WARNING,)
+        return ()
+
+    def _configured_entry_floor_usdc(self) -> Decimal | None:
+        settings = self._settings()
+        if settings is None:
+            return None
+        candidates = []
+        for name in ("max_order_usdc", "max_market_usdc", "portfolio_budget_usdc"):
+            value = _decimal_or_none(getattr(settings, name, None))
+            if value is not None and value > Decimal("0"):
+                candidates.append(value)
+        if not candidates:
+            return None
+        return min(candidates)
 
     def _config_readiness_snapshot(self) -> dict[str, Any]:
         settings = getattr(self.runtime, "readiness", None)

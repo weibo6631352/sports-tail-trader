@@ -257,6 +257,9 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
         - 否则返回 ``SKIP``。
     """
 
+    if not config.auto_exit_enabled:
+        return ExtensionDecision.skip(reason="settlement_only_exit_disabled")
+
     size_shares = context.size_shares or _metadata_decimal(context, "size_shares")
     if size_shares is not None and size_shares > Decimal("0"):
         uncovered_shares = size_shares
@@ -665,7 +668,7 @@ def _scale_in_allocation_gate(
     if _has_open_order(snapshot, OrderSide.BUY):
         return False, {}, None
     covered_shares = _covered_exit_shares(snapshot)
-    if covered_shares < position.shares:
+    if config.auto_exit_enabled and covered_shares < position.shares:
         return False, {}, None
 
     descriptor = describe_sports_market(snapshot.market)

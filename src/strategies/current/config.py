@@ -33,7 +33,11 @@ class CurrentStrategyConfig:
             框架入场 BUY 的兜底最高价格。体育扫尾会优先使用各盘口自己的
             价格上限；这里保留给现有分配和下单接线使用。
         exit_no_price:
-            退出时使用的目标挂卖价格。
+            启用自动退出时使用的目标挂卖价格。当前默认扫尾策略买入后等待
+            权威结算，不主动挂 follow-up SELL。
+        auto_exit_enabled:
+            是否在 BUY 成交或持仓恢复时自动生成 SELL。默认关闭，避免扫尾盘
+            在结果确定后为了提前卖出而增加挂单、撤单和流动性风险。
         min_liquidity_usdc:
             允许入场前要求达到的最小盘口深度，单位是 USDC。
         max_spread:
@@ -68,7 +72,8 @@ class CurrentStrategyConfig:
 
     entry_no_price_max: Decimal = Decimal("0.99")
     exit_no_price: Decimal = Decimal("0.995")
-    min_liquidity_usdc: Decimal = Decimal("5")
+    auto_exit_enabled: bool = False
+    min_liquidity_usdc: Decimal = Decimal("1")
     max_spread: Decimal | None = Decimal("0.10")
     discovery_title_searches: tuple[str, ...] = ("sports", "nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
     discovery_tag_slugs: tuple[str, ...] = ("sports",)
@@ -98,7 +103,7 @@ class CurrentStrategyConfig:
     sports_totals_max_entry_price: Decimal = Decimal("0.99")
     sports_moneyline_max_entry_price: Decimal = Decimal("0.97")
     sports_spreads_max_entry_price: Decimal = Decimal("0.96")
-    sports_min_liquidity_usdc: Decimal = Decimal("5")
+    sports_min_liquidity_usdc: Decimal = Decimal("1")
     sports_max_game_state_age_seconds: int = 10
     sports_tennis_max_game_state_age_seconds: int = 35
     sports_max_under_seconds_remaining: int = 30

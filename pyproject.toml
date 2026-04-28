@@ -14,7 +14,7 @@ dependencies = [
   "httpx>=0.26",
   "pydantic>=2.6",
   "pydantic-settings>=2.2",
-  "py-clob-client>=0.34.6",
+  "py-clob-client-v2>=1.0.0",
   "sqlalchemy>=2.0",
   "uvicorn[standard]>=0.27",
   "websockets>=12",
@@ -41,5 +41,5 @@ line-length = 100
 target-version = "py312"
 
 [[tool.mypy.overrides]]
-module = ["py_clob_client.*"]
+module = ["py_clob_client_v2.*"]
 ignore_missing_imports = true

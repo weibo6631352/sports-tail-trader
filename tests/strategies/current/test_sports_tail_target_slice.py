@@ -442,9 +442,10 @@ def test_entry_plan_preserves_event_metadata_through_application_entry_path() ->
     assert plan.metadata["source"] == "worker_payload"
     assert plan.metadata["sports_tail_reason"] == "totals_over_locked"
     assert plan.metadata["sports_execution_permission"] == "auto_execute"
+    assert plan.metadata["sports_exit_plan"]["primary_action"] == "hold_until_authoritative_resolution"
 
 
-def test_follow_up_exit_price_aligns_to_market_tick_size() -> None:
+def test_follow_up_waits_for_settlement_by_default() -> None:
     market = _totals_market().with_tick_size(Decimal("0.01"))
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
@@ -469,9 +470,7 @@ def test_follow_up_exit_price_aligns_to_market_tick_size() -> None:
         )
     )
 
-    assert len(decisions) == 1
-    assert decisions[0].price == Decimal("0.99")
-    assert decisions[0].metadata["sports_exit_target_price"] == "0.99"
+    assert decisions == ()
 
 
 def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -> None:
@@ -768,7 +767,7 @@ def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_orde
     assert plan.metadata["sports_tail_reason"] == "open_exit_detected"
 
 
-def test_entry_plan_allows_scale_in_when_existing_position_is_covered_and_advantage_strengthens() -> None:
+def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_advantage_strengthens() -> None:
     market = _moneyline_market()
     position = Position(
         condition_id=market.condition_id,
@@ -776,27 +775,12 @@ def test_entry_plan_allows_scale_in_when_existing_position_is_covered_and_advant
         shares=Decimal("12"),
         cost_usdc=Decimal("12"),
         market_slug=market.market_slug,
-        open_sell_shares=Decimal("12"),
-    )
-    exit_order = Order(
-        trace_id="trace-exit-scale",
-        condition_id=market.condition_id,
-        token_id="home",
-        market_slug=market.market_slug,
-        side=OrderSide.SELL,
-        order_type=OrderType.GTC,
-        price=Decimal("0.99"),
-        size_shares=Decimal("12"),
-        remaining_shares=Decimal("12"),
-        status=OrderStatus.LIVE,
-        order_id="exit-scale-order",
     )
     account_snapshot = AccountSnapshot(
         balance_usdc=Decimal("50"),
         allowance_usdc=Decimal("50"),
         allow_new_entries=True,
         positions=(position,),
-        open_orders=(exit_order,),
         fills=(
             Fill(
                 trace_id="trace-initial-buy",
@@ -1100,7 +1084,7 @@ def test_spreads_default_permission_enters_auto_buy_path() -> None:
     assert decision.metadata["sports_execution_permission"] == "auto_execute"
 
 
-def test_follow_up_sell_carries_explicit_exit_plan_metadata() -> None:
+def test_follow_up_sell_is_not_created_after_buy_fill() -> None:
     market = _totals_market()
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
@@ -1120,12 +1104,31 @@ def test_follow_up_sell_carries_explicit_exit_plan_metadata() -> None:
         )
     )
 
-    assert len(decisions) == 1
-    decision = decisions[0]
-    assert decision.action.value == "sell"
-    assert decision.metadata["sports_exit_plan_version"] == "1"
-    assert decision.metadata["sports_exit_plan"]["primary_action"] == "place_follow_up_gtc_sell_after_buy_fill"
-    assert decision.metadata["sports_exit_plan"]["target_size_shares"] == "3"
+    assert decisions == ()
+
+
+def test_position_exit_waits_for_settlement_by_default() -> None:
+    market = _totals_market()
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+
+    decision = strategy.decide_exit(
+        ExtensionContext(
+            trace_id="trace-position-exit",
+            market=market,
+            token_id="over",
+            position=Position(
+                condition_id=market.condition_id,
+                token_id="over",
+                shares=Decimal("3"),
+                cost_usdc=Decimal("2.97"),
+                market_slug=market.market_slug,
+            ),
+            metadata={"exit_trigger": "position_updated"},
+        )
+    )
+
+    assert decision.action.value == "skip"
+    assert decision.reason == "settlement_only_exit_disabled"
 
 
 def test_recovery_keeps_ended_single_game_open_for_ended_not_closed_scan() -> None:

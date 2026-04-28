@@ -292,6 +292,8 @@ def _load_market(item: Mapping[str, Any]) -> Market:
         event_id=_text(item.get("event_id")),
         event_title=_text(item.get("event_title")),
         event_slug=_text(item.get("event_slug")),
+        end_date=_datetime_value(item.get("end_date")),
+        game_start_time=_datetime_value(item.get("game_start_time")),
         category=_text(item.get("category")),
         tags=tuple(str(tag) for tag in item.get("tags", ()) if tag),
         matched_keywords=tuple(str(tag) for tag in item.get("matched_keywords", ()) if tag),

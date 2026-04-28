@@ -317,6 +317,7 @@ class MarketModel(Base, TimestampMixin):
             "event_slug": market.event_slug,
             "icon_url": market.icon_url,
             "end_date": _json_safe(market.end_date),
+            "game_start_time": _json_safe(market.game_start_time),
             "tick_size": str(market.tick_size),
             "min_order_size": str(market.min_order_size),
             "neg_risk": market.neg_risk,
@@ -331,6 +332,8 @@ class MarketModel(Base, TimestampMixin):
             "trading_status": market.trading_status.value,
             "reject_reason": market.reject_reason,
         }
+        if market.game_start_time is not None:
+            payload.setdefault("game_start_time", _json_safe(market.game_start_time))
         return cls(
             trace_id=trace_id,
             source=source,
@@ -385,6 +388,11 @@ class MarketModel(Base, TimestampMixin):
             event_slug=self.event_slug,
             icon_url=_text(raw_payload.get("icon_url")) or _text(raw_payload.get("icon")),
             end_date=_datetime_value(raw_payload.get("end_date")) or _datetime_value(raw_payload.get("endDate")),
+            game_start_time=(
+                _datetime_value(raw_payload.get("game_start_time"))
+                or _datetime_value(raw_payload.get("gameStartTime"))
+                or _datetime_value(raw_payload.get("gameStart"))
+            ),
             tick_size=_decimal(self.tick_size) or Decimal("0.01"),
             min_order_size=_decimal(self.min_order_size) or Decimal("1"),
             neg_risk=bool(self.neg_risk),
@@ -1208,7 +1216,7 @@ class OutboxEventModel(Base, TimestampMixin):
             event_id=event.event_id,
             trace_id=event.trace_id,
             event_type=event.event_type,
-            idempotency_key=event.idempotency_key,
+            idempotency_key=_db_key(event.idempotency_key) or event.event_id,
             market_slug=event.market_slug,
             event_slug=event.event_slug,
             condition_id=event.condition_id,

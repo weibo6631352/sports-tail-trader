@@ -574,6 +574,7 @@ class ReconcileAuthorityRefresher:
             event_slug=refreshed.event_slug,
             icon_url=refreshed.icon_url,
             end_date=refreshed.end_date,
+            game_start_time=refreshed.game_start_time,
             category=refreshed.category,
             tags=refreshed.tags,
             matched_keywords=current.matched_keywords,

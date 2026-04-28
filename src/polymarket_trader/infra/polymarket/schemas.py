@@ -365,6 +365,7 @@ class GammaMarketDTO:
     event_slug: str | None = None
     icon_url: str | None = None
     end_date: datetime | None = None
+    game_start_time: datetime | None = None
     outcomes: tuple[MarketOutcome, ...] = field(default_factory=tuple)
     tick_size: Decimal | None = None
     min_order_size: Decimal | None = None
@@ -416,6 +417,26 @@ class GammaMarketDTO:
             else _coerce_datetime(
                 _first_value(self.raw, "endDate", "end_date")
                 or _first_value(event or {}, "endDate", "end_date")
+            ),
+        )
+        object.__setattr__(
+            self,
+            "game_start_time",
+            self.game_start_time
+            if self.game_start_time is not None
+            else _coerce_datetime(
+                _first_value(
+                    self.raw,
+                    "gameStartTime",
+                    "game_start_time",
+                    "gameStart",
+                )
+                or _first_value(
+                    event or {},
+                    "gameStartTime",
+                    "game_start_time",
+                    "gameStart",
+                )
             ),
         )
         object.__setattr__(
@@ -491,6 +512,7 @@ class GammaMarketDTO:
             event_slug=self.event_slug,
             icon_url=self.icon_url,
             end_date=self.end_date,
+            game_start_time=self.game_start_time,
             tick_size=tick_size,
             min_order_size=min_order_size,
             neg_risk=self.neg_risk,

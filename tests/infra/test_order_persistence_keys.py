@@ -11,7 +11,8 @@ from polymarket_trader.domain.order import (
     OrderStatus,
     OrderType,
 )
-from polymarket_trader.infra.db.models import OrderModel
+from polymarket_trader.domain.events import OutboxEvent
+from polymarket_trader.infra.db.models import OrderModel, OutboxEventModel
 
 
 def test_order_result_persistence_key_prefers_exchange_order_id_over_intent_key() -> None:
@@ -84,3 +85,19 @@ def test_long_local_order_keys_are_shortened_for_database_columns() -> None:
     assert len(model.idempotency_key or "") <= 255
     assert model.order_key == model.idempotency_key
     assert model.raw_payload["idempotency_key"] == long_key
+
+
+def test_long_outbox_idempotency_keys_are_shortened_for_database_columns() -> None:
+    long_key = "submit:trace:" + "x" * 320 + ":order_submitted"
+    event = OutboxEvent(
+        trace_id="trace-1",
+        event_type="order_submitted",
+        idempotency_key=long_key,
+        payload={"idempotency_key": long_key},
+    )
+
+    model = OutboxEventModel.from_domain(event)
+
+    assert len(model.idempotency_key) <= 255
+    assert model.idempotency_key != long_key
+    assert model.payload["idempotency_key"] == long_key

@@ -41,6 +41,15 @@ def build_exit_plan_metadata(
     """
 
     exit_price = exit_price_for_context(config, context)
+    if config.auto_exit_enabled:
+        primary_action = "place_follow_up_gtc_sell_after_buy_fill"
+        settlement_rule = "keep_exit_order_until_fill_or_authoritative_resolution"
+        recovery_rule = "cancel_open_entry_orders_and_cover_unprotected_positions"
+    else:
+        primary_action = "hold_until_authoritative_resolution"
+        settlement_rule = "wait_for_authoritative_resolution_without_follow_up_sell"
+        recovery_rule = "cancel_open_entry_orders_and_keep_position_for_settlement_or_manual_review"
+
     plan: dict[str, object] = {
         "version": EXIT_PLAN_VERSION,
         "source_reason": source_reason,
@@ -48,9 +57,9 @@ def build_exit_plan_metadata(
         "market_slug": None if context.market is None else context.market.market_slug,
         "token_id": token_id,
         "target_exit_price": str(exit_price),
-        "primary_action": "place_follow_up_gtc_sell_after_buy_fill",
-        "settlement_rule": "keep_exit_order_until_fill_or_authoritative_resolution",
-        "recovery_rule": "cancel_open_entry_orders_and_cover_unprotected_positions",
+        "primary_action": primary_action,
+        "settlement_rule": settlement_rule,
+        "recovery_rule": recovery_rule,
         "abnormal_state_policy": {
             "stale_game_state": "pause_new_entries_until_live_state_refresh",
             "game_not_live": "pause_new_entries_and_keep_existing_exit_or_manual_review",

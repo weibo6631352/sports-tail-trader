@@ -317,6 +317,10 @@ def _serialize_market(market: Market | None) -> dict[str, Any] | None:
         "event_id": market.event_id,
         "event_title": market.event_title,
         "event_slug": market.event_slug,
+        "end_date": None if market.end_date is None else market.end_date.isoformat(),
+        "game_start_time": (
+            None if market.game_start_time is None else market.game_start_time.isoformat()
+        ),
         "tick_size": str(market.tick_size),
         "min_order_size": str(market.min_order_size),
         "neg_risk": market.neg_risk,

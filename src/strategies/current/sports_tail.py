@@ -216,7 +216,7 @@ class SportsTailPolicy:
     totals_max_entry_price: Decimal = Decimal("0.99")
     moneyline_max_entry_price: Decimal = Decimal("0.97")
     spreads_max_entry_price: Decimal = Decimal("0.96")
-    min_liquidity_usdc: Decimal = Decimal("5")
+    min_liquidity_usdc: Decimal = Decimal("1")
     max_game_state_age_seconds: int = 10
     tennis_max_game_state_age_seconds: int = 35
     max_under_seconds_remaining: int = 30

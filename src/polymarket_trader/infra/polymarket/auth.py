@@ -33,6 +33,13 @@ def _json_body(value: Any | None) -> str | None:
 
 
 def _require_py_clob_client() -> dict[str, Any]:
+    """加载 Polymarket CLOB V2 SDK。
+
+    2026-04-28 生产 CLOB 已切到 V2，旧版 `py-clob-client` 签出的订单会被
+    撮合引擎以 `order_version_mismatch` 拒绝。这里集中加载 V2 SDK，避免交易
+    主链路继续依赖旧签名结构。
+    """
+
     proxy_keys = (
         "ALL_PROXY",
         "all_proxy",
@@ -48,18 +55,19 @@ def _require_py_clob_client() -> dict[str, Any]:
             saved_proxy_env[key] = value
             os.environ.pop(key, None)
     try:
-        from py_clob_client.client import ClobClient as OfficialClobClient
-        from py_clob_client.clob_types import (
+        from py_clob_client_v2.client import ClobClient as OfficialClobClient
+        from py_clob_client_v2.clob_types import (
             ApiCreds,
             MarketOrderArgs,
             OrderArgs,
             OrderType as OfficialOrderType,
+            OrderPayload,
             RequestArgs,
         )
-        from py_clob_client.headers.headers import create_level_2_headers
+        from py_clob_client_v2.headers.headers import create_level_2_headers
     except ImportError as exc:
         raise RuntimeError(
-            "py-clob-client is required for production Polymarket authentication. "
+            "py-clob-client-v2 is required for production Polymarket authentication. "
             "Install project dependencies before enabling live trading."
         ) from exc
     finally:
@@ -71,6 +79,7 @@ def _require_py_clob_client() -> dict[str, Any]:
         "market_order_args": MarketOrderArgs,
         "order_args": OrderArgs,
         "order_type": OfficialOrderType,
+        "order_payload": OrderPayload,
         "request_args": RequestArgs,
         "create_level_2_headers": create_level_2_headers,
     }
@@ -124,7 +133,7 @@ class DerivedApiCredentials:
 
 
 class PolymarketTradingClient:
-    """对官方 `py-clob-client` 的轻量封装。
+    """对官方 `py-clob-client-v2` 的轻量封装。
 
     这里把 L1 创建/派生 API creds、L2 HMAC headers 和已签名订单构造集中封装，
     避免把官方 SDK 对象泄漏到 app / domain 层。
@@ -205,16 +214,20 @@ class PolymarketTradingClient:
         exported = _require_py_clob_client()
         client = self._ensure_client(require_l2=True)
         official_order_type = getattr(exported["order_type"], order_type.upper())
-        response = client.post_order(
-            signed_order,
-            orderType=official_order_type,
-            post_only=post_only,
-        )
+        try:
+            response = client.post_order(
+                signed_order,
+                order_type=official_order_type,
+                post_only=post_only,
+            )
+        except Exception as exc:
+            response = self._normalize_api_exception(exc)
         return self._normalize_response(response)
 
     def cancel_order(self, order_id: str) -> Mapping[str, Any]:
+        exported = _require_py_clob_client()
         client = self._ensure_client(require_l2=True)
-        response = client.cancel(order_id)
+        response = client.cancel_order(exported["order_payload"](orderID=order_id))
         normalized = dict(self._normalize_response(response))
         normalized.setdefault("order_id", order_id)
         normalized.setdefault("status", "cancelled")
@@ -240,7 +253,9 @@ class PolymarketTradingClient:
                     self._credentials.funder_address,
                 )
             if require_l2 and self._api_creds is None:
-                derived = self._client.create_or_derive_api_creds()
+                # API key 可由签名钱包确定性派生；直接 derive 可以避免 V2 SDK 先尝试
+                # create 时产生“Could not create api key”的可预期 400 噪音。
+                derived = self._client.derive_api_key()
                 self._api_creds = DerivedApiCredentials(
                     api_key=str(derived.api_key),
                     api_secret=str(derived.api_secret),
@@ -254,6 +269,28 @@ class PolymarketTradingClient:
                     )
                 )
             return self._client
+
+    def _normalize_api_exception(self, exc: Exception) -> Mapping[str, Any]:
+        """把 SDK 的 HTTP 400 响应还原为框架可判读的 CLOB 响应。
+
+        V2 SDK 对 FAK no-fill、最小订单、余额不足等 400 响应抛异常；交易框架
+        需要继续读取 `error` / `orderID` 来区分 no-fill、拒单和可重试失败。
+        """
+
+        error_msg = getattr(exc, "error_msg", None)
+        if error_msg is None:
+            raise exc
+        normalized: dict[str, Any] = {"success": False, "status": "rejected"}
+        if isinstance(error_msg, Mapping):
+            normalized.update({str(key): value for key, value in error_msg.items()})
+            if "error" not in normalized and "reason" in normalized:
+                normalized["error"] = normalized["reason"]
+        else:
+            normalized["error"] = str(error_msg)
+        order_id = normalized.get("orderID") or normalized.get("order_id") or normalized.get("id")
+        if order_id is not None:
+            normalized["order_id"] = str(order_id)
+        return normalized
 
     def _normalize_response(self, response: Any) -> Mapping[str, Any]:
         if isinstance(response, Mapping):

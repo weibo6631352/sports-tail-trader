@@ -104,6 +104,8 @@ def _load_market(item: Mapping[str, Any]) -> Market:
         event_id=_optional_text(item, "event_id"),
         event_title=_optional_text(item, "event_title"),
         event_slug=_optional_text(item, "event_slug"),
+        end_date=_optional_datetime(item, "end_date"),
+        game_start_time=_optional_datetime(item, "game_start_time"),
         category=_optional_text(item, "category"),
         tags=_text_tuple(item, "tags"),
         matched_keywords=tuple(str(keyword) for keyword in item.get("matched_keywords", ())),
@@ -278,3 +280,15 @@ def _datetime(item: Mapping[str, Any], key: str) -> datetime:
     if value.endswith("Z"):
         value = value[:-1] + "+00:00"
     return datetime.fromisoformat(value)
+
+
+def _optional_datetime(item: Mapping[str, Any], key: str) -> datetime | None:
+    value = item.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    return datetime.fromisoformat(text)

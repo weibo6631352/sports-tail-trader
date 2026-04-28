@@ -205,6 +205,7 @@ class TradingOrderResultProcessor:
                 OrderResultStatus.FAILED,
                 OrderResultStatus.UNKNOWN_TIMEOUT,
             }:
+                lifecycle = _entry_failure_lifecycle(order_result, execution)
                 await self._host._publish(
                     DomainEventType.ORDER_STATE_UPDATED,
                     trace_id=order_result.trace_id,
@@ -214,13 +215,17 @@ class TradingOrderResultProcessor:
                     reason=order_result.reason,
                     payload={
                         "origin": TRADING_DECISION_WORKER_ORIGIN,
-                        "state": "rejected",
+                        "state": (
+                            "retryable_rejected"
+                            if lifecycle == MarketLifecycle.ENTRY_READY
+                            else "rejected"
+                        ),
                         "order_result": serialize_order_result(order_result),
                     },
                 )
                 self._host._transition_market_by_result(
                     order_result,
-                    MarketLifecycle.ENTRY_REJECTED,
+                    lifecycle,
                 )
 
         active_snapshot, result_event = await self._execute_follow_up_decisions(
@@ -449,3 +454,25 @@ class TradingOrderResultProcessor:
             if self._account_state_store is not None
             else active_snapshot
         )
+
+
+def _entry_failure_lifecycle(
+    order_result: OrderResult,
+    execution: TradingReviewResult | None,
+) -> MarketLifecycle:
+    """把入场失败映射到后续生命周期。
+
+    只有没有触达执行器、且由风控层判定为可重试的拒绝，才能回到
+    ENTRY_READY 继续等待下一轮信号。执行器失败或超时可能已经产生外部
+    订单副作用，必须停在 ENTRY_REJECTED 等待 reconcile 或人工处理。
+    """
+
+    if (
+        execution is not None
+        and not execution.submitted
+        and execution.risk_decision is not None
+        and execution.risk_decision.retryable
+        and order_result.retryable
+    ):
+        return MarketLifecycle.ENTRY_READY
+    return MarketLifecycle.ENTRY_REJECTED
