@@ -977,7 +977,7 @@ def _evaluate_tennis_scale_in(
 ) -> SportsTailEvaluation:
     market = candidate.market
     if market.market_type == SportsMarketType.TOTALS:
-        return _evaluate_totals_scale_in(candidate, policy)
+        return _evaluate_tennis_totals_scale_in(candidate, policy)
     if market.market_type != SportsMarketType.MONEYLINE:
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
     state = candidate.game.tennis_state
@@ -1001,6 +1001,46 @@ def _evaluate_tennis_scale_in(
             opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
         )
     return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
+
+
+def _evaluate_tennis_totals_scale_in(
+    candidate: SportsTailCandidate,
+    policy: SportsTailPolicy,
+) -> SportsTailEvaluation:
+    """按网球盘口结算范围评估 totals 受控加仓。"""
+
+    market = candidate.market
+    state = candidate.game.tennis_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
+    if market.line is None:
+        return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+    if market.side == SportsMarketSide.UNDER:
+        return _reject(candidate, TailRejectReason.TENNIS_TOTALS_UNDER_NOT_SUPPORTED.value)
+    if market.side != SportsMarketSide.OVER:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+
+    total_scope = _tennis_total_scope(market)
+    if total_scope == "match_games":
+        total_games = Decimal(state.total_games)
+        if total_games - market.line >= Decimal("1"):
+            return _accept(
+                candidate,
+                "scale_in_tennis_totals_over_advantage",
+                policy.totals_execution_permission,
+                opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
+            )
+        return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
+    if total_scope == "sets":
+        if _tennis_sets_total_is_over(state, market.line):
+            return _accept(
+                candidate,
+                "scale_in_tennis_set_totals_over_advantage",
+                policy.totals_execution_permission,
+                opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
+            )
+        return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
+    return _reject(candidate, TailRejectReason.TENNIS_TOTAL_SCOPE_UNSUPPORTED.value)
 
 
 def _accept(

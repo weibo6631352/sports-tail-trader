@@ -340,6 +340,31 @@ def test_entry_signal_scale_in_plan_is_not_dropped_while_exit_order_is_open() ->
     asyncio.run(run())
 
 
+def test_entry_signal_scale_in_plan_is_dropped_while_market_lifecycle_is_paused() -> None:
+    async def run() -> None:
+        market, orderbook = _exit_market_and_orderbook()
+        account_state = _open_entry_gate()
+        account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+        decision_service = _ScaleInDecisionService(market, orderbook)
+        executor = _LiveSellExecutor()
+        worker = TradingDecisionWorker(
+            trading_decision_service=decision_service,
+            trading_service=TradingService(executor=executor),
+            account_state_store=account_state,
+            max_order_usdc=Decimal("5"),
+            max_market_usdc=Decimal("20"),
+            max_total_usdc=Decimal("20"),
+        )
+        worker._market_lifecycle[market.condition_id] = MarketLifecycle.PAUSED
+
+        result = await worker.process_event(_entry_signal_event(event_id="event-scale-in-paused"))
+
+        assert result is None
+        assert executor.intents == []
+
+    asyncio.run(run())
+
+
 def _orderbook_event(*, event_id: str = "event-orderbook") -> DomainEvent:
     return _event(DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED, event_id=event_id)
 

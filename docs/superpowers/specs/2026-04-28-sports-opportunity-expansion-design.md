@@ -9,6 +9,7 @@
 - 新机会仍属于当前策略能力，主要落在 `src/strategies/current/`。
 - 买入、加仓、退出覆盖继续走统一交易主链路，不新增直连下单旁路。
 - 结束未封盘必须以外部直播源明确 `ENDED`、单场盘口、无来源冲突、可从最终比分明确判断目标 token 为前提。
+- `ENDED` 是确定性机会状态，不属于恢复链路的异常暂停状态；取消、延期、退赛、争议和未知状态仍必须暂停新增交易。
 - 加仓不是亏损补仓，只允许在已有退出覆盖、没有开放 BUY、优势状态强于普通入场阈值、总暴露仍在上限内时触发。
 - 风控默认继续禁止“有退出 SELL 时再次 BUY”；只有策略显式标记为受控加仓的 BUY intent，才允许穿过该门禁，并保留审计记录。
 
@@ -50,16 +51,18 @@
 - Totals Under：剩余时间不超过普通阈值的一半，且安全边际至少比普通阈值多 1。
 - Totals Over：已越过 line 后继续拉开至少 1 分。
 - Tennis Moneyline：当前盘目标方至少 5 局且领先至少 3 局，或比赛已经结束且目标方胜出。
-- Tennis Totals：结束或已完成条件能明确目标方向。
+- Tennis Totals：整场总局数使用 `tennis_state.total_games`，总盘数使用结构化盘数，不复用普通球队比分总分。
 
 ## 运行链路
 
 1. live state worker 继续把直播状态写入 entry metadata。
 2. entry planner 构造当前 market/token 的候选快照。
-3. 当前策略先评估 `ended_not_closed`，再评估普通尾盘机会，最后评估 `scale_in_advantage`。
-4. scale-in 通过策略 metadata 显式标记 `allow_open_exit_overlap`，由 intent builder 写入 BUY intent。
-5. RiskManager 默认仍拒绝开放退出单上的 BUY；仅当 intent 明确允许受控加仓时通过该门禁。
-6. BUY 成交后，现有 `decide_follow_up` 继续为新增份额挂 GTC SELL。
+3. recovery 只暂停真正异常的直播状态；`ended` market 保持可评估，交给 `ended_not_closed` 判断是否交易。
+4. 当前策略先评估 `ended_not_closed`，再评估普通尾盘机会，最后评估 `scale_in_advantage`。
+5. scale-in 通过策略 metadata 显式标记 `allow_open_exit_overlap`，由 intent builder 写入 BUY intent。
+6. TradingDecisionWorker 只允许 `POSITION_OPEN` / `FOLLOW_UP_ORDER_OPEN` 生命周期中的受控加仓继续执行。
+7. RiskManager 默认仍拒绝开放退出单上的 BUY；仅当 intent 明确允许受控加仓时通过该门禁。
+8. BUY 成交后，现有 `decide_follow_up` 继续为新增份额挂 GTC SELL。
 
 ## 验收口径
 

@@ -850,6 +850,97 @@ def test_entry_plan_allows_scale_in_when_existing_position_is_covered_and_advant
     assert plan.metadata["sports_tail_opportunity_type"] == "scale_in_advantage"
 
 
+def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
+    market = _tennis_totals_market()
+    position = Position(
+        condition_id=market.condition_id,
+        token_id="tennis-over",
+        shares=Decimal("12"),
+        cost_usdc=Decimal("12"),
+        market_slug=market.market_slug,
+        open_sell_shares=Decimal("12"),
+    )
+    exit_order = Order(
+        trace_id="trace-tennis-exit-scale",
+        condition_id=market.condition_id,
+        token_id="tennis-over",
+        market_slug=market.market_slug,
+        side=OrderSide.SELL,
+        order_type=OrderType.GTC,
+        price=Decimal("0.99"),
+        size_shares=Decimal("12"),
+        remaining_shares=Decimal("12"),
+        status=OrderStatus.LIVE,
+        order_id="tennis-exit-scale-order",
+    )
+    account_snapshot = AccountSnapshot(
+        balance_usdc=Decimal("50"),
+        allowance_usdc=Decimal("50"),
+        allow_new_entries=True,
+        positions=(position,),
+        open_orders=(exit_order,),
+        fills=(
+            Fill(
+                trace_id="trace-tennis-initial-buy",
+                condition_id=market.condition_id,
+                token_id="tennis-over",
+                side="BUY",
+                notional_usdc=Decimal("12"),
+                confirmed_at=datetime(2026, 4, 27, 0, 1, tzinfo=timezone.utc),
+            ),
+        ),
+    )
+    service = TradingDecisionService(
+        extension_hooks=CurrentStrategy(
+            config=CurrentStrategyConfig(sports_max_event_exposure_usdc=Decimal("40"))
+        ).hooks,
+    )
+
+    plan = service.build_entry_plan(
+        market=market,
+        orderbook=_orderbook(token_id="tennis-over", best_ask=Decimal("0.94")),
+        account_snapshot=account_snapshot,
+        token_id="tennis-over",
+        trace_id="trace-tennis-scale-in-plan",
+        portfolio_budget_usdc=Decimal("20"),
+        available_usdc=Decimal("50"),
+        max_order_usdc=Decimal("20"),
+        max_market_usdc=Decimal("40"),
+        max_total_usdc=Decimal("60"),
+        metadata={
+            "sports_tail_game": {
+                "league": "WTA",
+                "home_name": "Rada Zolotareva",
+                "away_name": "Despina Papamichail",
+                "home_score": 0,
+                "away_score": 0,
+                "period": "S2",
+                "status": "live",
+                "observed_at": "2026-04-27T00:00:00+00:00",
+                "tennis_state": {
+                    "home_sets_won": 1,
+                    "away_sets_won": 0,
+                    "current_set": 2,
+                    "home_current_set_games": 6,
+                    "away_current_set_games": 5,
+                    "home_total_games": 12,
+                    "away_total_games": 11,
+                    "set_scores": ((6, 4), (6, 5)),
+                },
+            }
+        },
+    )
+
+    assert plan.ready_to_trade is True
+    assert plan.intent is not None
+    assert plan.intent.token_id == "tennis-over"
+    assert plan.intent.amount_usdc == Decimal("6")
+    assert getattr(plan.intent, "allow_open_exit_overlap") is True
+    assert plan.metadata is not None
+    assert plan.metadata["sports_tail_reason"] == "scale_in_tennis_totals_over_advantage"
+    assert plan.metadata["sports_tail_opportunity_type"] == "scale_in_advantage"
+
+
 def test_admin_live_state_store_projects_manual_candidate_and_confirmation() -> None:
     result = asyncio.run(_run_admin_manual_candidate_flow())
 
@@ -1037,7 +1128,7 @@ def test_follow_up_sell_carries_explicit_exit_plan_metadata() -> None:
     assert decision.metadata["sports_exit_plan"]["target_size_shares"] == "3"
 
 
-def test_recovery_pauses_new_entries_when_live_state_is_abnormal() -> None:
+def test_recovery_keeps_ended_single_game_open_for_ended_not_closed_scan() -> None:
     market = _totals_market()
 
     decision = decide_recovery(
@@ -1056,6 +1147,35 @@ def test_recovery_pauses_new_entries_when_live_state_is_abnormal() -> None:
                     "period": "P3",
                     "seconds_remaining": 0,
                     "status": "ended",
+                    "observed_at": "2026-04-27T00:00:00+00:00",
+                }
+            },
+        ),
+    )
+
+    assert decision.pause_trading is False
+    assert decision.pause_reason == ""
+
+
+def test_recovery_pauses_new_entries_when_live_state_is_abnormal() -> None:
+    market = _totals_market()
+
+    decision = decide_recovery(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-abnormal-recovery",
+            market=market,
+            now=datetime(2026, 4, 27, 1, tzinfo=timezone.utc),
+            metadata={
+                "sports_tail_game": {
+                    "league": "NHL",
+                    "home_name": "TB",
+                    "away_name": "MON",
+                    "home_score": 0,
+                    "away_score": 0,
+                    "period": "Postponed",
+                    "seconds_remaining": None,
+                    "status": "postponed",
                     "observed_at": "2026-04-27T00:59:55+00:00",
                 }
             },
@@ -1063,7 +1183,7 @@ def test_recovery_pauses_new_entries_when_live_state_is_abnormal() -> None:
     )
 
     assert decision.pause_trading is True
-    assert decision.pause_reason == "sports_live_state_ended"
+    assert decision.pause_reason == "sports_live_state_postponed"
 
 
 def test_recovery_manages_all_sports_target_tokens_instead_of_fixed_primary_token() -> None:

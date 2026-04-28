@@ -147,10 +147,12 @@ def _abnormal_live_state_pause_reason(
         LiveGameStatus.CANCELLED,
         LiveGameStatus.DISPUTED,
         LiveGameStatus.RETIRED,
-        LiveGameStatus.ENDED,
         LiveGameStatus.UNKNOWN,
     }:
         return f"sports_live_state_{game.status.value}"
+    if game.status == LiveGameStatus.ENDED:
+        # 已结束但 Polymarket 未封盘是当前策略的确定性机会，不按直播异常暂停。
+        return None
     if game.observed_at is not None and _live_state_age_seconds(context, game.observed_at) > (
         _max_live_state_age_seconds(config, game)
     ):

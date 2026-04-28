@@ -46,6 +46,10 @@ from polymarket_trader.workers.trading_decision_worker_result import TradingDeci
 PositionsProvider = Callable[[], Iterable[Position]]
 OpenOrdersProvider = Callable[[], Iterable[Order]]
 EntryMetadataProvider = Callable[[DomainEvent, AccountSnapshot | None], Mapping[str, object] | None]
+POSITION_INCREASE_LIFECYCLES = {
+    MarketLifecycle.POSITION_OPEN,
+    MarketLifecycle.FOLLOW_UP_ORDER_OPEN,
+}
 
 
 def _utc_now() -> datetime:
@@ -184,7 +188,10 @@ class TradingDecisionWorker:
         state = self._state_for_market(plan.market)
         if state is None:
             self._transition_market(plan.market, MarketLifecycle.WATCHING_ORDERBOOK)
-        elif state != MarketLifecycle.WATCHING_ORDERBOOK and not _plan_allows_position_increase(plan):
+        elif state != MarketLifecycle.WATCHING_ORDERBOOK and not _state_allows_position_increase(
+            state,
+            plan,
+        ):
             return None
         return await self._execute_entry_plan(event=event, snapshot=snapshot, plan=plan)
 
@@ -689,6 +696,12 @@ def _plan_allows_position_increase(plan: EntryPlan) -> bool:
         and getattr(plan.intent, "allow_open_exit_overlap", False)
         and dict(plan.metadata or {}).get("sports_tail_opportunity_type") == "scale_in_advantage"
     )
+
+
+def _state_allows_position_increase(state: MarketLifecycle, plan: EntryPlan) -> bool:
+    """只有持仓相关生命周期允许策略受控加仓继续走主链路。"""
+
+    return state in POSITION_INCREASE_LIFECYCLES and _plan_allows_position_increase(plan)
 
 
 def _match_open_orders(
