@@ -204,7 +204,7 @@ def _recovery_profit_take_action(
     average_price = position.cost_usdc / position.shares
     if average_price < config.sports_recovery_profit_take_min_avg_price or average_price >= Decimal("1"):
         return None
-    target_price = _next_tick_price(context, average_price)
+    target_price, price_source = _recovery_profit_take_price(context, position.token_id, average_price)
     if target_price is None or target_price > Decimal("1"):
         return None
     expected_profit = uncovered_shares * (target_price - average_price)
@@ -225,6 +225,7 @@ def _recovery_profit_take_action(
             "sports_exit_mode": "profit_take",
             "sports_exit_source_reason": "recovery_profit_take",
             "sports_profit_take_target_price": str(target_price),
+            "sports_profit_take_price_source": price_source,
             "sports_profit_take_expected_profit_usdc": _decimal_metadata_text(expected_profit),
             "sports_recovery_position_avg_price": _decimal_metadata_text(average_price),
         }
@@ -244,6 +245,35 @@ def _recovery_profit_take_action(
         market_slug=position.market_slug or (context.market.market_slug if context.market is not None else None),
         metadata=exit_metadata,
     )
+
+
+def _recovery_profit_take_price(
+    context: ExtensionContext,
+    token_id: str,
+    average_price: Decimal,
+) -> tuple[Decimal | None, str]:
+    """优先使用当前可成交 bid，否则退回均价上方一档止盈价。"""
+
+    tick_price = _next_tick_price(context, average_price)
+    orderbook = _orderbook_for_token(context, token_id)
+    best_bid = None if orderbook is None else orderbook.best_bid
+    if best_bid is not None and best_bid > average_price and (
+        tick_price is None or best_bid > tick_price
+    ):
+        tick_size = orderbook.tick_size or (context.market.tick_size if context.market is not None else None)
+        return cap_price_to_clob_limit(best_bid, tick_size=tick_size), "best_bid"
+    return tick_price, "next_tick"
+
+
+def _orderbook_for_token(context: ExtensionContext, token_id: str):
+    """从恢复上下文里找到对应 token 的盘口快照。"""
+
+    if context.orderbook is not None and context.orderbook.token_id == token_id:
+        return context.orderbook
+    for view in context.market_token_views:
+        if view.token_id == token_id:
+            return view.orderbook
+    return None
 
 
 def _next_tick_price(context: ExtensionContext, price: Decimal) -> Decimal | None:

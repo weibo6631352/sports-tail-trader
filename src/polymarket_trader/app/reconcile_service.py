@@ -17,6 +17,7 @@ from polymarket_trader.domain.order import (
     ReplaceOrderIntent,
     SellOrderIntent,
 )
+from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.account import AccountSnapshot, MarketPause
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
@@ -130,9 +131,11 @@ class ReconcileService:
         *,
         extension_hooks: ExtensionHooks,
         entry_metadata_provider: Callable[[Market], Mapping[str, Any]] | None = None,
+        orderbook_reader: Callable[[str], OrderbookSnapshot | None] | None = None,
     ) -> None:
         self._extension_hooks = extension_hooks
         self._entry_metadata_provider = entry_metadata_provider
+        self._orderbook_reader = orderbook_reader
 
     def build_reconcile_plan(
         self,
@@ -190,6 +193,11 @@ class ReconcileService:
             MarketTokenView(
                 token_id=outcome.token_id,
                 outcome=outcome.outcome,
+                orderbook=(
+                    None
+                    if self._orderbook_reader is None
+                    else self._orderbook_reader(outcome.token_id)
+                ),
                 position=account_snapshot.get_position(market.condition_id, outcome.token_id),
                 open_orders=account_snapshot.open_orders_for_market(
                     market.condition_id,

@@ -359,6 +359,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     reconcile_service = ReconcileService(
         extension_hooks=extension.hooks,
         entry_metadata_provider=entry_metadata_for_market,
+        orderbook_reader=trading_decision_service.lookup_orderbook,
     )
     reconcile_worker = ReconcileWorker(
         event_bus=event_bus,

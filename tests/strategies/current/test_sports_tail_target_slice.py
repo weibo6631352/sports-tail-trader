@@ -28,7 +28,7 @@ from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.workers.trading_decision_worker import TradingDecisionWorker
-from polymarket_trader.extension_api import ExtensionContext
+from polymarket_trader.extension_api import ExtensionContext, MarketTokenView
 
 from strategies.current.config import CurrentStrategyConfig, sports_tail_policy_from_config
 from strategies.current.outcomes import SportsMarketFamily, describe_sports_market
@@ -3186,6 +3186,47 @@ def test_recovery_places_profit_take_for_high_price_uncovered_position() -> None
     assert decision.actions[0].size_shares == Decimal("5.0505")
     assert decision.actions[0].metadata["sports_exit_mode"] == "profit_take"
     assert decision.actions[0].metadata["sports_profit_take_expected_profit_usdc"] == "0.059995"
+
+
+def test_recovery_uses_profitable_best_bid_when_one_tick_profit_is_too_small() -> None:
+    market = _totals_market().with_tick_size(Decimal("0.001"))
+    position = Position(
+        condition_id=market.condition_id,
+        token_id="over",
+        shares=Decimal("5.0505"),
+        cost_usdc=Decimal("4.9999"),
+        market_slug=market.market_slug,
+    )
+    orderbook = OrderbookSnapshot(
+        token_id="over",
+        condition_id=market.condition_id,
+        market_slug=market.market_slug,
+        best_bid=Decimal("0.999"),
+        best_ask=None,
+        bids=(PriceLevel(price=Decimal("0.999"), size=Decimal("100")),),
+        asks=(),
+        received_at=datetime(2026, 4, 30, tzinfo=timezone.utc),
+        tick_size=Decimal("0.001"),
+    )
+
+    decision = decide_recovery(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-recovery-profit-take-best-bid",
+            market=market,
+            position=position,
+            market_token_views=(
+                MarketTokenView(token_id="over", outcome="Over", orderbook=orderbook),
+            ),
+        ),
+    )
+
+    assert decision.reason == "strategy_recovery"
+    assert len(decision.actions) == 1
+    assert decision.actions[0].reason == "recovery_profit_take"
+    assert decision.actions[0].price == Decimal("0.999")
+    assert decision.actions[0].metadata["sports_profit_take_price_source"] == "best_bid"
+    assert decision.actions[0].metadata["sports_profit_take_expected_profit_usdc"] == "0.0455495"
 
 
 def test_recovery_places_profit_take_for_unknown_legacy_high_price_position() -> None:

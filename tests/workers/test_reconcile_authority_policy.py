@@ -9,6 +9,7 @@ from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market, MarketOutcome
 from polymarket_trader.domain.order import Order, OrderSide, OrderStatus, OrderType
+from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.position import Position
 from polymarket_trader.extension_api import ExtensionContext
 from polymarket_trader.extension_api.decisions import (
@@ -62,6 +63,15 @@ class _NoopHooks:
         reason: str,
     ) -> Market:
         return existing_market
+
+
+class _CaptureRecoveryHooks(_NoopHooks):
+    def __init__(self) -> None:
+        self.recovery_context: ExtensionContext | None = None
+
+    def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:
+        self.recovery_context = context
+        return RecoveryDecision(reason="captured")
 
 
 class _CountingGammaClient:
@@ -209,6 +219,45 @@ def test_runtime_trace_id_fits_persistence_columns() -> None:
 
     assert len(trace_id) <= 64
     assert trace_id.startswith("reconcile-")
+
+
+def test_reconcile_recovery_context_includes_orderbook_snapshot() -> None:
+    market = _market(1)
+    orderbook = OrderbookSnapshot(
+        token_id="token-1-yes",
+        condition_id="condition-1",
+        best_bid=Decimal("0.99"),
+        best_ask=Decimal("1"),
+        bids=(PriceLevel(price=Decimal("0.99"), size=Decimal("10")),),
+        asks=(PriceLevel(price=Decimal("1"), size=Decimal("10")),),
+        received_at=datetime(2026, 4, 30, tzinfo=timezone.utc),
+        tick_size=Decimal("0.01"),
+    )
+    hooks = _CaptureRecoveryHooks()
+    service = ReconcileService(
+        extension_hooks=hooks,
+        orderbook_reader=lambda token_id: orderbook if token_id == "token-1-yes" else None,
+    )
+
+    service.build_reconcile_plan(
+        registry_snapshot=MarketRegistrySnapshot((market,)),
+        account_snapshot=AccountSnapshot(
+            positions=(
+                Position(
+                    condition_id="condition-1",
+                    token_id="token-1-yes",
+                    shares=Decimal("5"),
+                    cost_usdc=Decimal("4.95"),
+                ),
+            ),
+            allow_new_entries=True,
+        ),
+    )
+
+    assert hooks.recovery_context is not None
+    token_views = {view.token_id: view for view in hooks.recovery_context.market_token_views}
+    assert token_views["token-1-yes"].orderbook == orderbook
+    assert token_views["token-1-no"].orderbook is None
 
 
 @pytest.mark.asyncio
