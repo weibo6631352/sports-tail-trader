@@ -3992,7 +3992,7 @@ def test_recovery_keeps_fresh_open_entry_order_within_strategy_ttl() -> None:
     assert decision.actions == ()
 
 
-def test_recovery_default_keeps_profit_take_entry_order_for_two_minute_window() -> None:
+def test_recovery_default_keeps_profit_take_entry_order_for_ten_minute_window() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
     open_buy = Order(
@@ -4006,7 +4006,7 @@ def test_recovery_default_keeps_profit_take_entry_order_for_two_minute_window() 
         status=OrderStatus.LIVE,
         order_id="buy-1",
         market_slug=market.market_slug,
-        created_at=now - timedelta(seconds=60),
+        created_at=now - timedelta(seconds=300),
     )
 
     decision = decide_recovery(
