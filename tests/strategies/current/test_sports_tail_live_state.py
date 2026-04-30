@@ -111,6 +111,56 @@ def test_live_state_match_accepts_accented_basketball_team_names() -> None:
     assert match.matched_away_alias == "Žalgiris Kaunas"
 
 
+def test_live_state_match_ignores_basketball_club_and_sponsor_tokens() -> None:
+    market = Market(
+        condition_id="aba-spartak-zadar-condition",
+        market_slug="bkaba-spa-zad-2026-04-30",
+        market_question="Spartak Subotica vs. Zadar",
+        event_title="Spartak Subotica vs. Zadar",
+        event_slug="bkaba-spa-zad-2026-04-30",
+        game_start_time=datetime(2026, 4, 30, 17, 0, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("Basketball", "ABA League", "bkaba"),
+        outcomes=(
+            MarketOutcome(token_id="spartak", outcome="Spartak Subotica"),
+            MarketOutcome(token_id="zadar", outcome="Zadar"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="16074050",
+        league="ABA League",
+        home=SportsLiveTeam(
+            name="KK Spartak Office Shoes",
+            score=0,
+            short_name="KK Spartak",
+            aliases=("kk spartak office shoes subotica",),
+        ),
+        away=SportsLiveTeam(
+            name="KK Zadar",
+            score=0,
+            short_name="Zadar",
+            aliases=("kk zadar",),
+        ),
+        status=SportsLiveGameStatus.SCHEDULED,
+        period="Not started",
+        observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+        source_payload={
+            "sport": "basketball",
+            "start_timestamp": 1777568400,
+            "tournament": "ABA League",
+        },
+    )
+
+    match = match_sports_live_game(market, game)
+
+    assert match is not None
+    assert match.game.source_event_id == "16074050"
+    assert match.matched_home_alias == "kk spartak office shoes subotica"
+    assert match.matched_away_alias in {"KK Zadar", "Zadar"}
+
+
 def test_best_live_state_match_reuses_market_text_across_many_games(monkeypatch) -> None:
     market = _market("nba-phi-bos-2026-04-28")
     games = tuple(
