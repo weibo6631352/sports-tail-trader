@@ -2962,6 +2962,66 @@ def test_live_mlb_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
     assert decision.metadata["sports_tail_reason"] == "baseball_not_late_enough"
 
 
+def test_live_kbo_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gate() -> None:
+    now = datetime(2026, 4, 30, 10, 18, tzinfo=timezone.utc)
+    market = Market(
+        condition_id="kbo-live-condition",
+        market_slug="kbo-kia-nc-2026-04-30",
+        market_question="KBO: Kia Tigers vs. NC Dinos",
+        event_title="KBO: Kia Tigers vs. NC Dinos",
+        event_slug="kbo-kia-nc-2026-04-30",
+        category="Sports",
+        tags=("KBO", "Baseball"),
+        outcomes=(
+            MarketOutcome(token_id="kia", outcome="Kia Tigers"),
+            MarketOutcome(token_id="nc", outcome="NC Dinos"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    ).with_metadata(end_date=datetime(2026, 5, 7, 9, 30, tzinfo=timezone.utc))
+
+    decision = decide_entry(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-live-kbo-settlement-end-date",
+            market=market,
+            token_id="nc",
+            orderbook=_orderbook(token_id="nc", best_ask=Decimal("0.41")),
+            amount_usdc=Decimal("10"),
+            now=now,
+            metadata={
+                "sports_tail_game": {
+                    "league": "KBO",
+                    "home_name": "NC Dinos",
+                    "away_name": "Kia Tigers",
+                    "home_score": 1,
+                    "away_score": 0,
+                    "period": "I3",
+                    "seconds_remaining": None,
+                    "status": "live",
+                    "observed_at": "2026-04-30T10:18:00+00:00",
+                    "source": "sofascore",
+                    "baseball_state": {
+                        "current_inning": 3,
+                        "inning_half": None,
+                        "outs": None,
+                        "offense_team": None,
+                        "defense_team": None,
+                        "occupied_bases": (),
+                    },
+                },
+                "sports_live_match": {
+                    "matched_home_alias": "NC Dinos",
+                    "matched_away_alias": "Kia Tigers",
+                },
+            },
+        ),
+    )
+
+    assert decision.action.value == "skip"
+    assert decision.reason == "baseball_not_late_enough"
+    assert decision.metadata["sports_tail_reason"] == "baseball_not_late_enough"
+
+
 def test_mlb_structured_tail_state_allows_official_source_age_above_generic_limit() -> None:
     now = datetime(2026, 4, 30, 1, 40, 55, tzinfo=timezone.utc)
     market = Market(

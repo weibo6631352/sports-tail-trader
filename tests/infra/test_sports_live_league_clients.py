@@ -69,6 +69,40 @@ def test_nba_scoreboard_parser_normalizes_live_game_clock() -> None:
     assert game.raw_status == "Q4 8:44"
 
 
+def test_sofascore_baseball_parser_exposes_inning_state() -> None:
+    games = parse_sofascore_events_payload(
+        {
+            "events": [
+                {
+                    "id": 15290209,
+                    "slug": "nc-dinos-kia-tigers",
+                    "status": {"type": "inprogress", "description": "3rd Inning"},
+                    "tournament": {"uniqueTournament": {"name": "KBO", "slug": "kbo"}},
+                    "homeTeam": {"name": "NC Dinos", "shortName": "NC Dinos", "nameCode": "NCD"},
+                    "awayTeam": {"name": "Kia Tigers", "shortName": "Kia Tigers", "nameCode": "KIA"},
+                    "homeScore": {"current": 1, "display": 1, "period1": 1, "period2": 0},
+                    "awayScore": {"current": 0, "display": 0, "period1": 0, "period2": 0},
+                    "time": {"currentPeriodStartTimestamp": 1777541406},
+                    "startTimestamp": 1777539600,
+                }
+            ]
+        },
+        sport="baseball",
+        league_codes=("baseball",),
+        observed_at=datetime(2026, 4, 30, 10, 18, tzinfo=timezone.utc),
+    )
+
+    assert len(games) == 1
+    game = games[0]
+    assert game.status == SportsLiveGameStatus.LIVE
+    assert game.league == "KBO"
+    assert game.period == "I3"
+    assert game.baseball_state is not None
+    assert game.baseball_state.current_inning == 3
+    assert game.baseball_state.inning_half is None
+    assert game.baseball_state.outs is None
+
+
 def test_nhl_score_parser_normalizes_critical_game_clock() -> None:
     games = parse_nhl_score_payload(
         {

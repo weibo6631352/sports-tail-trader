@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from polymarket_trader.domain.sports_live import (
+    BaseballGameState,
     SportsLiveGame,
     SportsLiveGameStatus,
     SportsLiveSnapshot,
@@ -321,6 +322,7 @@ def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datet
     raw_status = first_text(status_mapping, "description", "type") or ""
     tournament = _tournament_payload(raw_event)
     tennis_state = _tennis_state_from_payload(raw_event, raw_status=raw_status) if sport == "tennis" else None
+    baseball_state = _baseball_state_from_payload(raw_event, raw_status=raw_status) if sport == "baseball" else None
     return SportsLiveGame(
         source="sofascore",
         source_event_id=str(raw_event.get("id") or raw_event.get("customId") or ""),
@@ -336,6 +338,7 @@ def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datet
         ),
         observed_at=observed_at,
         raw_status=raw_status,
+        baseball_state=baseball_state,
         source_payload={
             "sport": sport,
             "slug": raw_event.get("slug"),
@@ -405,6 +408,48 @@ def _tennis_state_from_payload(raw_event: Mapping[str, Any], *, raw_status: str)
         "first_to_serve": first_to_serve,
         "serving_side": _tennis_current_server(first_to_serve, home_total_games + away_total_games),
     }
+
+
+def _baseball_state_from_payload(raw_event: Mapping[str, Any], *, raw_status: str) -> BaseballGameState:
+    """提取 SofaScore 棒球局数。
+
+    scheduled-events 当前只稳定提供 inning 文本和逐局比分，不提供出局数/垒包。
+    策略层会继续把缺失出局数视为不能自动入场，但不再把 KBO live 市场误判成
+    单纯的远期 endDate 拒绝。
+    """
+
+    normalized = raw_status.strip().lower()
+    inning_half = None
+    if re.search(r"\btop\b", normalized):
+        inning_half = "top"
+    elif re.search(r"\bbottom\b", normalized):
+        inning_half = "bottom"
+    current_inning = _baseball_current_inning(raw_event, raw_status=raw_status)
+    return BaseballGameState(
+        current_inning=current_inning,
+        inning_half=inning_half,
+        outs=None,
+        offense_team=None,
+        defense_team=None,
+        occupied_bases=(),
+    )
+
+
+def _baseball_current_inning(raw_event: Mapping[str, Any], *, raw_status: str) -> int | None:
+    match = re.search(r"(\d+)(?:st|nd|rd|th)?\s+inning", raw_status.strip().lower())
+    if match:
+        return int(match.group(1))
+    innings: list[int] = []
+    for score_key in ("homeScore", "awayScore"):
+        score = raw_event.get(score_key)
+        score_mapping = score if isinstance(score, Mapping) else {}
+        for key, value in score_mapping.items():
+            if value is None:
+                continue
+            period_match = re.fullmatch(r"period(\d+)", str(key))
+            if period_match:
+                innings.append(int(period_match.group(1)))
+    return max(innings) if innings else None
 
 
 def _tennis_serving_side(value: Any) -> str | None:

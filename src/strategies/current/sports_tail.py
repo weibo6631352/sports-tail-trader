@@ -1592,7 +1592,8 @@ def _datetime_text(value: datetime | None) -> str | None:
 
 
 def _is_mlb_game(game: LiveGameState) -> bool:
-    return game.league.strip().lower() == "mlb"
+    league = game.league.strip().lower()
+    return league in {"mlb", "kbo", "baseball", "korean baseball", "korea baseball organization"}
 
 
 def _is_nfl_game(game: LiveGameState) -> bool:
