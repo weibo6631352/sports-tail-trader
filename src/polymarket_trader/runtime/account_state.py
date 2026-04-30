@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from threading import Lock
@@ -48,13 +49,21 @@ class AccountStateStore:
 
     def upsert_position(self, position: Position) -> AccountSnapshot:
         with self._lock:
-            self._positions[(position.condition_id, position.token_id)] = position
+            key = (position.condition_id, position.token_id)
+            self._positions[key] = _merge_position_authority_fields(
+                self._positions.get(key),
+                position,
+            )
             return self._publish_snapshot_locked()
 
     def replace_positions(self, positions: tuple[Position, ...]) -> AccountSnapshot:
         with self._lock:
+            previous_positions = self._positions
             self._positions = {
-                (position.condition_id, position.token_id): position
+                (position.condition_id, position.token_id): _merge_position_authority_fields(
+                    previous_positions.get((position.condition_id, position.token_id)),
+                    position,
+                )
                 for position in positions
             }
             return self._publish_snapshot_locked()
@@ -152,3 +161,39 @@ class AccountStateStore:
         )
         self._snapshot = snapshot
         return snapshot
+
+
+def _merge_position_authority_fields(
+    previous: Position | None,
+    incoming: Position,
+) -> Position:
+    """把 WS 稀疏持仓快照和 Data API 权威结算字段合并成单一热状态。"""
+
+    if previous is None:
+        return incoming
+
+    return replace(
+        incoming,
+        market_slug=incoming.market_slug or previous.market_slug,
+        avg_price=incoming.avg_price if incoming.avg_price is not None else previous.avg_price,
+        initial_value=(
+            incoming.initial_value if incoming.initial_value is not None else previous.initial_value
+        ),
+        current_value=(
+            incoming.current_value if incoming.current_value is not None else previous.current_value
+        ),
+        cash_pnl=incoming.cash_pnl if incoming.cash_pnl is not None else previous.cash_pnl,
+        percent_pnl=(
+            incoming.percent_pnl if incoming.percent_pnl is not None else previous.percent_pnl
+        ),
+        realized_pnl=(
+            incoming.realized_pnl if incoming.realized_pnl is not None else previous.realized_pnl
+        ),
+        percent_realized_pnl=(
+            incoming.percent_realized_pnl
+            if incoming.percent_realized_pnl is not None
+            else previous.percent_realized_pnl
+        ),
+        cur_price=incoming.cur_price if incoming.cur_price is not None else previous.cur_price,
+        redeemable=incoming.redeemable if incoming.redeemable is not None else previous.redeemable,
+    )

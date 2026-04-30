@@ -67,7 +67,7 @@ class AllocationPlan:
 
 def current_exposure_usdc(position: Position | None, open_orders: Iterable[Order] = ()) -> Decimal:
     exposure_usdc = Decimal("0")
-    if position is not None:
+    if position is not None and not position.settled_zero_value:
         exposure_usdc += position.cost_usdc
 
         # open SELL 代表已有底层持仓被挂单卖出，仍然占用原始持仓成本；按持仓成本比例近似计入 exposure。

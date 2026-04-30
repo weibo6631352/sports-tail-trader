@@ -30,6 +30,20 @@ class Position:
     cur_price: Decimal | None = None
     redeemable: bool | None = None
 
+    @property
+    def settled_zero_value(self) -> bool:
+        """已结算且当前价值为 0 的仓位不再代表可交易资金暴露。"""
+
+        if self.redeemable is not True:
+            return False
+        if self.current_value != Decimal("0"):
+            return False
+        if self.cur_price is not None and self.cur_price != Decimal("0"):
+            return False
+        if self.cash_pnl is not None and self.cash_pnl > Decimal("0"):
+            return False
+        return True
+
     def with_open_buy_shares(self, shares: Decimal) -> "Position":
         return replace(self, open_buy_shares=shares)
 

@@ -707,10 +707,13 @@ def _market_has_account_exposure(account_snapshot: Any, market: Market) -> bool:
     for token_id in market.token_ids:
         position = account_snapshot.get_position(market.condition_id, token_id)
         if position is not None and (
-            position.shares > 0
-            or position.open_buy_shares > 0
-            or position.open_sell_shares > 0
-            or position.pending_buy_shares > 0
+            not position.settled_zero_value
+            and (
+                position.shares > 0
+                or position.open_buy_shares > 0
+                or position.open_sell_shares > 0
+                or position.pending_buy_shares > 0
+            )
         ):
             return True
         if account_snapshot.open_orders_for_market(market.condition_id, token_id):
@@ -721,6 +724,8 @@ def _market_has_account_exposure(account_snapshot: Any, market: Market) -> bool:
 def _account_exposure_market_refs(account_snapshot: Any) -> tuple[tuple[str, str, str | None], ...]:
     refs: dict[tuple[str, str], str | None] = {}
     for position in account_snapshot.positions:
+        if position.settled_zero_value:
+            continue
         if (
             position.shares <= 0
             and position.open_buy_shares <= 0

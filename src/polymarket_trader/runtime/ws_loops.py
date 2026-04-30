@@ -57,6 +57,8 @@ def _account_exposure_keys(account_snapshot: Any | None) -> tuple[set[str], set[
     for item in tuple(getattr(account_snapshot, "positions", ())) + tuple(
         getattr(account_snapshot, "open_orders", ())
     ):
+        if getattr(item, "settled_zero_value", False):
+            continue
         condition_id = str(getattr(item, "condition_id", "") or "").strip()
         token_id = str(getattr(item, "token_id", "") or "").strip()
         if condition_id:
