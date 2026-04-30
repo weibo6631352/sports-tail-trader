@@ -1248,6 +1248,91 @@ def test_live_tennis_first_set_total_over_uses_current_set_score() -> None:
     assert decision.metadata["scope_number"] == 1
 
 
+def test_live_tennis_first_set_total_under_uses_completed_first_set_score() -> None:
+    market = _tennis_first_set_total_market().with_metadata(end_date=datetime(2026, 5, 7, tzinfo=timezone.utc))
+
+    decision = decide_entry(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-live-first-set-total-under-supported",
+            market=market,
+            token_id="first-set-under",
+            orderbook=_orderbook(token_id="first-set-under", best_ask=Decimal("0.98")),
+            amount_usdc=Decimal("5"),
+            now=datetime(2026, 4, 30, tzinfo=timezone.utc),
+            metadata={
+                "sports_tail_game": {
+                    "league": "WTA",
+                    "home_name": "Yufei Ren",
+                    "away_name": "Polona Hercog",
+                    "home_score": 1,
+                    "away_score": 0,
+                    "period": "S2",
+                    "status": "live",
+                    "observed_at": "2026-04-30T00:00:00+00:00",
+                    "tennis_state": {
+                        "home_sets_won": 1,
+                        "away_sets_won": 0,
+                        "current_set": 2,
+                        "home_current_set_games": 0,
+                        "away_current_set_games": 0,
+                        "home_total_games": 6,
+                        "away_total_games": 1,
+                        "total_games": 7,
+                        "set_scores": ((6, 1), (0, 0)),
+                    },
+                }
+            },
+        ),
+    )
+
+    assert decision.action.value == "buy"
+    assert decision.token_id == "first-set-under"
+    assert decision.metadata["sports_tail_reason"] == "tennis_set_games_under_locked"
+    assert decision.metadata["scope_type"] == "tennis_set_games"
+    assert decision.metadata["scope_number"] == 1
+
+
+def test_live_tennis_current_set_total_under_waits_until_set_completed() -> None:
+    market = _tennis_first_set_total_market()
+
+    decision = decide_entry(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-live-first-set-total-under-not-locked",
+            market=market,
+            token_id="first-set-under",
+            orderbook=_orderbook(token_id="first-set-under", best_ask=Decimal("0.98")),
+            amount_usdc=Decimal("5"),
+            now=datetime(2026, 4, 30, tzinfo=timezone.utc),
+            metadata={
+                "sports_tail_game": {
+                    "league": "WTA",
+                    "home_name": "Yufei Ren",
+                    "away_name": "Polona Hercog",
+                    "home_score": 0,
+                    "away_score": 0,
+                    "period": "S1",
+                    "status": "live",
+                    "observed_at": "2026-04-30T00:00:00+00:00",
+                    "tennis_state": {
+                        "current_set": 1,
+                        "home_current_set_games": 5,
+                        "away_current_set_games": 3,
+                        "home_total_games": 5,
+                        "away_total_games": 3,
+                        "total_games": 8,
+                        "set_scores": ((5, 3),),
+                    },
+                }
+            },
+        ),
+    )
+
+    assert decision.action.value == "skip"
+    assert decision.reason == "tennis_totals_under_not_supported"
+
+
 def test_period_total_market_is_not_treated_as_full_game_total() -> None:
     market = Market(
         condition_id="first-quarter-total-condition",

@@ -717,11 +717,17 @@ def _evaluate_tennis_totals(
         return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
     if market.line is None:
         return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+    scope = _tennis_total_scope(market)
     if market.side == SportsMarketSide.UNDER:
+        if scope.scope_type == SportsMarketScopeType.TENNIS_SET_GAMES and _tennis_set_games_total_is_under_locked(
+            state,
+            scope.scope_number,
+            market.line,
+        ):
+            return _accept(candidate, "tennis_set_games_under_locked", policy.totals_execution_permission)
         return _reject(candidate, TailRejectReason.TENNIS_TOTALS_UNDER_NOT_SUPPORTED.value)
     if market.side != SportsMarketSide.OVER:
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
-    scope = _tennis_total_scope(market)
     if scope.scope_type == SportsMarketScopeType.TENNIS_MATCH_GAMES and Decimal(state.total_games) > market.line:
         return _accept(candidate, "tennis_totals_over_locked", policy.totals_execution_permission)
     if scope.scope_type == SportsMarketScopeType.TENNIS_MATCH_GAMES and _tennis_match_total_min_final_games_is_over(state, market.line):
@@ -1116,12 +1122,23 @@ def _evaluate_tennis_totals_scale_in(
         return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
     if market.line is None:
         return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+    scope = _tennis_total_scope(market)
     if market.side == SportsMarketSide.UNDER:
+        if scope.scope_type == SportsMarketScopeType.TENNIS_SET_GAMES and _tennis_set_games_total_is_under_locked(
+            state,
+            scope.scope_number,
+            market.line,
+        ):
+            return _accept(
+                candidate,
+                "scale_in_tennis_set_games_under_advantage",
+                policy.totals_execution_permission,
+                opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
+            )
         return _reject(candidate, TailRejectReason.TENNIS_TOTALS_UNDER_NOT_SUPPORTED.value)
     if market.side != SportsMarketSide.OVER:
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
 
-    scope = _tennis_total_scope(market)
     if scope.scope_type == SportsMarketScopeType.TENNIS_MATCH_GAMES:
         total_games = Decimal(state.total_games)
         if total_games - market.line >= Decimal("1") or _tennis_match_total_min_final_games_is_over(
@@ -1419,9 +1436,16 @@ def _tennis_tail_state_reached(game: LiveGameState, market: SportsMarketSnapshot
 
 
 def _tennis_totals_tail_state_reached(state: TennisGameState, market: SportsMarketSnapshot) -> bool:
-    if market.line is None or market.side != SportsMarketSide.OVER:
+    if market.line is None:
         return False
     scope = _tennis_total_scope(market)
+    if market.side == SportsMarketSide.UNDER:
+        return (
+            scope.scope_type == SportsMarketScopeType.TENNIS_SET_GAMES
+            and _tennis_set_games_total_is_under_locked(state, scope.scope_number, market.line)
+        )
+    if market.side != SportsMarketSide.OVER:
+        return False
     if scope.scope_type == SportsMarketScopeType.TENNIS_MATCH_GAMES:
         return Decimal(state.total_games) > market.line or _tennis_match_total_min_final_games_is_over(
             state,
@@ -1671,6 +1695,25 @@ def _tennis_set_games_total_is_over(
         return False
     total_games = _tennis_set_games_total(state, set_number)
     return total_games is not None and Decimal(total_games) > line
+
+
+def _tennis_set_games_total_is_under_locked(
+    state: TennisGameState,
+    set_number: int | None,
+    line: Decimal | None,
+) -> bool:
+    """判断指定盘已结束且 Under 已经锁定。
+
+    当前盘还在进行时总局数只会继续增加，不能仅凭暂时低于盘口线抢 under；
+    只有目标盘已进入 ``set_scores`` 的完成记录后才视为可成交机会。
+    """
+
+    if set_number is None or line is None or len(state.set_scores) < set_number:
+        return False
+    home_games, away_games = state.set_scores[set_number - 1]
+    if not _tennis_set_score_is_final(home_games, away_games):
+        return False
+    return Decimal(home_games + away_games) < line
 
 
 def _tennis_sets_total_is_over(state: TennisGameState, line: Decimal | None) -> bool:
