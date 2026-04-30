@@ -479,6 +479,10 @@ def _alias_text_variants(alias: str) -> tuple[str, ...]:
     german_basketball = re.sub(r"\bfraport skyliners frankfurt\b", "fraport skyliners", normalized)
     if german_basketball != normalized:
         variants.append(german_basketball)
+    russian = re.sub(r"\bmoscow\b", "moskva", normalized)
+    russian = re.sub(r"\bdynamo\b", "dinamo", russian)
+    if russian != normalized:
+        variants.append(russian)
     return tuple(variants)
 
 

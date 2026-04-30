@@ -351,6 +351,44 @@ def test_live_state_match_accepts_basketball_location_suffix_variants() -> None:
     assert match.game.source_event_id == "14381848"
 
 
+def test_live_state_match_accepts_russian_soccer_transliteration_variants() -> None:
+    market = Market(
+        condition_id="russian-premier-lokomotiv-dinamo-condition",
+        market_slug="rus-lok-din-2026-05-01",
+        market_question="FK Lokomotiv Moskva vs. FK Dinamo Moskva",
+        event_title="FK Lokomotiv Moskva vs. FK Dinamo Moskva",
+        event_slug="rus-lok-din-2026-05-01",
+        game_start_time=datetime(2026, 5, 1, 16, 30, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("Soccer", "Russian Premier League"),
+        outcomes=(
+            MarketOutcome(token_id="lokomotiv", outcome="FK Lokomotiv Moskva"),
+            MarketOutcome(token_id="dinamo", outcome="FK Dinamo Moskva"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="14036734",
+        league="Russian Premier League",
+        home=SportsLiveTeam(name="Lokomotiv Moscow", score=0, short_name="Lokomotiv"),
+        away=SportsLiveTeam(name="Dynamo Moscow", score=0, short_name="Dynamo"),
+        status=SportsLiveGameStatus.SCHEDULED,
+        period="Not started",
+        observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+        source_payload={
+            "sport": "football",
+            "start_timestamp": 1777653000,
+            "tournament": "Russian Premier League",
+        },
+    )
+
+    match = match_sports_live_game(market, game)
+
+    assert match is not None
+    assert match.game.source_event_id == "14036734"
+
+
 def test_best_live_state_match_reuses_market_text_across_many_games(monkeypatch) -> None:
     market = _market("nba-phi-bos-2026-04-28")
     games = tuple(
