@@ -72,7 +72,7 @@ def decide_recovery(
         order_id = _order_identifier(order)
         if order_id is None:
             continue
-        if _is_open_entry_order(order):
+        if _should_cancel_open_entry_order(config, context, order):
             actions.append(
                 ExtensionDecision.cancel(
                     reason="open_entry_order_detected",
@@ -163,6 +163,29 @@ def _order_identifier(order) -> str | None:
 
 def _is_open_entry_order(order) -> bool:
     return order.side == OrderSide.BUY and order.open
+
+
+def _should_cancel_open_entry_order(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    order,
+) -> bool:
+    """只撤超过策略 TTL 的 open BUY，给 maker 入场单短暂成交窗口。"""
+
+    if not _is_open_entry_order(order):
+        return False
+    max_resting_seconds = config.sports_entry_maker_max_resting_seconds
+    if max_resting_seconds <= 0:
+        return True
+    opened_at = order.created_at or order.updated_at
+    if opened_at is None:
+        return True
+    now = context.now or datetime.now(timezone.utc)
+    if opened_at.tzinfo is None:
+        opened_at = opened_at.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return (now - opened_at).total_seconds() > max_resting_seconds
 
 
 def _is_open_exit_order(order) -> bool:

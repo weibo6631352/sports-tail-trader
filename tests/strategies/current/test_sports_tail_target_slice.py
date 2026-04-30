@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -3361,6 +3361,68 @@ def test_recovery_cancels_historical_open_exit_order_in_settlement_only_mode() -
 
     assert [(action.action.value, action.reason, action.order_id) for action in decision.actions] == [
         ("cancel", "settlement_only_open_exit_order_detected", "sell-1"),
+    ]
+
+
+def test_recovery_keeps_fresh_open_entry_order_within_strategy_ttl() -> None:
+    now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
+    market = _moneyline_market()
+    open_buy = Order(
+        condition_id=market.condition_id,
+        token_id="away",
+        side=OrderSide.BUY,
+        order_type=OrderType.GTC,
+        price=Decimal("0.995"),
+        amount_usdc=Decimal("5"),
+        remaining_shares=Decimal("5.02"),
+        status=OrderStatus.LIVE,
+        order_id="buy-1",
+        market_slug=market.market_slug,
+        created_at=now - timedelta(seconds=3),
+    )
+
+    decision = decide_recovery(
+        CurrentStrategyConfig(sports_entry_maker_max_resting_seconds=10),
+        ExtensionContext(
+            trace_id="trace-fresh-open-entry",
+            market=market,
+            open_orders=(open_buy,),
+            now=now,
+        ),
+    )
+
+    assert decision.actions == ()
+
+
+def test_recovery_cancels_stale_open_entry_order_after_strategy_ttl() -> None:
+    now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
+    market = _moneyline_market()
+    open_buy = Order(
+        condition_id=market.condition_id,
+        token_id="away",
+        side=OrderSide.BUY,
+        order_type=OrderType.GTC,
+        price=Decimal("0.995"),
+        amount_usdc=Decimal("5"),
+        remaining_shares=Decimal("5.02"),
+        status=OrderStatus.LIVE,
+        order_id="buy-1",
+        market_slug=market.market_slug,
+        created_at=now - timedelta(seconds=11),
+    )
+
+    decision = decide_recovery(
+        CurrentStrategyConfig(sports_entry_maker_max_resting_seconds=10),
+        ExtensionContext(
+            trace_id="trace-stale-open-entry",
+            market=market,
+            open_orders=(open_buy,),
+            now=now,
+        ),
+    )
+
+    assert [(action.action.value, action.reason, action.order_id) for action in decision.actions] == [
+        ("cancel", "open_entry_order_detected", "buy-1"),
     ]
 
 
