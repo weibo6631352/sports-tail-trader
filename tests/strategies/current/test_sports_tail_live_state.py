@@ -389,6 +389,82 @@ def test_live_state_match_accepts_russian_soccer_transliteration_variants() -> N
     assert match.game.source_event_id == "14036734"
 
 
+def test_live_state_match_ignores_latin_american_club_prefix_variants() -> None:
+    market = Market(
+        condition_id="guatemala-guastatoya-municipal-condition",
+        market_slug="gtm-cdg-mun-2026-04-30",
+        market_question="CD Guastatoya vs. CSD Municipal",
+        event_title="CD Guastatoya vs. CSD Municipal",
+        event_slug="gtm-cdg-mun-2026-04-30",
+        game_start_time=datetime(2026, 5, 1, 1, 0, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("Soccer", "Guatemala Liga Nacional"),
+        outcomes=(
+            MarketOutcome(token_id="guastatoya", outcome="CD Guastatoya"),
+            MarketOutcome(token_id="municipal", outcome="CSD Municipal"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="16083435",
+        league="Liga Nacional de Fútbol de Guatemala, Clausura",
+        home=SportsLiveTeam(name="Deportivo Guastatoya", score=0, short_name="Dep. Guastatoya"),
+        away=SportsLiveTeam(name="CSD Municipal", score=0, short_name="Municipal"),
+        status=SportsLiveGameStatus.SCHEDULED,
+        period="Not started",
+        observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+        source_payload={
+            "sport": "football",
+            "start_timestamp": 1777597200,
+            "tournament": "Liga Nacional de Fútbol de Guatemala, Clausura",
+        },
+    )
+
+    match = match_sports_live_game(market, game)
+
+    assert match is not None
+    assert match.game.source_event_id == "16083435"
+
+
+def test_live_state_match_accepts_french_polynesia_table_tennis_alias() -> None:
+    market = Market(
+        condition_id="wtt-chile-french-polynesia-condition",
+        market_slug="wttmen-chile-polynes-2026-04-30",
+        market_question="WTT - Men's Singles: Chile vs French Polynesia",
+        event_title="WTT - Men's Singles: Chile vs French Polynesia",
+        event_slug="wttmen-chile-polynes-2026-04-30",
+        game_start_time=datetime(2026, 4, 30, 18, 30, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("Table Tennis", "WTT"),
+        outcomes=(
+            MarketOutcome(token_id="chile", outcome="Chile"),
+            MarketOutcome(token_id="polynesia", outcome="French Polynesia"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="16094584",
+        league="World Team Championships Finals",
+        home=SportsLiveTeam(name="Chile", score=0),
+        away=SportsLiveTeam(name="Tahiti", score=0),
+        status=SportsLiveGameStatus.SCHEDULED,
+        period="Not started",
+        observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+        source_payload={
+            "sport": "table-tennis",
+            "start_timestamp": 1777573800,
+            "tournament": "World Team Championships Finals",
+        },
+    )
+
+    match = match_sports_live_game(market, game)
+
+    assert match is not None
+    assert match.game.source_event_id == "16094584"
+
+
 def test_best_live_state_match_reuses_market_text_across_many_games(monkeypatch) -> None:
     market = _market("nba-phi-bos-2026-04-28")
     games = tuple(

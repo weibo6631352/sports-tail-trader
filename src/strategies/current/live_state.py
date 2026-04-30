@@ -23,7 +23,11 @@ _GENERIC_ALIAS_TOKENS = {
     "basket",
     "bc",
     "bk",
+    "cd",
     "club",
+    "csd",
+    "dep",
+    "deportivo",
     "fc",
     "game",
     "hkk",
@@ -483,6 +487,9 @@ def _alias_text_variants(alias: str) -> tuple[str, ...]:
     russian = re.sub(r"\bdynamo\b", "dinamo", russian)
     if russian != normalized:
         variants.append(russian)
+    tahiti = re.sub(r"\btahiti\b", "french polynesia", normalized)
+    if tahiti != normalized:
+        variants.append(tahiti)
     return tuple(variants)
 
 
