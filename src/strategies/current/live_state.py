@@ -466,6 +466,10 @@ def _alias_text_variants(alias: str) -> tuple[str, ...]:
     replaced = re.sub(r"\bolympique\b", "olympic", normalized)
     if replaced != normalized:
         variants.append(replaced)
+    translated = re.sub(r"\bthree towns\b", "san zhen", normalized)
+    translated = re.sub(r"\btiger\b", "hu", translated)
+    if translated != normalized:
+        variants.append(translated)
     return tuple(variants)
 
 

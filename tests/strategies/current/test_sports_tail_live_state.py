@@ -199,6 +199,44 @@ def test_live_state_match_ignores_basketball_team_suffix() -> None:
     assert match.game.source_event_id == "15916331"
 
 
+def test_live_state_match_accepts_chinese_soccer_translation_variants() -> None:
+    market = Market(
+        condition_id="chinese-super-league-tianjin-wuhan-condition",
+        market_slug="chi-jin-wsz-2026-05-01",
+        market_question="Tianjin Jinmen Hu FC vs. Wuhan San Zhen FC",
+        event_title="Tianjin Jinmen Hu FC vs. Wuhan San Zhen FC",
+        event_slug="chi-jin-wsz-2026-05-01",
+        game_start_time=datetime(2026, 5, 1, 11, 35, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("Soccer", "Chinese Super League"),
+        outcomes=(
+            MarketOutcome(token_id="tianjin", outcome="Tianjin Jinmen Hu FC"),
+            MarketOutcome(token_id="wuhan", outcome="Wuhan San Zhen FC"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="15552514",
+        league="Chinese Super League",
+        home=SportsLiveTeam(name="Tianjin Jinmen Tiger", score=0, short_name="Jinmen Tiger"),
+        away=SportsLiveTeam(name="Wuhan Three Towns", score=0, short_name="Three Towns"),
+        status=SportsLiveGameStatus.SCHEDULED,
+        period="Not started",
+        observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+        source_payload={
+            "sport": "football",
+            "start_timestamp": 1777635300,
+            "tournament": "Chinese Super League",
+        },
+    )
+
+    match = match_sports_live_game(market, game)
+
+    assert match is not None
+    assert match.game.source_event_id == "15552514"
+
+
 def test_best_live_state_match_reuses_market_text_across_many_games(monkeypatch) -> None:
     market = _market("nba-phi-bos-2026-04-28")
     games = tuple(
