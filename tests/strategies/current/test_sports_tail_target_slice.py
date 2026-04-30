@@ -693,6 +693,62 @@ def test_real_polymarket_season_award_and_leader_props_are_outright_binary_props
             ),
             trading_status=TradingStatus.ELIGIBLE,
         ),
+        Market(
+            condition_id="team-relocation-announcement",
+            market_slug="mls-whitecaps-to-announce-relocation-by-the-end-of-2026",
+            market_question="MLS Whitecaps to announce relocation by the end of 2026?",
+            event_title="MLS Whitecaps to announce relocation by the end of 2026?",
+            event_slug="mls-whitecaps-to-announce-relocation-by-the-end-of-2026",
+            category="Sports",
+            tags=("Sports", "MLS", "Soccer"),
+            outcomes=(
+                MarketOutcome(token_id="relocation-announcement-yes", outcome="Yes"),
+                MarketOutcome(token_id="relocation-announcement-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
+        Market(
+            condition_id="coach-next-team",
+            market_slug="will-steve-kerr-join-the-new-york-knicks-in-2026",
+            market_question="Will Steve Kerr join the New York Knicks in 2026?",
+            event_title="Will Steve Kerr join the New York Knicks in 2026?",
+            event_slug="will-steve-kerr-join-the-new-york-knicks-in-2026",
+            category="Sports",
+            tags=("Sports", "NBA", "Knicks"),
+            outcomes=(
+                MarketOutcome(token_id="coach-next-team-yes", outcome="Yes"),
+                MarketOutcome(token_id="coach-next-team-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
+        Market(
+            condition_id="manager-appointment",
+            market_slug="will-xabi-alonso-be-appointed-as-manager-of-manchester-united",
+            market_question="Will Xabi Alonso be appointed as manager of Manchester United?",
+            event_title="Will Xabi Alonso be appointed as manager of Manchester United?",
+            event_slug="will-xabi-alonso-be-appointed-as-manager-of-manchester-united",
+            category="Sports",
+            tags=("Sports", "Soccer", "Manchester United"),
+            outcomes=(
+                MarketOutcome(token_id="manager-yes", outcome="Yes"),
+                MarketOutcome(token_id="manager-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
+        Market(
+            condition_id="player-retirement",
+            market_slug="will-cristiano-ronaldo-announce-his-retirement-in-2026",
+            market_question="Will Cristiano Ronaldo announce his retirement in 2026?",
+            event_title="Will Cristiano Ronaldo announce his retirement in 2026?",
+            event_slug="will-cristiano-ronaldo-announce-his-retirement-in-2026",
+            category="Sports",
+            tags=("Sports", "Soccer"),
+            outcomes=(
+                MarketOutcome(token_id="retirement-yes", outcome="Yes"),
+                MarketOutcome(token_id="retirement-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
     )
 
     for market in markets:
