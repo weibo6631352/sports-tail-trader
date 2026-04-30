@@ -20,6 +20,7 @@ _GENERIC_ALIAS_TOKENS = {
     "an",
     "and",
     "at",
+    "basket",
     "bc",
     "bk",
     "club",

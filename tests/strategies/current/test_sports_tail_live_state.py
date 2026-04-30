@@ -161,6 +161,44 @@ def test_live_state_match_ignores_basketball_club_and_sponsor_tokens() -> None:
     assert match.matched_away_alias in {"KK Zadar", "Zadar"}
 
 
+def test_live_state_match_ignores_basketball_team_suffix() -> None:
+    market = Market(
+        condition_id="euroleague-olympiacos-monaco-condition",
+        market_slug="euroleague-olympiac-monaco-2026-04-30",
+        market_question="Olympiacos B.C. vs. Monaco",
+        event_title="Olympiacos B.C. vs. Monaco",
+        event_slug="euroleague-olympiac-monaco-2026-04-30",
+        game_start_time=datetime(2026, 4, 30, 17, 0, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("Basketball", "Euroleague Basketball"),
+        outcomes=(
+            MarketOutcome(token_id="olympiacos", outcome="Olympiacos B.C."),
+            MarketOutcome(token_id="monaco", outcome="Monaco"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="15916331",
+        league="Euroleague",
+        home=SportsLiveTeam(name="Olympiacos BC", score=0, short_name="Olympiacos"),
+        away=SportsLiveTeam(name="Monaco Basket", score=0, short_name="Monaco Basket"),
+        status=SportsLiveGameStatus.SCHEDULED,
+        period="Not started",
+        observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+        source_payload={
+            "sport": "basketball",
+            "start_timestamp": 1777572000,
+            "tournament": "Euroleague",
+        },
+    )
+
+    match = match_sports_live_game(market, game)
+
+    assert match is not None
+    assert match.game.source_event_id == "15916331"
+
+
 def test_best_live_state_match_reuses_market_text_across_many_games(monkeypatch) -> None:
     market = _market("nba-phi-bos-2026-04-28")
     games = tuple(
