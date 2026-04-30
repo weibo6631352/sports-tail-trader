@@ -313,6 +313,44 @@ def test_live_state_match_ignores_soccer_club_prefix_variants() -> None:
     assert match.game.source_event_id == "14090463"
 
 
+def test_live_state_match_accepts_basketball_location_suffix_variants() -> None:
+    market = Market(
+        condition_id="germany-bbl-fraport-bonn-condition",
+        market_slug="bkbbl-fra-tel-2026-05-01",
+        market_question="Fraport Skyliners vs. Telekom Baskets Bonn",
+        event_title="Fraport Skyliners vs. Telekom Baskets Bonn",
+        event_slug="bkbbl-fra-tel-2026-05-01",
+        game_start_time=datetime(2026, 5, 1, 14, 30, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("Basketball", "Germany BBL"),
+        outcomes=(
+            MarketOutcome(token_id="fraport", outcome="Fraport Skyliners"),
+            MarketOutcome(token_id="bonn", outcome="Telekom Baskets Bonn"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="14381848",
+        league="Germany BBL",
+        home=SportsLiveTeam(name="Fraport Skyliners Frankfurt", score=0, short_name="Frankfurt"),
+        away=SportsLiveTeam(name="Telekom Baskets Bonn", score=0, short_name="Bonn"),
+        status=SportsLiveGameStatus.SCHEDULED,
+        period="Not started",
+        observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+        source_payload={
+            "sport": "basketball",
+            "start_timestamp": 1777645800,
+            "tournament": "Germany BBL",
+        },
+    )
+
+    match = match_sports_live_game(market, game)
+
+    assert match is not None
+    assert match.game.source_event_id == "14381848"
+
+
 def test_best_live_state_match_reuses_market_text_across_many_games(monkeypatch) -> None:
     market = _market("nba-phi-bos-2026-04-28")
     games = tuple(
