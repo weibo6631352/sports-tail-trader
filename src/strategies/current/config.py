@@ -165,7 +165,7 @@ class CurrentStrategyConfig:
     sports_min_expected_profit_per_hour_usdc: Decimal = Decimal("0.10")
     sports_profit_take_min_profit_usdc: Decimal = Decimal("0.02")
     sports_profit_take_hold_minutes: int = 2
-    sports_entry_maker_max_resting_seconds: int = 10
+    sports_entry_maker_max_resting_seconds: int = 120
     sports_settlement_hold_minutes: int = 180
     sports_recovery_profit_take_enabled: bool = True
     sports_recovery_profit_take_min_avg_price: Decimal = Decimal("0.90")
