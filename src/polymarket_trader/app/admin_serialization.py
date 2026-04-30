@@ -39,6 +39,7 @@ class AdminSerializer:
         return {
             "balance_usdc": decimal_text(account.balance_usdc),
             "allowance_usdc": decimal_text(account.allowance_usdc),
+            "open_buy_reserved_usdc": decimal_text(account.open_buy_reserved_usdc),
             "available_usdc": decimal_text(account.available_usdc),
             "positions": len(account.positions),
             "open_orders": len(account.open_orders),
@@ -53,6 +54,7 @@ class AdminSerializer:
         return {
             "balance_usdc": decimal_text(account.balance_usdc),
             "allowance_usdc": decimal_text(account.allowance_usdc),
+            "open_buy_reserved_usdc": decimal_text(account.open_buy_reserved_usdc),
             "available_usdc": decimal_text(account.available_usdc),
             "positions": [jsonable(position) for position in account.positions],
             "open_orders": [jsonable(order) for order in account.open_orders],

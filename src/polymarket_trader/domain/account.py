@@ -102,8 +102,22 @@ class AccountSnapshot:
     last_reconcile_at: datetime | None = None
 
     @property
+    def open_buy_reserved_usdc(self) -> Decimal:
+        """返回交易所会为开放 BUY 订单预留的 USDC 金额。"""
+
+        total = Decimal("0")
+        for order in self.open_orders:
+            if order.side != OrderSide.BUY or not order.open:
+                continue
+            total += _open_buy_order_reserved_usdc(order)
+        return total
+
+    @property
     def available_usdc(self) -> Decimal:
-        return min(self.balance_usdc, self.allowance_usdc)
+        available = min(self.balance_usdc, self.allowance_usdc) - self.open_buy_reserved_usdc
+        if available < Decimal("0"):
+            return Decimal("0")
+        return available
 
     def get_position(self, condition_id: str, token_id: str) -> Position | None:
         for position in self.positions:
@@ -160,3 +174,21 @@ class AccountSnapshot:
             elif order.size_shares is not None:
                 total += order.size_shares
         return total
+
+
+def _open_buy_order_reserved_usdc(order: Order) -> Decimal:
+    """按 Polymarket CLOB 剩余 BUY 订单规模估算余额预留。"""
+
+    if order.price is not None:
+        shares = order.remaining_shares
+        if shares is None and order.size_shares is not None:
+            shares = order.size_shares - order.filled_shares
+        if shares is not None:
+            if shares <= Decimal("0"):
+                return Decimal("0")
+            return order.price * shares
+    if order.amount_usdc is not None:
+        return max(order.amount_usdc, Decimal("0"))
+    if order.notional_usdc is not None:
+        return max(order.notional_usdc, Decimal("0"))
+    return Decimal("0")

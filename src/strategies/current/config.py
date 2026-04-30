@@ -83,9 +83,8 @@ class CurrentStrategyConfig:
             按该占用时间折算后的每小时资金效率达标时才允许进入，避免长期挂单
             只赚极小金额。
         sports_entry_maker_max_resting_seconds:
-            maker 入场 BUY 允许短暂 resting 的最长秒数。用于锁定态体育盘
-            以接近 1 的价格挂买等待吃单，但超过该窗口后恢复链路会撤单，避免
-            买单长期占用资金或在状态变化后变成陈旧风险。
+            历史遗留开放 BUY 的最长容忍秒数。自动入场 BUY 只走触发式
+            FAK 市价单；该参数只用于恢复链路撤掉旧 GTC BUY，避免长期占用资金。
         sports_settlement_hold_minutes:
             估算等待权威结算的保守资金占用时间。实盘里市场结束到可结算可能跨越
             数小时，因此这里不只看比赛剩余时间。
@@ -165,7 +164,7 @@ class CurrentStrategyConfig:
     sports_min_expected_profit_per_hour_usdc: Decimal = Decimal("0.10")
     sports_profit_take_min_profit_usdc: Decimal = Decimal("0.02")
     sports_profit_take_hold_minutes: int = 2
-    sports_entry_maker_max_resting_seconds: int = 600
+    sports_entry_maker_max_resting_seconds: int = 60
     sports_settlement_hold_minutes: int = 180
     sports_recovery_profit_take_enabled: bool = True
     sports_recovery_profit_take_min_avg_price: Decimal = Decimal("0.90")

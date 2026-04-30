@@ -197,9 +197,12 @@ class ReconcileAuthorityRefresher:
                     )
                 )
                 continue
-            if item.refreshed_market is not None:
+            market_to_apply = item.refreshed_market
+            if market_to_apply is None and item.requested_market.market_slug.startswith("account-exposure-"):
+                market_to_apply = item.requested_market
+            if market_to_apply is not None:
                 refreshed_markets += 1
-                self._apply_refreshed_market(item.refreshed_market)
+                self._apply_refreshed_market(market_to_apply)
             if item.orderbook_snapshots:
                 refreshed_orderbooks += len(item.orderbook_snapshots)
                 await self._apply_refreshed_orderbooks(
@@ -229,9 +232,12 @@ class ReconcileAuthorityRefresher:
                     )
                 )
                 continue
-            if item.refreshed_market is not None:
+            market_to_apply = item.refreshed_market
+            if market_to_apply is None and item.requested_market.market_slug.startswith("account-exposure-"):
+                market_to_apply = item.requested_market
+            if market_to_apply is not None:
                 refreshed_markets += 1
-                self._apply_refreshed_market(item.refreshed_market)
+                self._apply_refreshed_market(market_to_apply)
             if item.orderbook_snapshots:
                 refreshed_orderbooks += len(item.orderbook_snapshots)
                 await self._apply_refreshed_orderbooks(
@@ -416,12 +422,11 @@ class ReconcileAuthorityRefresher:
                 continue
             if condition_id_filter and condition_id not in condition_id_filter:
                 continue
-            if not market_slug:
-                continue
+            synthetic_slug = market_slug or f"account-exposure-{condition_id}"
             targets[condition_id] = Market(
                 condition_id=condition_id,
-                market_slug=market_slug,
-                event_slug=market_slug,
+                market_slug=synthetic_slug,
+                event_slug=synthetic_slug,
                 outcomes=(MarketOutcome(token_id=token_id, outcome=""),),
                 trading_status=TradingStatus.CANDIDATE,
             )
@@ -520,7 +525,7 @@ class ReconcileAuthorityRefresher:
         market: Market,
         failures: list[AuthoritativeRefreshFailure],
     ) -> tuple[OrderbookSnapshot, ...]:
-        if self._clob_client is None:
+        if self._clob_client is None or not hasattr(self._clob_client, "get_orderbook"):
             return ()
         snapshots: list[OrderbookSnapshot] = []
         for token_id in market.token_ids:
@@ -616,7 +621,7 @@ class ReconcileAuthorityRefresher:
         market: Market,
         failures: list[AuthoritativeRefreshFailure],
     ) -> int | None:
-        if self._clob_client is None:
+        if self._clob_client is None or not hasattr(self._clob_client, "get_fee_rate"):
             return None
         token_id = next(iter(market.token_ids), None)
         if token_id is None:

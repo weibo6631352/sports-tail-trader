@@ -37,7 +37,7 @@ from polymarket_trader.workers.trading_decision_event_payloads import (
     serialize_review,
     serialize_snapshot,
     snapshot_allowance,
-    snapshot_balance,
+    snapshot_available_usdc,
     snapshot_position,
 )
 from polymarket_trader.workers.trading_order_result_processor import TradingOrderResultProcessor
@@ -175,7 +175,7 @@ class TradingDecisionWorker:
             account_snapshot=snapshot,
             portfolio_budget_usdc=self._portfolio_budget_usdc,
             available_usdc=(
-                self._available_usdc if self._available_usdc is not None else snapshot_balance(snapshot)
+                self._available_usdc if self._available_usdc is not None else snapshot_available_usdc(snapshot)
             ),
             max_order_usdc=self._max_order_usdc,
             max_market_usdc=self._max_market_usdc,
@@ -278,7 +278,7 @@ class TradingDecisionWorker:
             open_orders=focus_open_orders,
             allocation_plan=plan.allocation_plan,
             classification_passed=True,
-            balance_usdc=self._balance_usdc if self._balance_usdc is not None else snapshot_balance(snapshot),
+            balance_usdc=self._balance_usdc if self._balance_usdc is not None else snapshot_available_usdc(snapshot),
             allowance_usdc=(
                 self._allowance_usdc if self._allowance_usdc is not None else snapshot_allowance(snapshot)
             ),
@@ -664,7 +664,7 @@ class TradingDecisionWorker:
                 else ()
             ),
             classification_passed=True,
-            balance_usdc=self._balance_usdc if self._balance_usdc is not None else snapshot_balance(snapshot),
+            balance_usdc=self._balance_usdc if self._balance_usdc is not None else snapshot_available_usdc(snapshot),
             allowance_usdc=(
                 self._allowance_usdc if self._allowance_usdc is not None else snapshot_allowance(snapshot)
             ),

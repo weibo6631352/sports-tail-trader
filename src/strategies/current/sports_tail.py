@@ -533,16 +533,11 @@ def _common_reject_reason(
         return TailRejectReason.STALE_GAME_STATE
     if market.market_type == SportsMarketType.BINARY_PROP:
         return None
-    maker_candidate = _sports_tail_maker_bid_candidate(game, market, policy)
-    if market.best_ask is None and not maker_candidate:
+    if market.best_ask is None:
         return TailRejectReason.MISSING_BEST_ASK
-    if (
-        market.best_ask is not None
-        and market.best_ask > _max_entry_price(game, market, policy)
-        and not maker_candidate
-    ):
+    if market.best_ask > _max_entry_price(game, market, policy):
         return TailRejectReason.PRICE_ABOVE_MAX
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc and not maker_candidate:
+    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
         return TailRejectReason.LIQUIDITY_BELOW_MIN
     return None
 
@@ -556,16 +551,11 @@ def _market_data_reject_reason(
 
     if game.source_conflicts:
         return TailRejectReason.LIVE_SOURCE_CONFLICT
-    maker_candidate = _sports_tail_maker_bid_candidate(game, market, policy)
-    if market.best_ask is None and not maker_candidate:
+    if market.best_ask is None:
         return TailRejectReason.MISSING_BEST_ASK
-    if (
-        market.best_ask is not None
-        and market.best_ask > _max_entry_price(game, market, policy)
-        and not maker_candidate
-    ):
+    if market.best_ask > _max_entry_price(game, market, policy):
         return TailRejectReason.PRICE_ABOVE_MAX
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc and not maker_candidate:
+    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
         return TailRejectReason.LIQUIDITY_BELOW_MIN
     return None
 
@@ -1229,88 +1219,6 @@ def _max_entry_price(
     if market.market_type == SportsMarketType.SPREADS:
         return policy.spreads_max_entry_price
     return Decimal("0")
-
-
-def _locked_set_winner_maker_bid_candidate(
-    game: LiveGameState,
-    market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
-) -> bool:
-    """判断锁定 set winner 是否可用低于 ask 的盈利挂单继续争取成交。"""
-
-    return (
-        (
-            market.best_ask is None
-            or (
-                market.best_ask <= Decimal("1")
-                and market.best_ask > policy.tennis_locked_moneyline_max_entry_price
-            )
-        )
-        and _is_tennis_game(game)
-        and _is_tennis_set_winner_market(market)
-        and game.tennis_state is not None
-        and _tennis_set_winner_completed_for_side(game.tennis_state, market)
-    )
-
-
-def _near_locked_set_winner_maker_bid_candidate(
-    game: LiveGameState,
-    market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
-) -> bool:
-    """判断未结束但近锁定的 set winner 是否可用 1 以下 maker bid 争取成交。"""
-
-    return (
-        market.best_ask is not None
-        and market.best_ask <= Decimal("1")
-        and market.best_ask > policy.moneyline_max_entry_price
-        and _is_tennis_game(game)
-        and _is_tennis_set_winner_market(market)
-        and game.tennis_state is not None
-        and market.side in {SportsMarketSide.HOME, SportsMarketSide.AWAY}
-        and _tennis_current_set_side_near_locked(game.tennis_state, market.side)
-    )
-
-
-def _set_winner_maker_bid_candidate(
-    game: LiveGameState,
-    market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
-) -> bool:
-    """统一判断 set winner 可否不吃 ask、改用受控 maker bid。"""
-
-    return _locked_set_winner_maker_bid_candidate(
-        game,
-        market,
-        policy,
-    ) or _near_locked_set_winner_maker_bid_candidate(game, market, policy)
-
-
-def _ended_not_closed_maker_bid_candidate(
-    game: LiveGameState,
-    market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
-) -> bool:
-    """判断已完赛未结算盘口是否可先跳过 ask 深度，交给确定性比分判断。"""
-
-    max_entry_price = _max_entry_price(game, market, policy)
-    return game.status == LiveGameStatus.ENDED and (
-        market.best_ask is None or (market.best_ask <= Decimal("1") and market.best_ask > max_entry_price)
-    )
-
-
-def _sports_tail_maker_bid_candidate(
-    game: LiveGameState,
-    market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
-) -> bool:
-    """统一判断体育扫尾是否可用受控 maker bid 替代直接吃 ask。"""
-
-    return _set_winner_maker_bid_candidate(game, market, policy) or _ended_not_closed_maker_bid_candidate(
-        game,
-        market,
-        policy,
-    )
 
 
 def _market_family_reject_reason(market_family: SportsMarketFamily) -> TailRejectReason | None:

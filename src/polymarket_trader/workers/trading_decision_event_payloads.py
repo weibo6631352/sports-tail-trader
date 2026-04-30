@@ -393,6 +393,12 @@ def snapshot_balance(snapshot: AccountSnapshot | None) -> Decimal:
     return snapshot.balance_usdc
 
 
+def snapshot_available_usdc(snapshot: AccountSnapshot | None) -> Decimal:
+    if snapshot is None:
+        return Decimal("0")
+    return snapshot.available_usdc
+
+
 def snapshot_allowance(snapshot: AccountSnapshot | None) -> Decimal:
     if snapshot is None:
         return Decimal("0")

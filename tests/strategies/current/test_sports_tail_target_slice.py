@@ -995,6 +995,8 @@ def test_totals_over_locked_can_create_buy_only_after_full_sports_gate_passes() 
     assert decision.token_id == "over"
     assert decision.price == Decimal("0.98")
     assert decision.amount_usdc == Decimal("10")
+    assert decision.order_type is None
+    assert decision.post_only is False
     assert decision.metadata["sports_tail_reason"] == "totals_over_locked"
     assert decision.metadata["sports_execution_permission"] == "auto_execute"
 
@@ -2019,7 +2021,7 @@ def test_tennis_first_set_winner_current_set_near_locked_requires_service_point_
     assert decision.reason == "tennis_not_late_enough"
 
 
-def test_tennis_first_set_winner_current_set_near_locked_can_place_maker_bid_below_one() -> None:
+def test_tennis_first_set_winner_current_set_near_locked_rejects_ask_above_price_cap() -> None:
     now = datetime(2026, 4, 29, 9, 19, tzinfo=timezone.utc)
     market = Market(
         condition_id="tennis-first-set-near-lock-maker-condition",
@@ -2075,13 +2077,11 @@ def test_tennis_first_set_winner_current_set_near_locked_can_place_maker_bid_bel
         ),
     )
 
-    assert decision.action.value == "buy"
-    assert decision.price == Decimal("0.97")
-    assert decision.metadata["sports_tail_reason"] == "tennis_set_winner_current_set_near_locked"
-    assert decision.metadata["sports_tail_maker_bid_reason"] == "ask_above_near_lock_price_cap"
+    assert decision.action.value == "skip"
+    assert decision.reason == "price_above_max"
 
 
-def test_tennis_completed_set_winner_can_enter_at_locked_price_despite_wide_spread() -> None:
+def test_tennis_completed_set_winner_rejects_market_ask_above_locked_price_cap() -> None:
     now = datetime(2026, 4, 29, 8, 45, tzinfo=timezone.utc)
     market = Market(
         condition_id="tennis-first-set-locked-condition",
@@ -2142,13 +2142,11 @@ def test_tennis_completed_set_winner_can_enter_at_locked_price_despite_wide_spre
         ),
     )
 
-    assert decision.action.value == "buy"
-    assert decision.price == Decimal("0.995")
-    assert decision.reason == "strategy_entry"
-    assert decision.metadata["sports_tail_reason"] == "tennis_set_winner_locked"
+    assert decision.action.value == "skip"
+    assert decision.reason == "price_above_max"
 
 
-def test_tennis_completed_set_winner_places_profitable_maker_bid_when_ask_is_one() -> None:
+def test_tennis_completed_set_winner_rejects_ask_above_locked_price_cap() -> None:
     now = datetime(2026, 4, 29, 8, 50, tzinfo=timezone.utc)
     market = Market(
         condition_id="tennis-first-set-ask-one-condition",
@@ -2209,15 +2207,11 @@ def test_tennis_completed_set_winner_places_profitable_maker_bid_when_ask_is_one
         ),
     )
 
-    assert decision.action.value == "buy"
-    assert decision.price == Decimal("0.995")
-    assert decision.metadata["sports_tail_reason"] == "tennis_set_winner_locked"
-    assert decision.metadata["sports_tail_maker_bid_reason"] == "ask_above_locked_price_cap"
-    assert decision.order_type == OrderType.GTC
-    assert decision.post_only is True
+    assert decision.action.value == "skip"
+    assert decision.reason == "price_above_max"
 
 
-def test_tennis_completed_set_winner_places_maker_bid_when_best_ask_is_missing() -> None:
+def test_tennis_completed_set_winner_rejects_missing_best_ask() -> None:
     now = datetime(2026, 4, 29, 9, 4, tzinfo=timezone.utc)
     market = Market(
         condition_id="tennis-first-set-missing-ask-condition",
@@ -2278,15 +2272,11 @@ def test_tennis_completed_set_winner_places_maker_bid_when_best_ask_is_missing()
         ),
     )
 
-    assert decision.action.value == "buy"
-    assert decision.price == Decimal("0.995")
-    assert decision.metadata["sports_tail_reason"] == "tennis_set_winner_locked"
-    assert decision.metadata["sports_tail_maker_bid_reason"] == "missing_best_ask_locked_outcome"
-    assert decision.order_type == OrderType.GTC
-    assert decision.post_only is True
+    assert decision.action.value == "skip"
+    assert decision.reason == "missing_best_ask"
 
 
-def test_ended_moneyline_places_profitable_maker_bid_when_best_ask_is_missing() -> None:
+def test_ended_moneyline_rejects_missing_best_ask() -> None:
     market = _moneyline_market().with_tick_size(Decimal("0.001"))
     now = datetime(2026, 4, 27, tzinfo=timezone.utc)
 
@@ -2324,16 +2314,11 @@ def test_ended_moneyline_places_profitable_maker_bid_when_best_ask_is_missing() 
         ),
     )
 
-    assert decision.action.value == "buy"
-    assert decision.token_id == "home"
-    assert decision.price == Decimal("0.97")
-    assert decision.order_type == OrderType.GTC
-    assert decision.post_only is True
-    assert decision.metadata["sports_tail_reason"] == "ended_not_closed_moneyline"
-    assert decision.metadata["sports_tail_maker_bid_reason"] == "missing_best_ask_locked_outcome"
+    assert decision.action.value == "skip"
+    assert decision.reason == "missing_best_ask"
 
 
-def test_entry_plan_allocates_locked_set_winner_maker_bid_without_ask_depth_at_price_cap() -> None:
+def test_entry_plan_rejects_locked_set_winner_when_only_limit_bid_would_work() -> None:
     now = datetime(2026, 4, 29, 8, 50, tzinfo=timezone.utc)
     market = Market(
         condition_id="tennis-first-set-plan-condition",
@@ -2403,15 +2388,12 @@ def test_entry_plan_allocates_locked_set_winner_maker_bid_without_ask_depth_at_p
         },
     )
 
-    assert plan.ready_to_trade is True
-    assert plan.intent is not None
-    assert plan.intent.price == Decimal("0.995")
-    assert plan.intent.order_type == OrderType.GTC
-    assert plan.intent.post_only is True
-    assert plan.metadata["sports_tail_maker_bid_reason"] == "ask_above_locked_price_cap"
+    assert plan.ready_to_trade is False
+    assert plan.intent is None
+    assert plan.reason == "price_above_entry_max"
 
 
-def test_entry_plan_allocates_ended_moneyline_maker_bid_without_ask_depth_at_price_cap() -> None:
+def test_entry_plan_rejects_ended_moneyline_when_best_ask_is_missing() -> None:
     market = _moneyline_market().with_tick_size(Decimal("0.001"))
     now = datetime(2026, 4, 27, tzinfo=timezone.utc)
     service = TradingDecisionService(
@@ -2458,14 +2440,9 @@ def test_entry_plan_allocates_ended_moneyline_maker_bid_without_ask_depth_at_pri
         },
     )
 
-    assert plan.ready_to_trade is True
-    assert plan.intent is not None
-    assert plan.intent.token_id == "home"
-    assert plan.intent.price == Decimal("0.97")
-    assert plan.intent.order_type == OrderType.GTC
-    assert plan.intent.post_only is True
-    assert plan.metadata["sports_tail_reason"] == "ended_not_closed_moneyline"
-    assert plan.metadata["sports_tail_maker_bid_reason"] == "missing_best_ask_locked_outcome"
+    assert plan.ready_to_trade is False
+    assert plan.intent is None
+    assert plan.reason == "missing_best_ask"
 
 
 def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
@@ -3992,7 +3969,7 @@ def test_recovery_keeps_fresh_open_entry_order_within_strategy_ttl() -> None:
     assert decision.actions == ()
 
 
-def test_recovery_default_keeps_profit_take_entry_order_for_ten_minute_window() -> None:
+def test_recovery_default_keeps_profit_take_entry_order_for_one_minute_window() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
     open_buy = Order(
@@ -4006,7 +3983,7 @@ def test_recovery_default_keeps_profit_take_entry_order_for_ten_minute_window() 
         status=OrderStatus.LIVE,
         order_id="buy-1",
         market_slug=market.market_slug,
-        created_at=now - timedelta(seconds=300),
+        created_at=now - timedelta(seconds=30),
     )
 
     decision = decide_recovery(
@@ -4051,6 +4028,38 @@ def test_recovery_keeps_open_entry_order_when_exchange_snapshot_lacks_timestamp(
     assert decision.actions == ()
 
 
+def test_recovery_default_cancels_open_entry_order_after_one_minute_window() -> None:
+    now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
+    market = _moneyline_market()
+    open_buy = Order(
+        condition_id=market.condition_id,
+        token_id="away",
+        side=OrderSide.BUY,
+        order_type=OrderType.GTC,
+        price=Decimal("0.995"),
+        amount_usdc=Decimal("5"),
+        remaining_shares=Decimal("5.02"),
+        status=OrderStatus.LIVE,
+        order_id="buy-1",
+        market_slug=market.market_slug,
+        created_at=now - timedelta(seconds=61),
+    )
+
+    decision = decide_recovery(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-default-stale-open-entry",
+            market=market,
+            open_orders=(open_buy,),
+            now=now,
+        ),
+    )
+
+    assert [(action.action.value, action.reason, action.order_id) for action in decision.actions] == [
+        ("cancel", "open_entry_order_detected", "buy-1"),
+    ]
+
+
 def test_recovery_cancels_stale_open_entry_order_after_strategy_ttl() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
@@ -4080,6 +4089,42 @@ def test_recovery_cancels_stale_open_entry_order_after_strategy_ttl() -> None:
 
     assert [(action.action.value, action.reason, action.order_id) for action in decision.actions] == [
         ("cancel", "open_entry_order_detected", "buy-1"),
+    ]
+
+
+def test_recovery_cancels_stale_open_entry_order_even_when_market_has_no_strategy_target() -> None:
+    now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
+    market = Market(
+        condition_id="orphan-condition",
+        market_slug="account-exposure-orphan-condition",
+        outcomes=(MarketOutcome(token_id="orphan-token", outcome=""),),
+        trading_status=TradingStatus.CANDIDATE,
+    )
+    open_buy = Order(
+        condition_id=market.condition_id,
+        token_id="orphan-token",
+        side=OrderSide.BUY,
+        order_type=OrderType.GTC,
+        price=Decimal("0.99"),
+        size_shares=Decimal("5.05"),
+        remaining_shares=Decimal("5.05"),
+        status=OrderStatus.LIVE,
+        order_id="orphan-buy",
+        created_at=now - timedelta(seconds=61),
+    )
+
+    decision = decide_recovery(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            trace_id="trace-orphan-open-entry",
+            market=market,
+            open_orders=(open_buy,),
+            now=now,
+        ),
+    )
+
+    assert [(action.action.value, action.reason, action.order_id) for action in decision.actions] == [
+        ("cancel", "open_entry_order_detected", "orphan-buy"),
     ]
 
 

@@ -67,8 +67,6 @@ def decide_recovery(
     abnormal_pause_reason = _abnormal_live_state_pause_reason(config, context)
     recovery_metadata = _recovery_metadata(config, context, abnormal_pause_reason=abnormal_pause_reason)
     for order in open_orders:
-        if missing_sports_target:
-            continue
         order_id = _order_identifier(order)
         if order_id is None:
             continue
@@ -82,6 +80,8 @@ def decide_recovery(
                     metadata=recovery_metadata,
                 )
             )
+            continue
+        if missing_sports_target:
             continue
         if not config.auto_exit_enabled and _is_open_exit_order(order) and not _is_profit_take_exit_order(order):
             actions.append(
@@ -170,7 +170,7 @@ def _should_cancel_open_entry_order(
     context: ExtensionContext,
     order,
 ) -> bool:
-    """只撤超过策略 TTL 的 open BUY，给 maker 入场单短暂成交窗口。"""
+    """撤掉超过策略 TTL 的历史开放 BUY，避免旧 GTC 买单长期占用资金。"""
 
     if not _is_open_entry_order(order):
         return False

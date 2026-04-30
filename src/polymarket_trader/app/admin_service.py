@@ -29,7 +29,7 @@ from polymarket_trader.workers.trading_decision_event_payloads import (
     serialize_plan_metadata,
     serialize_review,
     snapshot_allowance,
-    snapshot_balance,
+    snapshot_available_usdc,
 )
 from polymarket_trader.infra.db import (
     AllocationRepository,
@@ -1095,7 +1095,7 @@ class AdminService:
             open_orders=account.open_orders_for_market(market.condition_id, token_id),
             allocation_plan=plan.allocation_plan,
             classification_passed=True,
-            balance_usdc=snapshot_balance(account),
+            balance_usdc=snapshot_available_usdc(account),
             allowance_usdc=snapshot_allowance(account),
             max_order_usdc=self._settings_value("max_order_usdc"),
             max_market_usdc=self._settings_value("max_market_usdc"),

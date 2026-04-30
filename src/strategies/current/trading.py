@@ -19,7 +19,7 @@ from polymarket_trader.domain.allocation import (
     current_exposure_usdc,
 )
 from polymarket_trader.domain.market import TradingStatus
-from polymarket_trader.domain.order import OrderSide, OrderType
+from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.extension_api import EntryCandidate, EntrySizing, ExtensionContext, ExtensionDecision
 
 from strategies.current.allocation import AllocationMarketSnapshot, equal_weight_plan
@@ -114,12 +114,6 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
         buyable_liquidity_usdc = _ask_depth_notional(
             snapshot.orderbook,
             price_cap=price_cap,
-        )
-        buyable_liquidity_usdc = _maker_bid_liquidity_floor(
-            context,
-            snapshot,
-            price_cap=price_cap,
-            buyable_liquidity_usdc=buyable_liquidity_usdc,
         )
         scale_in_allowed, scale_in_metadata, scale_in_budget_cap = _scale_in_allocation_gate(
             config,
@@ -227,18 +221,11 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         sports_metadata = {}
 
     best_ask = context.orderbook.best_ask
-    missing_ask_maker_bid = _sports_tail_missing_ask_locked_maker_bid(context, sports_metadata, allowed_price)
-    if best_ask is None and not missing_ask_maker_bid:
+    if best_ask is None:
         return ExtensionDecision.skip(reason="missing_best_ask")
-    maker_bid_metadata = _sports_tail_locked_maker_bid_metadata(
-        context,
-        sports_metadata,
-        best_ask=best_ask,
-        allowed_price=allowed_price,
-    )
-    if best_ask is not None and best_ask > allowed_price and not maker_bid_metadata:
+    if best_ask > allowed_price:
         return ExtensionDecision.skip(reason="price_above_entry_max")
-    entry_price = allowed_price if maker_bid_metadata or missing_ask_maker_bid else best_ask
+    entry_price = best_ask
 
     amount_usdc = context.amount_usdc or _metadata_decimal(context, "amount_usdc", "buy_budget_usdc")
     if amount_usdc is None or amount_usdc <= Decimal("0"):
@@ -246,8 +233,6 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
 
     token_id = context.token_id or context.orderbook.token_id
     decision_metadata = dict(sports_metadata)
-    decision_metadata.update(missing_ask_maker_bid)
-    decision_metadata.update(maker_bid_metadata)
     efficiency_allowed, efficiency_reason, efficiency_metadata = _sports_capital_efficiency_gate(
         config,
         context,
@@ -275,8 +260,8 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         token_id=token_id,
         price=entry_price,
         amount_usdc=amount_usdc,
-        order_type=OrderType.GTC if maker_bid_metadata or missing_ask_maker_bid else None,
-        post_only=bool(maker_bid_metadata or missing_ask_maker_bid),
+        order_type=None,
+        post_only=False,
         market_slug=context.market.market_slug,
         metadata=decision_metadata,
     )
@@ -671,16 +656,9 @@ def _allocation_skip_reason(
         snapshot.token_id,
         locked_outcome_signal=locked_outcome_signal,
     )
-    locked_maker_candidate = (
-        _sports_tail_maker_bid_signal_from_metadata(context)
-        and (
-            (best_ask is None and locked_outcome_signal)
-            or (best_ask is not None and best_ask <= Decimal("1") and best_ask > price_cap)
-        )
-    )
-    if best_ask is None and not locked_maker_candidate:
+    if best_ask is None:
         return "missing_best_ask"
-    if best_ask is not None and best_ask > price_cap and not locked_maker_candidate:
+    if best_ask is not None and best_ask > price_cap:
         return "price_above_entry_max"
 
     spread = snapshot.spread if snapshot.spread is not None else (
@@ -694,7 +672,7 @@ def _allocation_skip_reason(
     ):
         return "spread_above_max"
 
-    if buyable_liquidity_usdc < config.min_liquidity_usdc and not locked_maker_candidate:
+    if buyable_liquidity_usdc < config.min_liquidity_usdc:
         return "liquidity_below_min"
 
     return ""
@@ -1451,130 +1429,6 @@ def _sports_tail_locked_outcome_signal(context: ExtensionContext) -> bool:
         "live_outcome_lock_candidate",
         "ended_not_closed",
     }
-
-
-def _sports_tail_maker_bid_signal_from_metadata(context: ExtensionContext) -> bool:
-    """判断 live-state 粗信号是否允许后续评估考虑 maker bid。"""
-
-    return str(context.metadata.get("sports_tail_entry_signal_reason") or "") in {
-        "live_outcome_lock_candidate",
-        "ended_not_closed",
-        "live_tail_state_candidate",
-    }
-
-
-def _sports_tail_near_lock_maker_signal(
-    context: ExtensionContext,
-    sports_metadata: Mapping[str, object],
-) -> bool:
-    """判断当前盘口是否允许用 1 以下 maker bid 追近锁定网球盘。"""
-
-    return (
-        str(context.metadata.get("sports_tail_entry_signal_reason") or "") == "live_tail_state_candidate"
-        and sports_metadata.get("sports_tail_reason") == "tennis_set_winner_current_set_near_locked"
-    )
-
-
-def _sports_tail_maker_bid_signal(
-    context: ExtensionContext,
-    sports_metadata: Mapping[str, object],
-) -> bool:
-    return _sports_tail_locked_maker_signal(context, sports_metadata) or _sports_tail_near_lock_maker_signal(
-        context,
-        sports_metadata,
-    )
-
-
-def _sports_tail_locked_maker_signal(
-    context: ExtensionContext,
-    sports_metadata: Mapping[str, object],
-) -> bool:
-    """判断已锁定结果是否允许用盈利 maker bid 入场。"""
-
-    if not _sports_tail_locked_outcome_signal(context):
-        return False
-    reason = str(sports_metadata.get("sports_tail_reason") or "")
-    return reason.startswith("ended_not_closed_") or reason in {
-        "tennis_set_winner_locked",
-        "totals_over_locked",
-        "tennis_totals_over_locked",
-        "tennis_totals_over_min_final_games_locked",
-        "tennis_set_totals_over_locked",
-        "tennis_set_games_over_locked",
-    }
-
-
-def _sports_tail_locked_maker_bid_metadata(
-    context: ExtensionContext,
-    sports_metadata: Mapping[str, object],
-    *,
-    best_ask: Decimal | None,
-    allowed_price: Decimal,
-) -> dict[str, object]:
-    """返回锁定结果以盈利价格挂 maker bid 的审计 metadata。"""
-
-    if best_ask is None or not (allowed_price < best_ask <= Decimal("1")):
-        return {}
-    if _sports_tail_locked_maker_signal(context, sports_metadata):
-        return {
-            "sports_tail_maker_bid_reason": "ask_above_locked_price_cap",
-            "sports_tail_observed_best_ask": str(best_ask),
-            "sports_tail_order_price_cap": str(allowed_price),
-        }
-    if _sports_tail_near_lock_maker_signal(context, sports_metadata):
-        return {
-            "sports_tail_maker_bid_reason": "ask_above_near_lock_price_cap",
-            "sports_tail_observed_best_ask": str(best_ask),
-            "sports_tail_order_price_cap": str(allowed_price),
-        }
-    return {}
-
-
-def _sports_tail_missing_ask_locked_maker_bid(
-    context: ExtensionContext,
-    sports_metadata: Mapping[str, object],
-    allowed_price: Decimal,
-) -> dict[str, object]:
-    """返回锁定结果缺 ask 时主动挂盈利 bid 的审计 metadata。"""
-
-    if _sports_tail_locked_maker_signal(context, sports_metadata) and allowed_price == context.orderbook.best_bid:
-        return {}
-    if _sports_tail_locked_maker_signal(context, sports_metadata):
-        return {
-            "sports_tail_maker_bid_reason": "missing_best_ask_locked_outcome",
-            "sports_tail_order_price_cap": str(allowed_price),
-        }
-    return {}
-
-
-def _maker_bid_liquidity_floor(
-    context: ExtensionContext,
-    snapshot: AllocationMarketSnapshot,
-    *,
-    price_cap: Decimal,
-    buyable_liquidity_usdc: Decimal,
-) -> Decimal:
-    """给锁定结果的被动买单提供分配预算下限。
-
-    这类订单不是吃当前 ask，而是在 1 以下挂盈利 bid，因此不能用 ask 深度为 0
-    直接推导为不可分配。
-    """
-
-    best_ask = snapshot.best_ask if snapshot.best_ask is not None else (
-        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
-    )
-    if not (
-        _sports_tail_maker_bid_signal_from_metadata(context)
-        and (
-            (best_ask is None and _sports_tail_locked_outcome_signal(context))
-            or (best_ask is not None and price_cap < best_ask <= Decimal("1"))
-        )
-    ):
-        return buyable_liquidity_usdc
-    min_order_budget = max(snapshot.market.min_order_size, snapshot.market.min_order_size * (best_ask or price_cap))
-    requested_budget = context.amount_usdc or _metadata_decimal(context, "amount_usdc", "buy_budget_usdc")
-    floor = requested_budget if requested_budget is not None and requested_budget > min_order_budget else min_order_budget
-    return floor if floor > buyable_liquidity_usdc else buyable_liquidity_usdc
 
 
 def _is_tennis_set_winner_market(market) -> bool:

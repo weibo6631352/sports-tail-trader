@@ -311,6 +311,41 @@ def test_buy_entry_rejects_when_exit_order_is_already_open_for_same_token() -> N
     assert decision.suggested_action == "wait_exit"
 
 
+def test_buy_entry_allows_unrelated_open_buy_order() -> None:
+    decision = RiskManager().check_order_intent(
+        BuyOrderIntent(
+            trace_id="trace-buy-with-unrelated-open-buy",
+            condition_id="new-condition",
+            token_id="new-token",
+            price=Decimal("0.90"),
+            amount_usdc=Decimal("3"),
+        ),
+        market=_market(condition_id="new-condition", yes_token_id="new-token"),
+        open_orders=(
+            Order(
+                trace_id="trace-old-buy",
+                condition_id="old-condition",
+                token_id="old-token",
+                side=OrderSide.BUY,
+                order_type=OrderType.GTC,
+                price=Decimal("0.99"),
+                size_shares=Decimal("5.05"),
+                status=OrderStatus.LIVE,
+                order_id="old-buy-order",
+            ),
+        ),
+        max_order_usdc=Decimal("5"),
+        max_market_usdc=Decimal("5"),
+        max_total_usdc=Decimal("20"),
+        balance_usdc=Decimal("10"),
+        allowance_usdc=Decimal("10"),
+        open_orders_count=1,
+        max_open_orders=10,
+    )
+
+    assert decision.passed is True
+
+
 def test_controlled_scale_in_buy_can_pass_open_exit_gate_when_explicitly_allowed() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
@@ -353,13 +388,19 @@ def test_controlled_scale_in_buy_can_pass_open_exit_gate_when_explicitly_allowed
     assert decision.passed is True
 
 
-def _market(*, min_order_size: Decimal = Decimal("1")) -> Market:
+def _market(
+    *,
+    min_order_size: Decimal = Decimal("1"),
+    condition_id: str = "condition",
+    yes_token_id: str = "yes",
+    no_token_id: str = "no",
+) -> Market:
     return Market(
-        condition_id="condition",
+        condition_id=condition_id,
         market_slug="virtual-market",
         outcomes=(
-            MarketOutcome(token_id="yes", outcome="Yes"),
-            MarketOutcome(token_id="no", outcome="No"),
+            MarketOutcome(token_id=yes_token_id, outcome="Yes"),
+            MarketOutcome(token_id=no_token_id, outcome="No"),
         ),
         trading_status=TradingStatus.ELIGIBLE,
         tick_size=Decimal("0.01"),

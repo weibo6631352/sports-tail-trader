@@ -341,6 +341,39 @@ async def test_refresher_recovers_missing_registry_market_from_account_position_
 
 
 @pytest.mark.asyncio
+async def test_refresher_tracks_missing_open_order_market_without_slug_for_recovery() -> None:
+    open_buy = Order(
+        trace_id="trace-buy",
+        condition_id="orphan-condition",
+        token_id="orphan-token",
+        market_slug=None,
+        side=OrderSide.BUY,
+        order_type=OrderType.GTC,
+        price=Decimal("0.99"),
+        size_shares=Decimal("5.05"),
+        remaining_shares=Decimal("5.05"),
+        status=OrderStatus.LIVE,
+        order_id="orphan-buy",
+    )
+    account_state = AccountStateStore()
+    registry = MarketRegistry()
+    refresher = ReconcileAuthorityRefresher(
+        registry_snapshot_provider=lambda: MarketRegistrySnapshot(()),
+        account_state_store=account_state,
+        registry=registry,
+        clob_client=_OpenOrdersClient((open_buy,)),
+    )
+
+    summary = await refresher.refresh(trace_id="trace-orphan")
+
+    recovered = registry.get_by_condition_id("orphan-condition")
+    assert summary.refreshed_open_orders == 1
+    assert recovered is not None
+    assert recovered.condition_id == "orphan-condition"
+    assert recovered.token_ids == ("orphan-token",)
+
+
+@pytest.mark.asyncio
 async def test_refresher_refreshes_position_coverage_from_authoritative_open_orders() -> None:
     market = _market(4)
     position = Position(
