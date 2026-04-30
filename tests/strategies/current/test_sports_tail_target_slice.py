@@ -3623,6 +3623,35 @@ def test_recovery_keeps_fresh_open_entry_order_within_strategy_ttl() -> None:
     assert decision.actions == ()
 
 
+def test_recovery_keeps_open_entry_order_when_exchange_snapshot_lacks_timestamp() -> None:
+    now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
+    market = _moneyline_market()
+    open_buy = Order(
+        condition_id=market.condition_id,
+        token_id="away",
+        side=OrderSide.BUY,
+        order_type=OrderType.GTC,
+        price=Decimal("0.995"),
+        amount_usdc=Decimal("5"),
+        remaining_shares=Decimal("5.02"),
+        status=OrderStatus.LIVE,
+        order_id="buy-1",
+        market_slug=market.market_slug,
+    )
+
+    decision = decide_recovery(
+        CurrentStrategyConfig(sports_entry_maker_max_resting_seconds=10),
+        ExtensionContext(
+            trace_id="trace-open-entry-without-timestamp",
+            market=market,
+            open_orders=(open_buy,),
+            now=now,
+        ),
+    )
+
+    assert decision.actions == ()
+
+
 def test_recovery_cancels_stale_open_entry_order_after_strategy_ttl() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()

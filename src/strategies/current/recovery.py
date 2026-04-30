@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_CEILING
 
 from polymarket_trader.domain.market import TradingStatus
-from polymarket_trader.domain.order import OrderSide
+from polymarket_trader.domain.order import OrderSide, OrderType
 from polymarket_trader.extension_api import RecoveryDecision, ExtensionContext, ExtensionDecision
 
 from strategies.current.config import CurrentStrategyConfig
@@ -179,7 +179,7 @@ def _should_cancel_open_entry_order(
         return True
     opened_at = order.created_at or order.updated_at
     if opened_at is None:
-        return True
+        return order.order_type != OrderType.GTC
     now = context.now or datetime.now(timezone.utc)
     if opened_at.tzinfo is None:
         opened_at = opened_at.replace(tzinfo=timezone.utc)
