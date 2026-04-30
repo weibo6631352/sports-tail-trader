@@ -749,6 +749,62 @@ def test_real_polymarket_season_award_and_leader_props_are_outright_binary_props
             ),
             trading_status=TradingStatus.ELIGIBLE,
         ),
+        Market(
+            condition_id="next-manager",
+            market_slug="will-aj-ellis-be-the-next-red-sox-manager",
+            market_question="Will AJ Ellis be the next Red Sox manager?",
+            event_title="Will AJ Ellis be the next Red Sox manager?",
+            event_slug="will-aj-ellis-be-the-next-red-sox-manager",
+            category="Sports",
+            tags=("Sports", "MLB", "Red Sox"),
+            outcomes=(
+                MarketOutcome(token_id="next-manager-yes", outcome="Yes"),
+                MarketOutcome(token_id="next-manager-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
+        Market(
+            condition_id="coach-next-team-placeholder",
+            market_slug="will-steve-kerr-join-team-a-in-2026",
+            market_question="Will Steve Kerr join Team A in 2026?",
+            event_title="Will Steve Kerr join Team A in 2026?",
+            event_slug="will-steve-kerr-join-team-a-in-2026",
+            category="Sports",
+            tags=("Sports", "NBA"),
+            outcomes=(
+                MarketOutcome(token_id="coach-team-a-yes", outcome="Yes"),
+                MarketOutcome(token_id="coach-team-a-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
+        Market(
+            condition_id="tennis-us-open-winner",
+            market_slug="will-player-v-win-the-2026-mens-us-open",
+            market_question="Will Player V win the 2026 Men's US Open?",
+            event_title="Will Player V win the 2026 Men's US Open?",
+            event_slug="will-player-v-win-the-2026-mens-us-open",
+            category="Sports",
+            tags=("Sports", "Tennis"),
+            outcomes=(
+                MarketOutcome(token_id="us-open-yes", outcome="Yes"),
+                MarketOutcome(token_id="us-open-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
+        Market(
+            condition_id="mlb-season-record",
+            market_slug="mlb-4-homer-game-in-2026",
+            market_question="MLB 4 homer game in 2026?",
+            event_title="MLB 4 homer game in 2026?",
+            event_slug="mlb-4-homer-game-in-2026",
+            category="Sports",
+            tags=("Sports", "MLB"),
+            outcomes=(
+                MarketOutcome(token_id="homer-game-yes", outcome="Yes"),
+                MarketOutcome(token_id="homer-game-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
     )
 
     for market in markets:

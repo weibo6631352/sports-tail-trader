@@ -370,6 +370,7 @@ def _is_season_or_competition_prop(text: str) -> bool:
         "postseason",
         "world cup",
         "wimbledon",
+        "us open",
         "champions league",
         "europa league",
         "conference league",
@@ -387,6 +388,7 @@ def _is_season_or_competition_prop(text: str) -> bool:
         "most yellow cards",
         "most red cards",
         "most goal contributions",
+        "homer game",
         "promoted to",
         "name stadium",
         "stadium after",
@@ -411,6 +413,8 @@ def _is_season_or_competition_prop(text: str) -> bool:
     )
     if _contains_any(text, strong_competition_phrases):
         return True
+    if _is_next_role_market(text):
+        return True
 
     matchup_sensitive_phrases = (
         "top goal scorer",
@@ -420,6 +424,8 @@ def _is_season_or_competition_prop(text: str) -> bool:
         "next team",
         "play for",
         "join the",
+        "join team",
+        "join someone else",
         "sign with",
         "to leave",
         "traded to",
@@ -435,6 +441,15 @@ def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
     padded = f" {text} "
     hyphen_normalized = f" {text.replace('-', ' ')} "
     return any(f" {phrase} " in padded or f" {phrase} " in hyphen_normalized for phrase in phrases)
+
+
+def _is_next_role_market(text: str) -> bool:
+    """识别下一任教练/经理等长期职位归属市场。"""
+
+    normalized = f" {text.replace('-', ' ')} "
+    if " be the next " not in normalized:
+        return False
+    return _contains_any(text, ("manager", "coach", "head coach"))
 
 
 def _non_empty(*values: str | None) -> tuple[str, ...]:
