@@ -237,6 +237,44 @@ def test_live_state_match_accepts_chinese_soccer_translation_variants() -> None:
     assert match.game.source_event_id == "15552514"
 
 
+def test_live_state_match_accepts_moroccan_soccer_name_variants() -> None:
+    market = Market(
+        condition_id="botola-dhj-zemamra-condition",
+        market_slug="mar1-dhe-rcz-2026-04-30",
+        market_question="Difaâ Hassani El Jadida vs. RCA Zemamra",
+        event_title="Difaâ Hassani El Jadida vs. RCA Zemamra",
+        event_slug="mar1-dhe-rcz-2026-04-30",
+        game_start_time=datetime(2026, 4, 30, 15, 0, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("Soccer", "Botola Pro"),
+        outcomes=(
+            MarketOutcome(token_id="dhj", outcome="Difaâ Hassani El Jadida"),
+            MarketOutcome(token_id="rcz", outcome="RCA Zemamra"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="16037146",
+        league="Botola Pro",
+        home=SportsLiveTeam(name="Difaâ Hassani El-Jadidi", score=0, short_name="DHJ"),
+        away=SportsLiveTeam(name="Renaissance Zemamra", score=0, short_name="Renaissance Zemamra"),
+        status=SportsLiveGameStatus.SCHEDULED,
+        period="Not started",
+        observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+        source_payload={
+            "sport": "football",
+            "start_timestamp": 1777561200,
+            "tournament": "Botola Pro",
+        },
+    )
+
+    match = match_sports_live_game(market, game)
+
+    assert match is not None
+    assert match.game.source_event_id == "16037146"
+
+
 def test_best_live_state_match_reuses_market_text_across_many_games(monkeypatch) -> None:
     market = _market("nba-phi-bos-2026-04-28")
     games = tuple(
