@@ -275,6 +275,44 @@ def test_live_state_match_accepts_moroccan_soccer_name_variants() -> None:
     assert match.game.source_event_id == "16037146"
 
 
+def test_live_state_match_ignores_soccer_club_prefix_variants() -> None:
+    market = Market(
+        condition_id="ukraine-poltava-kryvbas-condition",
+        market_slug="ukr1-sp-kry-2026-05-01",
+        market_question="SK Poltava vs. FK Kryvbas Kryvyi Rih",
+        event_title="SK Poltava vs. FK Kryvbas Kryvyi Rih",
+        event_slug="ukr1-sp-kry-2026-05-01",
+        game_start_time=datetime(2026, 5, 1, 12, 30, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("Soccer", "Ukraine Premier Liha"),
+        outcomes=(
+            MarketOutcome(token_id="poltava", outcome="SK Poltava"),
+            MarketOutcome(token_id="kryvbas", outcome="FK Kryvbas Kryvyi Rih"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="14090463",
+        league="Ukrainian Premier League",
+        home=SportsLiveTeam(name="SC Poltava", score=0),
+        away=SportsLiveTeam(name="FC Kryvbas Kryvyi Rih", score=0, short_name="Kryvbas"),
+        status=SportsLiveGameStatus.SCHEDULED,
+        period="Not started",
+        observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+        source_payload={
+            "sport": "football",
+            "start_timestamp": 1777638600,
+            "tournament": "Ukrainian Premier League",
+        },
+    )
+
+    match = match_sports_live_game(market, game)
+
+    assert match is not None
+    assert match.game.source_event_id == "14090463"
+
+
 def test_best_live_state_match_reuses_market_text_across_many_games(monkeypatch) -> None:
     market = _market("nba-phi-bos-2026-04-28")
     games = tuple(
