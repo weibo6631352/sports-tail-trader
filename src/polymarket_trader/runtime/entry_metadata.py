@@ -67,6 +67,7 @@ class EntryMetadataStore:
 
     def __init__(self) -> None:
         self._records: dict[str, EntryMetadataRecord] = {}
+        self._aliases: dict[str, str] = {}
         self._lock = Lock()
 
     def upsert(
@@ -87,8 +88,12 @@ class EntryMetadataStore:
             source=source,
             updated_at=updated_at or _utc_now(),
         )
+        aliases = _record_identity_keys(record)
         with self._lock:
             self._records[record.key] = record
+            self._remove_aliases_for_primary(record.key)
+            for alias in aliases:
+                self._aliases[alias] = record.key
         return record
 
     def remove(
@@ -100,7 +105,11 @@ class EntryMetadataStore:
     ) -> bool:
         key = _identity(condition_id=condition_id, market_slug=market_slug, event_slug=event_slug)
         with self._lock:
-            return self._records.pop(key, None) is not None
+            primary_key = self._aliases.get(key, key)
+            removed = self._records.pop(primary_key, None) is not None
+            if removed:
+                self._remove_aliases_for_primary(primary_key)
+            return removed
 
     def records(self) -> tuple[EntryMetadataRecord, ...]:
         with self._lock:
@@ -136,10 +145,15 @@ class EntryMetadataStore:
             keys.append(_identity(event_slug=event_slug))
         with self._lock:
             for key in keys:
-                record = self._records.get(key)
+                record = self._records.get(self._aliases.get(key, key))
                 if record is not None:
                     return record
         return None
+
+    def _remove_aliases_for_primary(self, primary_key: str) -> None:
+        for alias, target in tuple(self._aliases.items()):
+            if target == primary_key:
+                self._aliases.pop(alias, None)
 
     def metadata_for_event(
         self,
@@ -152,3 +166,16 @@ class EntryMetadataStore:
             market_slug=event.market_slug or (market.market_slug if market is not None else None),
             event_slug=event.event_slug or (market.event_slug if market is not None else None),
         )
+
+
+def _record_identity_keys(record: EntryMetadataRecord) -> tuple[str, ...]:
+    """返回同一 metadata 事实可被查询的所有市场身份。"""
+
+    keys: list[str] = []
+    if record.condition_id:
+        keys.append(_identity(condition_id=record.condition_id))
+    if record.market_slug:
+        keys.append(_identity(market_slug=record.market_slug))
+    if record.event_slug:
+        keys.append(_identity(event_slug=record.event_slug))
+    return tuple(keys)

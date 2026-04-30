@@ -42,6 +42,16 @@ def test_sports_live_state_worker_writes_metadata_and_entry_signals() -> None:
     assert {first_event.token_id, second_event.token_id} == {"home", "away"}
 
 
+def test_sports_live_state_worker_indexes_metadata_by_event_identity() -> None:
+    result = asyncio.run(_run_sync_with_match())
+
+    by_market_slug = result["store"].metadata_for(market_slug="nba-nyk-bos-moneyline")
+    by_event_slug = result["store"].metadata_for(event_slug="new-york-knicks-vs-boston-celtics")
+
+    assert by_market_slug["sports_live_match"]["source_event_id"] == "game-1"
+    assert by_event_slug["sports_live_match"]["source_event_id"] == "game-1"
+
+
 def test_sports_live_state_worker_tracks_entry_signal_market_for_market_ws() -> None:
     async def run() -> None:
         registry = MarketRegistry()
@@ -282,6 +292,7 @@ async def _run_sync_with_match() -> dict[str, object]:
     assert sync_result is not None
     return {
         "metadata": store.metadata_for(condition_id="moneyline-condition"),
+        "store": store,
         "status": worker.status_snapshot(),
         "last_games": worker.last_games(),
         "first_event": await event_bus.next_trading_event(),
