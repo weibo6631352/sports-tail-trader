@@ -1447,7 +1447,10 @@ def _sports_tail_price_cap(
 def _sports_tail_locked_outcome_signal(context: ExtensionContext) -> bool:
     """判断 live-state 是否已经标记当前市场为数学锁定候选。"""
 
-    return str(context.metadata.get("sports_tail_entry_signal_reason") or "") == "live_outcome_lock_candidate"
+    return str(context.metadata.get("sports_tail_entry_signal_reason") or "") in {
+        "live_outcome_lock_candidate",
+        "ended_not_closed",
+    }
 
 
 def _sports_tail_maker_bid_signal_from_metadata(context: ExtensionContext) -> bool:
@@ -1455,6 +1458,7 @@ def _sports_tail_maker_bid_signal_from_metadata(context: ExtensionContext) -> bo
 
     return str(context.metadata.get("sports_tail_entry_signal_reason") or "") in {
         "live_outcome_lock_candidate",
+        "ended_not_closed",
         "live_tail_state_candidate",
     }
 

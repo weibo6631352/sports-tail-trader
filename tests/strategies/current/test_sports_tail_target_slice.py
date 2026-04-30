@@ -2282,7 +2282,7 @@ def test_ended_moneyline_places_profitable_maker_bid_when_best_ask_is_missing() 
             amount_usdc=Decimal("10"),
             now=now,
             metadata={
-                "sports_tail_entry_signal_reason": "live_outcome_lock_candidate",
+                "sports_tail_entry_signal_reason": "ended_not_closed",
                 "sports_tail_game": {
                     "league": "NBA",
                     "home_name": "NYK",
@@ -2417,7 +2417,7 @@ def test_entry_plan_allocates_ended_moneyline_maker_bid_without_ask_depth_at_pri
         max_market_usdc=Decimal("10"),
         max_total_usdc=Decimal("10"),
         metadata={
-            "sports_tail_entry_signal_reason": "live_outcome_lock_candidate",
+            "sports_tail_entry_signal_reason": "ended_not_closed",
             "sports_tail_game": {
                 "league": "NBA",
                 "home_name": "NYK",
