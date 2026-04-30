@@ -846,6 +846,32 @@ def test_real_polymarket_season_award_and_leader_props_are_outright_binary_props
         assert decision.reason == "outright_market_not_auto_tradable"
 
 
+def test_real_polymarket_grand_slam_comparison_prop_is_outright_moneyline() -> None:
+    market = Market(
+        condition_id="grand-slam-comparison",
+        market_slug="will-alcaraz-or-sinner-win-more-grand-slams-in-2026",
+        market_question="Will Alcaraz or Sinner win more Grand Slams in 2026?",
+        event_title="Will Alcaraz or Sinner win more Grand Slams in 2026?",
+        event_slug="will-alcaraz-or-sinner-win-more-grand-slams-in-2026",
+        category=None,
+        tags=("sinner", "Tennis", "Sports", "Alcaraz"),
+        outcomes=(
+            MarketOutcome(token_id="alcaraz", outcome="Alcaraz"),
+            MarketOutcome(token_id="sinner", outcome="Sinner"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+    descriptor = describe_sports_market(market)
+    decision = select_market(CurrentStrategyConfig(), market)
+
+    assert descriptor.accepted is True
+    assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
+    assert descriptor.market_type == SportsMarketType.MONEYLINE
+    assert decision.selected is False
+    assert decision.reason == "outright_market_not_auto_tradable"
+
+
 def test_entry_rejects_series_market_before_single_game_live_score_can_create_buy() -> None:
     market = _series_winner_market()
     orderbook = _orderbook(token_id="series-home", best_ask=Decimal("0.45"))

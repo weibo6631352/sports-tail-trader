@@ -161,6 +161,8 @@ def _market_family(market: Market, text: str) -> SportsMarketFamily:
         ),
     ) and not _has_matchup_marker(text):
         return SportsMarketFamily.OUTRIGHT
+    if _is_season_or_competition_prop(combined_text) and not _has_matchup_marker(text):
+        return SportsMarketFamily.OUTRIGHT
     if _is_binary_yes_no_market(market) and _is_season_or_competition_prop(combined_text):
         return SportsMarketFamily.OUTRIGHT
     return SportsMarketFamily.SINGLE_GAME
