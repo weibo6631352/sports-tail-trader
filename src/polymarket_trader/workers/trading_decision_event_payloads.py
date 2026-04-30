@@ -119,6 +119,7 @@ def serialize_intent(intent: ManagedOrderIntent) -> dict[str, object]:
         "reason": getattr(intent, "reason", ""),
         "allow_open_exit_overlap": bool(getattr(intent, "allow_open_exit_overlap", False)),
         "market_slug": intent.market_slug,
+        "metadata": jsonable(getattr(intent, "metadata", {}) or {}),
     }
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from typing import Iterable
 
 from polymarket_trader.domain.allocation import (
@@ -14,6 +14,8 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order, OrderSide
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
+
+_MIN_CLOB_NOTIONAL_USDC = Decimal("0.01")
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,8 +333,9 @@ def _market_hard_capacity_usdc(
     hard_capacity_usdc = remaining_market_usdc
     if max_order_usdc < hard_capacity_usdc:
         hard_capacity_usdc = max_order_usdc
-    if available_usdc < hard_capacity_usdc:
-        hard_capacity_usdc = available_usdc
+    fee_adjusted_available_usdc = _fee_adjusted_available_usdc(snapshot, available_usdc)
+    if fee_adjusted_available_usdc < hard_capacity_usdc:
+        hard_capacity_usdc = fee_adjusted_available_usdc
     if liquidity_usdc < hard_capacity_usdc:
         hard_capacity_usdc = liquidity_usdc
     if snapshot.strategy_budget_cap_usdc is not None and snapshot.strategy_budget_cap_usdc < hard_capacity_usdc:
@@ -350,6 +353,28 @@ def _market_liquidity_usdc(
     return _ask_depth_notional(snapshot.orderbook)
 
 
+def _fee_adjusted_available_usdc(snapshot: AllocationMarketSnapshot, available_usdc: Decimal) -> Decimal:
+    """按 BUY taker 费用预留余额，避免把全部现金作为订单 amount 发出后被 CLOB 费用校验拒绝。"""
+
+    if available_usdc <= Decimal("0") or snapshot.market.fees_enabled is False:
+        return max(available_usdc, Decimal("0"))
+    fee_rate_bps = snapshot.market.fee_rate_bps
+    if fee_rate_bps is None:
+        fee_rate_bps = snapshot.market.taker_base_fee_bps
+    if fee_rate_bps is None or fee_rate_bps <= 0:
+        return available_usdc
+    price = snapshot.best_ask if snapshot.best_ask is not None else (
+        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
+    )
+    if price is None or price <= Decimal("0") or price >= Decimal("1"):
+        return available_usdc
+    fee_multiplier = (Decimal(fee_rate_bps) / Decimal("1000")) * (Decimal("1") - price)
+    if fee_multiplier <= Decimal("0"):
+        return available_usdc
+    adjusted = available_usdc / (Decimal("1") + fee_multiplier)
+    return adjusted.quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
+
+
 def _min_buy_budget_usdc(snapshot: AllocationMarketSnapshot) -> Decimal:
     """把 Polymarket 最小订单 size 换算为入场预算下限。
 
@@ -365,8 +390,8 @@ def _min_buy_budget_usdc(snapshot: AllocationMarketSnapshot) -> Decimal:
         snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
     )
     if price is None or price <= Decimal("0"):
-        return min_order_size
-    return min_order_size * price
+        return max(min_order_size, _MIN_CLOB_NOTIONAL_USDC)
+    return max(min_order_size * price, _MIN_CLOB_NOTIONAL_USDC)
 
 
 def _ask_depth_notional(

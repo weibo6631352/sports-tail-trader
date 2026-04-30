@@ -169,6 +169,11 @@ def _market_coverage_priority(game: SportsLiveGame) -> int:
 def _game_query_terms(game: SportsLiveGame) -> tuple[str, ...]:
     terms: list[str] = []
     seen: set[str] = set()
+    for term in _matchup_query_terms(game):
+        if term in seen:
+            continue
+        seen.add(term)
+        terms.append(term)
     for team in (game.home, game.away):
         for term in _team_query_terms(team):
             if term in seen:
@@ -176,6 +181,20 @@ def _game_query_terms(game: SportsLiveGame) -> tuple[str, ...]:
             seen.add(term)
             terms.append(term)
     return tuple(terms)
+
+
+def _matchup_query_terms(game: SportsLiveGame) -> tuple[str, ...]:
+    """生成优先级最高的对阵组合词，减少单队名搜索带来的远期噪声。"""
+
+    home_terms = _team_query_terms(game.home)
+    away_terms = _team_query_terms(game.away)
+    if not home_terms or not away_terms:
+        return ()
+    home = home_terms[0]
+    away = away_terms[0]
+    if home == away:
+        return ()
+    return (f"{home} {away}", f"{away} {home}")
 
 
 def _team_query_terms(team: SportsLiveTeam) -> tuple[str, ...]:

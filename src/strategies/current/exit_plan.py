@@ -15,8 +15,6 @@ from strategies.current.config import CurrentStrategyConfig
 
 
 EXIT_PLAN_VERSION = "1"
-
-
 def build_exit_plan_metadata(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
@@ -99,6 +97,13 @@ def align_price_to_tick(price: Decimal, *, tick_size: Decimal | None) -> Decimal
     if units <= 0:
         return price
     return units * tick_size
+
+
+def cap_price_to_clob_limit(price: Decimal, *, tick_size: Decimal | None = None) -> Decimal:
+    """把目标价限制在 Polymarket CLOB 当前 tick 接受的最高价格内。"""
+
+    effective_tick = tick_size if tick_size is not None and tick_size > Decimal("0") else Decimal("0.01")
+    return min(price, Decimal("1") - effective_tick)
 
 
 def _effective_tick_size(context: ExtensionContext) -> Decimal | None:

@@ -127,6 +127,16 @@ def _json_mapping(value: JsonMapping | None) -> dict[str, Any]:
     return {str(key): _json_safe(item) for key, item in value.items()}
 
 
+def _json_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float, Decimal)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+
 def _tuple_from_sequence(value: Any) -> tuple[str, ...]:
     if not value:
         return ()
@@ -772,7 +782,11 @@ class OrderModel(Base, TimestampMixin):
                 else None
             ),
             reason=order.reason,
-            post_only=False if order.intent is None else getattr(order.intent, "post_only", False),
+            post_only=(
+                bool(getattr(order.intent, "post_only", False))
+                if order.intent is not None
+                else _json_bool(payload.get("post_only"))
+            ),
             raw_payload=payload,
         )
 

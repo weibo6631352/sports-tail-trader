@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from datetime import datetime, timezone
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -9,19 +10,119 @@ from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics
 from polymarket_trader.runtime.status import WorkerLifecycleState
 
 _SUBSCRIPTION_REFRESH_SECONDS = 5.0
+_MARKET_WS_LIVE_STATUSES = {"live", "ended"}
+_MARKET_WS_TAIL_WINDOW_SECONDS = 3600.0
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def market_ws_subscription_token_ids(runtime: Any) -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            {
-                token_id
-                for market in runtime.registry.snapshot().markets
-                for token_id in market.token_ids
-                if token_id
-            }
-        )
+    """返回 market WS 需要订阅的 token。
+
+    全量 market 发现负责扩大机会池；market WS 只承载交易热路径所需盘口。
+    因此这里按“已有风险敞口”或“直播源已进入可交易观察状态”收窄订阅范围，
+    避免把全量 registry 直接压到 Polymarket WS 上造成反复重连。
+    """
+
+    account_snapshot = _account_snapshot(runtime)
+    exposed_condition_ids, exposed_token_ids = _account_exposure_keys(account_snapshot)
+    token_ids: set[str] = set()
+    for market in runtime.registry.snapshot().markets:
+        if not _market_requires_market_ws(
+            runtime,
+            market,
+            exposed_condition_ids=exposed_condition_ids,
+            exposed_token_ids=exposed_token_ids,
+        ):
+            continue
+        token_ids.update(token_id for token_id in market.token_ids if token_id)
+    return tuple(sorted(token_ids))
+
+
+def _account_snapshot(runtime: Any) -> Any | None:
+    store = getattr(runtime, "account_state_store", None)
+    snapshot = getattr(store, "snapshot", None)
+    if callable(snapshot):
+        return snapshot()
+    return None
+
+
+def _account_exposure_keys(account_snapshot: Any | None) -> tuple[set[str], set[str]]:
+    condition_ids: set[str] = set()
+    token_ids: set[str] = set()
+    if account_snapshot is None:
+        return condition_ids, token_ids
+    for item in tuple(getattr(account_snapshot, "positions", ())) + tuple(
+        getattr(account_snapshot, "open_orders", ())
+    ):
+        condition_id = str(getattr(item, "condition_id", "") or "").strip()
+        token_id = str(getattr(item, "token_id", "") or "").strip()
+        if condition_id:
+            condition_ids.add(condition_id)
+        if token_id:
+            token_ids.add(token_id)
+    return condition_ids, token_ids
+
+
+def _market_requires_market_ws(
+    runtime: Any,
+    market: Any,
+    *,
+    exposed_condition_ids: set[str],
+    exposed_token_ids: set[str],
+) -> bool:
+    if market.condition_id in exposed_condition_ids or any(
+        token_id in exposed_token_ids for token_id in market.token_ids
+    ):
+        return True
+    metadata = _entry_metadata_for_market(runtime, market)
+    signal_reason = str(metadata.get("sports_tail_entry_signal_reason") or "").strip()
+    if metadata.get("sports_tail_entry_signal_allowed") is False and signal_reason != "market_end_too_far":
+        return False
+    sports_tail_game = metadata.get("sports_tail_game")
+    if not isinstance(sports_tail_game, Mapping):
+        return False
+    status = str(sports_tail_game.get("status") or "").strip().lower()
+    if status == "ended":
+        return True
+    if status not in _MARKET_WS_LIVE_STATUSES:
+        return False
+    if metadata.get("sports_tail_entry_signal_allowed") is True:
+        return True
+    if status == "live" and signal_reason == "market_end_too_far":
+        return True
+    return _market_end_within_tail_window(market, now=_utc_now())
+
+
+def _market_end_within_tail_window(market: Any, *, now: datetime) -> bool:
+    """判断 live market 是否进入实时盘口订阅窗口。
+
+    全量扫描仍保留远期市场；这里只保护 market WS 热路径。已有持仓或挂单在
+    调用侧已提前放行，ended 未封盘市场也不受该窗口限制。
+    """
+
+    market_end = getattr(market, "end_date", None)
+    if market_end is None:
+        return True
+    if market_end.tzinfo is None:
+        market_end = market_end.replace(tzinfo=timezone.utc)
+    seconds_until_end = (market_end.astimezone(timezone.utc) - now.astimezone(timezone.utc)).total_seconds()
+    return seconds_until_end <= _MARKET_WS_TAIL_WINDOW_SECONDS
+
+
+def _entry_metadata_for_market(runtime: Any, market: Any) -> Mapping[str, Any]:
+    store = getattr(runtime, "entry_metadata_store", None)
+    metadata_for = getattr(store, "metadata_for", None)
+    if not callable(metadata_for):
+        return {}
+    metadata = metadata_for(
+        condition_id=market.condition_id,
+        market_slug=market.market_slug,
+        event_slug=market.event_slug,
     )
+    return metadata if isinstance(metadata, Mapping) else {}
 
 
 def user_ws_subscription_condition_ids(runtime: Any) -> tuple[str, ...]:
@@ -77,6 +178,7 @@ async def stream_market_ws_messages(
     queue: asyncio.Queue[Mapping[str, Any]],
 ) -> None:
     async def on_connect(attempt: int) -> None:
+        runtime.market_ws_worker.clear_error()
         runtime.supervisor.heartbeat_worker(
             "market_ws",
             state=WorkerLifecycleState.RUNNING,
@@ -234,6 +336,7 @@ async def run_market_ws(runtime: Any) -> None:
                     _drain_queue(queue)
                     if desired_token_ids:
                         runtime.market_ws_worker.build_subscription_request(desired_token_ids)
+                        await runtime.market_ws_worker.refresh_rest_snapshots(desired_token_ids)
                         stream_task = asyncio.create_task(
                             stream_market_ws_messages(runtime, desired_token_ids, queue),
                             name="trader:market-ws-stream",

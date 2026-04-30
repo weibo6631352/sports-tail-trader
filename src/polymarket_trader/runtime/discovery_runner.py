@@ -13,6 +13,8 @@ _MARKET_DISCOVERY_EVENT_PAGE_LIMIT = 50
 _MARKET_DISCOVERY_MARKET_BUDGET_PER_TICK = 1000
 _MARKET_DISCOVERY_REQUEST_BUDGET_PER_TICK = 2
 _MARKET_DISCOVERY_MAX_RUNTIME_MS = 200.0
+_LIVE_EVENT_EXPANSION_BUDGET_PER_TICK = 1
+_LIVE_EVENT_EXPANSION_REFRESH_SECONDS = 30.0
 MARKET_DISCOVERY_TICK_SECONDS = 0.5
 MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS = 5
 
@@ -49,6 +51,8 @@ class FullMarketDiscoveryState:
     last_tick_markets: int = 0
     last_error: str | None = None
     consecutive_failures: int = 0
+    last_query_names: tuple[str, ...] = ()
+    live_event_expanded_at: dict[str, datetime] = field(default_factory=dict)
 
     def start_tick(self) -> None:
         self.last_tick_started_at = _utc_now()
@@ -59,6 +63,10 @@ class FullMarketDiscoveryState:
             self.round_started_at = self.last_tick_started_at
 
     def next_query(self, queries: tuple[DiscoveryQuery, ...]) -> DiscoveryQuery | None:
+        query_name_sequence = tuple(query.name for query in queries)
+        if query_name_sequence != self.last_query_names:
+            self.next_query_index = 0
+            self.last_query_names = query_name_sequence
         query_names = {query.name for query in queries}
         self.query_cursors = {
             name: cursor for name, cursor in self.query_cursors.items() if name in query_names
@@ -204,6 +212,7 @@ async def run_market_discovery_scan(
                 break
             if state.last_tick_markets >= _MARKET_DISCOVERY_MARKET_BUDGET_PER_TICK:
                 break
+        await expand_live_event_market_discovery(runtime)
     except Exception as exc:  # pragma: no cover - depends on external gamma
         state.record_failure(str(exc))
         runtime.market_discovery_worker.record_failure(
@@ -239,6 +248,62 @@ async def run_market_discovery_scan(
         _sync(sync_runtime_metrics, runtime)
 
 
+async def expand_live_event_market_discovery(runtime: Any) -> None:
+    """对已匹配直播事件按 event slug 精确补齐同场子盘口。
+
+    常规 title_search discovery 会受查询轮转和分页预算影响；实盘中一旦
+    live state 已确认某个 event，就应快速拉齐该事件的全场、分盘和总分盘口。
+    """
+
+    state = runtime.market_discovery_scan
+    slugs = _live_event_slugs_for_expansion(runtime, now=_utc_now())
+    for event_slug in slugs[:_LIVE_EVENT_EXPANSION_BUDGET_PER_TICK]:
+        events = await runtime.gamma_client.list_events(
+            active=True,
+            closed=False,
+            slug=event_slug,
+            limit=5,
+            timeout_s=2.0,
+        )
+        raw_events: list[Any] = []
+        for event in events:
+            raw_events.extend(event.to_raw_market_events(source="gamma.events_slug"))
+        if raw_events:
+            await runtime.market_discovery_worker.ingest_source_page(
+                {"markets": [raw_event.payload for raw_event in raw_events]},
+                source="gamma.events_slug",
+                trace_id=f"market-discovery-live-event-{uuid4().hex}",
+            )
+        state.live_event_expanded_at[event_slug] = _utc_now()
+
+
+def _live_event_slugs_for_expansion(runtime: Any, *, now: datetime) -> tuple[str, ...]:
+    store = getattr(runtime, "entry_metadata_store", None)
+    records = getattr(store, "records", None)
+    if not callable(records):
+        return ()
+    state = runtime.market_discovery_scan
+    slugs: list[str] = []
+    for record in records():
+        event_slug = str(getattr(record, "event_slug", "") or "").strip()
+        if not event_slug:
+            continue
+        metadata = getattr(record, "metadata", {})
+        if not isinstance(metadata, Mapping):
+            continue
+        game = metadata.get("sports_tail_game")
+        if not isinstance(game, Mapping):
+            continue
+        status = str(game.get("status") or "").strip().lower()
+        if status not in {"live", "ended"}:
+            continue
+        expanded_at = state.live_event_expanded_at.get(event_slug)
+        if expanded_at is not None and (now - expanded_at).total_seconds() < _LIVE_EVENT_EXPANSION_REFRESH_SECONDS:
+            continue
+        slugs.append(event_slug)
+    return tuple(dict.fromkeys(slugs))
+
+
 async def fetch_full_market_discovery_page(
     runtime: Any,
     *,
@@ -255,7 +320,7 @@ async def fetch_full_market_discovery_page(
     after_cursor = state.query_cursors.get(query.name) or state.after_cursor
     if after_cursor is not None:
         params["after_cursor"] = after_cursor
-    events, next_cursor = await runtime.gamma_client.list_events_keyset_by_params(params)
+    events, next_cursor = await runtime.gamma_client.list_events_keyset_by_params(params, timeout_s=2.0)
     raw_events: list[Any] = []
     for event in events:
         raw_events.extend(event.to_raw_market_events(source="gamma.events_keyset"))

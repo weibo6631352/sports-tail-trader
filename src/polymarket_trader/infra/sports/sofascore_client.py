@@ -7,8 +7,9 @@ sport path，避免每轮同步拉取无关的大体量赛程。
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import re
 from typing import Any
 
@@ -32,10 +33,20 @@ from polymarket_trader.infra.sports.common import (
 )
 
 _DEFAULT_BASE_URL = "https://www.sofascore.com"
+_WHOLE_MARKET_SPORTS = (
+    "basketball",
+    "ice-hockey",
+    "baseball",
+    "american-football",
+    "football",
+    "tennis",
+    "table-tennis",
+)
 _DEFAULT_SPORTS = ("basketball", "ice-hockey", "baseball", "american-football")
 _SCHEDULED_EVENTS_PATH = "/api/v1/sport/{sport}/scheduled-events/{date}"
 
 _SPORTS_BY_LEAGUE: dict[str, tuple[str, ...]] = {
+    "sports": _WHOLE_MARKET_SPORTS,
     "nba": ("basketball",),
     "wnba": ("basketball",),
     "ncaamb": ("basketball",),
@@ -54,9 +65,13 @@ _SPORTS_BY_LEAGUE: dict[str, tuple[str, ...]] = {
     "premier-league": ("football",),
     "football": ("football",),
     "tennis": ("tennis",),
+    "wtt": ("table-tennis",),
+    "table-tennis": ("table-tennis",),
+    "table tennis": ("table-tennis",),
 }
 
 _TOURNAMENT_ALIASES_BY_LEAGUE: dict[str, tuple[str, ...] | None] = {
+    "sports": None,
     "nba": ("nba", "national basketball association"),
     "wnba": ("wnba", "women national basketball association"),
     "ncaamb": ("ncaa", "ncaa men", "college basketball"),
@@ -75,6 +90,9 @@ _TOURNAMENT_ALIASES_BY_LEAGUE: dict[str, tuple[str, ...] | None] = {
     "epl": ("premier league", "premier-league"),
     "premier-league": ("premier league", "premier-league"),
     "tennis": None,
+    "wtt": ("world team championships", "wtt"),
+    "table-tennis": None,
+    "table tennis": None,
 }
 
 
@@ -91,6 +109,7 @@ class SofaScoreLiveClient:
         timeout_s: float = 5.0,
         min_fetch_interval_s: float = 20.0,
         max_stale_on_error_s: float = 300.0,
+        lookahead_days: int = 0,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -99,6 +118,7 @@ class SofaScoreLiveClient:
         self._now_provider = now_provider
         self._min_fetch_interval_s = max(0.0, float(min_fetch_interval_s))
         self._max_stale_on_error_s = max(0.0, float(max_stale_on_error_s))
+        self._lookahead_days = max(0, int(lookahead_days))
         self._cached_snapshot: SportsLiveSnapshot | None = None
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
@@ -132,19 +152,36 @@ class SofaScoreLiveClient:
                 self._cached_snapshot or SportsLiveSnapshot(source="sofascore", observed_at=observed_at, games=()),
                 health=SportsLiveSourceHealth.CACHED,
             )
-        date_text = observed_at.strftime("%Y-%m-%d")
-        games: list[SportsLiveGame] = []
+        date_texts = _scheduled_event_dates(observed_at, lookahead_days=self._lookahead_days)
         try:
-            for sport in self._sports:
-                payload = await self._get_scheduled_events(sport, date_text=date_text)
-                games.extend(
-                    parse_sofascore_events_payload(
-                        payload,
-                        sport=sport,
-                        league_codes=self._league_codes,
-                        observed_at=observed_at,
-                    )
+            requests = tuple((sport, date_text) for sport in self._sports for date_text in date_texts)
+            results = await asyncio.gather(
+                *(self._get_scheduled_events(sport, date_text=date_text) for sport, date_text in requests),
+                return_exceptions=True,
+            )
+            failures = [
+                f"{sport}:{date_text}: {result}"
+                for (sport, date_text), result in zip(requests, results, strict=True)
+                if isinstance(result, Exception)
+            ]
+            payloads = [
+                (sport, result)
+                for (sport, _date_text), result in zip(requests, results, strict=True)
+                if not isinstance(result, Exception)
+            ]
+            if not payloads and failures:
+                first_error = next(result for result in results if isinstance(result, Exception))
+                raise first_error
+            games = [
+                game
+                for sport, payload in payloads
+                for game in parse_sofascore_events_payload(
+                    payload,
+                    sport=sport,
+                    league_codes=self._league_codes,
+                    observed_at=observed_at,
                 )
+            ]
         except Exception as exc:
             if self._is_cache_usable_after_error(observed_at):
                 return self._snapshot_with_status(
@@ -168,7 +205,8 @@ class SofaScoreLiveClient:
                 SportsLiveSourceHealth.SUCCESS_WITH_LIVE_DATA
                 if snapshot.games
                 else SportsLiveSourceHealth.SUCCESS_EMPTY
-            )
+            ),
+            last_error="; ".join(failures) if failures else None,
         )
         self._cached_snapshot = snapshot
         return snapshot
@@ -229,6 +267,16 @@ def sofascore_sports_for_leagues(league_codes: Sequence[str]) -> tuple[str, ...]
             seen.add(sport)
             result.append(sport)
     return tuple(result)
+
+
+def _scheduled_event_dates(observed_at: datetime, *, lookahead_days: int) -> tuple[str, ...]:
+    """返回需要拉取的 UTC 比赛日，默认当天，可扩展近未来单场市场覆盖。"""
+
+    start = observed_at.date()
+    return tuple(
+        (start + timedelta(days=offset)).strftime("%Y-%m-%d")
+        for offset in range(0, max(0, lookahead_days) + 1)
+    )
 
 
 def parse_sofascore_events_payload(
@@ -341,6 +389,7 @@ def _tennis_state_from_payload(raw_event: Mapping[str, Any], *, raw_status: str)
     away_current_games = _period_score(away_mapping, current_set)
     home_total_games = _period_total(home_mapping)
     away_total_games = _period_total(away_mapping)
+    first_to_serve = _tennis_serving_side(raw_event.get("firstToServe"))
     return {
         "home_sets_won": _score_value(home_mapping),
         "away_sets_won": _score_value(away_mapping),
@@ -353,7 +402,28 @@ def _tennis_state_from_payload(raw_event: Mapping[str, Any], *, raw_status: str)
         "set_scores": _tennis_set_scores(home_mapping, away_mapping),
         "home_point": first_text(home_mapping, "point"),
         "away_point": first_text(away_mapping, "point"),
+        "first_to_serve": first_to_serve,
+        "serving_side": _tennis_current_server(first_to_serve, home_total_games + away_total_games),
     }
+
+
+def _tennis_serving_side(value: Any) -> str | None:
+    side = int_value(value)
+    if side == 1:
+        return "home"
+    if side == 2:
+        return "away"
+    return None
+
+
+def _tennis_current_server(first_to_serve: str | None, total_games: int) -> str | None:
+    """根据首个发球方和已完成/正在记录的总局数推算当前发球方。"""
+
+    if first_to_serve not in {"home", "away"}:
+        return None
+    if total_games % 2 == 0:
+        return first_to_serve
+    return "away" if first_to_serve == "home" else "home"
 
 
 def _tennis_current_set(

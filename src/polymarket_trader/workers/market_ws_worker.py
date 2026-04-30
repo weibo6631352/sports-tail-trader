@@ -31,6 +31,15 @@ _message_type = market_ws_adapter.message_type
 _extract_token_candidates = market_ws_adapter.extract_token_candidates
 
 
+def _snapshot_has_quotes(snapshot: OrderbookSnapshot) -> bool:
+    return (
+        snapshot.best_bid is not None
+        or snapshot.best_ask is not None
+        or bool(snapshot.bids)
+        or bool(snapshot.asks)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class MarketWsResultSummary:
     token_id: str
@@ -278,6 +287,29 @@ class MarketWsWorker:
             reason="rest_snapshot",
         )
 
+    async def refresh_rest_snapshots(self, token_ids: tuple[str, ...] | list[str]) -> int:
+        """为刚进入订阅集合但仍为空的热态盘口预取 REST 快照。
+
+        该方法只把权威 REST 盘口写回 Market WS worker 的热态缓存，并发布正常的
+        orderbook snapshot 事件；交易决策仍然只读取统一热态，不新增下单旁路。
+        """
+
+        if self._rest_snapshot_loader is None:
+            return 0
+        refreshed = 0
+        for token_id in tuple(str(item).strip() for item in token_ids if str(item).strip()):
+            state = self._states.get(token_id)
+            if state is not None and _snapshot_has_quotes(state.snapshot):
+                continue
+            try:
+                snapshot = await self._rest_snapshot_loader(token_id)
+            except Exception as exc:
+                self.record_error(str(exc), token_id=token_id)
+                continue
+            await self.apply_rest_snapshot(token_id, snapshot, source="subscription_rest_prefetch")
+            refreshed += 1
+        return refreshed
+
     def snapshot(self, token_id: str) -> OrderbookSnapshot | None:
         state = self._states.get(token_id)
         return None if state is None else state.snapshot
@@ -371,6 +403,11 @@ class MarketWsWorker:
             state = self._states.get(token_id)
             if state is not None:
                 state.last_error = reason
+
+    def clear_error(self) -> None:
+        """连接恢复或收到有效盘口后清除全局错误，避免陈旧错误阻断 readiness。"""
+
+        self._last_error = None
 
     def buyable_depth(self, token_id: str, price_limit: Decimal | None = None) -> Decimal:
         state = self._states.get(token_id)

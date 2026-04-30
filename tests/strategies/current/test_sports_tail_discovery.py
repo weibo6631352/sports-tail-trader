@@ -40,6 +40,35 @@ def test_live_game_discovery_queries_use_real_team_terms() -> None:
     assert all(query.params.get("tag_slug") == "sports" for query in queries)
 
 
+def test_live_game_discovery_queries_put_matchup_terms_before_single_team_terms() -> None:
+    game = SportsLiveGame(
+        source="mlb",
+        source_event_id="823473",
+        league="MLB",
+        home=SportsLiveTeam(
+            name="Giants",
+            score=0,
+            display_name="San Francisco Giants",
+            short_name="Giants",
+        ),
+        away=SportsLiveTeam(
+            name="Phillies",
+            score=0,
+            display_name="Philadelphia Phillies",
+            short_name="Phillies",
+        ),
+        status=SportsLiveGameStatus.LIVE,
+        period="Top 9",
+    )
+
+    queries = build_live_game_discovery_queries(CurrentStrategyConfig(), (game,))
+    title_searches = [str(query.params.get("title_search")) for query in queries]
+
+    assert title_searches[:2] == ["giants phillies", "phillies giants"]
+    assert "giants" in title_searches
+    assert "phillies" in title_searches
+
+
 def test_live_game_discovery_queries_ignore_finished_games() -> None:
     game = SportsLiveGame(
         source="nhl",

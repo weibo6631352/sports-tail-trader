@@ -20,6 +20,7 @@ class SportsMarketType(StrEnum):
     TOTALS = "totals"
     MONEYLINE = "moneyline"
     SPREADS = "spreads"
+    BINARY_PROP = "binary_prop"
 
 
 class SportsMarketFamily(StrEnum):
@@ -39,6 +40,18 @@ class SportsMarketSide(StrEnum):
     UNDER = "under"
     HOME = "home"
     AWAY = "away"
+    YES = "yes"
+    NO = "no"
+
+
+class SportsMarketScopeType(StrEnum):
+    """盘口结算范围。"""
+
+    FULL_GAME = "full_game"
+    TENNIS_MATCH_GAMES = "tennis_match_games"
+    TENNIS_TOTAL_SETS = "tennis_total_sets"
+    TENNIS_SET_GAMES = "tennis_set_games"
+    UNSUPPORTED_PERIOD = "unsupported_period"
 
 
 class LiveGameStatus(StrEnum):
@@ -87,6 +100,7 @@ class TailRejectReason(StrEnum):
 
     MISSING_LIVE_GAME_STATE = "missing_live_game_state"
     GAME_NOT_LIVE = "game_not_live"
+    MARKET_END_TOO_FAR = "market_end_too_far"
     STALE_GAME_STATE = "stale_game_state"
     MISSING_MARKET_LINE = "missing_market_line"
     MISSING_BEST_ASK = "missing_best_ask"
@@ -99,6 +113,7 @@ class TailRejectReason(StrEnum):
     INSUFFICIENT_SAFETY_MARGIN = "insufficient_safety_margin"
     UNSUPPORTED_MARKET_TYPE = "unsupported_market_type"
     UNSUPPORTED_MARKET_SIDE = "unsupported_market_side"
+    UNSUPPORTED_MARKET_SCOPE = "unsupported_market_scope"
     SERIES_MARKET_NOT_AUTO_TRADABLE = "series_market_not_auto_tradable"
     OUTRIGHT_MARKET_NOT_AUTO_TRADABLE = "outright_market_not_auto_tradable"
     ESPORTS_MARKET_NOT_AUTO_TRADABLE = "esports_market_not_auto_tradable"
@@ -142,6 +157,8 @@ class TennisGameState:
     set_scores: tuple[tuple[int, int], ...] = ()
     home_point: str | None = None
     away_point: str | None = None
+    first_to_serve: str | None = None
+    serving_side: str | None = None
 
     @property
     def total_games(self) -> int:
@@ -215,15 +232,19 @@ class SportsTailPolicy:
     spreads_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     totals_max_entry_price: Decimal = Decimal("0.99")
     moneyline_max_entry_price: Decimal = Decimal("0.97")
+    tennis_locked_moneyline_max_entry_price: Decimal = Decimal("0.995")
     spreads_max_entry_price: Decimal = Decimal("0.96")
     min_liquidity_usdc: Decimal = Decimal("1")
     max_game_state_age_seconds: int = 10
+    baseball_max_game_state_age_seconds: int = 45
     tennis_max_game_state_age_seconds: int = 35
+    max_market_end_seconds: int = 3600
     max_under_seconds_remaining: int = 30
     max_moneyline_seconds_remaining: int = 180
     max_spreads_seconds_remaining: int = 120
     min_under_safety_margin: Decimal = Decimal("2")
     min_moneyline_lead: int = 6
+    mlb_eighth_moneyline_min_lead: int = 2
     min_spread_safety_margin: Decimal = Decimal("2")
 
 
@@ -239,7 +260,18 @@ class SportsMarketSnapshot:
     buyable_liquidity_usdc: Decimal
     market_family: SportsMarketFamily = SportsMarketFamily.SINGLE_GAME
     market_slug: str | None = None
+    market_end_date: datetime | None = None
+    scope_type: SportsMarketScopeType = SportsMarketScopeType.FULL_GAME
+    scope_number: int | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SportsMarketScope:
+    """结构化盘口结算范围。"""
+
+    scope_type: SportsMarketScopeType
+    scope_number: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,11 +362,17 @@ def evaluate_tail_opportunity(
         return _reject(None, TailRejectReason.MISSING_LIVE_GAME_STATE.value)
 
     candidate = _candidate(game, market)
+    scope_reject_reason = _market_scope_reject_reason(market)
+    if scope_reject_reason is not None:
+        return _reject(candidate, scope_reject_reason.value)
     if game.status == LiveGameStatus.ENDED:
         market_reject_reason = _market_data_reject_reason(game, market, policy)
         if market_reject_reason:
             return _reject(candidate, market_reject_reason.value)
         return _evaluate_ended_not_closed(candidate, policy)
+
+    if _market_end_too_far(market, policy, now=now) and not _can_bypass_market_end_window(game, market, policy):
+        return _reject(candidate, TailRejectReason.MARKET_END_TOO_FAR.value)
 
     common_reject_reason = _common_reject_reason(game, market, policy, now=now)
     if common_reject_reason:
@@ -352,6 +390,9 @@ def evaluate_tail_opportunity(
     if _is_nfl_game(game):
         return _evaluate_nfl_manual_review(candidate, policy)
 
+    if market.market_type == SportsMarketType.BINARY_PROP:
+        return _accept(candidate, "binary_prop_requires_specific_model", ExecutionPermission.RECORD_ONLY)
+
     if _is_tennis_game(game):
         if market.market_type == SportsMarketType.TOTALS:
             return _evaluate_tennis_totals(candidate, policy)
@@ -367,6 +408,8 @@ def evaluate_tail_opportunity(
         return _evaluate_moneyline(candidate, policy)
     if market.market_type == SportsMarketType.SPREADS:
         return _evaluate_spreads(candidate, policy)
+    if market.market_type == SportsMarketType.BINARY_PROP:
+        return _accept(candidate, "binary_prop_requires_specific_model", ExecutionPermission.RECORD_ONLY)
     return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
 
 
@@ -396,6 +439,9 @@ def evaluate_scale_in_opportunity(
         return _reject(None, TailRejectReason.MISSING_LIVE_GAME_STATE.value)
 
     candidate = _candidate(game, market)
+    scope_reject_reason = _market_scope_reject_reason(market)
+    if scope_reject_reason is not None:
+        return _reject(candidate, scope_reject_reason.value)
     if game.status == LiveGameStatus.ENDED:
         market_reject_reason = _market_data_reject_reason(game, market, policy)
         if market_reject_reason:
@@ -409,6 +455,9 @@ def evaluate_scale_in_opportunity(
             ended.execution_permission or ExecutionPermission.AUTO_EXECUTE,
             opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
         )
+
+    if _market_end_too_far(market, policy, now=now) and not _can_bypass_market_end_window(game, market, policy):
+        return _reject(candidate, TailRejectReason.MARKET_END_TOO_FAR.value)
 
     common_reject_reason = _common_reject_reason(game, market, policy, now=now)
     if common_reject_reason:
@@ -436,6 +485,9 @@ def _candidate(game: LiveGameState, market: SportsMarketSnapshot) -> SportsTailC
             "side": market.side.value,
             "line": str(market.line) if market.line is not None else None,
             "best_ask": str(market.best_ask) if market.best_ask is not None else None,
+            "scope_type": _market_scope(market).scope_type.value,
+            "scope_number": _market_scope(market).scope_number,
+            "market_end_date": _datetime_text(market.market_end_date),
             "total_score": game.total_score,
             "seconds_remaining": game.seconds_remaining,
             "game_status": game.status.value,
@@ -459,6 +511,8 @@ def _candidate(game: LiveGameState, market: SportsMarketSnapshot) -> SportsTailC
                 "set_scores": game.tennis_state.set_scores,
                 "home_point": game.tennis_state.home_point,
                 "away_point": game.tennis_state.away_point,
+                "first_to_serve": game.tennis_state.first_to_serve,
+                "serving_side": game.tennis_state.serving_side,
             },
         },
     )
@@ -477,11 +531,18 @@ def _common_reject_reason(
         return TailRejectReason.LIVE_SOURCE_CONFLICT
     if _is_stale(game, policy, now=now):
         return TailRejectReason.STALE_GAME_STATE
-    if market.best_ask is None:
+    if market.market_type == SportsMarketType.BINARY_PROP:
+        return None
+    maker_candidate = _set_winner_maker_bid_candidate(game, market, policy)
+    if market.best_ask is None and not maker_candidate:
         return TailRejectReason.MISSING_BEST_ASK
-    if market.best_ask > _max_entry_price(market.market_type, policy):
+    if (
+        market.best_ask is not None
+        and market.best_ask > _max_entry_price(game, market, policy)
+        and not maker_candidate
+    ):
         return TailRejectReason.PRICE_ABOVE_MAX
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
+    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc and not maker_candidate:
         return TailRejectReason.LIQUIDITY_BELOW_MIN
     return None
 
@@ -495,11 +556,12 @@ def _market_data_reject_reason(
 
     if game.source_conflicts:
         return TailRejectReason.LIVE_SOURCE_CONFLICT
-    if market.best_ask is None:
+    maker_candidate = _set_winner_maker_bid_candidate(game, market, policy)
+    if market.best_ask is None and not maker_candidate:
         return TailRejectReason.MISSING_BEST_ASK
-    if market.best_ask > _max_entry_price(market.market_type, policy):
+    if market.best_ask > _max_entry_price(game, market, policy) and not maker_candidate:
         return TailRejectReason.PRICE_ABOVE_MAX
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
+    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc and not maker_candidate:
         return TailRejectReason.LIQUIDITY_BELOW_MIN
     return None
 
@@ -595,9 +657,15 @@ def _evaluate_mlb_moneyline(
     market = candidate.market
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
-    reject_reason = _mlb_side_tail_reject_reason(game, market.side)
+    early_eighth_threat = _mlb_eighth_moneyline_threat_reject_reason(game, market.side, policy)
+    if early_eighth_threat is not None:
+        return _reject(candidate, early_eighth_threat.value)
+    early_eighth = _mlb_eighth_moneyline_lead_reached(game, market.side, policy)
+    reject_reason = None if early_eighth else _mlb_side_tail_reject_reason(game, market.side)
     if reject_reason is not None:
         return _reject(candidate, reject_reason.value)
+    if early_eighth:
+        return _accept(candidate, "mlb_moneyline_eighth_lead", policy.moneyline_execution_permission)
     if game.score_diff_for(market.side) < policy.min_moneyline_lead:
         return _reject(candidate, TailRejectReason.INSUFFICIENT_LEAD.value)
     return _accept(candidate, "mlb_moneyline_late_lead", policy.moneyline_execution_permission)
@@ -659,12 +727,24 @@ def _evaluate_tennis_totals(
         return _reject(candidate, TailRejectReason.TENNIS_TOTALS_UNDER_NOT_SUPPORTED.value)
     if market.side != SportsMarketSide.OVER:
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
-    total_scope = _tennis_total_scope(market)
-    if total_scope == "match_games" and Decimal(state.total_games) > market.line:
+    scope = _tennis_total_scope(market)
+    if scope.scope_type == SportsMarketScopeType.TENNIS_MATCH_GAMES and Decimal(state.total_games) > market.line:
         return _accept(candidate, "tennis_totals_over_locked", policy.totals_execution_permission)
-    if total_scope == "sets" and _tennis_sets_total_is_over(state, market.line):
+    if scope.scope_type == SportsMarketScopeType.TENNIS_MATCH_GAMES and _tennis_match_total_min_final_games_is_over(state, market.line):
+        return _accept(
+            candidate,
+            "tennis_totals_over_min_final_games_locked",
+            policy.totals_execution_permission,
+        )
+    if scope.scope_type == SportsMarketScopeType.TENNIS_TOTAL_SETS and _tennis_sets_total_is_over(state, market.line):
         return _accept(candidate, "tennis_set_totals_over_locked", policy.totals_execution_permission)
-    if total_scope == "unsupported":
+    if scope.scope_type == SportsMarketScopeType.TENNIS_SET_GAMES and _tennis_set_games_total_is_over(
+        state,
+        scope.scope_number,
+        market.line,
+    ):
+        return _accept(candidate, "tennis_set_games_over_locked", policy.totals_execution_permission)
+    if scope.scope_type == SportsMarketScopeType.UNSUPPORTED_PERIOD:
         return _reject(candidate, TailRejectReason.TENNIS_TOTAL_SCOPE_UNSUPPORTED.value)
     return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
 
@@ -714,6 +794,12 @@ def _evaluate_tennis_set_winner(
     set_number = _tennis_set_winner_number(market)
     if set_number is None or not state.set_scores:
         return _reject(candidate, TailRejectReason.TENNIS_SET_WINNER_NOT_SUPPORTED.value)
+    if state.current_set == set_number and _tennis_current_set_side_near_locked(state, market.side):
+        return _accept(
+            candidate,
+            "tennis_set_winner_current_set_near_locked",
+            policy.moneyline_execution_permission,
+        )
     if state.current_set is not None and state.current_set <= set_number:
         return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
     if len(state.set_scores) < set_number:
@@ -817,8 +903,10 @@ def _evaluate_ended_tennis(
     if market.market_type == SportsMarketType.TOTALS:
         if market.line is None:
             return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
-        total_scope = _tennis_total_scope(market)
-        if total_scope == "sets":
+        scope = _tennis_total_scope(market)
+        if scope.scope_type == SportsMarketScopeType.UNSUPPORTED_PERIOD:
+            return _reject(candidate, TailRejectReason.TENNIS_TOTAL_SCOPE_UNSUPPORTED.value)
+        if scope.scope_type == SportsMarketScopeType.TENNIS_TOTAL_SETS:
             completed = Decimal(state.home_sets_won + state.away_sets_won)
             if market.side == SportsMarketSide.OVER and completed > market.line:
                 return _accept(
@@ -834,7 +922,7 @@ def _evaluate_ended_tennis(
                     policy.totals_execution_permission,
                     opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
                 )
-        elif total_scope == "match_games":
+        elif scope.scope_type == SportsMarketScopeType.TENNIS_MATCH_GAMES:
             total_games = Decimal(state.total_games)
             if market.side == SportsMarketSide.OVER and total_games > market.line:
                 return _accept(
@@ -847,6 +935,25 @@ def _evaluate_ended_tennis(
                 return _accept(
                     candidate,
                     "ended_not_closed_tennis_games_under",
+                    policy.totals_execution_permission,
+                    opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+                )
+        elif scope.scope_type == SportsMarketScopeType.TENNIS_SET_GAMES:
+            set_games = _tennis_set_games_total(state, scope.scope_number)
+            if set_games is None:
+                return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
+            total_games = Decimal(set_games)
+            if market.side == SportsMarketSide.OVER and total_games > market.line:
+                return _accept(
+                    candidate,
+                    "ended_not_closed_tennis_set_games_over",
+                    policy.totals_execution_permission,
+                    opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
+                )
+            if market.side == SportsMarketSide.UNDER and total_games < market.line:
+                return _accept(
+                    candidate,
+                    "ended_not_closed_tennis_set_games_under",
                     policy.totals_execution_permission,
                     opportunity_type=SportsTailOpportunityType.ENDED_NOT_CLOSED,
                 )
@@ -1020,10 +1127,13 @@ def _evaluate_tennis_totals_scale_in(
     if market.side != SportsMarketSide.OVER:
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
 
-    total_scope = _tennis_total_scope(market)
-    if total_scope == "match_games":
+    scope = _tennis_total_scope(market)
+    if scope.scope_type == SportsMarketScopeType.TENNIS_MATCH_GAMES:
         total_games = Decimal(state.total_games)
-        if total_games - market.line >= Decimal("1"):
+        if total_games - market.line >= Decimal("1") or _tennis_match_total_min_final_games_is_over(
+            state,
+            market.line,
+        ):
             return _accept(
                 candidate,
                 "scale_in_tennis_totals_over_advantage",
@@ -1031,11 +1141,20 @@ def _evaluate_tennis_totals_scale_in(
                 opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
             )
         return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
-    if total_scope == "sets":
+    if scope.scope_type == SportsMarketScopeType.TENNIS_TOTAL_SETS:
         if _tennis_sets_total_is_over(state, market.line):
             return _accept(
                 candidate,
                 "scale_in_tennis_set_totals_over_advantage",
+                policy.totals_execution_permission,
+                opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
+            )
+        return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
+    if scope.scope_type == SportsMarketScopeType.TENNIS_SET_GAMES:
+        if _tennis_set_games_total_is_over(state, scope.scope_number, market.line):
+            return _accept(
+                candidate,
+                "scale_in_tennis_set_games_over_advantage",
                 policy.totals_execution_permission,
                 opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
             )
@@ -1087,14 +1206,80 @@ def _action_for_permission(permission: ExecutionPermission) -> TailAction:
     return TailAction.AUTO_EXECUTE
 
 
-def _max_entry_price(market_type: SportsMarketType, policy: SportsTailPolicy) -> Decimal:
-    if market_type == SportsMarketType.TOTALS:
+def _max_entry_price(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+) -> Decimal:
+    if (
+        _is_tennis_game(game)
+        and _is_tennis_set_winner_market(market)
+        and game.tennis_state is not None
+        and _tennis_set_winner_completed_for_side(game.tennis_state, market)
+    ):
+        return policy.tennis_locked_moneyline_max_entry_price
+    if market.market_type == SportsMarketType.TOTALS:
         return policy.totals_max_entry_price
-    if market_type == SportsMarketType.MONEYLINE:
+    if market.market_type == SportsMarketType.MONEYLINE:
         return policy.moneyline_max_entry_price
-    if market_type == SportsMarketType.SPREADS:
+    if market.market_type == SportsMarketType.SPREADS:
         return policy.spreads_max_entry_price
     return Decimal("0")
+
+
+def _locked_set_winner_maker_bid_candidate(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+) -> bool:
+    """判断锁定 set winner 是否可用低于 ask 的盈利挂单继续争取成交。"""
+
+    return (
+        (
+            market.best_ask is None
+            or (
+                market.best_ask <= Decimal("1")
+                and market.best_ask > policy.tennis_locked_moneyline_max_entry_price
+            )
+        )
+        and _is_tennis_game(game)
+        and _is_tennis_set_winner_market(market)
+        and game.tennis_state is not None
+        and _tennis_set_winner_completed_for_side(game.tennis_state, market)
+    )
+
+
+def _near_locked_set_winner_maker_bid_candidate(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+) -> bool:
+    """判断未结束但近锁定的 set winner 是否可用 1 以下 maker bid 争取成交。"""
+
+    return (
+        market.best_ask is not None
+        and market.best_ask <= Decimal("1")
+        and market.best_ask > policy.moneyline_max_entry_price
+        and _is_tennis_game(game)
+        and _is_tennis_set_winner_market(market)
+        and game.tennis_state is not None
+        and market.side in {SportsMarketSide.HOME, SportsMarketSide.AWAY}
+        and _tennis_current_set_side_near_locked(game.tennis_state, market.side)
+    )
+
+
+def _set_winner_maker_bid_candidate(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+) -> bool:
+    """统一判断 set winner 可否不吃 ask、改用受控 maker bid。"""
+
+    return _locked_set_winner_maker_bid_candidate(
+        game,
+        market,
+        policy,
+    ) or _near_locked_set_winner_maker_bid_candidate(game, market, policy)
 
 
 def _market_family_reject_reason(market_family: SportsMarketFamily) -> TailRejectReason | None:
@@ -1122,12 +1307,288 @@ def _is_stale(
     if observed_at.tzinfo is None:
         observed_at = observed_at.replace(tzinfo=timezone.utc)
     age_seconds = (current_time - observed_at).total_seconds()
-    max_age_seconds = (
-        policy.tennis_max_game_state_age_seconds
-        if _is_tennis_game(game)
-        else policy.max_game_state_age_seconds
-    )
+    if _is_tennis_game(game):
+        max_age_seconds = policy.tennis_max_game_state_age_seconds
+    elif _is_mlb_game(game) and game.baseball_state is not None:
+        max_age_seconds = policy.baseball_max_game_state_age_seconds
+    else:
+        max_age_seconds = policy.max_game_state_age_seconds
     return age_seconds > max_age_seconds
+
+
+def _market_end_too_far(
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+    *,
+    now: datetime | None,
+) -> bool:
+    """判断 Polymarket 封盘时间是否仍明显早于扫尾窗口。
+
+    该规则只用于 live 尾盘候选的粗筛；已结束但未封盘的机会在调用侧提前处理，
+    缺失封盘时间则不在这里拒绝，避免因 Gamma 字段缺失错过真实尾盘。
+    """
+
+    if market.market_end_date is None or policy.max_market_end_seconds <= 0:
+        return False
+    current_time = now or datetime.now(timezone.utc)
+    market_end = market.market_end_date
+    if market_end.tzinfo is None:
+        market_end = market_end.replace(tzinfo=timezone.utc)
+    return (market_end.astimezone(timezone.utc) - current_time.astimezone(timezone.utc)).total_seconds() > (
+        policy.max_market_end_seconds
+    )
+
+
+def _can_bypass_market_end_window(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+) -> bool:
+    """判断结果已数学锁定的 live 盘口是否可绕过 endDate 粗筛。
+
+    Polymarket 体育 ``endDate`` 经常是结算展示日期，不等同于封盘时间。对
+    已经达到策略尾盘条件的盘口，不能只因 endDate 很远就丢弃；否则会等到
+    盘口完全单边化后才尝试入场。
+    """
+
+    if game.status != LiveGameStatus.LIVE:
+        return False
+    if _is_tennis_game(game):
+        return _tennis_tail_state_reached(game, market)
+    if _is_mlb_game(game):
+        # MLB/KBO 等棒球市场的 Gamma endDate 常是结算展示日期，不是比赛封盘时间。
+        # 已拿到结构化局面时，应由局数、出局数、垒上状态和分差决定是否可入场。
+        if game.baseball_state is not None:
+            return True
+        return _mlb_tail_state_reached(game, market, policy)
+    return _standard_tail_state_reached(game, market, policy)
+
+
+def _standard_tail_state_reached(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+) -> bool:
+    """复用常规运动尾盘条件判断是否可忽略 Gamma 的远期 endDate。"""
+
+    if market.market_type == SportsMarketType.TOTALS:
+        return _standard_totals_tail_state_reached(game, market, policy)
+    if market.market_type == SportsMarketType.MONEYLINE:
+        return _standard_moneyline_tail_state_reached(game, market, policy)
+    if market.market_type == SportsMarketType.SPREADS:
+        return _standard_spreads_tail_state_reached(game, market, policy)
+    return False
+
+
+def _standard_totals_tail_state_reached(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+) -> bool:
+    if market.line is None:
+        return False
+    total_score = Decimal(game.total_score)
+    if market.side == SportsMarketSide.OVER:
+        return total_score > market.line
+    if market.side != SportsMarketSide.UNDER or game.seconds_remaining is None:
+        return False
+    return (
+        game.seconds_remaining <= policy.max_under_seconds_remaining
+        and market.line - total_score >= policy.min_under_safety_margin
+    )
+
+
+def _standard_moneyline_tail_state_reached(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+) -> bool:
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY} or game.seconds_remaining is None:
+        return False
+    return (
+        game.seconds_remaining <= policy.max_moneyline_seconds_remaining
+        and game.score_diff_for(market.side) >= policy.min_moneyline_lead
+    )
+
+
+def _standard_spreads_tail_state_reached(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+) -> bool:
+    if (
+        market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}
+        or market.line is None
+        or game.seconds_remaining is None
+    ):
+        return False
+    safety_margin = Decimal(game.score_diff_for(market.side)) + market.line
+    return (
+        game.seconds_remaining <= policy.max_spreads_seconds_remaining
+        and safety_margin >= policy.min_spread_safety_margin
+    )
+
+
+def _mlb_tail_state_reached(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: SportsTailPolicy,
+) -> bool:
+    """按 MLB 的局数、出局和垒上状态判断是否已经进入尾盘。"""
+
+    if market.market_type == SportsMarketType.TOTALS:
+        if market.line is None:
+            return False
+        total_score = Decimal(game.total_score)
+        if market.side == SportsMarketSide.OVER:
+            return total_score > market.line
+        return (
+            market.side == SportsMarketSide.UNDER
+            and _mlb_low_scoring_tail_reject_reason(game) is None
+            and market.line - total_score >= policy.min_under_safety_margin
+        )
+    if market.market_type == SportsMarketType.MONEYLINE:
+        return (
+            market.side in {SportsMarketSide.HOME, SportsMarketSide.AWAY}
+            and _mlb_side_tail_reject_reason(game, market.side) is None
+            and game.score_diff_for(market.side) >= policy.min_moneyline_lead
+        )
+    if market.market_type == SportsMarketType.SPREADS:
+        if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY} or market.line is None:
+            return False
+        safety_margin = Decimal(game.score_diff_for(market.side)) + market.line
+        return (
+            _mlb_side_tail_reject_reason(game, market.side) is None
+            and safety_margin >= policy.min_spread_safety_margin
+        )
+    return False
+
+
+def _tennis_tail_state_reached(game: LiveGameState, market: SportsMarketSnapshot) -> bool:
+    """判断网球是否已达到可前置订阅和入场的尾盘结构。"""
+
+    state = game.tennis_state
+    if state is None:
+        return False
+    if market.market_type == SportsMarketType.TOTALS:
+        return _tennis_totals_tail_state_reached(state, market)
+    if market.market_type != SportsMarketType.MONEYLINE:
+        return False
+    if _is_tennis_set_winner_market(market):
+        return _tennis_set_winner_tail_state_reached(state, market)
+    return _tennis_moneyline_tail_state_reached(state, market)
+
+
+def _tennis_totals_tail_state_reached(state: TennisGameState, market: SportsMarketSnapshot) -> bool:
+    if market.line is None or market.side != SportsMarketSide.OVER:
+        return False
+    scope = _tennis_total_scope(market)
+    if scope.scope_type == SportsMarketScopeType.TENNIS_MATCH_GAMES:
+        return Decimal(state.total_games) > market.line or _tennis_match_total_min_final_games_is_over(
+            state,
+            market.line,
+        )
+    if scope.scope_type == SportsMarketScopeType.TENNIS_TOTAL_SETS:
+        return _tennis_sets_total_is_over(state, market.line)
+    if scope.scope_type == SportsMarketScopeType.TENNIS_SET_GAMES:
+        return _tennis_set_games_total_is_over(state, scope.scope_number, market.line)
+    return False
+
+
+def _tennis_moneyline_tail_state_reached(state: TennisGameState, market: SportsMarketSnapshot) -> bool:
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return False
+    other_side = SportsMarketSide.AWAY if market.side == SportsMarketSide.HOME else SportsMarketSide.HOME
+    side_games = state.current_set_games_for(market.side)
+    other_games = state.current_set_games_for(other_side)
+    if side_games is None or other_games is None:
+        return False
+    return (
+        side_games >= 5
+        and side_games - other_games >= 2
+        and state.sets_won_for(market.side) - state.sets_won_for(other_side) >= 1
+    )
+
+
+def _tennis_set_winner_tail_state_reached(state: TennisGameState, market: SportsMarketSnapshot) -> bool:
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return False
+    set_number = _tennis_set_winner_number(market)
+    if set_number is None:
+        return False
+    if state.current_set == set_number:
+        side_games = state.current_set_games_for(market.side)
+        other_side = SportsMarketSide.AWAY if market.side == SportsMarketSide.HOME else SportsMarketSide.HOME
+        other_games = state.current_set_games_for(other_side)
+        return (
+            side_games is not None
+            and other_games is not None
+            and side_games >= 5
+            and side_games - other_games >= 2
+        )
+    if state.current_set is not None and state.current_set <= set_number:
+        return False
+    if len(state.set_scores) < set_number:
+        return False
+    home_games, away_games = state.set_scores[set_number - 1]
+    side_games = home_games if market.side == SportsMarketSide.HOME else away_games
+    other_games = away_games if market.side == SportsMarketSide.HOME else home_games
+    return side_games > other_games
+
+
+def _tennis_current_set_side_near_locked(state: TennisGameState, side: SportsMarketSide) -> bool:
+    """判断当前盘指定方向是否接近拿下，服务 set winner 的提前入场。"""
+
+    if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return False
+    other_side = SportsMarketSide.AWAY if side == SportsMarketSide.HOME else SportsMarketSide.HOME
+    side_games = state.current_set_games_for(side)
+    other_games = state.current_set_games_for(other_side)
+    return (
+        side_games is not None
+        and other_games is not None
+        and side_games >= 5
+        and side_games - other_games >= 2
+        and _tennis_side_has_service_point_pressure(state, side)
+    )
+
+
+def _tennis_side_has_service_point_pressure(state: TennisGameState, side: SportsMarketSide) -> bool:
+    """要求目标方发球且至少到 40/A，避免只凭 5-3 局分过早抢单。"""
+
+    if state.serving_side != side.value:
+        return False
+    point = state.home_point if side == SportsMarketSide.HOME else state.away_point
+    if point is None:
+        return False
+    return point.strip().upper() in {"40", "A", "AD", "ADV", "ADVANTAGE"}
+
+
+def _tennis_set_winner_completed_for_side(
+    state: TennisGameState,
+    market: SportsMarketSnapshot,
+) -> bool:
+    """判断 set winner 盘口对应的目标盘是否已结束且指定方向胜出。"""
+
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return False
+    set_number = _tennis_set_winner_number(market)
+    if set_number is None:
+        return False
+    if state.current_set is not None and state.current_set <= set_number:
+        return False
+    if len(state.set_scores) < set_number:
+        return False
+    home_games, away_games = state.set_scores[set_number - 1]
+    side_games = home_games if market.side == SportsMarketSide.HOME else away_games
+    other_games = away_games if market.side == SportsMarketSide.HOME else home_games
+    return side_games > other_games
+
+
+def _datetime_text(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
 
 
 def _is_mlb_game(game: LiveGameState) -> bool:
@@ -1143,17 +1604,133 @@ def _is_tennis_game(game: LiveGameState) -> bool:
     return game.tennis_state is not None or "tennis" in league or league in {"atp", "wta"}
 
 
-def _tennis_total_scope(market: SportsMarketSnapshot) -> str:
-    """识别网球 totals 盘口的结算范围。"""
+def _market_scope(market: SportsMarketSnapshot) -> SportsMarketScope:
+    """返回盘口的结构化结算范围。"""
+
+    if market.scope_type != SportsMarketScopeType.FULL_GAME or market.scope_number is not None:
+        return SportsMarketScope(market.scope_type, market.scope_number)
+    if market.market_type == SportsMarketType.TOTALS:
+        return _totals_market_scope(market)
+    return SportsMarketScope(SportsMarketScopeType.FULL_GAME)
+
+
+def _tennis_total_scope(market: SportsMarketSnapshot) -> SportsMarketScope:
+    """返回网球 totals 的结算范围，缺省按整场总局数处理。"""
+
+    scope = _market_scope(market)
+    if scope.scope_type == SportsMarketScopeType.FULL_GAME:
+        return SportsMarketScope(SportsMarketScopeType.TENNIS_MATCH_GAMES)
+    return scope
+
+
+def _market_scope_reject_reason(market: SportsMarketSnapshot) -> TailRejectReason | None:
+    """返回当前策略明确不能自动结算的盘口范围拒绝原因。"""
+
+    scope = _market_scope(market)
+    if scope.scope_type == SportsMarketScopeType.UNSUPPORTED_PERIOD:
+        return (
+            TailRejectReason.TENNIS_TOTAL_SCOPE_UNSUPPORTED
+            if _is_tennis_scope_candidate(market)
+            else TailRejectReason.UNSUPPORTED_MARKET_SCOPE
+        )
+    return None
+
+
+def _is_tennis_scope_candidate(market: SportsMarketSnapshot) -> bool:
+    text = _normalized_market_slug(market)
+    return "tennis" in text or "atp" in text or "wta" in text
+
+
+def _totals_market_scope(market: SportsMarketSnapshot) -> SportsMarketScope:
+    """识别 totals 盘口的结算范围。"""
 
     text = _normalized_market_slug(market)
+    set_number = _tennis_set_games_total_number(text)
+    if set_number is not None:
+        return SportsMarketScope(SportsMarketScopeType.TENNIS_SET_GAMES, set_number)
+    if _is_unsupported_period_total(text):
+        return SportsMarketScope(SportsMarketScopeType.UNSUPPORTED_PERIOD)
     if "set total" in text or "set totals" in text or "total sets" in text:
-        return "sets"
+        return SportsMarketScope(SportsMarketScopeType.TENNIS_TOTAL_SETS)
     if "match total" in text or "total games" in text:
-        return "match_games"
-    if market.line is not None and market.line <= Decimal("5"):
-        return "unsupported"
-    return "match_games"
+        if _is_tennis_scope_candidate(market):
+            return SportsMarketScope(SportsMarketScopeType.TENNIS_MATCH_GAMES)
+        return SportsMarketScope(SportsMarketScopeType.FULL_GAME)
+    if _is_tennis_scope_candidate(market):
+        return SportsMarketScope(SportsMarketScopeType.TENNIS_MATCH_GAMES)
+    return SportsMarketScope(SportsMarketScopeType.FULL_GAME)
+
+
+def _tennis_set_games_total_number(text: str) -> int | None:
+    """识别第一盘/第二盘等单盘总局数盘口。"""
+
+    set_markers = (
+        (1, ("first set total", "1st set total", "set 1 total")),
+        (2, ("second set total", "2nd set total", "set 2 total")),
+        (3, ("third set total", "3rd set total", "set 3 total")),
+        (4, ("fourth set total", "4th set total", "set 4 total")),
+        (5, ("fifth set total", "5th set total", "set 5 total")),
+    )
+    for set_number, markers in set_markers:
+        if any(marker in text for marker in markers):
+            return set_number
+    return None
+
+
+def _is_unsupported_period_total(text: str) -> bool:
+    """识别当前没有独立直播字段支撑的分段 totals。"""
+
+    period_markers = (
+        "first quarter total",
+        "1st quarter total",
+        "second quarter total",
+        "2nd quarter total",
+        "third quarter total",
+        "3rd quarter total",
+        "fourth quarter total",
+        "4th quarter total",
+        "first half total",
+        "1st half total",
+        "second half total",
+        "2nd half total",
+        "first inning total",
+        "1st inning total",
+        "first 5 innings total",
+        "first five innings total",
+    )
+    return any(marker in text for marker in period_markers)
+
+
+def _tennis_set_games_total(
+    state: TennisGameState,
+    set_number: int | None,
+) -> int | None:
+    """返回指定盘已经记录到的总局数。"""
+
+    if set_number is None:
+        return None
+    if len(state.set_scores) >= set_number:
+        home_games, away_games = state.set_scores[set_number - 1]
+        return home_games + away_games
+    if state.current_set == set_number:
+        home_games = state.home_current_set_games
+        away_games = state.away_current_set_games
+        if home_games is not None and away_games is not None:
+            return home_games + away_games
+    return None
+
+
+def _tennis_set_games_total_is_over(
+    state: TennisGameState,
+    set_number: int | None,
+    line: Decimal | None,
+) -> bool:
+    """判断指定盘总局数 Over 是否已经锁定。"""
+
+    if line is None:
+        return False
+    total_games = _tennis_set_games_total(state, set_number)
+    return total_games is not None and Decimal(total_games) > line
 
 
 def _tennis_sets_total_is_over(state: TennisGameState, line: Decimal | None) -> bool:
@@ -1165,6 +1742,50 @@ def _tennis_sets_total_is_over(state: TennisGameState, line: Decimal | None) -> 
     if state.current_set is None:
         return False
     return Decimal(state.current_set) > line
+
+
+def _tennis_match_total_min_final_games_is_over(state: TennisGameState, line: Decimal | None) -> bool:
+    """用决胜盘最低可能最终局数判断整场总局数 Over 是否已经锁定。"""
+
+    if line is None:
+        return False
+    if state.current_set is None or state.current_set < 3:
+        return False
+    current_home = state.home_current_set_games
+    current_away = state.away_current_set_games
+    if current_home is None or current_away is None:
+        return False
+    previous_games = max(0, state.total_games - current_home - current_away)
+    minimum_current_set_games = _tennis_minimum_final_set_games(current_home, current_away)
+    if minimum_current_set_games is None:
+        return False
+    return Decimal(previous_games + minimum_current_set_games) > line
+
+
+def _tennis_minimum_final_set_games(home_games: int, away_games: int) -> int | None:
+    """返回从当前局分出发，当前盘最少还会以多少总局数结束。"""
+
+    if home_games < 0 or away_games < 0:
+        return None
+    if _tennis_set_score_is_final(home_games, away_games):
+        return home_games + away_games
+    best: int | None = None
+    for final_home in range(home_games, 8):
+        for final_away in range(away_games, 8):
+            if not _tennis_set_score_is_final(final_home, final_away):
+                continue
+            total = final_home + final_away
+            if best is None or total < best:
+                best = total
+    return best
+
+
+def _tennis_set_score_is_final(home_games: int, away_games: int) -> bool:
+    if home_games == 7 and away_games in {5, 6}:
+        return True
+    if away_games == 7 and home_games in {5, 6}:
+        return True
+    return (home_games >= 6 or away_games >= 6) and abs(home_games - away_games) >= 2
 
 
 def _is_tennis_set_winner_market(market: SportsMarketSnapshot) -> bool:
@@ -1207,6 +1828,50 @@ def _mlb_side_tail_reject_reason(
         return TailRejectReason.MISSING_BASEBALL_STATE
     if offense_side == side:
         return TailRejectReason.BASEBALL_OFFENSE_NOT_TRAILING
+    return None
+
+
+def _mlb_eighth_moneyline_lead_reached(
+    game: LiveGameState,
+    side: SportsMarketSide,
+    policy: SportsTailPolicy,
+) -> bool:
+    """识别 MLB 第 8 局后段的受控 moneyline 领先方机会。
+
+    第 8 局仍有对手后续进攻机会，因此只放行领先方、至少一出局、领先达到
+    单独阈值且没有二/三垒得分威胁的场景；第 9 局继续使用更强的锁定规则。
+    """
+
+    state = game.baseball_state
+    if state is None:
+        return False
+    if state.current_inning != 8 or (state.outs or 0) < 1:
+        return False
+    if game.score_diff_for(side) < policy.mlb_eighth_moneyline_min_lead:
+        return False
+    occupied_bases = {int(base) for base in state.occupied_bases}
+    if occupied_bases.intersection({2, 3}):
+        return False
+    return side in {SportsMarketSide.HOME, SportsMarketSide.AWAY}
+
+
+def _mlb_eighth_moneyline_threat_reject_reason(
+    game: LiveGameState,
+    side: SportsMarketSide,
+    policy: SportsTailPolicy,
+) -> TailRejectReason | None:
+    """第 8 局早期 moneyline 窗口内存在二/三垒威胁时给出可审计拒绝原因。"""
+
+    state = game.baseball_state
+    if state is None:
+        return None
+    if state.current_inning != 8 or (state.outs or 0) < 1:
+        return None
+    if game.score_diff_for(side) < policy.mlb_eighth_moneyline_min_lead:
+        return None
+    occupied_bases = {int(base) for base in state.occupied_bases}
+    if occupied_bases.intersection({2, 3}):
+        return TailRejectReason.BASEBALL_THREAT_ON_BASE
     return None
 
 
@@ -1315,6 +1980,8 @@ def _tennis_state(value: object) -> TennisGameState | None:
         set_scores=_tennis_set_scores(value.get("set_scores")),
         home_point=None if value.get("home_point") is None else str(value.get("home_point")),
         away_point=None if value.get("away_point") is None else str(value.get("away_point")),
+        first_to_serve=None if value.get("first_to_serve") is None else str(value.get("first_to_serve")),
+        serving_side=None if value.get("serving_side") is None else str(value.get("serving_side")),
     )
 
 

@@ -60,8 +60,10 @@ def decision_to_managed_intent(
             price=decision.price,
             amount_usdc=decision.amount_usdc,
             order_type=decision.order_type or OrderType.FAK,
+            post_only=decision.post_only,
             market_slug=resolved_market_slug,
             allow_open_exit_overlap=bool(decision.metadata.get("allow_open_exit_overlap")),
+            metadata=decision.metadata,
         )
     if decision.action == ExtensionAction.SELL:
         if decision.price is None or decision.size_shares is None or decision.size_shares <= Decimal("0"):
@@ -73,7 +75,9 @@ def decision_to_managed_intent(
             price=decision.price,
             size_shares=decision.size_shares,
             order_type=decision.order_type or OrderType.GTC,
+            post_only=decision.post_only,
             market_slug=resolved_market_slug,
+            metadata=decision.metadata,
         )
     if decision.action == ExtensionAction.CANCEL:
         if not decision.order_id:

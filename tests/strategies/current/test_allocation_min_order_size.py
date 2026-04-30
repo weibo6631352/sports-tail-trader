@@ -44,18 +44,66 @@ def test_allocation_rejects_budget_when_converted_share_size_is_below_market_min
     assert plan.allocations[0].release_reason == "below_min_order_size"
 
 
-def _snapshot(*, best_ask: Decimal, min_order_size: Decimal) -> AllocationMarketSnapshot:
+def test_allocation_reserves_taker_fee_when_available_balance_is_small() -> None:
+    plan = equal_weight_plan(
+        trace_id="trace-fee-reserve",
+        portfolio_budget_usdc=Decimal("10"),
+        markets=(
+            _snapshot(
+                best_ask=Decimal("0.001"),
+                best_ask_size=Decimal("10000"),
+                min_order_size=Decimal("5"),
+                fee_rate_bps=30,
+            ),
+        ),
+        available_usdc=Decimal("4.4261"),
+        max_order_usdc=Decimal("5"),
+        max_market_usdc=Decimal("20"),
+        max_total_usdc=Decimal("20"),
+    )
+
+    allocation = plan.allocations[0]
+    estimated_fee = allocation.buy_budget_usdc * Decimal("0.03") * Decimal("0.999")
+    assert allocation.buy_budget_usdc < Decimal("4.4261")
+    assert allocation.buy_budget_usdc + estimated_fee <= Decimal("4.4261")
+
+
+def test_allocation_rejects_dust_budget_below_clob_notional_floor() -> None:
+    plan = equal_weight_plan(
+        trace_id="trace-dust-budget",
+        portfolio_budget_usdc=Decimal("1"),
+        markets=(
+            _snapshot(best_ask=Decimal("0.001"), min_order_size=Decimal("5")),
+        ),
+        available_usdc=Decimal("0.0073"),
+        max_order_usdc=Decimal("1"),
+        max_market_usdc=Decimal("20"),
+        max_total_usdc=Decimal("20"),
+    )
+
+    assert plan.reason == "no_market_meets_min_order_size"
+    assert plan.allocations[0].buy_budget_usdc == Decimal("0")
+    assert plan.allocations[0].release_reason == "below_min_order_size"
+
+
+def _snapshot(
+    *,
+    best_ask: Decimal,
+    min_order_size: Decimal,
+    best_ask_size: Decimal = Decimal("100"),
+    fee_rate_bps: int | None = None,
+) -> AllocationMarketSnapshot:
     orderbook = OrderbookSnapshot(
         token_id="yes",
         best_bid=best_ask - Decimal("0.01"),
         best_ask=best_ask,
         bids=(PriceLevel(price=best_ask - Decimal("0.01"), size=Decimal("100")),),
-        asks=(PriceLevel(price=best_ask, size=Decimal("100")),),
+        asks=(PriceLevel(price=best_ask, size=best_ask_size),),
         received_at=datetime.now(timezone.utc),
         condition_id="condition",
         market_slug="market",
         best_bid_size=Decimal("100"),
-        best_ask_size=Decimal("100"),
+        best_ask_size=best_ask_size,
         tick_size=Decimal("0.01"),
     )
     return AllocationMarketSnapshot(
@@ -68,7 +116,7 @@ def _snapshot(*, best_ask: Decimal, min_order_size: Decimal) -> AllocationMarket
             ),
             trading_status=TradingStatus.ELIGIBLE,
             min_order_size=min_order_size,
-        ),
+        ).with_fee_rate(fee_rate_bps),
         token_id="yes",
         orderbook=orderbook,
         best_ask=best_ask,

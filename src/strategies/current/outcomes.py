@@ -109,6 +109,8 @@ def _market_type(market: Market, text: str) -> SportsMarketType | None:
         return SportsMarketType.TOTALS
     if "spread" in text or "handicap" in text or _has_signed_number(text):
         return SportsMarketType.SPREADS
+    if _is_binary_yes_no_market(market):
+        return SportsMarketType.BINARY_PROP
     if len(market.outcomes) >= 2:
         return SportsMarketType.MONEYLINE
     return None
@@ -141,7 +143,7 @@ def _market_family(market: Market, text: str) -> SportsMarketFamily:
         "games ou",
         "game handicap",
     )
-    if _contains_any(text, series_phrases) or (
+    if (_contains_any(text, series_phrases) and not _is_tennis_text(combined_text)) or (
         " total games " in f" {text} " and not _is_tennis_text(combined_text)
     ):
         return SportsMarketFamily.SERIES
@@ -150,6 +152,7 @@ def _market_family(market: Market, text: str) -> SportsMarketFamily:
         (
             "championship winner",
             "cup winner",
+            "winner",
             "stanley cup winner",
             "tournament winner",
             "winner nation",
@@ -157,6 +160,8 @@ def _market_family(market: Market, text: str) -> SportsMarketFamily:
             "will win the",
         ),
     ) and not _has_matchup_marker(text):
+        return SportsMarketFamily.OUTRIGHT
+    if _is_binary_yes_no_market(market) and _is_season_or_competition_prop(combined_text):
         return SportsMarketFamily.OUTRIGHT
     return SportsMarketFamily.SINGLE_GAME
 
@@ -179,6 +184,8 @@ def _token_targets(
 ) -> tuple[SportsTokenTarget, ...]:
     if market_type == SportsMarketType.TOTALS:
         return _totals_targets(market)
+    if market_type == SportsMarketType.BINARY_PROP:
+        return _binary_targets(market)
     return _side_targets(market)
 
 
@@ -223,6 +230,31 @@ def _side_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
             label=non_generic[1].outcome,
         ),
     )
+
+
+def _binary_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
+    """解析 Polymarket 真实 Yes/No 体育 prop 的方向。"""
+
+    targets: list[SportsTokenTarget] = []
+    for outcome in market.outcomes:
+        normalized = _normalize_text(outcome.outcome)
+        if normalized == "yes":
+            targets.append(
+                SportsTokenTarget(
+                    token_id=outcome.token_id,
+                    side=SportsMarketSide.YES,
+                    label=outcome.outcome,
+                )
+            )
+        elif normalized == "no":
+            targets.append(
+                SportsTokenTarget(
+                    token_id=outcome.token_id,
+                    side=SportsMarketSide.NO,
+                    label=outcome.outcome,
+                )
+            )
+    return tuple(targets)
 
 
 def _market_line(text: str) -> Decimal | None:
@@ -290,11 +322,64 @@ def _has_signed_number(text: str) -> bool:
 
 
 def _has_matchup_marker(text: str) -> bool:
-    return bool(re.search(r"(?<![a-z0-9])(?:vs|v|at)(?![a-z0-9])", text))
+    return bool(re.search(r"(?:^|\s)(?:vs|v|at)(?:\s|$)", text))
 
 
 def _is_tennis_text(text: str) -> bool:
     return _contains_any(text, ("tennis", "atp", "wta"))
+
+
+def _is_binary_yes_no_market(market: Market) -> bool:
+    outcome_tokens = {_normalize_text(outcome.outcome) for outcome in market.outcomes}
+    return {"yes", "no"} <= outcome_tokens
+
+
+def _is_season_or_competition_prop(text: str) -> bool:
+    """识别真实 Gamma 样本里的赛季/赛事归属型 Yes/No 市场。
+
+    这些市场可以解析方向，但不属于单场直播扫尾，不进入自动交易 universe。
+    """
+
+    return _contains_any(
+        text,
+        (
+            "top goal scorer",
+            "top goalscorer",
+            "golden boot",
+            "winner",
+            "next team",
+            "play for",
+            "sign with",
+            "traded to",
+            "be traded",
+            "draft",
+            "drafted",
+            "overall pick",
+            "award",
+            "awards",
+            "mvp",
+            "player of the year",
+            "rookie of the year",
+            "manager of the year",
+            "coach of the year",
+            "comeback player",
+            "defensive player",
+            "cba",
+            "collective bargaining",
+            "scorigami",
+            "season",
+            "champion",
+            "championship",
+            "world cup",
+            "champions league",
+            "premier league",
+            "la liga",
+            "bundesliga",
+            "serie a",
+            "ligue 1",
+            "ucl",
+        ),
+    ) and not _has_matchup_marker(text)
 
 
 def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:

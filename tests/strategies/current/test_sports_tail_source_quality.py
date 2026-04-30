@@ -398,10 +398,11 @@ def test_tennis_moneyline_requires_near_locked_current_set() -> None:
 def test_default_discovery_scope_matches_live_source_coverage() -> None:
     config = CurrentStrategyConfig()
 
-    assert config.discovery_title_searches == ("sports", "nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
+    assert config.discovery_title_searches == ("nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
     assert "sports" not in config.sports_category_tokens
-    assert "soccer" not in config.sports_category_tokens
     assert {"nba", "nhl", "nfl", "mlb", "basketball", "hockey", "football", "baseball"} <= set(
         config.sports_category_tokens
     )
+    assert "soccer" in config.sports_category_tokens
+    assert {"table tennis", "table-tennis", "wtt"} <= set(config.sports_category_tokens)
     assert {"tennis", "atp", "wta"} <= set(config.sports_category_tokens)

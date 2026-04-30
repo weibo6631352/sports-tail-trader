@@ -54,10 +54,12 @@ class SportsLiveAggregateClient:
         providers: Sequence[tuple[str, SportsLiveSnapshotProvider]],
         closers: Sequence[SportsLiveCloser] = (),
         now_provider: Callable[[], datetime] | None = None,
+        provider_timeout_s: float = 8.0,
     ) -> None:
         self._providers = tuple((str(source).strip().lower(), provider) for source, provider in providers)
         self._closers = tuple(closers)
         self._now_provider = now_provider
+        self._provider_timeout_s = max(0.1, float(provider_timeout_s))
 
     async def aclose(self) -> None:
         """关闭聚合器持有的所有底层 client。"""
@@ -70,7 +72,13 @@ class SportsLiveAggregateClient:
         """拉取所有来源，失败来源只进入 source_statuses，不阻断健康来源。"""
 
         observed_at = utc_now(self._now_provider)
-        tasks = [asyncio.create_task(provider()) for _, provider in self._providers]
+        tasks = [
+            asyncio.create_task(
+                _provider_snapshot_with_timeout(provider, timeout_s=self._provider_timeout_s),
+                name=f"sports-live-source:{source}",
+            )
+            for source, provider in self._providers
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         source_statuses: list[SportsLiveSourceStatus] = []
         games: list[SportsLiveGame] = []
@@ -95,6 +103,19 @@ class SportsLiveAggregateClient:
             games=_dedupe_games(tuple(games)),
             source_statuses=tuple(source_statuses),
         )
+
+
+async def _provider_snapshot_with_timeout(
+    provider: SportsLiveSnapshotProvider,
+    *,
+    timeout_s: float,
+) -> SportsLiveSnapshot:
+    """单个数据源超时后降级，避免阻塞整轮实盘状态同步。"""
+
+    try:
+        return await asyncio.wait_for(provider(), timeout=timeout_s)
+    except TimeoutError as exc:
+        raise TimeoutError(f"provider_timeout after {timeout_s:.3f}s") from exc
 
 
 def _dedupe_games(games: tuple[SportsLiveGame, ...]) -> tuple[SportsLiveGame, ...]:

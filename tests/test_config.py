@@ -18,6 +18,19 @@ def test_settings_accepts_sofascore_live_source_for_supported_league() -> None:
     assert not readiness.blocking_issues
 
 
+def test_settings_accepts_sports_live_state_league_for_whole_market_coverage() -> None:
+    settings = _settings(
+        sports_live_state_enabled=True,
+        sports_live_state_sources="sofascore",
+        sports_live_state_leagues="sports",
+    )
+
+    readiness = settings.validate_startup_readiness()
+
+    assert readiness.ready_to_trade
+    assert not readiness.blocking_issues
+
+
 def test_settings_accepts_thesportsdb_live_source_for_supported_league() -> None:
     settings = _settings(
         sports_live_state_enabled=True,

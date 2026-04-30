@@ -78,6 +78,7 @@ class ExtensionDecision:
     size_shares: Decimal | None = None
     order_id: str | None = None
     order_type: OrderType | None = None
+    post_only: bool = False
     market_slug: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
@@ -99,6 +100,7 @@ class ExtensionDecision:
         price: Decimal,
         amount_usdc: Decimal,
         order_type: OrderType | None = None,
+        post_only: bool = False,
         market_slug: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "ExtensionDecision":
@@ -109,6 +111,7 @@ class ExtensionDecision:
             price=price,
             amount_usdc=amount_usdc,
             order_type=order_type,
+            post_only=post_only,
             market_slug=market_slug,
             metadata=metadata or {},
         )
@@ -122,6 +125,7 @@ class ExtensionDecision:
         price: Decimal,
         size_shares: Decimal,
         order_type: OrderType | None = None,
+        post_only: bool = False,
         market_slug: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "ExtensionDecision":
@@ -132,6 +136,7 @@ class ExtensionDecision:
             price=price,
             size_shares=size_shares,
             order_type=order_type,
+            post_only=post_only,
             market_slug=market_slug,
             metadata=metadata or {},
         )

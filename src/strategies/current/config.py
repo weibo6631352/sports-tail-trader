@@ -64,10 +64,38 @@ class CurrentStrategyConfig:
             体育扫尾允许纳入 universe 的盘口类型。
         sports_*:
             体育扫尾策略自己的价格、流动性、时间窗口和执行权限参数。
+        sports_market_end_horizon_seconds:
+            live 市场进入扫尾候选前允许的最长封盘剩余秒数。默认 3600 秒，
+            用于把远离封盘的真实直播赛事留在全量发现里，但不进入实时交易候选。
         sports_max_*:
             体育扫尾策略级风险上限，用于约束同一比赛、同一联赛和当日新增
             暴露。框架级 `MAX_ORDER_USDC / MAX_MARKET_USDC / MAX_TOTAL_USDC`
             仍由 RiskManager 做最终门禁。
+        sports_min_expected_profit_*:
+            入场前按买入价格和买入金额估算等待权威结算的毛利润和资金占用效率。
+            如果结算持有收益太低，策略只在可挂出满足最小毛利润的 profit-take
+            SELL 时允许买入，否则拒绝这类长时间占用资金的小利润订单。
+        sports_profit_take_min_profit_usdc:
+            低结算效率订单允许走 profit-take 路径时，目标卖价相对买入价至少需要
+            产生的预期毛利润。
+        sports_profit_take_hold_minutes:
+            估算一档 profit-take 挂单成交前的资金占用时间。小绝对利润订单只有
+            按该占用时间折算后的每小时资金效率达标时才允许进入，避免长期挂单
+            只赚极小金额。
+        sports_settlement_hold_minutes:
+            估算等待权威结算的保守资金占用时间。实盘里市场结束到可结算可能跨越
+            数小时，因此这里不只看比赛剩余时间。
+        sports_baseball_max_game_state_age_seconds:
+            MLB 官方结构化局面允许的最大状态年龄。MLB schedule/linescore
+            拉取和匹配会批量处理大量市场，不能用通用 10 秒阈值误杀第 9 局
+            这类真实尾盘；该放宽只作用于棒球结构化局面。
+        sports_mlb_eighth_moneyline_min_lead:
+            MLB 第 8 局 moneyline 早期领先机会的最低领先分差。该规则还要求
+            至少一出局且二/三垒无得分威胁，避免把普通中局波动提前纳入。
+        sports_recovery_profit_take_*:
+            恢复侧对历史遗留或买入后缺失止盈挂单的近端仓位补救退出参数。
+            默认只在持仓均价较高、无开放 SELL、且挂到下一档 tick 的预期毛利润
+            达标时补 profit-take SELL，避免继续长期占用资金。
     """
 
     entry_no_price_max: Decimal = Decimal("0.99")
@@ -75,7 +103,7 @@ class CurrentStrategyConfig:
     auto_exit_enabled: bool = False
     min_liquidity_usdc: Decimal = Decimal("1")
     max_spread: Decimal | None = Decimal("0.10")
-    discovery_title_searches: tuple[str, ...] = ("sports", "nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
+    discovery_title_searches: tuple[str, ...] = ("nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
     discovery_tag_slugs: tuple[str, ...] = ("sports",)
     sports_live_discovery_max_games: int = 40
     sports_live_discovery_max_queries: int = 120
@@ -84,10 +112,16 @@ class CurrentStrategyConfig:
         "nfl",
         "nhl",
         "mlb",
+        "kbo",
         "basketball",
         "baseball",
+        "korean baseball",
         "hockey",
         "football",
+        "soccer",
+        "table tennis",
+        "table-tennis",
+        "wtt",
         "tennis",
         "atp",
         "wta",
@@ -96,21 +130,26 @@ class CurrentStrategyConfig:
         SportsMarketType.TOTALS,
         SportsMarketType.MONEYLINE,
         SportsMarketType.SPREADS,
+        SportsMarketType.BINARY_PROP,
     )
     sports_totals_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     sports_moneyline_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     sports_spreads_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     sports_totals_max_entry_price: Decimal = Decimal("0.99")
     sports_moneyline_max_entry_price: Decimal = Decimal("0.97")
+    sports_tennis_locked_moneyline_max_entry_price: Decimal = Decimal("0.995")
     sports_spreads_max_entry_price: Decimal = Decimal("0.96")
     sports_min_liquidity_usdc: Decimal = Decimal("1")
     sports_max_game_state_age_seconds: int = 10
+    sports_baseball_max_game_state_age_seconds: int = 45
     sports_tennis_max_game_state_age_seconds: int = 35
+    sports_market_end_horizon_seconds: int = 3600
     sports_max_under_seconds_remaining: int = 30
     sports_max_moneyline_seconds_remaining: int = 180
     sports_max_spreads_seconds_remaining: int = 120
     sports_min_under_safety_margin: Decimal = Decimal("2")
     sports_min_moneyline_lead: int = 6
+    sports_mlb_eighth_moneyline_min_lead: int = 2
     sports_min_spread_safety_margin: Decimal = Decimal("2")
     sports_max_event_exposure_usdc: Decimal = Decimal("25")
     sports_max_league_exposure_usdc: Decimal = Decimal("75")
@@ -118,6 +157,13 @@ class CurrentStrategyConfig:
     sports_max_consecutive_losses: int = 3
     sports_scale_in_budget_fraction: Decimal = Decimal("0.5")
     sports_scale_in_max_buy_fills: int = 2
+    sports_min_expected_profit_usdc: Decimal = Decimal("0.03")
+    sports_min_expected_profit_per_hour_usdc: Decimal = Decimal("0.10")
+    sports_profit_take_min_profit_usdc: Decimal = Decimal("0.02")
+    sports_profit_take_hold_minutes: int = 2
+    sports_settlement_hold_minutes: int = 180
+    sports_recovery_profit_take_enabled: bool = True
+    sports_recovery_profit_take_min_avg_price: Decimal = Decimal("0.90")
 
 
 def sports_tail_policy_from_config(config: CurrentStrategyConfig) -> SportsTailPolicy:
@@ -130,15 +176,19 @@ def sports_tail_policy_from_config(config: CurrentStrategyConfig) -> SportsTailP
         spreads_execution_permission=config.sports_spreads_execution_permission,
         totals_max_entry_price=config.sports_totals_max_entry_price,
         moneyline_max_entry_price=config.sports_moneyline_max_entry_price,
+        tennis_locked_moneyline_max_entry_price=config.sports_tennis_locked_moneyline_max_entry_price,
         spreads_max_entry_price=config.sports_spreads_max_entry_price,
         min_liquidity_usdc=config.sports_min_liquidity_usdc,
         max_game_state_age_seconds=config.sports_max_game_state_age_seconds,
+        baseball_max_game_state_age_seconds=config.sports_baseball_max_game_state_age_seconds,
         tennis_max_game_state_age_seconds=config.sports_tennis_max_game_state_age_seconds,
+        max_market_end_seconds=config.sports_market_end_horizon_seconds,
         max_under_seconds_remaining=config.sports_max_under_seconds_remaining,
         max_moneyline_seconds_remaining=config.sports_max_moneyline_seconds_remaining,
         max_spreads_seconds_remaining=config.sports_max_spreads_seconds_remaining,
         min_under_safety_margin=config.sports_min_under_safety_margin,
         min_moneyline_lead=config.sports_min_moneyline_lead,
+        mlb_eighth_moneyline_min_lead=config.sports_mlb_eighth_moneyline_min_lead,
         min_spread_safety_margin=config.sports_min_spread_safety_margin,
     )
 

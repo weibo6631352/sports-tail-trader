@@ -73,6 +73,16 @@ async def list_live_states(
     return await service.list_sports_live_states(limit=limit, offset=offset)
 
 
+@router.get("/live-source-gaps")
+async def list_live_source_gaps(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    prefix: str | None = Query(default=None),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    return await service.list_sports_live_source_gaps(limit=limit, offset=offset, prefix=prefix)
+
+
 @router.post("/live-states")
 async def upsert_live_state(
     request: SportsLiveStateRequest,

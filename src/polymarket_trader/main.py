@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from polymarket_trader.app.trading_decision_service import TradingDecisionServic
 from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.config import ConfigIssue, ConfigLoadError, Settings, StartupReadiness, load_settings
 from polymarket_trader.domain.events import DomainEvent, OutboxPriority
+from polymarket_trader.domain.market import Market
 from polymarket_trader.infra.db import (
     AccountSnapshotRepository,
     DatabasePersistenceRepository,
@@ -143,9 +145,14 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
     providers = []
     closers = []
     if "espn" in source_codes:
+        espn_leagues = tuple(
+            league
+            for league in settings.sports_live_state_league_codes
+            if league in settings._ESPN_SUPPORTED_LEAGUES or league.startswith("soccer:")
+        )
         espn_client = EspnScoreboardClient(
             base_url=settings.sports_live_state_espn_base_url,
-            leagues=settings.sports_live_state_league_codes,
+            leagues=espn_leagues,
             timeout_s=settings.sports_live_state_timeout_s,
         )
         providers.append(("espn", espn_client.list_games))
@@ -179,6 +186,7 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
                 sports=sofascore_sports,
                 league_codes=settings.sports_live_state_league_codes,
                 timeout_s=settings.sports_live_state_timeout_s,
+                lookahead_days=settings.sports_live_state_sofascore_lookahead_days,
             )
             providers.append(("sofascore", sofascore_client.list_games))
             closers.append(sofascore_client.aclose)
@@ -193,7 +201,15 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
             )
             providers.append(("thesportsdb", thesportsdb_client.list_games))
             closers.append(thesportsdb_client.aclose)
-    return SportsLiveAggregateClient(providers=tuple(providers), closers=tuple(closers))
+    # 聚合器超时是“单个 provider 完整快照”的预算；像 ESPN/SofaScore 这类 provider
+    # 内部会按多个 sport/league 拉取，预算需要高于单次 HTTP timeout，避免刚拿到部分
+    # 实盘数据时被外层取消。各 provider 已并行隔离，放宽这里不会阻塞交易主链路。
+    provider_timeout_s = max(settings.sports_live_state_timeout_s * 3, 12.0)
+    return SportsLiveAggregateClient(
+        providers=tuple(providers),
+        closers=tuple(closers),
+        provider_timeout_s=provider_timeout_s,
+    )
 
 
 def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
@@ -376,6 +392,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 registry=registry,
                 entry_metadata_store=entry_metadata_store,
                 event_bus=event_bus,
+                market_tracker=market_ws_worker.track_market,
                 enabled=True,
                 source="sports_live_aggregate",
                 leagues=settings.sports_live_state_league_codes,
@@ -600,6 +617,34 @@ def _restore_account_reference_state(runtime: RuntimeComponents, *, balance_usdc
     )
 
 
+def _restore_trackable_markets(runtime: RuntimeComponents, markets: Iterable[Market]) -> int:
+    """按当前业务扩展重新校验数据库恢复出的 market。
+
+    数据库快照只作为恢复参考，不能把旧策略留下的 eligible 状态直接恢复成
+    运行时真相；启动时必须重新走当前策略的 universe 与保留规则。
+    """
+
+    restored = 0
+    account_snapshot = runtime.account_state_store.snapshot()
+    hooks = runtime.extension.hooks
+    for market in markets:
+        universe_decision = hooks.select_market(market)
+        if universe_decision.selected:
+            runtime.market_ws_worker.track_market(market)
+            restored += 1
+            continue
+        if not hooks.should_keep_tracking(market, account_snapshot):
+            continue
+        tracked_market = hooks.build_filtered_tracking_market(
+            market,
+            existing_market=market,
+            reason=universe_decision.reason,
+        )
+        runtime.market_ws_worker.track_market(tracked_market)
+        restored += 1
+    return restored
+
+
 async def _handle_market_ws_message(runtime, message) -> None:
     await handle_market_ws_message(runtime, message)
 
@@ -619,14 +664,13 @@ async def _load_reference_state(runtime: RuntimeComponents) -> dict[str, int]:
                 balance_usdc=account_snapshot.balance_usdc,
                 allowance_usdc=account_snapshot.allowance_usdc,
             )
-        for market in markets.items:
-            runtime.market_ws_worker.track_market(market)
         runtime.account_state_store.replace_positions(positions.items)
         runtime.account_state_store.replace_open_orders(open_orders.items)
         runtime.account_state_store.replace_fills(fills.items)
+        restored_markets = _restore_trackable_markets(runtime, markets.items)
         loaded = {
             "account_snapshots": 0 if account_snapshot is None else 1,
-            "markets": len(markets.items),
+            "markets": restored_markets,
             "positions": len(positions.items),
             "open_orders": len(open_orders.items),
             "fills": len(fills.items),

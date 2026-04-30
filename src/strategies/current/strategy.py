@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+import re
 from typing import Any, Mapping
 
 from polymarket_trader.extension_api import (
@@ -29,8 +32,9 @@ from strategies.current.discovery import (
     build_configured_discovery_queries,
     build_live_game_discovery_queries,
 )
-from strategies.current.exit_plan import build_exit_plan_metadata, exit_price_for_context
-from strategies.current.live_state import sports_live_metadata_match
+from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata, exit_price_for_context
+from strategies.current.live_state import sports_live_metadata_match, sports_tail_entry_signal_gate
+from strategies.current.outcomes import describe_sports_market
 from strategies.current.recovery import decide_recovery
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
 from strategies.current.trading import decide_entry, decide_exit, size_entry
@@ -70,6 +74,8 @@ class CurrentStrategy:
 
         self._config = config
         self._ports = ports or ExtensionPorts()
+        self._live_game_filter_cache_games_id: int | None = None
+        self._live_game_filter_cache: dict[tuple[tuple[str, ...], str | None], tuple[SportsLiveGame, ...]] = {}
         self._spec = ExtensionSpec(
             name="current",
             version="1",
@@ -151,13 +157,47 @@ class CurrentStrategy:
     def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
         """根据成交结果生成后续动作。"""
 
-        if not self._config.auto_exit_enabled:
-            return ()
         if context.order_result is None:
             return ()
         if context.order_result.side is None or context.order_result.side.value != "BUY":
             return ()
         if context.order_result.matched_shares <= 0:
+            return ()
+        intent_metadata = _order_intent_metadata(context.order_result.intent)
+        if _has_profit_take_follow_up(intent_metadata):
+            target_price = _decimal_from_metadata(intent_metadata.get("sports_profit_take_target_price"))
+            if target_price is None:
+                return ()
+            target_price = cap_price_to_clob_limit(target_price, tick_size=_effective_tick_size(context))
+            exit_metadata = build_exit_plan_metadata(
+                self._config,
+                context,
+                token_id=context.order_result.token_id,
+                source_reason="profit_take_after_buy_fill",
+                target_size_shares=context.order_result.matched_shares,
+            )
+            exit_metadata.update(intent_metadata)
+            exit_plan = exit_metadata.get("sports_exit_plan")
+            if isinstance(exit_plan, dict):
+                exit_plan["target_exit_price"] = str(target_price)
+                exit_plan["primary_action"] = "place_profit_take_gtc_sell_after_buy_fill"
+                exit_plan["settlement_rule"] = "keep_profit_take_order_until_fill_or_authoritative_resolution"
+                exit_plan["recovery_rule"] = "cancel_open_entry_orders_and_cover_profit_take_positions"
+            exit_metadata["sports_exit_target_price"] = str(target_price)
+            exit_metadata["sports_exit_source_reason"] = "profit_take_after_buy_fill"
+            return (
+                ExtensionDecision.sell(
+                    reason="strategy_profit_take",
+                    token_id=context.order_result.token_id,
+                    price=target_price,
+                    size_shares=context.order_result.matched_shares,
+                    market_slug=context.order_result.market_slug or (
+                        context.market.market_slug if context.market is not None else None
+                    ),
+                    metadata=exit_metadata,
+                ),
+            )
+        if not self._config.auto_exit_enabled:
             return ()
         return (
             ExtensionDecision.sell(
@@ -209,7 +249,52 @@ class CurrentStrategy:
     ) -> tuple[Market, SportsLiveGame, Mapping[str, Any]] | None:
         """将外部直播比赛集合匹配成当前策略可消费的 metadata。"""
 
-        return sports_live_metadata_match(market, games)
+        descriptor = describe_sports_market(market)
+        if not descriptor.accepted or descriptor.market_family.value != "single_game":
+            return None
+        match = sports_live_metadata_match(market, self._candidate_live_games_for_market(market, games))
+        if match is None:
+            return None
+        matched_market, game, metadata = match
+        signal_allowed, signal_reason = sports_tail_entry_signal_gate(
+            matched_market,
+            game,
+            market_end_horizon_seconds=self._config.sports_market_end_horizon_seconds,
+        )
+        if not signal_allowed and signal_reason == "market_end_too_far":
+            bypass_reason = _market_tail_window_bypass_reason(
+                matched_market,
+                game,
+                descriptor,
+                self._config,
+            )
+            if bypass_reason is not None:
+                signal_allowed = True
+                signal_reason = bypass_reason
+        return matched_market, game, {
+            **metadata,
+            "sports_tail_entry_signal_allowed": signal_allowed,
+            "sports_tail_entry_signal_reason": signal_reason,
+        }
+
+    def _candidate_live_games_for_market(
+        self,
+        market: Market,
+        games: tuple[SportsLiveGame, ...],
+    ) -> tuple[SportsLiveGame, ...]:
+        games_id = id(games)
+        if self._live_game_filter_cache_games_id != games_id:
+            self._live_game_filter_cache_games_id = games_id
+            self._live_game_filter_cache.clear()
+        sport_codes = tuple(sorted(_market_sport_codes(market)))
+        market_start = _ensure_utc(getattr(market, "game_start_time", None))
+        cache_key = (sport_codes, None if market_start is None else market_start.isoformat())
+        cached = self._live_game_filter_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        filtered = _candidate_live_games_for_market(market, games)
+        self._live_game_filter_cache[cache_key] = filtered
+        return filtered
 
 
 def build_strategy(
@@ -233,3 +318,374 @@ def build_strategy(
         config=load_current_strategy_config(config_path),
         ports=ports,
     )
+
+
+def _order_intent_metadata(intent: object | None) -> Mapping[str, Any]:
+    """读取成交来源 intent 上的透传 metadata。"""
+
+    metadata = getattr(intent, "metadata", None)
+    return metadata if isinstance(metadata, Mapping) else {}
+
+
+def _decimal_from_metadata(value: object) -> Decimal | None:
+    """把 metadata 中的价格文本转换为 Decimal。"""
+
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _effective_tick_size(context: ExtensionContext) -> Decimal | None:
+    if context.orderbook is not None and context.orderbook.tick_size is not None:
+        return context.orderbook.tick_size
+    if context.market is not None:
+        return context.market.tick_size
+    return None
+
+
+def _has_profit_take_follow_up(metadata: Mapping[str, object]) -> bool:
+    """判断 BUY 成交后是否需要补挂主动止盈单。"""
+
+    return metadata.get("sports_exit_mode") == "profit_take" or bool(
+        metadata.get("sports_profit_take_overlay_enabled")
+    )
+
+
+def _market_tail_window_bypass_reason(
+    market: Market,
+    game: SportsLiveGame,
+    descriptor: Any,
+    config: CurrentStrategyConfig,
+) -> str | None:
+    """返回可绕过远期 endDate 粗筛的直播尾盘原因。"""
+
+    if _market_can_lock_before_tail_window(market, game, descriptor):
+        return "live_outcome_lock_candidate"
+    if _market_has_live_tail_state(market, game, descriptor, config):
+        return "live_tail_state_candidate"
+    return None
+
+
+def _market_can_lock_before_tail_window(market: Market, game: SportsLiveGame, descriptor: Any) -> bool:
+    """判断 market 是否存在不依赖比赛封盘时间的数学锁定机会。"""
+
+    status = str(getattr(game.status, "value", game.status)).lower()
+    if status != "live":
+        return False
+    market_type = getattr(descriptor.market_type, "value", descriptor.market_type)
+    if market_type == "totals":
+        return _totals_market_is_already_over(market, game, descriptor)
+    if market_type != "moneyline" or not _is_tennis_set_winner_market(market):
+        return False
+    state = game.source_payload.get("tennis_state")
+    if not isinstance(state, Mapping):
+        return False
+    set_number = _tennis_set_winner_number(market)
+    current_set = _int_value(state.get("current_set"))
+    set_scores = state.get("set_scores")
+    return set_number is not None and current_set is not None and current_set > set_number and bool(set_scores)
+
+
+def _market_has_live_tail_state(
+    market: Market,
+    game: SportsLiveGame,
+    descriptor: Any,
+    config: CurrentStrategyConfig,
+) -> bool:
+    """判断直播状态是否已达到策略尾盘条件，但结果尚未完全数学锁定。"""
+
+    status = str(getattr(game.status, "value", game.status)).lower()
+    if status != "live":
+        return False
+    market_type = getattr(descriptor.market_type, "value", descriptor.market_type)
+    state = game.source_payload.get("tennis_state")
+    if isinstance(state, Mapping):
+        if market_type == "moneyline":
+            if _is_tennis_set_winner_market(market):
+                return _tennis_set_winner_tail_state_reached(market, state)
+            return _tennis_moneyline_tail_state_reached(state)
+        return False
+    baseball_state = getattr(game, "baseball_state", None)
+    if baseball_state is not None:
+        return _baseball_tail_state_reached(baseball_state)
+    if market_type == "moneyline":
+        seconds_remaining = _int_value(game.seconds_remaining)
+        if seconds_remaining is None:
+            return False
+        return (
+            seconds_remaining <= config.sports_max_moneyline_seconds_remaining
+            and abs(game.home.score - game.away.score) >= config.sports_min_moneyline_lead
+        )
+    return False
+
+
+def _baseball_tail_state_reached(state: Any) -> bool:
+    """用结构化棒球局面判断是否值得触发快速入场重放。"""
+
+    current_inning = _int_value(getattr(state, "current_inning", None))
+    outs = _int_value(getattr(state, "outs", None))
+    occupied_bases = tuple(getattr(state, "occupied_bases", ()) or ())
+    return current_inning is not None and current_inning >= 9 and outs is not None and outs >= 2 and not occupied_bases
+
+
+def _tennis_moneyline_tail_state_reached(state: Mapping[str, Any]) -> bool:
+    home_games = _int_value(state.get("home_current_set_games"))
+    away_games = _int_value(state.get("away_current_set_games"))
+    home_sets = _int_value(state.get("home_sets_won"))
+    away_sets = _int_value(state.get("away_sets_won"))
+    if home_games is None or away_games is None or home_sets is None or away_sets is None:
+        return False
+    if home_games >= 5 and home_games - away_games >= 2 and home_sets - away_sets >= 1:
+        return True
+    return away_games >= 5 and away_games - home_games >= 2 and away_sets - home_sets >= 1
+
+
+def _tennis_set_winner_tail_state_reached(market: Market, state: Mapping[str, Any]) -> bool:
+    set_number = _tennis_set_winner_number(market)
+    current_set = _int_value(state.get("current_set"))
+    if set_number is None or current_set != set_number:
+        return False
+    home_games = _int_value(state.get("home_current_set_games"))
+    away_games = _int_value(state.get("away_current_set_games"))
+    if home_games is None or away_games is None:
+        return False
+    return max(home_games, away_games) >= 5 and abs(home_games - away_games) >= 2
+
+
+def _totals_market_is_already_over(market: Market, game: SportsLiveGame, descriptor: Any) -> bool:
+    line = descriptor.line
+    if line is None:
+        return False
+    state = game.source_payload.get("tennis_state")
+    if isinstance(state, Mapping):
+        if _is_set_total_market_slug(market.market_slug):
+            current_set = _int_value(state.get("current_set"))
+            return current_set is not None and current_set > line
+        total_games = _int_value(state.get("total_games"))
+        if total_games is None:
+            home_games = _int_value(state.get("home_total_games")) or 0
+            away_games = _int_value(state.get("away_total_games")) or 0
+            total_games = home_games + away_games
+        return total_games > line or _tennis_match_total_min_final_games_is_over(state, line)
+    return (game.home.score + game.away.score) > line
+
+
+def _is_tennis_set_winner_market(market: Market) -> bool:
+    text = _normalized_market_slug(market)
+    return "set winner" in text or "first set winner" in text
+
+
+def _tennis_set_winner_number(market: Market) -> int | None:
+    text = _normalized_market_slug(market)
+    if "first set winner" in text or "1st set winner" in text or "set 1 winner" in text:
+        return 1
+    if "second set winner" in text or "2nd set winner" in text or "set 2 winner" in text:
+        return 2
+    if "third set winner" in text or "3rd set winner" in text or "set 3 winner" in text:
+        return 3
+    return None
+
+
+def _is_set_total_market_slug(slug: str) -> bool:
+    text = slug.strip().lower().replace("_", " ").replace("-", " ")
+    return "set total" in text or "set totals" in text or "total sets" in text
+
+
+def _tennis_match_total_min_final_games_is_over(state: Mapping[str, Any], line: object) -> bool:
+    """判断当前网球局面下，整场最低可能最终总局数是否已越过 totals 线。"""
+
+    home_total_games = _int_value(state.get("home_total_games")) or 0
+    away_total_games = _int_value(state.get("away_total_games")) or 0
+    current_home = _int_value(state.get("home_current_set_games"))
+    current_away = _int_value(state.get("away_current_set_games"))
+    if current_home is None or current_away is None:
+        return False
+    minimum_current_set_games = _tennis_minimum_final_set_games(current_home, current_away)
+    if minimum_current_set_games is None:
+        return False
+    current_games = current_home + current_away
+    already_counted_total = home_total_games + away_total_games
+    minimum_final_games = already_counted_total - current_games + minimum_current_set_games
+    return minimum_final_games > line
+
+
+def _tennis_minimum_final_set_games(home_games: int, away_games: int) -> int | None:
+    if home_games < 0 or away_games < 0:
+        return None
+    if _tennis_set_score_is_final(home_games, away_games):
+        return home_games + away_games
+    for extra_games in range(0, 8):
+        for home_extra in range(extra_games + 1):
+            away_extra = extra_games - home_extra
+            final_home = home_games + home_extra
+            final_away = away_games + away_extra
+            if _tennis_set_score_is_final(final_home, final_away):
+                return final_home + final_away
+    return None
+
+
+def _tennis_set_score_is_final(home_games: int, away_games: int) -> bool:
+    winner_games = max(home_games, away_games)
+    loser_games = min(home_games, away_games)
+    return (winner_games >= 6 and winner_games - loser_games >= 2) or winner_games == 7
+
+
+def _normalized_market_slug(market: Market) -> str:
+    return market.market_slug.strip().lower().replace("_", " ").replace("-", " ")
+
+
+def _candidate_live_games_for_market(
+    market: Market,
+    games: tuple[SportsLiveGame, ...],
+) -> tuple[SportsLiveGame, ...]:
+    """按运动类型和开赛时间缩小直播匹配候选集。
+
+    全体育覆盖会让 SofaScore 单轮返回数千场比赛。策略 hook 在进入文本匹配前
+    做保守过滤，避免每个 market 都执行 markets x games 全量匹配。
+    """
+
+    sport_codes = _market_sport_codes(market)
+    market_start = _ensure_utc(getattr(market, "game_start_time", None))
+    filtered: list[SportsLiveGame] = []
+    for game in games:
+        if sport_codes and (game_sport := _game_sport_code(game)) is not None and game_sport not in sport_codes:
+            continue
+        if market_start is not None and not _game_start_is_near_market_start(game, market_start):
+            continue
+        filtered.append(game)
+    return tuple(filtered)
+
+
+def _market_sport_codes(market: Market) -> set[str]:
+    text = _normalized_market_text(market)
+    mapping = (
+        ("table-tennis", ("table tennis", "table-tennis", "wtt", "world team championships")),
+        ("baseball", ("mlb", "kbo", "baseball")),
+        ("tennis", ("atp", "wta")),
+        ("basketball", ("nba", "wnba", "ncaamb", "ncaawb", "basketball")),
+        ("ice-hockey", ("nhl", "ahl", "hockey", "ice hockey")),
+        ("american-football", ("nfl", "ncaaf", "american football")),
+        ("football", ("soccer", "football", "mls", "nwsl", "epl")),
+    )
+    return {sport for sport, tokens in mapping if any(f" {token} " in f" {text} " for token in tokens)}
+
+
+def _game_sport_code(game: SportsLiveGame) -> str | None:
+    sport = str(game.source_payload.get("sport") or "").strip().lower()
+    if sport:
+        return _normalize_sport_code(sport)
+    source = str(game.source or "").strip().lower()
+    league = str(game.league or "").strip().lower()
+    text = f"{source} {league}"
+    if "mlb" in text:
+        return "baseball"
+    if "nba" in text or "basketball" in text:
+        return "basketball"
+    if "nhl" in text or "hockey" in text:
+        return "ice-hockey"
+    if "table-tennis" in text or "table tennis" in text or "wtt" in text:
+        return "table-tennis"
+    if "tennis" in text or "atp" in text or "wta" in text:
+        return "tennis"
+    if "football" in text or "soccer" in text:
+        return "football"
+    return None
+
+
+def _normalize_sport_code(value: str) -> str:
+    normalized = value.replace("_", "-").replace(" ", "-")
+    if normalized in {"soccer"}:
+        return "football"
+    if normalized in {"icehockey"}:
+        return "ice-hockey"
+    if normalized in {"tabletennis"}:
+        return "table-tennis"
+    return normalized
+
+
+def _game_start_is_near_market_start(game: SportsLiveGame, market_start: datetime) -> bool:
+    game_start = _game_start_time(game)
+    if game_start is None:
+        return True
+    tolerance = timedelta(hours=24) if _game_sport_code(game) == "tennis" else timedelta(hours=6)
+    return abs(game_start - market_start) <= tolerance
+
+
+def _game_start_time(game: SportsLiveGame) -> datetime | None:
+    for key in ("start_timestamp", "start_time_utc", "game_time_utc", "game_date", "date"):
+        parsed = _parse_datetime_value(game.source_payload.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_datetime_value(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return _ensure_utc(value)
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(_timestamp_seconds(value), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    text = str(value).strip()
+    if not text or re.fullmatch(r"20\d{2}-[01]\d-[0-3]\d", text):
+        return None
+    if re.fullmatch(r"\d+(\.\d+)?", text):
+        try:
+            return datetime.fromtimestamp(_timestamp_seconds(float(text)), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    try:
+        return _ensure_utc(datetime.fromisoformat(text.replace("Z", "+00:00")))
+    except ValueError:
+        return None
+
+
+def _timestamp_seconds(value: int | float) -> float:
+    timestamp = float(value)
+    if timestamp > 10_000_000_000:
+        timestamp = timestamp / 1000
+    return timestamp
+
+
+def _ensure_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _normalized_market_text(market: Market) -> str:
+    return " ".join(
+        re.sub(
+            r"[^a-z0-9]+",
+            " ",
+            " ".join(
+                part
+                for part in (
+                    market.market_question,
+                    market.market_name,
+                    market.market_slug,
+                    market.event_title,
+                    market.event_slug,
+                    market.category,
+                    " ".join(market.tags),
+                    " ".join(outcome.outcome for outcome in market.outcomes),
+                )
+                if part
+            ).lower(),
+        ).split()
+    )
+
+
+def _int_value(value: object) -> int | None:
+    try:
+        return None if value is None or value == "" else int(value)
+    except (TypeError, ValueError):
+        return None

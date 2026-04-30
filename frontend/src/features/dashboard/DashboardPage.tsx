@@ -25,7 +25,19 @@ import { hasPositiveShares } from '../../shared/utils/markets'
 import { getMarketPosition, getMarketTokenId } from '../../shared/utils/marketViews'
 import { resolveExtensionPresentation } from '../../extensions/registry'
 
-const boolTone = (value: boolean): 'success' | 'danger' => (value ? 'success' : 'danger')
+const boolTone = (value: boolean | undefined): 'neutral' | 'success' | 'danger' => {
+  if (value === undefined) {
+    return 'neutral'
+  }
+  return value ? 'success' : 'danger'
+}
+
+const boolLabel = (value: boolean | undefined, trueLabel: string, falseLabel: string): string => {
+  if (value === undefined) {
+    return '加载中'
+  }
+  return value ? trueLabel : falseLabel
+}
 
 const getWorkerTone = (
   state: string | undefined,
@@ -66,12 +78,12 @@ const sortByEndDate = <T extends { market: { end_date: string | null } }>(items:
 
 export const DashboardPage = () => {
   const readyQuery = useQuery({
-    queryKey: ['ready', 'dashboard'],
+    queryKey: ['ready'],
     queryFn: adminApi.getReady,
     refetchInterval: 10_000,
   })
   const runtimeQuery = useQuery({
-    queryKey: ['runtime', 'dashboard'],
+    queryKey: ['runtime'],
     queryFn: adminApi.getRuntime,
     refetchInterval: 15_000,
   })
@@ -97,14 +109,24 @@ export const DashboardPage = () => {
   })
 
   const extensionModule = getString(runtimeQuery.data?.settings?.extension_module)
-  const extensionPresentation = useMemo(() => resolveExtensionPresentation(extensionModule), [extensionModule])
+  const extensionPresentation = useMemo(
+    () => (runtimeQuery.data ? resolveExtensionPresentation(extensionModule) : null),
+    [extensionModule, runtimeQuery.data],
+  )
 
+  const ready = readyQuery.data?.ready_to_trade ?? runtimeQuery.data?.ready_to_trade
+  const phase = readyQuery.data?.phase ?? runtimeQuery.data?.phase
+  const phaseLabel = phase ? formatPhaseLabel(phase) : '加载中'
+  const readyLabel = ready === undefined ? '加载中' : ready ? '已就绪' : '受阻'
+  const readyPillLabel = ready === undefined ? '状态加载中' : ready ? '允许' : '阻塞'
+  const readyPillTone = ready === undefined ? 'neutral' : ready ? 'success' : 'danger'
+  const runtimeStatus = readyQuery.data?.runtime ?? runtimeQuery.data?.runtime
   const blockingIssues = readyQuery.data?.blocking_issues ?? []
   const warnings = readyQuery.data?.warnings ?? []
   const recentAllocations = portfolioQuery.data?.recent_allocations ?? []
-  const workers = workersQuery.data?.workers ?? []
+  const workers = workersQuery.data?.workers
   const marketItems = useMemo(() => marketsQuery.data?.items ?? [], [marketsQuery.data?.items])
-  const runningWorkerCount = workers.filter((worker) => (worker.state ?? worker.status) === 'running').length
+  const runningWorkerCount = workers?.filter((worker) => (worker.state ?? worker.status) === 'running').length
   const trackedMarkets = useMemo(
     () => sortByEndDate(marketItems.filter((item) => item.tracked)),
     [marketItems],
@@ -115,11 +137,17 @@ export const DashboardPage = () => {
   )
   const trackedPreview = trackedMarkets.slice(0, 6)
   const positionPreview = positionMarkets.slice(0, 6)
-  const trackedMarketCount = runtimeQuery.data?.registry.market_count ?? 0
-  const lastCompletedFullScanMarkets = runtimeQuery.data?.market_discovery.last_completed_round_markets ?? 0
-  const currentRoundScannedMarkets = runtimeQuery.data?.market_discovery.markets_seen_in_round ?? 0
+  const trackedMarketCount = runtimeQuery.data?.registry.market_count
+  const lastCompletedFullScanMarkets = runtimeQuery.data?.market_discovery.last_completed_round_markets
+  const currentRoundScannedMarkets = runtimeQuery.data?.market_discovery.markets_seen_in_round
   const fullScanMarketCount = lastCompletedFullScanMarkets || currentRoundScannedMarkets
-  const fullScanCompletedAt = runtimeQuery.data?.market_discovery.last_round_completed_at ?? null
+  const fullScanCompletedAt = runtimeQuery.data?.market_discovery.last_round_completed_at
+  const trackedEmptyMessage =
+    fullScanMarketCount === undefined
+      ? '全量扫描数据加载中。'
+      : fullScanMarketCount > 0
+        ? `上轮全量扫描 ${formatCompact(fullScanMarketCount)} 个活跃市场，当前扩展还没有纳入市场。`
+        : '当前还没有完成一轮全量扫描。'
   const dashboardError =
     readyQuery.error ??
     runtimeQuery.error ??
@@ -143,13 +171,13 @@ export const DashboardPage = () => {
       <section className="stats-grid">
         <div className="stat-card">
           <span>自动交易</span>
-          <strong>{readyQuery.data?.ready_to_trade ? '已就绪' : '受阻'}</strong>
-          <small>当前阶段 {formatPhaseLabel(readyQuery.data?.phase ?? runtimeQuery.data?.phase)}</small>
+          <strong>{readyLabel}</strong>
+          <small>当前阶段 {phaseLabel}</small>
         </div>
         <div className="stat-card">
           <span>阻塞项</span>
-          <strong>{blockingIssues.length}</strong>
-          <small>告警 {warnings.length}</small>
+          <strong>{readyQuery.data ? blockingIssues.length : '—'}</strong>
+          <small>告警 {readyQuery.data ? warnings.length : '—'}</small>
         </div>
         <div className="stat-card">
           <span>组合余额</span>
@@ -158,8 +186,10 @@ export const DashboardPage = () => {
         </div>
         <div className="stat-card">
           <span>全量扫描面</span>
-          <strong>{fullScanMarketCount}</strong>
-          <small>扩展跟踪 {trackedMarketCount} · 运行中线程 {runningWorkerCount}</small>
+          <strong>{formatCompact(fullScanMarketCount)}</strong>
+          <small>
+            扩展跟踪 {formatCompact(trackedMarketCount)} · 运行中线程 {formatCompact(runningWorkerCount)}
+          </small>
         </div>
       </section>
 
@@ -169,22 +199,19 @@ export const DashboardPage = () => {
             <div>
               <dt>自动交易</dt>
               <dd>
-                <StatusPill
-                  label={readyQuery.data?.ready_to_trade ? '允许' : '阻塞'}
-                  tone={readyQuery.data?.ready_to_trade ? 'success' : 'danger'}
-                />
+                <StatusPill label={readyPillLabel} tone={readyPillTone} />
               </dd>
             </div>
             <div>
               <dt>运行阶段</dt>
-              <dd>{formatPhaseLabel(readyQuery.data?.phase ?? runtimeQuery.data?.phase)}</dd>
+              <dd>{phaseLabel}</dd>
             </div>
             <div>
               <dt>用户行情连接</dt>
               <dd>
                 <StatusPill
-                  label={readyQuery.data?.runtime.user_ws_connected ? '已连接' : '未连接'}
-                  tone={boolTone(readyQuery.data?.runtime.user_ws_connected ?? false)}
+                  label={boolLabel(runtimeStatus?.user_ws_connected, '已连接', '未连接')}
+                  tone={boolTone(runtimeStatus?.user_ws_connected)}
                 />
               </dd>
             </div>
@@ -192,25 +219,25 @@ export const DashboardPage = () => {
               <dt>允许新买入</dt>
               <dd>
                 <StatusPill
-                  label={readyQuery.data?.runtime.allow_new_entries ? '打开' : '关闭'}
-                  tone={boolTone(readyQuery.data?.runtime.allow_new_entries ?? false)}
+                  label={boolLabel(runtimeStatus?.allow_new_entries, '打开', '关闭')}
+                  tone={boolTone(runtimeStatus?.allow_new_entries)}
                 />
               </dd>
             </div>
             <div>
               <dt>最近一次对账</dt>
-              <dd>{formatDateTime(readyQuery.data?.runtime.last_reconcile_at)}</dd>
+              <dd>{formatDateTime(runtimeStatus?.last_reconcile_at)}</dd>
             </div>
             <div>
               <dt>持仓 / 未完成订单</dt>
               <dd>
-                {portfolioQuery.data?.position_count ?? 0} / {portfolioQuery.data?.open_order_count ?? 0}
+                {portfolioQuery.data ? `${portfolioQuery.data.position_count} / ${portfolioQuery.data.open_order_count}` : '—'}
               </dd>
             </div>
             <div>
               <dt>上轮全量扫描</dt>
               <dd>
-                {fullScanMarketCount} 个活跃市场
+                {fullScanMarketCount === undefined ? '—' : `${formatCompact(fullScanMarketCount)} 个活跃市场`}
                 {fullScanCompletedAt ? ` · 完成于 ${formatDateTime(fullScanCompletedAt)}` : ''}
               </dd>
             </div>
@@ -221,11 +248,11 @@ export const DashboardPage = () => {
           <div className="detail-list">
             <div>
               <dt>运行中线程</dt>
-              <dd>{runningWorkerCount}</dd>
+              <dd>{formatCompact(runningWorkerCount)}</dd>
             </div>
             <div>
               <dt>线程总数</dt>
-              <dd>{workers.length}</dd>
+              <dd>{workers ? workers.length : '—'}</dd>
             </div>
             <div>
               <dt>授权额度</dt>
@@ -237,7 +264,7 @@ export const DashboardPage = () => {
             </div>
             <div>
               <dt>成交数</dt>
-              <dd>{portfolioQuery.data?.fill_count ?? 0}</dd>
+              <dd>{portfolioQuery.data?.fill_count ?? '—'}</dd>
             </div>
           </div>
         </SectionCard>
@@ -310,11 +337,7 @@ export const DashboardPage = () => {
               ) : null}
             </>
           ) : (
-            <p className="muted">
-              {fullScanMarketCount > 0
-                ? `上轮全量扫描 ${fullScanMarketCount} 个活跃市场，当前扩展还没有纳入市场。`
-                : '当前还没有完成一轮全量扫描。'}
-            </p>
+            <p className="muted">{trackedEmptyMessage}</p>
           )}
         </SectionCard>
 
@@ -362,7 +385,9 @@ export const DashboardPage = () => {
       </div>
 
       <SectionCard title="工作线程状态" subtitle="这里看线程是否在跑，以及是否处于异常或暂停。">
-        {workers.length > 0 ? (
+        {workers === undefined ? (
+          <p className="muted">线程快照加载中。</p>
+        ) : workers.length > 0 ? (
           <div className="inline-badge-list">
             {workers.map((worker, index) => {
               const workerName = worker.name ?? worker.worker_name ?? `worker-${index + 1}`
@@ -382,7 +407,7 @@ export const DashboardPage = () => {
         )}
       </SectionCard>
 
-      {extensionPresentation.renderDashboard?.({
+      {extensionPresentation?.renderDashboard?.({
         ready: readyQuery.data,
         runtime: runtimeQuery.data,
         portfolio: portfolioQuery.data,

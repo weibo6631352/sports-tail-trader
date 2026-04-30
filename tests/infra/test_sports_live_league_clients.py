@@ -17,6 +17,7 @@ from polymarket_trader.infra.sports import (
     parse_nhl_score_payload,
     parse_sofascore_events_payload,
     parse_thesportsdb_events_payload,
+    sofascore_sports_for_leagues,
 )
 
 
@@ -239,6 +240,84 @@ def test_sofascore_parser_normalizes_filtered_basketball_live_game() -> None:
     assert game.raw_status == "4th quarter"
 
 
+def test_sofascore_sports_code_expands_whole_sports_market_without_tournament_filter() -> None:
+    assert sofascore_sports_for_leagues(("sports",)) == (
+        "basketball",
+        "ice-hockey",
+        "baseball",
+        "american-football",
+        "football",
+        "tennis",
+        "table-tennis",
+    )
+
+    games = parse_sofascore_events_payload(
+        {
+            "events": [
+                {
+                    "id": 15555555,
+                    "status": {"description": "4th quarter", "type": "inprogress"},
+                    "tournament": {
+                        "name": "Liga ACB",
+                        "slug": "liga-acb",
+                        "uniqueTournament": {"name": "Liga ACB", "slug": "liga-acb"},
+                    },
+                    "homeTeam": {"name": "Barcelona", "shortName": "Barcelona", "nameCode": "BAR"},
+                    "awayTeam": {"name": "Real Madrid", "shortName": "Real Madrid", "nameCode": "RMA"},
+                    "homeScore": {"current": 70},
+                    "awayScore": {"current": 72},
+                    "time": {"played": 2600, "periodLength": 600, "totalPeriodCount": 4},
+                }
+            ]
+        },
+        sport="basketball",
+        league_codes=("sports",),
+        observed_at=datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(games) == 1
+    assert games[0].league == "Liga ACB"
+
+
+def test_sofascore_parser_normalizes_table_tennis_event_for_whole_sports_market() -> None:
+    games = parse_sofascore_events_payload(
+        {
+            "events": [
+                {
+                    "id": 16094559,
+                    "status": {"description": "Not started", "type": "notstarted"},
+                    "tournament": {
+                        "name": "World Team Championships Finals 2026, Group 13",
+                        "slug": "world-team-championships-finals-2026-group-13",
+                        "uniqueTournament": {
+                            "name": "World Team Championships Finals",
+                            "slug": "world-team-championships-finals",
+                        },
+                    },
+                    "homeTeam": {"name": "Austria", "shortName": "Austria"},
+                    "awayTeam": {"name": "Italy", "shortName": "Italy"},
+                    "homeScore": {"current": 0},
+                    "awayScore": {"current": 0},
+                    "startTimestamp": 1777539600,
+                }
+            ]
+        },
+        sport="table-tennis",
+        league_codes=("sports",),
+        observed_at=datetime(2026, 4, 30, 5, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(games) == 1
+    game = games[0]
+    assert game.source == "sofascore"
+    assert game.league == "World Team Championships Finals"
+    assert game.home.name == "Austria"
+    assert game.away.name == "Italy"
+    assert game.status == SportsLiveGameStatus.SCHEDULED
+    assert game.source_payload["sport"] == "table-tennis"
+    assert game.source_payload["tennis_state"] is None
+
+
 def test_sofascore_parser_normalizes_finished_baseball_game_without_clock() -> None:
     games = parse_sofascore_events_payload(
         {
@@ -282,6 +361,7 @@ def test_sofascore_parser_preserves_tennis_live_state() -> None:
                 {
                     "id": 16078142,
                     "slug": "rada-zolotareva-despina-papamichail",
+                    "firstToServe": 2,
                     "status": {"code": 9, "description": "2nd set", "type": "inprogress"},
                     "tournament": {
                         "name": "Huzhou, China",
@@ -333,6 +413,8 @@ def test_sofascore_parser_preserves_tennis_live_state() -> None:
     assert tennis_state["total_games"] == 10
     assert tennis_state["set_scores"] == ((4, 6), (0, 0))
     assert tennis_state["home_point"] == "15"
+    assert tennis_state["first_to_serve"] == "away"
+    assert tennis_state["serving_side"] == "away"
 
 
 def test_thesportsdb_parser_normalizes_filtered_nhl_live_game() -> None:
@@ -493,6 +575,40 @@ def test_league_clients_use_expected_public_endpoints() -> None:
     ]
 
 
+def test_sofascore_client_fetches_today_and_configured_lookahead_dates() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        return httpx.Response(200, request=request, json={"events": []})
+
+    async def run() -> None:
+        client = SofaScoreLiveClient(
+            client=httpx.AsyncClient(
+                base_url="https://www.sofascore.com",
+                transport=httpx.MockTransport(handler),
+            ),
+            sports=("football", "baseball"),
+            league_codes=("sports",),
+            lookahead_days=1,
+            min_fetch_interval_s=0,
+            now_provider=lambda: datetime(2026, 4, 30, 3, 55, tzinfo=timezone.utc),
+        )
+        try:
+            await client.list_games()
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+
+    assert requests == [
+        "/api/v1/sport/football/scheduled-events/2026-04-30",
+        "/api/v1/sport/football/scheduled-events/2026-05-01",
+        "/api/v1/sport/baseball/scheduled-events/2026-04-30",
+        "/api/v1/sport/baseball/scheduled-events/2026-05-01",
+    ]
+
+
 def test_sofascore_client_reuses_cached_snapshot_inside_min_fetch_interval() -> None:
     requests = 0
 
@@ -553,6 +669,91 @@ def test_sofascore_client_reuses_cached_snapshot_inside_min_fetch_interval() -> 
     assert first_count == 1
     assert second_count == 1
     assert requests == 1
+
+
+def test_sofascore_client_fetches_configured_sports_concurrently() -> None:
+    active_requests = 0
+    max_active_requests = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active_requests, max_active_requests
+        active_requests += 1
+        max_active_requests = max(max_active_requests, active_requests)
+        await asyncio.sleep(0.01)
+        active_requests -= 1
+        return httpx.Response(200, request=request, json={"events": []})
+
+    async def run() -> None:
+        client = SofaScoreLiveClient(
+            client=httpx.AsyncClient(
+                base_url="https://www.sofascore.com",
+                transport=httpx.MockTransport(handler),
+            ),
+            sports=("basketball", "ice-hockey", "baseball"),
+            league_codes=("nba", "nhl", "mlb"),
+            min_fetch_interval_s=0,
+            now_provider=lambda: datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
+        )
+        try:
+            await client.list_games()
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+
+    assert max_active_requests > 1
+
+
+def test_sofascore_client_keeps_successful_sports_when_one_sport_times_out() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/sport/tennis/" in str(request.url):
+            raise httpx.ReadTimeout("tennis timeout", request=request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "events": [
+                    {
+                        "id": 15935004,
+                        "status": {"description": "4th quarter", "type": "inprogress"},
+                        "tournament": {
+                            "name": "NBA",
+                            "slug": "nba",
+                            "uniqueTournament": {"name": "NBA", "slug": "nba"},
+                        },
+                        "homeTeam": {"name": "Orlando Magic", "shortName": "Magic", "nameCode": "ORL"},
+                        "awayTeam": {"name": "Detroit Pistons", "shortName": "Pistons", "nameCode": "DET"},
+                        "homeScore": {"current": 87},
+                        "awayScore": {"current": 85},
+                        "time": {"played": 2692, "periodLength": 720, "totalPeriodCount": 4},
+                    }
+                ]
+            },
+        )
+
+    async def run():
+        client = SofaScoreLiveClient(
+            client=httpx.AsyncClient(
+                base_url="https://www.sofascore.com",
+                transport=httpx.MockTransport(handler),
+            ),
+            sports=("basketball", "tennis"),
+            league_codes=("nba", "tennis"),
+            min_fetch_interval_s=0,
+            now_provider=lambda: datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
+        )
+        try:
+            return await client.list_games()
+        finally:
+            await client.aclose()
+
+    snapshot = asyncio.run(run())
+
+    assert len(snapshot.games) == 1
+    assert snapshot.games[0].league == "NBA"
+    assert snapshot.source_statuses[0].success is True
+    assert snapshot.source_statuses[0].health == SportsLiveSourceHealth.SUCCESS_WITH_LIVE_DATA
+    assert "tennis" in (snapshot.source_statuses[0].last_error or "")
 
 
 def test_sofascore_client_returns_rate_limited_status_on_cold_rate_limit() -> None:

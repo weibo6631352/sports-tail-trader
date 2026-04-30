@@ -650,6 +650,7 @@ class PolymarketOrderExecutor:
                 else str(request.price or request.new_price),
                 "amount_usdc": None if request.amount_usdc is None else str(request.amount_usdc),
                 "size_shares": None if request.size_shares is None else str(request.size_shares),
+                "post_only": request.post_only,
                 "new_price": None if request.new_price is None else str(request.new_price),
                 "timestamps": _serialize_timestamps(timestamps or request.timestamps),
                 "intent": _serialize_intent(intent),

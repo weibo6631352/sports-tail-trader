@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import TypeAlias
+from typing import Any, Mapping, TypeAlias
 
 
 class OrderSide(StrEnum):
@@ -64,6 +64,7 @@ class BuyOrderIntent:
     post_only: bool = False
     retry_count: int = 0
     allow_open_exit_overlap: bool = False
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def side(self) -> OrderSide:
@@ -90,6 +91,7 @@ class SellOrderIntent:
     idempotency_key: str | None = None
     post_only: bool = False
     retry_count: int = 0
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def side(self) -> OrderSide:

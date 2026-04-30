@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Callable, Literal, Mapping, Sequence, cast
 from uuid import uuid4
@@ -53,6 +54,21 @@ MarketFeeSortField = Literal[
     "taker_base_fee_bps",
 ]
 SortDirection = Literal["asc", "desc"]
+
+
+def _orderbook_has_no_quotes(snapshot: OrderbookSnapshot) -> bool:
+    """判断热态盘口是否只是空占位。
+
+    Market WS worker 会先为已跟踪 token 建立空快照；查询侧不能把这种快照当作
+    有效盘口，否则会遮蔽 REST 中已经存在的真实买卖盘。
+    """
+
+    return (
+        snapshot.best_bid is None
+        and snapshot.best_ask is None
+        and not snapshot.bids
+        and not snapshot.asks
+    )
 
 
 def _market_matches_fee_filters(
@@ -152,6 +168,25 @@ def _text_filter_matches(value: object, expected: str | None) -> bool:
     if expected is None or not expected.strip():
         return True
     return str(value or "").strip().lower() == expected.strip().lower()
+
+
+def _plan_block_reason(plan, metadata: Mapping[str, Any]) -> str:
+    """提取入场计划被资金、盘口或风控阻断后的最终可审计原因。"""
+
+    allocation = getattr(plan, "allocation", None)
+    if allocation is not None:
+        reason = str(allocation.release_reason or allocation.reason or "")
+        if reason:
+            return reason
+    return str(getattr(plan, "reason", "") or metadata.get("sports_tail_reason") or "")
+
+
+def _project_candidate_action(strategy_action: str, plan, metadata: Mapping[str, Any]) -> tuple[str, str]:
+    """把策略动作投影成候选展示的最终动作和原因。"""
+
+    if strategy_action == "auto_execute" and not bool(getattr(plan, "ready_to_trade", False)):
+        return "reject", _plan_block_reason(plan, metadata)
+    return strategy_action, str(metadata.get("sports_tail_reason") or getattr(plan, "reason", "") or "")
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,7 +467,7 @@ class AdminService:
 
         snapshot = self._market_ws_snapshot(resolved_token_id)
         source = "hot"
-        if snapshot is None:
+        if snapshot is None or _orderbook_has_no_quotes(snapshot):
             orderbook = await self._clob_client().get_orderbook(
                 resolved_token_id,
                 market_slug=resolved_market_slug,
@@ -797,6 +832,109 @@ class AdminService:
         page = self._slice_sequence(records, limit=limit, offset=offset)
         return page_payload(page, serializer=lambda record: record.as_payload())
 
+    async def list_sports_live_source_gaps(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        prefix: str | None = None,
+    ) -> dict[str, Any]:
+        """诊断已跟踪市场中缺少体育直播状态的覆盖缺口。
+
+        该接口只读取运行时 registry 和 metadata store，用于实盘观察直播源/
+        匹配覆盖率，不触发 discovery、订阅或交易判断。
+        """
+
+        registry = getattr(self.runtime, "registry", None)
+        store = self._entry_metadata_store()
+        if registry is None:
+            empty = page_payload(self._slice_sequence((), limit=limit, offset=offset), serializer=lambda item: item)
+            empty.update(
+                {
+                    "tracked_markets": 0,
+                    "live_state_markets": 0,
+                    "missing_live_state_markets": 0,
+                    "by_prefix": [],
+                }
+            )
+            return empty
+
+        all_markets = tuple(registry.snapshot().markets)
+        markets = _live_source_gap_scope_markets(self.runtime, all_markets)
+        scoped_condition_ids = {market.condition_id for market in markets}
+        live_state_records = (
+            ()
+            if store is None
+            else tuple(
+                record
+                for record in store.records()
+                if "sports_tail_game" in record.metadata and record.condition_id in scoped_condition_ids
+            )
+        )
+        now = datetime.now(timezone.utc)
+        missing_markets = []
+        normalized_prefix = None if prefix is None else prefix.strip().lower()
+        for market in markets:
+            record = None if store is None else store.find(
+                condition_id=market.condition_id,
+                market_slug=market.market_slug,
+                event_slug=market.event_slug,
+            )
+            if record is not None and "sports_tail_game" in record.metadata:
+                continue
+            market_prefix = _market_slug_prefix(market)
+            if normalized_prefix and market_prefix != normalized_prefix:
+                continue
+            missing_markets.append(market)
+
+        missing_markets = sorted(
+            missing_markets,
+            key=lambda market: (
+                _live_source_gap_urgency_rank(_live_source_gap_urgency(market, now=now)),
+                market.game_start_time or datetime.max.replace(tzinfo=timezone.utc),
+                market.market_slug or market.condition_id,
+            ),
+        )
+        by_prefix_counts: dict[str, int] = {}
+        by_urgency_counts: dict[str, int] = {}
+        for market in missing_markets:
+            market_prefix = _market_slug_prefix(market)
+            by_prefix_counts[market_prefix] = by_prefix_counts.get(market_prefix, 0) + 1
+            urgency = _live_source_gap_urgency(market, now=now)
+            by_urgency_counts[urgency] = by_urgency_counts.get(urgency, 0) + 1
+        by_prefix = [
+            {"prefix": item_prefix, "count": count}
+            for item_prefix, count in sorted(
+                by_prefix_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ]
+        by_urgency = [
+            {"urgency": urgency, "count": count}
+            for urgency, count in sorted(
+                by_urgency_counts.items(),
+                key=lambda item: (_live_source_gap_urgency_rank(item[0]), item[0]),
+            )
+        ]
+
+        page = self._slice_sequence(tuple(missing_markets), limit=limit, offset=offset)
+        payload = page_payload(
+            page,
+            serializer=lambda market: _live_source_gap_market_payload(market, now=now),
+        )
+        payload.update(
+            {
+                "tracked_markets": len(markets),
+                "total_tracked_markets": len(all_markets),
+                "live_state_markets": len(live_state_records),
+                "missing_live_state_markets": len(missing_markets),
+                "by_prefix": by_prefix,
+                "by_urgency": by_urgency,
+                "prefix": normalized_prefix,
+            }
+        )
+        return payload
+
     async def list_sports_tail_candidates(
         self,
         *,
@@ -1026,7 +1164,8 @@ class AdminService:
         metadata = dict(plan.metadata or {})
         sports_tail_game = metadata.get("sports_tail_game") if isinstance(metadata.get("sports_tail_game"), Mapping) else {}
         outcome = market.get_outcome_by_token_id(token_id)
-        action = str(metadata.get("sports_tail_action") or "")
+        strategy_action = str(metadata.get("sports_tail_action") or "")
+        action, reason = _project_candidate_action(strategy_action, plan, metadata)
         execution_permission = metadata.get("sports_execution_permission")
         return {
             "candidate_id": f"{plan.trace_id}:{market.condition_id}:{token_id}",
@@ -1044,8 +1183,9 @@ class AdminService:
                 and action == "manual_confirm"
                 and not bool(metadata.get("sports_tail_manual_confirmed"))
             ),
-            "reason": str(metadata.get("sports_tail_reason") or plan.reason or ""),
+            "reason": reason,
             "action": action,
+            "strategy_action": strategy_action,
             "execution_permission": execution_permission,
             "league": sports_tail_game.get("league") or metadata.get("sports_league"),
             "home_name": sports_tail_game.get("home_name"),
@@ -1282,6 +1422,95 @@ class AdminService:
         if len(matches) != 1:
             return None
         return matches[0]
+
+
+def _market_slug_prefix(market: Market) -> str:
+    """提取 market slug 的首段，用于直播源缺口聚合。"""
+
+    slug = (market.market_slug or market.event_slug or "").strip().lower()
+    if not slug:
+        return "unknown"
+    return slug.split("-", 1)[0] or "unknown"
+
+
+def _live_source_gap_scope_markets(runtime: Any, markets: Sequence[Market]) -> tuple[Market, ...]:
+    """返回适用于单场直播源覆盖诊断的市场集合。
+
+    直播比分源只适合直接匹配单场市场。系列赛、冠军、奖项、转会/下家等长期
+    市场也属于体育策略目标，但需要专用数据源和定价模型；这里不把它们计入
+    live-source gap，避免把诊断噪声误当成单场直播源缺口。
+    """
+
+    hooks = getattr(getattr(runtime, "extension", None), "hooks", None)
+    if hooks is None:
+        return tuple(markets)
+    scoped: list[Market] = []
+    for market in markets:
+        try:
+            decision = hooks.select_market(market)
+        except Exception:
+            continue
+        if decision.selected:
+            scoped.append(market)
+    return tuple(scoped)
+
+
+def _live_source_gap_urgency(market: Market, *, now: datetime) -> str:
+    """按开赛时间给直播源缺口分配实盘排查优先级。"""
+
+    start_time = _ensure_utc(market.game_start_time)
+    if start_time is None:
+        return "unknown_time"
+    if start_time <= now:
+        return "started_or_past_due"
+    if start_time <= now + timedelta(hours=24):
+        return "starts_within_24h"
+    return "future_schedule"
+
+
+def _live_source_gap_urgency_rank(urgency: str) -> int:
+    """返回直播源缺口优先级排序权重。"""
+
+    ranks = {
+        "started_or_past_due": 0,
+        "starts_within_24h": 1,
+        "future_schedule": 2,
+        "unknown_time": 3,
+    }
+    return ranks.get(urgency, 99)
+
+
+def _ensure_utc(value: datetime | None) -> datetime | None:
+    """把可选时间规范成 UTC aware datetime。"""
+
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _live_source_gap_market_payload(market: Market, *, now: datetime) -> dict[str, Any]:
+    """把缺少直播状态的 market 转成诊断样本。"""
+
+    start_time = _ensure_utc(market.game_start_time)
+    end_date = _ensure_utc(market.end_date)
+    return {
+        "condition_id": market.condition_id,
+        "market_slug": market.market_slug,
+        "event_slug": market.event_slug,
+        "slug_prefix": _market_slug_prefix(market),
+        "gap_urgency": _live_source_gap_urgency(market, now=now),
+        "game_start_time": None if start_time is None else start_time.isoformat(),
+        "end_date": None if end_date is None else end_date.isoformat(),
+        "market_question": market.market_question,
+        "event_title": market.event_title,
+        "category": market.category,
+        "tags": tuple(market.tags),
+        "trading_status": market.trading_status.value,
+        "outcome_count": len(market.outcomes),
+    }
+
 
 @dataclass(frozen=True, slots=True)
 class _RepositoryGroup:

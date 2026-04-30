@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 
 from polymarket_trader.domain.market import Market, MarketOutcome
+from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
+from polymarket_trader.domain.position import Position
+from polymarket_trader.runtime.account_state import AccountStateStore
+from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.runtime.ws_loops import (
     market_ws_subscription_token_ids,
@@ -39,22 +46,115 @@ def test_user_ws_status_can_return_lightweight_summary() -> None:
     assert status.subscriptions == ()
 
 
-def test_ws_subscription_helpers_keep_full_registry_scope() -> None:
+def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None:
+    now = datetime.now(timezone.utc)
     registry = MarketRegistry()
     registry.upsert(_market(index=1))
     registry.upsert(_market(index=2))
-    runtime = SimpleNamespace(registry=registry)
+    registry.upsert(_market(index=3))
+    registry.upsert(_market(index=4, end_date=now + timedelta(hours=2)))
+    registry.upsert(_market(index=5, end_date=now + timedelta(hours=2)))
+    registry.upsert(_market(index=6))
+    metadata_store = EntryMetadataStore()
+    metadata_store.upsert(
+        condition_id="condition-1",
+        market_slug="nba-game-1-moneyline",
+        metadata={"sports_tail_game": {"status": "live"}},
+        source="test",
+    )
+    metadata_store.upsert(
+        condition_id="condition-2",
+        market_slug="nba-game-2-moneyline",
+        metadata={"sports_tail_game": {"status": "scheduled"}},
+        source="test",
+    )
+    metadata_store.upsert(
+        condition_id="condition-4",
+        market_slug="nba-game-4-moneyline",
+        metadata={"sports_tail_game": {"status": "live"}},
+        source="test",
+    )
+    metadata_store.upsert(
+        condition_id="condition-5",
+        market_slug="nba-game-5-moneyline",
+        metadata={"sports_tail_game": {"status": "ended"}},
+        source="test",
+    )
+    metadata_store.upsert(
+        condition_id="condition-6",
+        market_slug="nba-game-6-moneyline",
+        metadata={
+            "sports_tail_game": {"status": "ended"},
+            "sports_tail_entry_signal_allowed": False,
+            "sports_tail_entry_signal_reason": "series_market_not_auto_tradable",
+        },
+        source="test",
+    )
+    account_store = AccountStateStore()
+    account_store.replace_positions(
+        (
+            Position(
+                condition_id="condition-3",
+                token_id="token-3-yes",
+                shares=Decimal("5"),
+                cost_usdc=Decimal("4"),
+            ),
+        )
+    )
+    runtime = SimpleNamespace(
+        registry=registry,
+        entry_metadata_store=metadata_store,
+        account_state_store=account_store,
+    )
 
     assert market_ws_subscription_token_ids(runtime) == (
         "token-1-no",
         "token-1-yes",
-        "token-2-no",
-        "token-2-yes",
+        "token-3-no",
+        "token-3-yes",
+        "token-5-no",
+        "token-5-yes",
     )
-    assert user_ws_subscription_condition_ids(runtime) == ("condition-1", "condition-2")
+    assert user_ws_subscription_condition_ids(runtime) == (
+        "condition-1",
+        "condition-2",
+        "condition-3",
+        "condition-4",
+        "condition-5",
+        "condition-6",
+    )
 
 
-def _market(index: int = 1) -> Market:
+def test_market_ws_worker_prefetches_rest_snapshot_for_empty_tracked_token() -> None:
+    async def run() -> tuple[int, OrderbookSnapshot | None]:
+        async def load_snapshot(token_id: str) -> OrderbookSnapshot:
+            return OrderbookSnapshot(
+                token_id=token_id,
+                condition_id="condition-1",
+                market_slug="nba-game-1-moneyline",
+                best_bid=Decimal("0.52"),
+                best_ask=Decimal("0.53"),
+                best_bid_size=Decimal("100"),
+                best_ask_size=Decimal("200"),
+                bids=(PriceLevel(price=Decimal("0.52"), size=Decimal("100")),),
+                asks=(PriceLevel(price=Decimal("0.53"), size=Decimal("200")),),
+                received_at=datetime.now(timezone.utc),
+            )
+
+        worker = MarketWsWorker(rest_snapshot_loader=load_snapshot)
+        worker.track_market(_market())
+        refreshed = await worker.refresh_rest_snapshots(("token-1-yes",))
+        return refreshed, worker.snapshot("token-1-yes")
+
+    refreshed, snapshot = asyncio.run(run())
+
+    assert refreshed == 1
+    assert snapshot is not None
+    assert snapshot.best_bid == Decimal("0.52")
+    assert snapshot.best_ask == Decimal("0.53")
+
+
+def _market(index: int = 1, *, end_date: datetime | None = None) -> Market:
     return Market(
         condition_id=f"condition-{index}",
         market_slug=f"nba-game-{index}-moneyline",
@@ -62,4 +162,5 @@ def _market(index: int = 1) -> Market:
             MarketOutcome(token_id=f"token-{index}-yes", outcome="Yes"),
             MarketOutcome(token_id=f"token-{index}-no", outcome="No"),
         ),
+        end_date=end_date,
     )

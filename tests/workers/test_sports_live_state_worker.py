@@ -42,6 +42,76 @@ def test_sports_live_state_worker_writes_metadata_and_entry_signals() -> None:
     assert {first_event.token_id, second_event.token_id} == {"home", "away"}
 
 
+def test_sports_live_state_worker_tracks_entry_signal_market_for_market_ws() -> None:
+    async def run() -> None:
+        registry = MarketRegistry()
+        market = _market()
+        registry.upsert(market)
+        tracker = _MarketTracker()
+        worker = SportsLiveStateWorker(
+            snapshot_provider=lambda: _snapshot(_game()),
+            match_live_state=sports_live_metadata_match,
+            registry=registry,
+            entry_metadata_store=EntryMetadataStore(),
+            market_tracker=tracker,
+            enabled=True,
+            source="espn",
+            leagues=("nba",),
+            publish_entry_signals=False,
+        )
+
+        sync_result = await worker.sync_once()
+
+        assert sync_result is not None
+        assert sync_result.records_written == 1
+        assert tracker.tracked_condition_ids == ["moneyline-condition"]
+
+    asyncio.run(run())
+
+
+def test_sports_live_state_worker_does_not_track_blocked_entry_signal_market() -> None:
+    async def run() -> None:
+        registry = MarketRegistry()
+        registry.upsert(_market())
+        tracker = _MarketTracker()
+        worker = SportsLiveStateWorker(
+            snapshot_provider=lambda: _snapshot(_game()),
+            match_live_state=lambda market, games: (
+                market,
+                games[0],
+                {
+                    "sports_tail_game": {
+                        "league": "NBA",
+                        "home_name": "Knicks",
+                        "away_name": "Celtics",
+                        "home_score": 102,
+                        "away_score": 94,
+                        "period": "Q4",
+                        "seconds_remaining": 90,
+                        "status": "live",
+                    },
+                    "sports_tail_entry_signal_allowed": False,
+                    "sports_tail_entry_signal_reason": "market_end_too_far",
+                },
+            ),
+            registry=registry,
+            entry_metadata_store=EntryMetadataStore(),
+            market_tracker=tracker,
+            enabled=True,
+            source="espn",
+            leagues=("nba",),
+            publish_entry_signals=False,
+        )
+
+        sync_result = await worker.sync_once()
+
+        assert sync_result is not None
+        assert sync_result.records_written == 1
+        assert tracker.tracked_condition_ids == []
+
+    asyncio.run(run())
+
+
 def test_sports_live_state_worker_keeps_unmatched_markets_auditable() -> None:
     async def run() -> None:
         registry = MarketRegistry()
@@ -78,6 +148,52 @@ def test_sports_live_state_worker_keeps_unmatched_markets_auditable() -> None:
     asyncio.run(run())
 
 
+def test_sports_live_state_worker_writes_metadata_without_blocked_entry_signals() -> None:
+    async def run() -> None:
+        registry = MarketRegistry()
+        registry.upsert(_market())
+        store = EntryMetadataStore()
+        event_bus = EventBus(trading_capacity=10, maintenance_capacity=10, persistence_capacity=10)
+        worker = SportsLiveStateWorker(
+            snapshot_provider=lambda: _snapshot(_game()),
+            match_live_state=lambda market, games: (
+                market,
+                games[0],
+                {
+                    "sports_tail_game": {
+                        "league": "NBA",
+                        "home_name": "Knicks",
+                        "away_name": "Celtics",
+                        "home_score": 102,
+                        "away_score": 94,
+                        "period": "Q4",
+                        "seconds_remaining": 90,
+                        "status": "live",
+                    },
+                    "sports_tail_entry_signal_allowed": False,
+                    "sports_tail_entry_signal_reason": "market_end_too_far",
+                },
+            ),
+            registry=registry,
+            entry_metadata_store=store,
+            event_bus=event_bus,
+            enabled=True,
+            source="espn",
+            leagues=("nba",),
+            publish_entry_signals=True,
+        )
+
+        sync_result = await worker.sync_once()
+
+        assert sync_result is not None
+        assert sync_result.records_written == 1
+        assert sync_result.entry_signals_published == 0
+        assert event_bus.trading_queue_depth() == 0
+        assert store.metadata_for(condition_id="moneyline-condition")["sports_tail_entry_signal_allowed"] is False
+
+    asyncio.run(run())
+
+
 def test_sports_live_state_worker_exposes_source_statuses() -> None:
     async def run() -> None:
         registry = MarketRegistry()
@@ -107,6 +223,40 @@ def test_sports_live_state_worker_exposes_source_statuses() -> None:
         assert sync_result.source_statuses[0].source == "espn"
         assert status.source_statuses[1].source == "nba"
         assert status.source_statuses[1].last_error == "timeout"
+
+    asyncio.run(run())
+
+
+def test_sports_live_state_worker_yields_during_bulk_market_matching() -> None:
+    async def run() -> None:
+        registry = MarketRegistry()
+        for index in range(25):
+            registry.upsert(_market(condition_id=f"condition-{index}", slug=f"nba-nyk-bos-{index}"))
+        sync_done = False
+        yielded_before_sync_done = False
+
+        async def observer() -> None:
+            nonlocal yielded_before_sync_done
+            await asyncio.sleep(0)
+            yielded_before_sync_done = not sync_done
+
+        worker = SportsLiveStateWorker(
+            snapshot_provider=lambda: _snapshot(_game()),
+            match_live_state=lambda _market, _games: None,
+            registry=registry,
+            entry_metadata_store=EntryMetadataStore(),
+            enabled=True,
+            source="espn",
+            leagues=("nba",),
+            publish_entry_signals=False,
+        )
+
+        observer_task = asyncio.create_task(observer())
+        await worker.sync_once()
+        sync_done = True
+        await observer_task
+
+        assert yielded_before_sync_done is True
 
     asyncio.run(run())
 
@@ -188,10 +338,14 @@ def _game(
     )
 
 
-def _market() -> Market:
+def _market(
+    *,
+    condition_id: str = "moneyline-condition",
+    slug: str = "nba-nyk-bos-moneyline",
+) -> Market:
     return Market(
-        condition_id="moneyline-condition",
-        market_slug="nba-nyk-bos-moneyline",
+        condition_id=condition_id,
+        market_slug=slug,
         market_question="New York Knicks vs Boston Celtics moneyline",
         event_title="New York Knicks vs Boston Celtics",
         event_slug="new-york-knicks-vs-boston-celtics",
@@ -203,3 +357,11 @@ def _market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
+
+
+class _MarketTracker:
+    def __init__(self) -> None:
+        self.tracked_condition_ids: list[str] = []
+
+    def track_market(self, market: Market) -> None:
+        self.tracked_condition_ids.append(market.condition_id)

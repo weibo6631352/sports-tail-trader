@@ -49,8 +49,10 @@ def inactive_market_reason(
 
     if market.trading_status in {TradingStatus.CLOSED, TradingStatus.RESOLVED}:
         return f"market_{market.trading_status.value}"
-    if market.trading_status == TradingStatus.PAUSED and market.reject_reason == "market_out_of_universe":
-        return "market_out_of_universe"
+    if market.trading_status == TradingStatus.PAUSED and market.reject_reason:
+        # 无敞口的 PAUSED market 只保留审计拒绝原因，不再占用运行时跟踪集合。
+        # 后续 discovery 若重新变成可交易，会按目标策略重新纳入 registry。
+        return market.reject_reason
     if market_end_date_elapsed(market, now=now):
         return "market_end_date_elapsed"
     account_pause = account_snapshot.pause_for_market(market.condition_id)

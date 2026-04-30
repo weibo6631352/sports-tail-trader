@@ -7,7 +7,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from decimal import Decimal
+from datetime import datetime, timezone
+from decimal import Decimal, ROUND_FLOOR
 import re
 from typing import Any, Mapping
 
@@ -18,12 +19,12 @@ from polymarket_trader.domain.allocation import (
     current_exposure_usdc,
 )
 from polymarket_trader.domain.market import TradingStatus
-from polymarket_trader.domain.order import OrderSide
+from polymarket_trader.domain.order import OrderSide, OrderType
 from polymarket_trader.extension_api import EntryCandidate, EntrySizing, ExtensionContext, ExtensionDecision
 
 from strategies.current.allocation import AllocationMarketSnapshot, equal_weight_plan
 from strategies.current.config import CurrentStrategyConfig, sports_tail_policy_from_config
-from strategies.current.exit_plan import build_exit_plan_metadata, exit_price_for_context
+from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata, exit_price_for_context
 from strategies.current.outcomes import (
     SportsTokenTarget,
     describe_sports_market,
@@ -33,6 +34,7 @@ from strategies.current.outcomes import (
 from strategies.current.risk import check_sports_entry_risk
 from strategies.current.sports_tail import (
     LiveGameState,
+    LiveGameStatus,
     SportsMarketSnapshot,
     SportsMarketSide,
     SportsTailEvaluation,
@@ -103,10 +105,21 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
     skipped_allocations: dict[tuple[str, str], Allocation] = {}
     sizing_metadata: dict[str, object] = {}
     for snapshot in candidate_snapshots:
-        price_cap = _sports_tail_price_cap(config, snapshot.market, snapshot.token_id)
+        price_cap = _sports_tail_price_cap(
+            config,
+            snapshot.market,
+            snapshot.token_id,
+            locked_outcome_signal=_sports_tail_locked_outcome_signal(context),
+        )
         buyable_liquidity_usdc = _ask_depth_notional(
             snapshot.orderbook,
             price_cap=price_cap,
+        )
+        buyable_liquidity_usdc = _maker_bid_liquidity_floor(
+            context,
+            snapshot,
+            price_cap=price_cap,
+            buyable_liquidity_usdc=buyable_liquidity_usdc,
         )
         scale_in_allowed, scale_in_metadata, scale_in_budget_cap = _scale_in_allocation_gate(
             config,
@@ -121,6 +134,7 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
         )
         skip_reason = _allocation_skip_reason(
             config,
+            context,
             snapshot_for_allocation,
             buyable_liquidity_usdc=buyable_liquidity_usdc,
         )
@@ -213,10 +227,18 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         sports_metadata = {}
 
     best_ask = context.orderbook.best_ask
-    if best_ask is None:
+    missing_ask_maker_bid = _sports_tail_missing_ask_locked_maker_bid(context, sports_metadata, allowed_price)
+    if best_ask is None and not missing_ask_maker_bid:
         return ExtensionDecision.skip(reason="missing_best_ask")
-    if best_ask > allowed_price:
+    maker_bid_metadata = _sports_tail_locked_maker_bid_metadata(
+        context,
+        sports_metadata,
+        best_ask=best_ask,
+        allowed_price=allowed_price,
+    )
+    if best_ask is not None and best_ask > allowed_price and not maker_bid_metadata:
         return ExtensionDecision.skip(reason="price_above_entry_max")
+    entry_price = allowed_price if maker_bid_metadata or missing_ask_maker_bid else best_ask
 
     amount_usdc = context.amount_usdc or _metadata_decimal(context, "amount_usdc", "buy_budget_usdc")
     if amount_usdc is None or amount_usdc <= Decimal("0"):
@@ -224,6 +246,18 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
 
     token_id = context.token_id or context.orderbook.token_id
     decision_metadata = dict(sports_metadata)
+    decision_metadata.update(missing_ask_maker_bid)
+    decision_metadata.update(maker_bid_metadata)
+    efficiency_allowed, efficiency_reason, efficiency_metadata = _sports_capital_efficiency_gate(
+        config,
+        context,
+        entry_price=entry_price,
+        amount_usdc=amount_usdc,
+        sports_metadata=decision_metadata,
+    )
+    decision_metadata.update(efficiency_metadata)
+    if not efficiency_allowed:
+        return ExtensionDecision.skip(reason=efficiency_reason, metadata=decision_metadata)
     decision_metadata.update(
         build_exit_plan_metadata(
             config,
@@ -232,16 +266,186 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
             source_reason=str(sports_metadata.get("sports_tail_reason") or "strategy_entry"),
         )
     )
+    _apply_profit_take_exit_plan(decision_metadata)
     decision_reason = "strategy_scale_in" if sports_metadata.get("sports_tail_opportunity_type") == (
         "scale_in_advantage"
     ) else "strategy_entry"
     return ExtensionDecision.buy(
         reason=decision_reason,
         token_id=token_id,
-        price=best_ask,
+        price=entry_price,
         amount_usdc=amount_usdc,
+        order_type=OrderType.GTC if maker_bid_metadata or missing_ask_maker_bid else None,
+        post_only=bool(maker_bid_metadata or missing_ask_maker_bid),
         market_slug=context.market.market_slug,
         metadata=decision_metadata,
+    )
+
+
+def _sports_capital_efficiency_gate(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    *,
+    entry_price: Decimal,
+    amount_usdc: Decimal,
+    sports_metadata: Mapping[str, object],
+) -> tuple[bool, str, dict[str, object]]:
+    """评估体育扫尾入场的预期利润和资金占用效率。
+
+    结算收益足够时允许持有到权威结算，同时如果一档 profit-take SELL 已有
+    足够毛利润，也标记买入成交后挂单释放资金；结算效率不足时，只允许这些
+    能挂出达标 profit-take SELL 的订单继续进入主链路。
+    """
+
+    if "sports_tail_reason" not in sports_metadata:
+        return True, "", {}
+    if entry_price <= Decimal("0") or entry_price >= Decimal("1"):
+        return False, "profit_take_not_viable", {
+            "sports_exit_mode": "blocked",
+            "sports_capital_efficiency_reason": "entry_price_not_profitable",
+        }
+
+    shares = amount_usdc / entry_price
+    expected_settlement_profit = shares * (Decimal("1") - entry_price)
+    hold_minutes = max(int(config.sports_settlement_hold_minutes), 1)
+    expected_profit_per_hour = expected_settlement_profit * Decimal("60") / Decimal(hold_minutes)
+    metadata: dict[str, object] = {
+        "sports_expected_settlement_profit_usdc": _decimal_metadata_text(expected_settlement_profit),
+        "sports_expected_settlement_profit_per_hour_usdc": _decimal_metadata_text(
+            expected_profit_per_hour
+        ),
+        "sports_estimated_settlement_hold_minutes": hold_minutes,
+        "sports_min_expected_profit_usdc": str(config.sports_min_expected_profit_usdc),
+        "sports_min_expected_profit_per_hour_usdc": str(config.sports_min_expected_profit_per_hour_usdc),
+    }
+    settlement_efficient = (
+        expected_settlement_profit >= config.sports_min_expected_profit_usdc
+        and expected_profit_per_hour >= config.sports_min_expected_profit_per_hour_usdc
+    )
+    if settlement_efficient:
+        metadata["sports_exit_mode"] = "settlement"
+        profit_take_metadata = _profit_take_metadata(
+            config,
+            context,
+            entry_price=entry_price,
+            shares=shares,
+        )
+        if profit_take_metadata is not None:
+            metadata.update(profit_take_metadata)
+            metadata["sports_profit_take_overlay_enabled"] = True
+        return True, "", metadata
+
+    profit_take_metadata = _profit_take_metadata(
+        config,
+        context,
+        entry_price=entry_price,
+        shares=shares,
+    )
+    if profit_take_metadata is None:
+        metadata.update(
+            {
+                "sports_exit_mode": "blocked",
+                "sports_capital_efficiency_reason": "profit_take_target_above_one",
+            }
+        )
+        return False, "profit_take_not_viable", metadata
+
+    metadata.update(profit_take_metadata)
+    metadata["sports_exit_mode"] = "profit_take"
+    metadata["sports_capital_efficiency_reason"] = "settlement_efficiency_below_min"
+    profit_take_profit = Decimal(str(profit_take_metadata["sports_profit_take_expected_profit_usdc"]))
+    profit_take_profit_per_hour = Decimal(
+        str(profit_take_metadata["sports_profit_take_expected_profit_per_hour_usdc"])
+    )
+    if profit_take_profit < config.sports_profit_take_min_profit_usdc and (
+        profit_take_profit_per_hour < config.sports_min_expected_profit_per_hour_usdc
+    ):
+        return False, "profit_take_not_viable", metadata
+    if profit_take_profit < config.sports_profit_take_min_profit_usdc:
+        metadata["sports_capital_efficiency_reason"] = "profit_take_hourly_efficiency_high"
+    return True, "", metadata
+
+
+def _profit_take_metadata(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    *,
+    entry_price: Decimal,
+    shares: Decimal,
+) -> dict[str, object] | None:
+    """计算一档 profit-take SELL 的审计 metadata。"""
+
+    target_price = _profit_take_target_price(context, entry_price)
+    if target_price is None or target_price > Decimal("1"):
+        return None
+    expected_profit_take_profit = shares * (target_price - entry_price)
+    hold_minutes = max(int(config.sports_profit_take_hold_minutes), 1)
+    expected_profit_take_profit_per_hour = expected_profit_take_profit * Decimal("60") / Decimal(
+        hold_minutes
+    )
+    return {
+        "sports_profit_take_target_price": str(target_price),
+        "sports_profit_take_expected_profit_usdc": _decimal_metadata_text(
+            expected_profit_take_profit
+        ),
+        "sports_profit_take_expected_profit_per_hour_usdc": _decimal_metadata_text(
+            expected_profit_take_profit_per_hour
+        ),
+        "sports_profit_take_estimated_hold_minutes": hold_minutes,
+        "sports_profit_take_min_profit_usdc": str(config.sports_profit_take_min_profit_usdc),
+    }
+
+
+def _profit_take_target_price(context: ExtensionContext, entry_price: Decimal) -> Decimal | None:
+    """返回买入价上方一档 tick 的 profit-take 目标价。"""
+
+    tick_size = _effective_tick_size(context)
+    if tick_size is None or tick_size <= Decimal("0"):
+        tick_size = Decimal("0.01")
+    units = (entry_price / tick_size).to_integral_value(rounding=ROUND_FLOOR)
+    target = (units + 1) * tick_size
+    if target <= entry_price:
+        target += tick_size
+    return cap_price_to_clob_limit(target, tick_size=tick_size)
+
+
+def _effective_tick_size(context: ExtensionContext) -> Decimal | None:
+    """读取当前 market 或 orderbook 的最小价格跳动。"""
+
+    if context.orderbook is not None and context.orderbook.tick_size is not None:
+        return context.orderbook.tick_size
+    if context.market is not None:
+        return context.market.tick_size
+    return None
+
+
+def _decimal_metadata_text(value: Decimal) -> str:
+    """把审计金额压到稳定小数位，避免无限循环小数撑大 metadata。"""
+
+    return str(value.quantize(Decimal("0.000000000000000001")))
+
+
+def _apply_profit_take_exit_plan(metadata: dict[str, object]) -> None:
+    """把需要主动止盈的订单退出计划改写为买入后挂 profit-take SELL。"""
+
+    if not _has_profit_take_follow_up(metadata):
+        return
+    target_price = metadata.get("sports_profit_take_target_price")
+    metadata["sports_exit_target_price"] = target_price
+    plan = metadata.get("sports_exit_plan")
+    if not isinstance(plan, dict):
+        return
+    plan["target_exit_price"] = target_price
+    plan["primary_action"] = "place_profit_take_gtc_sell_after_buy_fill"
+    plan["settlement_rule"] = "keep_profit_take_order_until_fill_or_authoritative_resolution"
+    plan["recovery_rule"] = "cancel_open_entry_orders_and_cover_profit_take_positions"
+
+
+def _has_profit_take_follow_up(metadata: Mapping[str, object]) -> bool:
+    """判断 BUY 成交后是否需要立刻挂一档 profit-take SELL。"""
+
+    return metadata.get("sports_exit_mode") == "profit_take" or bool(
+        metadata.get("sports_profit_take_overlay_enabled")
     )
 
 
@@ -414,6 +618,7 @@ def _entry_candidate_to_snapshot(candidate: EntryCandidate) -> AllocationMarketS
 
 def _allocation_skip_reason(
     config: CurrentStrategyConfig,
+    context: ExtensionContext,
     snapshot: AllocationMarketSnapshot,
     *,
     buyable_liquidity_usdc: Decimal,
@@ -436,6 +641,9 @@ def _allocation_skip_reason(
         return universe_decision.reason or "market_out_of_universe"
     if not is_primary_token(snapshot.market, snapshot.token_id):
         return "unsupported_outcome"
+    sports_pre_orderbook_reason = _sports_tail_pre_orderbook_skip_reason(config, context, snapshot)
+    if sports_pre_orderbook_reason:
+        return sports_pre_orderbook_reason
     if not snapshot.tradable:
         return "market_not_tradable"
     if not snapshot.market_active:
@@ -456,22 +664,126 @@ def _allocation_skip_reason(
     best_ask = snapshot.best_ask if snapshot.best_ask is not None else (
         snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
     )
-    if best_ask is None:
+    locked_outcome_signal = _sports_tail_locked_outcome_signal(context)
+    price_cap = _sports_tail_price_cap(
+        config,
+        snapshot.market,
+        snapshot.token_id,
+        locked_outcome_signal=locked_outcome_signal,
+    )
+    locked_maker_candidate = (
+        _sports_tail_maker_bid_signal_from_metadata(context)
+        and _is_tennis_set_winner_market(snapshot.market)
+        and (
+            (best_ask is None and locked_outcome_signal)
+            or (best_ask is not None and best_ask <= Decimal("1") and best_ask > price_cap)
+        )
+    )
+    if best_ask is None and not locked_maker_candidate:
         return "missing_best_ask"
-    price_cap = _sports_tail_price_cap(config, snapshot.market, snapshot.token_id)
-    if best_ask > price_cap:
+    if best_ask is not None and best_ask > price_cap and not locked_maker_candidate:
         return "price_above_entry_max"
 
     spread = snapshot.spread if snapshot.spread is not None else (
         snapshot.orderbook.spread if snapshot.orderbook is not None else None
     )
-    if config.max_spread is not None and spread is not None and spread > config.max_spread:
+    if (
+        config.max_spread is not None
+        and spread is not None
+        and spread > config.max_spread
+        and not locked_outcome_signal
+    ):
         return "spread_above_max"
 
-    if buyable_liquidity_usdc < config.min_liquidity_usdc:
+    if buyable_liquidity_usdc < config.min_liquidity_usdc and not locked_maker_candidate:
         return "liquidity_below_min"
 
     return ""
+
+
+def _sports_tail_pre_orderbook_skip_reason(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    snapshot: AllocationMarketSnapshot,
+) -> str:
+    """执行不依赖盘口 ask 的体育扫尾粗筛。
+
+    远离封盘的 live 市场不应先落成 ``missing_best_ask``，否则候选页会把真正的
+    策略拒绝原因隐藏起来。已结束未封盘机会和缺失 end_date 的真实 live 状态继续
+    交给后续策略门禁判断。
+    """
+
+    descriptor = describe_sports_market(snapshot.market)
+    if not descriptor.accepted or descriptor.market_type is None:
+        return ""
+    if descriptor.market_family.value != "single_game":
+        return ""
+    game = live_game_state_from_metadata(context.metadata)
+    if game is None or game.status == LiveGameStatus.ENDED:
+        return ""
+    if _market_end_too_far_for_strategy(config, snapshot.market.end_date, now=context.now) and (
+        not _sports_tail_can_bypass_market_end_window(config, context, snapshot)
+    ):
+        return "market_end_too_far"
+    return ""
+
+
+def _sports_tail_can_bypass_market_end_window(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    snapshot: AllocationMarketSnapshot,
+) -> bool:
+    """用策略评估判断当前候选是否属于已锁定结果的远期 endDate 豁免。"""
+
+    descriptor = describe_sports_market(snapshot.market)
+    if not descriptor.accepted or descriptor.market_type is None:
+        return False
+    game = live_game_state_from_metadata(context.metadata)
+    target, _target_reason = _sports_target_for_live_game(
+        snapshot.market,
+        snapshot.token_id,
+        metadata=context.metadata,
+        game=game,
+    )
+    if game is None or target is None:
+        return False
+    policy = sports_tail_policy_from_config(config)
+    evaluation = evaluate_tail_opportunity(
+        game,
+        SportsMarketSnapshot(
+            market_type=descriptor.market_type,
+            side=target.side,
+            token_id=target.token_id,
+            line=descriptor.line,
+            best_ask=Decimal("0"),
+            buyable_liquidity_usdc=max(policy.min_liquidity_usdc, Decimal("1")),
+            market_family=descriptor.market_family,
+            market_slug=snapshot.market_slug,
+            market_end_date=snapshot.market.end_date,
+        ),
+        policy=policy,
+        now=context.now,
+    )
+    return evaluation.reason != "market_end_too_far"
+
+
+def _market_end_too_far_for_strategy(
+    config: CurrentStrategyConfig,
+    market_end_date: datetime | None,
+    *,
+    now: datetime | None,
+) -> bool:
+    """按策略配置判断 market 封盘时间是否仍超出扫尾窗口。"""
+
+    if market_end_date is None or config.sports_market_end_horizon_seconds <= 0:
+        return False
+    current_time = now or datetime.now(timezone.utc)
+    market_end = market_end_date
+    if market_end.tzinfo is None:
+        market_end = market_end.replace(tzinfo=timezone.utc)
+    return (market_end.astimezone(timezone.utc) - current_time.astimezone(timezone.utc)).total_seconds() > (
+        config.sports_market_end_horizon_seconds
+    )
 
 
 def _has_open_order(snapshot: AllocationMarketSnapshot, side: OrderSide) -> bool:
@@ -528,6 +840,7 @@ def _sports_tail_entry_gate(
         )
 
     policy = sports_tail_policy_from_config(config)
+    locked_outcome_signal = _sports_tail_locked_outcome_signal(context)
     market_snapshot = SportsMarketSnapshot(
         market_type=descriptor.market_type,
         side=target.side,
@@ -536,10 +849,16 @@ def _sports_tail_entry_gate(
         best_ask=context.orderbook.best_ask,
         buyable_liquidity_usdc=_ask_depth_notional(
             context.orderbook,
-            price_cap=_sports_tail_price_cap(config, context.market, token_id),
+            price_cap=_sports_tail_price_cap(
+                config,
+                context.market,
+                token_id,
+                locked_outcome_signal=locked_outcome_signal,
+            ),
         ),
         market_family=descriptor.market_family,
         market_slug=context.market.market_slug,
+        market_end_date=context.market.end_date,
     )
     evaluation = evaluate_tail_opportunity(
         game,
@@ -570,21 +889,49 @@ def _sports_tail_entry_gate(
     if not risk_decision.passed:
         return (
             ExtensionDecision.skip(reason=risk_decision.reason, metadata=metadata),
-            _sports_tail_price_cap(config, context.market, token_id),
+            _sports_tail_price_cap(
+                config,
+                context.market,
+                token_id,
+                locked_outcome_signal=locked_outcome_signal,
+            ),
             metadata,
         )
     if evaluation.action == TailAction.MANUAL_CONFIRM and _sports_tail_manual_confirmed(context.metadata):
-        return None, _sports_tail_price_cap(config, context.market, token_id), metadata
+        return (
+            None,
+            _sports_tail_price_cap(
+                config,
+                context.market,
+                token_id,
+                locked_outcome_signal=locked_outcome_signal,
+            ),
+            metadata,
+        )
     if evaluation.action != TailAction.AUTO_EXECUTE:
         return (
             ExtensionDecision.skip(
                 reason=f"sports_tail_{evaluation.action.value}",
                 metadata=metadata,
             ),
-            _sports_tail_price_cap(config, context.market, token_id),
+            _sports_tail_price_cap(
+                config,
+                context.market,
+                token_id,
+                locked_outcome_signal=locked_outcome_signal,
+            ),
             metadata,
         )
-    return None, _sports_tail_price_cap(config, context.market, token_id), metadata
+    return (
+        None,
+        _sports_tail_price_cap(
+            config,
+            context.market,
+            token_id,
+            locked_outcome_signal=locked_outcome_signal,
+        ),
+        metadata,
+    )
 
 
 def _scale_in_entry_gate(
@@ -653,6 +1000,7 @@ def _sports_tail_allocation_gate(
             buyable_liquidity_usdc=buyable_liquidity_usdc,
             market_family=descriptor.market_family,
             market_slug=snapshot.market_slug,
+            market_end_date=snapshot.market.end_date,
         ),
         policy=policy,
         now=context.now,
@@ -716,6 +1064,7 @@ def _scale_in_allocation_gate(
             buyable_liquidity_usdc=buyable_liquidity_usdc,
             market_family=descriptor.market_family,
             market_slug=snapshot.market_slug,
+            market_end_date=snapshot.market.end_date,
         ),
         policy=sports_tail_policy_from_config(config),
         now=context.now,
@@ -761,6 +1110,8 @@ def _sports_market_skip_metadata(
         metadata["market_type"] = descriptor.market_type.value
     if descriptor.line is not None:
         metadata["line"] = str(descriptor.line)
+    if snapshot.market.end_date is not None:
+        metadata["market_end_date"] = snapshot.market.end_date.isoformat()
     if snapshot.best_ask is not None:
         metadata["best_ask"] = str(snapshot.best_ask)
     return metadata
@@ -1043,12 +1394,16 @@ def _sports_tail_price_cap(
     config: CurrentStrategyConfig,
     market,
     token_id: str | None,
+    *,
+    locked_outcome_signal: bool = False,
 ) -> Decimal:
     descriptor = describe_sports_market(market)
     if descriptor.market_type is None:
         return config.entry_no_price_max
     if token_id is not None and target_for_token(market, token_id) is None:
         return config.entry_no_price_max
+    if locked_outcome_signal and descriptor.market_type.value == "moneyline" and _is_tennis_set_winner_market(market):
+        return config.sports_tennis_locked_moneyline_max_entry_price
     if descriptor.market_type.value == "totals":
         return config.sports_totals_max_entry_price
     if descriptor.market_type.value == "moneyline":
@@ -1056,6 +1411,130 @@ def _sports_tail_price_cap(
     if descriptor.market_type.value == "spreads":
         return config.sports_spreads_max_entry_price
     return config.entry_no_price_max
+
+
+def _sports_tail_locked_outcome_signal(context: ExtensionContext) -> bool:
+    """判断 live-state 是否已经标记当前市场为数学锁定候选。"""
+
+    return str(context.metadata.get("sports_tail_entry_signal_reason") or "") == "live_outcome_lock_candidate"
+
+
+def _sports_tail_maker_bid_signal_from_metadata(context: ExtensionContext) -> bool:
+    """判断 live-state 粗信号是否允许后续评估考虑 maker bid。"""
+
+    return str(context.metadata.get("sports_tail_entry_signal_reason") or "") in {
+        "live_outcome_lock_candidate",
+        "live_tail_state_candidate",
+    }
+
+
+def _sports_tail_near_lock_maker_signal(
+    context: ExtensionContext,
+    sports_metadata: Mapping[str, object],
+) -> bool:
+    """判断当前盘口是否允许用 1 以下 maker bid 追近锁定网球盘。"""
+
+    return (
+        str(context.metadata.get("sports_tail_entry_signal_reason") or "") == "live_tail_state_candidate"
+        and sports_metadata.get("sports_tail_reason") == "tennis_set_winner_current_set_near_locked"
+    )
+
+
+def _sports_tail_maker_bid_signal(
+    context: ExtensionContext,
+    sports_metadata: Mapping[str, object],
+) -> bool:
+    return (
+        _sports_tail_locked_outcome_signal(context)
+        and sports_metadata.get("sports_tail_reason") == "tennis_set_winner_locked"
+    ) or _sports_tail_near_lock_maker_signal(context, sports_metadata)
+
+
+def _sports_tail_locked_maker_bid_metadata(
+    context: ExtensionContext,
+    sports_metadata: Mapping[str, object],
+    *,
+    best_ask: Decimal | None,
+    allowed_price: Decimal,
+) -> dict[str, object]:
+    """返回锁定结果以盈利价格挂 maker bid 的审计 metadata。"""
+
+    if best_ask is None or not (allowed_price < best_ask <= Decimal("1")):
+        return {}
+    if _sports_tail_locked_outcome_signal(context) and sports_metadata.get("sports_tail_reason") == (
+        "tennis_set_winner_locked"
+    ):
+        return {
+            "sports_tail_maker_bid_reason": "ask_above_locked_price_cap",
+            "sports_tail_observed_best_ask": str(best_ask),
+            "sports_tail_order_price_cap": str(allowed_price),
+        }
+    if _sports_tail_near_lock_maker_signal(context, sports_metadata):
+        return {
+            "sports_tail_maker_bid_reason": "ask_above_near_lock_price_cap",
+            "sports_tail_observed_best_ask": str(best_ask),
+            "sports_tail_order_price_cap": str(allowed_price),
+        }
+    return {}
+
+
+def _sports_tail_missing_ask_locked_maker_bid(
+    context: ExtensionContext,
+    sports_metadata: Mapping[str, object],
+    allowed_price: Decimal,
+) -> dict[str, object]:
+    """返回锁定结果缺 ask 时主动挂盈利 bid 的审计 metadata。"""
+
+    if (
+        _sports_tail_locked_outcome_signal(context)
+        and sports_metadata.get("sports_tail_reason") == "tennis_set_winner_locked"
+        and allowed_price == context.orderbook.best_bid
+    ):
+        return {}
+    if _sports_tail_locked_outcome_signal(context) and sports_metadata.get("sports_tail_reason") == (
+        "tennis_set_winner_locked"
+    ):
+        return {
+            "sports_tail_maker_bid_reason": "missing_best_ask_locked_outcome",
+            "sports_tail_order_price_cap": str(allowed_price),
+        }
+    return {}
+
+
+def _maker_bid_liquidity_floor(
+    context: ExtensionContext,
+    snapshot: AllocationMarketSnapshot,
+    *,
+    price_cap: Decimal,
+    buyable_liquidity_usdc: Decimal,
+) -> Decimal:
+    """给锁定结果的被动买单提供分配预算下限。
+
+    这类订单不是吃当前 ask，而是在 1 以下挂盈利 bid，因此不能用 ask 深度为 0
+    直接推导为不可分配。
+    """
+
+    best_ask = snapshot.best_ask if snapshot.best_ask is not None else (
+        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
+    )
+    if not (
+        _sports_tail_maker_bid_signal_from_metadata(context)
+        and _is_tennis_set_winner_market(snapshot.market)
+        and (
+            (best_ask is None and _sports_tail_locked_outcome_signal(context))
+            or (best_ask is not None and price_cap < best_ask <= Decimal("1"))
+        )
+    ):
+        return buyable_liquidity_usdc
+    min_order_budget = snapshot.market.min_order_size * (best_ask or price_cap)
+    requested_budget = context.amount_usdc or _metadata_decimal(context, "amount_usdc", "buy_budget_usdc")
+    floor = requested_budget if requested_budget is not None and requested_budget > min_order_budget else min_order_budget
+    return floor if floor > buyable_liquidity_usdc else buyable_liquidity_usdc
+
+
+def _is_tennis_set_winner_market(market) -> bool:
+    text = str(getattr(market, "market_slug", "") or "").strip().lower().replace("_", " ").replace("-", " ")
+    return "set winner" in text or "first set winner" in text
 
 
 def _skipped_allocation(

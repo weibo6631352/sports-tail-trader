@@ -12,7 +12,7 @@ import re
 from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.sports_live import SportsLiveGame
+from polymarket_trader.domain.sports_live import SportsLiveGame, SportsLiveGameStatus
 
 _GENERIC_ALIAS_TOKENS = {
     "a",
@@ -25,6 +25,8 @@ _GENERIC_ALIAS_TOKENS = {
     "match",
     "market",
     "men",
+    "sport",
+    "sports",
     "team",
     "the",
     "to",
@@ -97,6 +99,16 @@ def match_sports_live_game(market: Market, game: SportsLiveGame) -> SportsLiveMa
     """
 
     market_text = _market_text(market)
+    return _match_sports_live_game_from_market_text(market, game, market_text)
+
+
+def _match_sports_live_game_from_market_text(
+    market: Market,
+    game: SportsLiveGame,
+    market_text: str,
+) -> SportsLiveMarketMatch | None:
+    """使用已归一化 market 文本匹配单场比赛，避免批量匹配重复做文本清洗。"""
+
     market_start = _market_event_start_time(market)
     game_start = _game_event_start_time(game)
     precise_start_matched = False
@@ -140,7 +152,12 @@ def best_sports_live_match(
 ) -> SportsLiveMarketMatch | None:
     """返回 market 在当前比赛集合中的最高置信匹配。"""
 
-    matches = [match for game in games if (match := match_sports_live_game(market, game)) is not None]
+    market_text = _market_text(market)
+    matches = [
+        match
+        for game in games
+        if (match := _match_sports_live_game_from_market_text(market, game, market_text)) is not None
+    ]
     if not matches:
         return None
     return max(matches, key=lambda item: item.score)
@@ -156,6 +173,34 @@ def sports_live_metadata_match(
     if match is None:
         return None
     return match.market, match.game, match.metadata()
+
+
+def sports_tail_entry_signal_gate(
+    market: Market,
+    game: SportsLiveGame,
+    *,
+    market_end_horizon_seconds: int,
+) -> tuple[bool, str]:
+    """判断直播匹配是否应触发 P0 入场信号。
+
+    metadata 写入用于候选展示和复盘；P0 entry signal 只给真正进入扫尾观察窗、
+    或已经结束但 Polymarket 尚未封盘的 market，避免远期 live 匹配挤压交易队列。
+    """
+
+    if game.status == SportsLiveGameStatus.ENDED:
+        return True, "ended_not_closed"
+    if game.status != SportsLiveGameStatus.LIVE:
+        return False, f"sports_live_state_{game.status.value}"
+    if market.end_date is None or market_end_horizon_seconds <= 0:
+        return True, "market_end_unknown"
+    current_time = _ensure_utc(game.observed_at) or datetime.now(timezone.utc)
+    market_end = _ensure_utc(market.end_date)
+    if market_end is None:
+        return True, "market_end_unknown"
+    seconds_until_end = (market_end - current_time).total_seconds()
+    if seconds_until_end > market_end_horizon_seconds:
+        return False, "market_end_too_far"
+    return True, "within_tail_window"
 
 
 def _market_text(market: Market) -> str:
@@ -194,6 +239,8 @@ def _tennis_state_metadata(value: Any) -> dict[str, Any] | None:
         "set_scores": value.get("set_scores"),
         "home_point": value.get("home_point"),
         "away_point": value.get("away_point"),
+        "first_to_serve": value.get("first_to_serve"),
+        "serving_side": value.get("serving_side"),
     }
 
 
@@ -345,26 +392,32 @@ def _best_alias(
     aliases: tuple[str, ...],
 ) -> str | None:
     candidates: list[tuple[int, str]] = []
+    market_compact = _compact_text(market_text)
     for alias in aliases:
-        normalized = _normalize_text(alias)
-        if not normalized:
-            continue
-        tokens = tuple(token for token in normalized.split() if token not in _GENERIC_ALIAS_TOKENS)
-        if not tokens:
-            continue
-        if len(tokens) == 1:
-            token = tokens[0]
-            if len(token) < 3 and token not in market_tokens:
+        seen_variants: set[str] = set()
+        for normalized in _alias_text_variants(alias):
+            if not normalized or normalized in seen_variants:
                 continue
-            if token in market_tokens:
-                candidates.append((_alias_score(token), alias))
-            continue
-        phrase = " ".join(tokens)
-        if f" {phrase} " in f" {market_text} ":
-            candidates.append((_alias_score(phrase), alias))
-            continue
-        if all(token in market_tokens for token in tokens):
-            candidates.append((_alias_score(phrase) - 1, alias))
+            seen_variants.add(normalized)
+            tokens = tuple(token for token in normalized.split() if token not in _GENERIC_ALIAS_TOKENS)
+            if not tokens:
+                continue
+            if len(tokens) == 1:
+                token = tokens[0]
+                if len(token) < 3 and token not in market_tokens:
+                    continue
+                if token in market_tokens:
+                    candidates.append((_alias_score(token), alias))
+                continue
+            phrase = " ".join(tokens)
+            if f" {phrase} " in f" {market_text} ":
+                candidates.append((_alias_score(phrase), alias))
+                continue
+            if all(token in market_tokens for token in tokens):
+                candidates.append((_alias_score(phrase) - 1, alias))
+                continue
+            if _compact_alias_matches_market(tokens, market_compact):
+                candidates.append((_alias_score(phrase) - 2, alias))
     if not candidates:
         return None
     return max(candidates, key=lambda item: item[0])[1]
@@ -382,3 +435,33 @@ def _normalize_text(value: str | None) -> str:
     text = value.lower().replace("&", " and ")
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return " ".join(text.split())
+
+
+def _alias_text_variants(alias: str) -> tuple[str, ...]:
+    """返回外部队名常见语言/拼写变体，用于跨来源匹配。
+
+    Polymarket 和比分源经常混用英语、法语或连写队名；这里仅生成保守的
+    多词队名变体，避免把短缩写误匹配到无关市场。
+    """
+
+    normalized = _normalize_text(alias)
+    if not normalized:
+        return ()
+    variants = [normalized]
+    replaced = re.sub(r"\bolympique\b", "olympic", normalized)
+    if replaced != normalized:
+        variants.append(replaced)
+    return tuple(variants)
+
+
+def _compact_alias_matches_market(tokens: tuple[str, ...], market_compact: str) -> bool:
+    if len(tokens) < 2:
+        return False
+    compact_alias = "".join(tokens)
+    if len(compact_alias) < 8:
+        return False
+    return compact_alias in market_compact
+
+
+def _compact_text(value: str) -> str:
+    return value.replace(" ", "")

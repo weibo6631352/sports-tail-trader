@@ -5,10 +5,13 @@ from decimal import Decimal
 from typing import Iterable
 
 from polymarket_trader.domain.allocation import AllocationPlan, current_exposure_usdc
+from polymarket_trader.domain.fees import calculate_trade_fee
 from polymarket_trader.domain.market import Market, TradingStatus
-from polymarket_trader.domain.order import Order, OrderIntent, OrderSide, OrderStatus
+from polymarket_trader.domain.order import Order, OrderIntent, OrderSide, OrderStatus, OrderType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
+
+_MIN_CLOB_NOTIONAL_USDC = Decimal("0.01")
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +113,7 @@ class RiskManager:
             intent,
             checks,
             market=market,
+            position=position,
             market_active=market_active,
             market_open=market_open,
             clob_enabled=clob_enabled,
@@ -165,6 +169,7 @@ class RiskManager:
         decision = self._check_account_gates(
             intent,
             checks,
+            market=market,
             notional_usdc=notional_usdc,
             geoblocked=geoblocked,
             balance_usdc=balance_usdc,
@@ -263,6 +268,7 @@ class RiskManager:
         checks: list[RiskCheck],
         *,
         market: Market | None,
+        position: Position | None,
         market_active: bool,
         market_open: bool,
         clob_enabled: bool,
@@ -270,17 +276,22 @@ class RiskManager:
         cancelled: bool,
         archived: bool,
     ) -> RiskDecision | None:
+        candidate_position_reducing_sell = _is_candidate_position_reducing_sell(
+            intent,
+            market=market,
+            position=position,
+        )
         for name, passed, reason, field_name, suggested_action in (
             (
                 "market_active_gate",
-                market_active,
+                market_active or candidate_position_reducing_sell,
                 "market_not_active",
                 "market.active",
                 "refresh_snapshot",
             ),
             (
                 "market_open_gate",
-                market_open,
+                market_open or candidate_position_reducing_sell,
                 "market_not_open",
                 "market.open",
                 "refresh_snapshot",
@@ -306,9 +317,22 @@ class RiskManager:
                     field=field_name,
                     suggested_action=suggested_action,
                     retryable=False,
-                )
+            )
 
         if market is not None and market.trading_status != TradingStatus.ELIGIBLE:
+            if candidate_position_reducing_sell:
+                checks.append(
+                    RiskCheck(
+                        name="market_status_gate",
+                        passed=True,
+                        field="market.trading_status",
+                        value={
+                            "status": market.trading_status,
+                            "allowed_for_position_reducing_sell": True,
+                        },
+                    )
+                )
+                return None
             return self._fail(
                 trace_id=intent.trace_id,
                 checks=checks,
@@ -343,7 +367,22 @@ class RiskManager:
 
         tick_size = _effective_tick_size(market=market, orderbook=orderbook)
         if tick_size is not None:
-            if tick_size <= Decimal("0") or not _is_multiple_of_tick(intent.price, tick_size):
+            max_price = Decimal("1") - tick_size
+            if intent.price > max_price:
+                return self._fail(
+                    trace_id=intent.trace_id,
+                    checks=checks,
+                    name="price_tick_limit_gate",
+                    reason="price_above_tick_limit",
+                    field="intent.price",
+                    value={"price": intent.price, "tick_size": tick_size, "max_price": max_price},
+                    suggested_action="reject",
+                    retryable=False,
+                )
+            if tick_size <= Decimal("0") or (
+                not _is_multiple_of_tick(intent.price, tick_size)
+                and not _is_sell_endpoint_price(intent)
+            ):
                 return self._fail(
                     trace_id=intent.trace_id,
                     checks=checks,
@@ -372,6 +411,20 @@ class RiskManager:
         notional_usdc: Decimal,
         market_min_order_size: Decimal,
     ) -> RiskDecision | None:
+        if notional_usdc < _MIN_CLOB_NOTIONAL_USDC:
+            return self._fail(
+                trace_id=intent.trace_id,
+                checks=checks,
+                name="min_notional_gate",
+                reason="min_notional_not_met",
+                field="intent.amount_usdc" if intent.side == OrderSide.BUY else "intent.size_shares",
+                value={
+                    "notional_usdc": notional_usdc,
+                    "min_notional_usdc": _MIN_CLOB_NOTIONAL_USDC,
+                },
+                suggested_action="skip_dust_order",
+                retryable=False,
+            )
         order_size_shares = _intent_order_size_shares(intent)
         if order_size_shares < market_min_order_size:
             return self._fail(
@@ -521,6 +574,7 @@ class RiskManager:
         intent: OrderIntent,
         checks: list[RiskCheck],
         *,
+        market: Market | None,
         notional_usdc: Decimal,
         geoblocked: bool,
         balance_usdc: Decimal | None,
@@ -539,25 +593,37 @@ class RiskManager:
             )
         if intent.side != OrderSide.BUY:
             return None
-        if balance_usdc is not None and notional_usdc > balance_usdc:
+        estimated_fee_usdc = _estimated_buy_taker_fee_usdc(intent, market=market)
+        required_balance_usdc = notional_usdc + estimated_fee_usdc
+        if balance_usdc is not None and required_balance_usdc > balance_usdc:
             return self._fail(
                 trace_id=intent.trace_id,
                 checks=checks,
                 name="balance_gate",
                 reason="balance_insufficient",
                 field="account.balance_usdc",
-                value={"balance_usdc": balance_usdc, "notional_usdc": notional_usdc},
+                value={
+                    "balance_usdc": balance_usdc,
+                    "notional_usdc": notional_usdc,
+                    "estimated_fee_usdc": estimated_fee_usdc,
+                    "required_balance_usdc": required_balance_usdc,
+                },
                 suggested_action="reduce_size",
                 retryable=False,
             )
-        if allowance_usdc is not None and notional_usdc > allowance_usdc:
+        if allowance_usdc is not None and required_balance_usdc > allowance_usdc:
             return self._fail(
                 trace_id=intent.trace_id,
                 checks=checks,
                 name="allowance_gate",
                 reason="allowance_insufficient",
                 field="account.allowance_usdc",
-                value={"allowance_usdc": allowance_usdc, "notional_usdc": notional_usdc},
+                value={
+                    "allowance_usdc": allowance_usdc,
+                    "notional_usdc": notional_usdc,
+                    "estimated_fee_usdc": estimated_fee_usdc,
+                    "required_allowance_usdc": required_balance_usdc,
+                },
                 suggested_action="approve_or_reduce",
                 retryable=False,
             )
@@ -574,6 +640,21 @@ class RiskManager:
         if orderbook is None:
             return None
         if intent.side != OrderSide.BUY:
+            return None
+        if _is_post_only_maker_buy(intent):
+            checks.append(
+                RiskCheck(
+                    name="liquidity_gate",
+                    passed=True,
+                    reason="post_only_maker_liquidity_not_required",
+                    field="intent.post_only",
+                    value={
+                        "order_type": intent.order_type,
+                        "post_only": intent.post_only,
+                        "price": intent.price,
+                    },
+                )
+            )
             return None
         depth_usdc = _orderbook_depth_usdc(orderbook, price_cap=intent.price)
         if depth_usdc < notional_usdc:
@@ -765,6 +846,74 @@ def _intent_order_size_shares(intent: OrderIntent) -> Decimal:
     if intent.amount_usdc is not None and intent.price > Decimal("0"):
         return intent.amount_usdc / intent.price
     return Decimal("0")
+
+
+def _is_candidate_position_reducing_sell(
+    intent: OrderIntent,
+    *,
+    market: Market | None,
+    position: Position | None,
+) -> bool:
+    """允许已有持仓在仅有本地候选快照时继续提交减仓 SELL。
+
+    CANDIDATE 表示本地发现/恢复链路尚未拿到完整市场元数据，不等同于权威终态。
+    该放行只适用于已持仓且 size 被持仓覆盖的 SELL；BUY 和无持仓 SELL 仍按
+    常规 market gate 拒绝。
+    """
+
+    if intent.side != OrderSide.SELL:
+        return False
+    if market is None or market.trading_status != TradingStatus.CANDIDATE:
+        return False
+    if position is None:
+        return False
+    if position.condition_id != intent.condition_id or position.token_id != intent.token_id:
+        return False
+    order_size_shares = _intent_order_size_shares(intent)
+    return order_size_shares > Decimal("0") and position.shares >= order_size_shares
+
+
+def _is_sell_endpoint_price(intent: OrderIntent) -> bool:
+    """Polymarket CLOB 接受 0.99 作为价格上限端点，SELL 退出允许使用该价。"""
+
+    return intent.side == OrderSide.SELL and intent.price == Decimal("0.99")
+
+
+def _is_post_only_maker_buy(intent: OrderIntent) -> bool:
+    """识别被动买入挂单；这类订单等待对手盘成交，不使用当前 ask 深度做成交性门禁。"""
+
+    return (
+        intent.side == OrderSide.BUY
+        and intent.order_type == OrderType.GTC
+        and intent.post_only
+    )
+
+
+def _estimated_buy_taker_fee_usdc(intent: OrderIntent, *, market: Market | None) -> Decimal:
+    """预估 BUY taker 订单需要额外预留的费用，避免余额刚好等于订单金额时被 CLOB 拒绝。"""
+
+    if market is None or intent.side != OrderSide.BUY or _is_post_only_maker_buy(intent):
+        return Decimal("0")
+    fee_rate_bps = _effective_taker_fee_rate_bps(market)
+    if fee_rate_bps is None or fee_rate_bps <= 0 or intent.amount_usdc is None or intent.price <= Decimal("0"):
+        return Decimal("0")
+    fee_quote = calculate_trade_fee(
+        price=intent.price,
+        size_shares=intent.amount_usdc / intent.price,
+        side="buy",
+        fee_rate_bps=fee_rate_bps,
+        fees_enabled=market.fees_enabled,
+        liquidity_role="taker",
+    )
+    return fee_quote.fee_usdc
+
+
+def _effective_taker_fee_rate_bps(market: Market) -> int | None:
+    if market.fees_enabled is False:
+        return 0
+    if market.fee_rate_bps is not None:
+        return market.fee_rate_bps
+    return market.taker_base_fee_bps
 
 
 def _resolve_market_flags(

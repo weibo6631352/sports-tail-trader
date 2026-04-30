@@ -65,6 +65,35 @@ def test_aggregate_client_keeps_healthy_sources_when_one_source_fails() -> None:
     assert "source unavailable" in (snapshot.source_statuses[0].last_error or "")
 
 
+def test_aggregate_client_keeps_healthy_sources_when_one_source_hangs() -> None:
+    observed = datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc)
+
+    async def hanging_provider() -> SportsLiveSnapshot:
+        await asyncio.sleep(10)
+        return SportsLiveSnapshot(source="espn", observed_at=observed, games=())
+
+    async def run() -> SportsLiveSnapshot:
+        client = SportsLiveAggregateClient(
+            providers=(
+                ("espn", hanging_provider),
+                ("nhl", lambda: _snapshot("nhl", _game("nhl", SportsLiveGameStatus.LIVE, observed))),
+            ),
+            now_provider=lambda: observed,
+            provider_timeout_s=0.01,
+        )
+        return await client.list_games()
+
+    snapshot = asyncio.run(run())
+
+    assert len(snapshot.games) == 1
+    assert snapshot.games[0].source == "nhl"
+    assert [(status.source, status.success, status.games_seen) for status in snapshot.source_statuses] == [
+        ("espn", False, 0),
+        ("nhl", True, 1),
+    ]
+    assert "provider_timeout" in (snapshot.source_statuses[0].last_error or "")
+
+
 def test_aggregate_client_classifies_empty_rate_limited_and_failed_sources() -> None:
     observed = datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc)
 

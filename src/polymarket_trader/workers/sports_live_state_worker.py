@@ -6,10 +6,11 @@ EntryMetadataStore 供策略入场评估读取。它不直接判断交易机会�
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
@@ -31,6 +32,12 @@ SportsLiveStateMatcher = Callable[
     [Market, tuple[SportsLiveGame, ...]],
     SportsLiveResolvedMatch | None,
 ]
+
+class SportsLiveMarketTracker(Protocol):
+    """直播状态确认入场后，用于把 market 交给盘口热订阅的最小接口。"""
+
+    def track_market(self, market: Market) -> None:
+        """开始跟踪 market 的盘口快照。"""
 
 
 def _utc_now() -> datetime:
@@ -69,6 +76,7 @@ class SportsLiveStateWorker:
         registry: MarketRegistry,
         entry_metadata_store: EntryMetadataStore,
         event_bus: EventBus | None = None,
+        market_tracker: SportsLiveMarketTracker | Callable[[Market], None] | None = None,
         enabled: bool = True,
         source: str = "espn",
         leagues: tuple[str, ...] = (),
@@ -79,6 +87,7 @@ class SportsLiveStateWorker:
         self._registry = registry
         self._entry_metadata_store = entry_metadata_store
         self._event_bus = event_bus
+        self._market_tracker = market_tracker
         self._enabled = enabled
         self._source = source
         self._leagues = leagues
@@ -163,7 +172,7 @@ class SportsLiveStateWorker:
         started_at: datetime,
     ) -> SportsLiveSyncResult:
         markets = self._registry.snapshot().markets
-        matches = self._match_markets(markets, snapshot.games)
+        matches = await self._match_markets(markets, snapshot.games)
         records_written = 0
         entry_signals = 0
         for market, game, metadata in matches:
@@ -176,6 +185,7 @@ class SportsLiveStateWorker:
                 metadata=metadata,
             )
             records_written += 1
+            self._track_entry_signal_market(market=market, metadata=metadata)
             entry_signals += await self._publish_entry_signal_events(
                 market=market,
                 game=game,
@@ -197,17 +207,40 @@ class SportsLiveStateWorker:
             source_statuses=snapshot.source_statuses,
         )
 
-    def _match_markets(
+    async def _match_markets(
         self,
         markets: tuple[Market, ...],
         games: tuple[SportsLiveGame, ...],
     ) -> tuple[SportsLiveResolvedMatch, ...]:
         results: list[SportsLiveResolvedMatch] = []
-        for market in markets:
+        for index, market in enumerate(markets, start=1):
             match = self._match_live_state(market, games)
             if match is not None:
                 results.append(match)
+            if index % 10 == 0:
+                # 单轮同步可能需要做 markets x games 的文本匹配；P2 任务必须让出事件循环。
+                await asyncio.sleep(0)
         return tuple(results)
+
+    def _track_entry_signal_market(
+        self,
+        *,
+        market: Market,
+        metadata: Mapping[str, Any],
+    ) -> None:
+        """把直播确认可进场的市场交给盘口 WS 跟踪，保证后续决策读取热盘口。"""
+
+        if self._market_tracker is None:
+            return
+        if metadata.get("sports_tail_entry_signal_allowed") is False:
+            return
+        tracker = self._market_tracker
+        if callable(tracker):
+            tracker(market)
+            return
+        track_market = getattr(tracker, "track_market", None)
+        if callable(track_market):
+            track_market(market)
 
     async def _publish_entry_signal_events(
         self,
@@ -217,6 +250,8 @@ class SportsLiveStateWorker:
         metadata: Mapping[str, Any],
     ) -> int:
         if not self._entry_signal_publish_enabled or self._event_bus is None:
+            return 0
+        if metadata.get("sports_tail_entry_signal_allowed") is False:
             return 0
         count = 0
         for token_id in market.token_ids:
