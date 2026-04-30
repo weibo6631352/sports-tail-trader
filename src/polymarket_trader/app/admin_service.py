@@ -55,6 +55,8 @@ MarketFeeSortField = Literal[
 ]
 SortDirection = Literal["asc", "desc"]
 
+_LIVE_SOURCE_GAP_PAST_WINDOW = timedelta(days=2)
+
 
 def _orderbook_has_no_quotes(snapshot: OrderbookSnapshot) -> bool:
     """判断热态盘口是否只是空占位。
@@ -888,6 +890,8 @@ class AdminService:
             if normalized_prefix and market_prefix != normalized_prefix:
                 continue
             urgency = _live_source_gap_urgency(market, now=now)
+            if _live_source_gap_outside_diagnostic_window(market, now=now):
+                continue
             if urgency == "future_schedule" and not include_future_schedule:
                 deferred_future_schedule_count += 1
                 continue
@@ -1492,6 +1496,15 @@ def _live_source_gap_urgency(market: Market, *, now: datetime) -> str:
     if start_time <= now + timedelta(hours=24):
         return "starts_within_24h"
     return "future_schedule"
+
+
+def _live_source_gap_outside_diagnostic_window(market: Market, *, now: datetime) -> bool:
+    """过滤直播源已不再稳定保留的陈旧开赛市场，避免缺口统计被历史噪声淹没。"""
+
+    start_time = _ensure_utc(market.game_start_time)
+    if start_time is None:
+        return False
+    return start_time < now - _LIVE_SOURCE_GAP_PAST_WINDOW
 
 
 def _live_source_gap_urgency_rank(urgency: str) -> int:

@@ -643,6 +643,40 @@ def test_sofascore_client_fetches_today_and_configured_lookahead_dates() -> None
     ]
 
 
+def test_sofascore_client_fetches_configured_lookback_dates_for_recent_unsettled_markets() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        return httpx.Response(200, request=request, json={"events": []})
+
+    async def run() -> None:
+        client = SofaScoreLiveClient(
+            client=httpx.AsyncClient(
+                base_url="https://www.sofascore.com",
+                transport=httpx.MockTransport(handler),
+            ),
+            sports=("tennis",),
+            league_codes=("sports",),
+            lookback_days=1,
+            lookahead_days=1,
+            min_fetch_interval_s=0,
+            now_provider=lambda: datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+        )
+        try:
+            await client.list_games()
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+
+    assert requests == [
+        "/api/v1/sport/tennis/scheduled-events/2026-04-29",
+        "/api/v1/sport/tennis/scheduled-events/2026-04-30",
+        "/api/v1/sport/tennis/scheduled-events/2026-05-01",
+    ]
+
+
 def test_sofascore_client_reuses_cached_snapshot_inside_min_fetch_interval() -> None:
     requests = 0
 

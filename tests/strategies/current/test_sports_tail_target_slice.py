@@ -2861,8 +2861,8 @@ def test_admin_candidates_use_runtime_metadata_source_not_full_registry() -> Non
 def test_admin_live_source_gap_diagnostics_groups_tracked_markets_without_live_state() -> None:
     result = asyncio.run(_run_admin_live_source_gap_diagnostics_flow())
 
-    assert result["total_tracked_markets"] == 4
-    assert result["tracked_markets"] == 3
+    assert result["total_tracked_markets"] == 5
+    assert result["tracked_markets"] == 4
     assert result["live_state_markets"] == 1
     assert result["missing_live_state_markets"] == 1
     assert result["deferred_future_schedule_markets"] == 1
@@ -4696,6 +4696,9 @@ async def _run_admin_live_source_gap_diagnostics_flow() -> dict[str, object]:
     covered_market = _moneyline_market_for_index(0)
     missing_nba_market = _moneyline_market_for_index(1)
     outright_market = _league_winner_market()
+    stale_market = _moneyline_market_for_index(2).with_metadata(
+        game_start_time=datetime(2026, 4, 24, 2, 0, tzinfo=timezone.utc),
+    )
     missing_mlb_market = Market(
         condition_id="mlb-gap-condition",
         market_slug="mlb-test-gap-2026-05-01",
@@ -4714,7 +4717,7 @@ async def _run_admin_live_source_gap_diagnostics_flow() -> dict[str, object]:
     missing_nba_market = missing_nba_market.with_metadata(
         game_start_time=datetime(2026, 5, 10, 2, 0, tzinfo=timezone.utc),
     )
-    for market in (covered_market, missing_nba_market, missing_mlb_market, outright_market):
+    for market in (covered_market, missing_nba_market, missing_mlb_market, stale_market, outright_market):
         registry.upsert(market)
     live_store.upsert(
         condition_id=covered_market.condition_id,

@@ -104,6 +104,7 @@ class Settings(BaseSettings):
     sports_live_state_nhl_base_url: str = "https://api-web.nhle.com"
     sports_live_state_mlb_base_url: str = "https://statsapi.mlb.com"
     sports_live_state_sofascore_base_url: str = "https://www.sofascore.com"
+    sports_live_state_sofascore_lookback_days: int = Field(default=1, ge=0, le=3)
     sports_live_state_sofascore_lookahead_days: int = Field(default=3, ge=0, le=3)
     sports_live_state_thesportsdb_base_url: str = "https://www.thesportsdb.com/api/v1/json/3"
     sports_live_state_leagues: str = "nba,nhl,nfl,mlb,tennis,sports"

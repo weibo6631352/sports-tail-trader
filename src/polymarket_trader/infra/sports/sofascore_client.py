@@ -110,6 +110,7 @@ class SofaScoreLiveClient:
         timeout_s: float = 5.0,
         min_fetch_interval_s: float = 20.0,
         max_stale_on_error_s: float = 300.0,
+        lookback_days: int = 0,
         lookahead_days: int = 0,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
@@ -119,6 +120,7 @@ class SofaScoreLiveClient:
         self._now_provider = now_provider
         self._min_fetch_interval_s = max(0.0, float(min_fetch_interval_s))
         self._max_stale_on_error_s = max(0.0, float(max_stale_on_error_s))
+        self._lookback_days = max(0, int(lookback_days))
         self._lookahead_days = max(0, int(lookahead_days))
         self._cached_snapshot: SportsLiveSnapshot | None = None
         self._owns_client = client is None
@@ -153,7 +155,11 @@ class SofaScoreLiveClient:
                 self._cached_snapshot or SportsLiveSnapshot(source="sofascore", observed_at=observed_at, games=()),
                 health=SportsLiveSourceHealth.CACHED,
             )
-        date_texts = _scheduled_event_dates(observed_at, lookahead_days=self._lookahead_days)
+        date_texts = _scheduled_event_dates(
+            observed_at,
+            lookback_days=self._lookback_days,
+            lookahead_days=self._lookahead_days,
+        )
         try:
             requests = tuple((sport, date_text) for sport in self._sports for date_text in date_texts)
             results = await asyncio.gather(
@@ -270,13 +276,13 @@ def sofascore_sports_for_leagues(league_codes: Sequence[str]) -> tuple[str, ...]
     return tuple(result)
 
 
-def _scheduled_event_dates(observed_at: datetime, *, lookahead_days: int) -> tuple[str, ...]:
-    """返回需要拉取的 UTC 比赛日，默认当天，可扩展近未来单场市场覆盖。"""
+def _scheduled_event_dates(observed_at: datetime, *, lookback_days: int, lookahead_days: int) -> tuple[str, ...]:
+    """返回需要拉取的 UTC 比赛日，覆盖近期未结算和近未来单场市场。"""
 
     start = observed_at.date()
     return tuple(
         (start + timedelta(days=offset)).strftime("%Y-%m-%d")
-        for offset in range(0, max(0, lookahead_days) + 1)
+        for offset in range(-max(0, lookback_days), max(0, lookahead_days) + 1)
     )
 
 

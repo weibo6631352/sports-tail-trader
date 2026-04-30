@@ -186,6 +186,7 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
                 sports=sofascore_sports,
                 league_codes=settings.sports_live_state_league_codes,
                 timeout_s=settings.sports_live_state_timeout_s,
+                lookback_days=settings.sports_live_state_sofascore_lookback_days,
                 lookahead_days=settings.sports_live_state_sofascore_lookahead_days,
             )
             providers.append(("sofascore", sofascore_client.list_games))
