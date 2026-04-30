@@ -508,6 +508,49 @@ def test_real_polymarket_homepage_nba_champion_yes_no_is_classified_as_outright_
     assert decision.reason == "outright_market_not_auto_tradable"
 
 
+def test_real_polymarket_season_award_and_leader_props_are_outright_binary_props() -> None:
+    markets = (
+        Market(
+            condition_id="mls-defender-award",
+            market_slug="will-aaron-long-win-2026-mls-defender-of-the-year",
+            market_question="Will Aaron Long win 2026 MLS Defender of the Year?",
+            event_title="2026 MLS Defender of the Year",
+            event_slug="2026-mls-defender-of-the-year",
+            category="Sports",
+            tags=("Sports", "MLS", "Soccer"),
+            outcomes=(
+                MarketOutcome(token_id="defender-yes", outcome="Yes"),
+                MarketOutcome(token_id="defender-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
+        Market(
+            condition_id="uel-most-goals",
+            market_slug="will-abde-ezzalzouli-score-the-most-goals-in-the-2025-26-uefa-europa-league",
+            market_question="Will Abde Ezzalzouli score the most goals in the 2025-26 UEFA Europa League?",
+            event_title="2025-26 UEFA Europa League: Most Goals",
+            event_slug="2025-26-uefa-europa-league-most-goals",
+            category="Sports",
+            tags=("Sports", "Soccer", "Europa League", "Goals"),
+            outcomes=(
+                MarketOutcome(token_id="goals-yes", outcome="Yes"),
+                MarketOutcome(token_id="goals-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
+    )
+
+    for market in markets:
+        descriptor = describe_sports_market(market)
+        decision = select_market(CurrentStrategyConfig(), market)
+
+        assert descriptor.accepted is True
+        assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
+        assert descriptor.market_type == SportsMarketType.BINARY_PROP
+        assert decision.selected is False
+        assert decision.reason == "outright_market_not_auto_tradable"
+
+
 def test_entry_rejects_series_market_before_single_game_live_score_can_create_buy() -> None:
     market = _series_winner_market()
     orderbook = _orderbook(token_id="series-home", best_ask=Decimal("0.45"))
