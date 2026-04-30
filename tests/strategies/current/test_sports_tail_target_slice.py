@@ -2577,6 +2577,19 @@ def test_admin_candidates_include_rejects_and_filter_by_action_permission_status
     assert result["manual"]["total"] == 0
 
 
+def test_admin_rejected_candidate_preserves_live_game_diagnostics_after_pre_orderbook_gate() -> None:
+    result = asyncio.run(_run_admin_far_tennis_under_candidate_flow())
+
+    assert result["total"] == 1
+    rejected = result["items"][0]
+    assert rejected["action"] == "reject"
+    assert rejected["reason"] == "tennis_totals_under_not_supported"
+    assert rejected["game_status"] == "live"
+    assert rejected["league"] == "ATP Challenger Jiujiang, China Men Singles"
+    assert rejected["side"] == "under"
+    assert rejected["line"] == "21.5"
+
+
 def test_admin_candidates_use_runtime_metadata_source_not_full_registry() -> None:
     result = asyncio.run(_run_admin_candidate_metadata_source_flow())
 
@@ -4239,6 +4252,67 @@ async def _run_admin_candidate_filter_flow() -> dict[str, object]:
             execution_permission="manual_confirm",
         ),
     }
+
+
+async def _run_admin_far_tennis_under_candidate_flow() -> dict[str, object]:
+    market = _tennis_totals_market().with_metadata(end_date=datetime(2026, 5, 7, tzinfo=timezone.utc))
+    orderbook = _orderbook(token_id="tennis-under", best_ask=Decimal("0.96"))
+    registry = MarketRegistry()
+    registry.upsert(market)
+    market_ws = _MarketWs({"tennis-under": orderbook})
+    account_state = AccountStateStore()
+    account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+    service = AdminService(
+        runtime=SimpleNamespace(
+            settings=SimpleNamespace(
+                portfolio_budget_usdc=Decimal("10"),
+                max_order_usdc=Decimal("10"),
+                max_market_usdc=Decimal("10"),
+                max_total_usdc=Decimal("10"),
+                max_open_orders=10,
+                order_retry_limit=2,
+            ),
+            registry=registry,
+            market_ws_worker=market_ws,
+            account_state_store=account_state,
+            entry_metadata_store=EntryMetadataStore(),
+            trading_decision_service=TradingDecisionService(
+                extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+                registry=registry,
+                orderbook_reader=market_ws.snapshot,
+            ),
+            trading_service=TradingService(executor=_NoFillExecutor()),
+            event_bus=None,
+        )
+    )
+
+    await service.upsert_sports_live_state(
+        sports_tail_game={
+            "league": "ATP Challenger Jiujiang, China Men Singles",
+            "home_name": "Rada Zolotareva",
+            "away_name": "Despina Papamichail",
+            "home_score": 1,
+            "away_score": 1,
+            "period": "S3",
+            "seconds_remaining": None,
+            "status": "live",
+            "observed_at": "2026-04-30T09:57:46+00:00",
+            "tennis_state": {
+                "home_sets_won": 1,
+                "away_sets_won": 1,
+                "current_set": 3,
+                "home_current_set_games": 6,
+                "away_current_set_games": 6,
+                "home_total_games": 17,
+                "away_total_games": 16,
+                "total_games": 33,
+                "set_scores": ((5, 7), (6, 3), (6, 6)),
+            },
+        },
+        condition_id=market.condition_id,
+        source="unit_test",
+    )
+    return await service.list_sports_tail_candidates(limit=10, offset=0)
 
 
 async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:

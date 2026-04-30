@@ -1206,7 +1206,7 @@ class AdminService:
             "best_ask": metadata.get("best_ask"),
             "total_score": metadata.get("total_score"),
             "seconds_remaining": metadata.get("seconds_remaining"),
-            "game_status": metadata.get("game_status"),
+            "game_status": metadata.get("game_status") or sports_tail_game.get("status"),
             "sports_risk_reason": metadata.get("sports_risk_reason"),
             "exit_plan": metadata.get("sports_exit_plan"),
             "allocation": None if plan.allocation is None else {

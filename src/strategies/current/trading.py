@@ -724,7 +724,31 @@ def _sports_tail_pre_orderbook_skip_reason(
     if _market_end_too_far_for_strategy(config, snapshot.market.end_date, now=context.now) and (
         not _sports_tail_can_bypass_market_end_window(config, context, snapshot)
     ):
+        model_reject_reason = _sports_tail_static_model_reject_reason(context, snapshot)
+        if model_reject_reason:
+            return model_reject_reason
         return "market_end_too_far"
+    return ""
+
+
+def _sports_tail_static_model_reject_reason(
+    context: ExtensionContext,
+    snapshot: AllocationMarketSnapshot,
+) -> str:
+    """返回不依赖盘口深度和比赛进程的具体模型缺口。
+
+    该判断只用于把粗筛拒绝原因写准确，不放宽任何入场条件。
+    """
+
+    game = live_game_state_from_metadata(context.metadata)
+    if game is None or not _is_tennis_live_game(game):
+        return ""
+    descriptor = describe_sports_market(snapshot.market)
+    if descriptor.market_type is None or descriptor.market_type.value != "totals":
+        return ""
+    target = target_for_token(snapshot.market, snapshot.token_id)
+    if target is not None and target.side == SportsMarketSide.UNDER:
+        return "tennis_totals_under_not_supported"
     return ""
 
 
@@ -765,6 +789,10 @@ def _sports_tail_can_bypass_market_end_window(
         now=context.now,
     )
     return evaluation.reason != "market_end_too_far"
+
+
+def _is_tennis_live_game(game: LiveGameState) -> bool:
+    return game.tennis_state is not None
 
 
 def _market_end_too_far_for_strategy(
@@ -1108,6 +1136,10 @@ def _sports_market_skip_metadata(
     }
     if descriptor.market_type is not None:
         metadata["market_type"] = descriptor.market_type.value
+    for target in descriptor.targets:
+        if target.token_id == snapshot.token_id:
+            metadata["side"] = target.side.value
+            break
     if descriptor.line is not None:
         metadata["line"] = str(descriptor.line)
     if snapshot.market.end_date is not None:
