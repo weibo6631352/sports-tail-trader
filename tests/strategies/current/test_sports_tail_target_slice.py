@@ -2260,6 +2260,53 @@ def test_tennis_completed_set_winner_places_maker_bid_when_best_ask_is_missing()
     assert decision.post_only is True
 
 
+def test_ended_moneyline_places_profitable_maker_bid_when_best_ask_is_missing() -> None:
+    market = _moneyline_market().with_tick_size(Decimal("0.001"))
+    now = datetime(2026, 4, 27, tzinfo=timezone.utc)
+
+    decision = decide_entry(
+        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        ExtensionContext(
+            trace_id="trace-ended-moneyline-missing-ask",
+            market=market,
+            token_id="home",
+            orderbook=OrderbookSnapshot(
+                token_id="home",
+                best_bid=Decimal("0.999"),
+                best_ask=None,
+                bids=(PriceLevel(price=Decimal("0.999"), size=Decimal("20")),),
+                asks=(),
+                received_at=now,
+                condition_id="moneyline-condition",
+            ),
+            amount_usdc=Decimal("10"),
+            now=now,
+            metadata={
+                "sports_tail_entry_signal_reason": "live_outcome_lock_candidate",
+                "sports_tail_game": {
+                    "league": "NBA",
+                    "home_name": "NYK",
+                    "away_name": "BOS",
+                    "home_score": 111,
+                    "away_score": 104,
+                    "period": "Final",
+                    "seconds_remaining": 0,
+                    "status": "ended",
+                    "observed_at": "2026-04-27T00:00:00+00:00",
+                },
+            },
+        ),
+    )
+
+    assert decision.action.value == "buy"
+    assert decision.token_id == "home"
+    assert decision.price == Decimal("0.97")
+    assert decision.order_type == OrderType.GTC
+    assert decision.post_only is True
+    assert decision.metadata["sports_tail_reason"] == "ended_not_closed_moneyline"
+    assert decision.metadata["sports_tail_maker_bid_reason"] == "missing_best_ask_locked_outcome"
+
+
 def test_entry_plan_allocates_locked_set_winner_maker_bid_without_ask_depth_at_price_cap() -> None:
     now = datetime(2026, 4, 29, 8, 50, tzinfo=timezone.utc)
     market = Market(
@@ -2336,6 +2383,63 @@ def test_entry_plan_allocates_locked_set_winner_maker_bid_without_ask_depth_at_p
     assert plan.intent.order_type == OrderType.GTC
     assert plan.intent.post_only is True
     assert plan.metadata["sports_tail_maker_bid_reason"] == "ask_above_locked_price_cap"
+
+
+def test_entry_plan_allocates_ended_moneyline_maker_bid_without_ask_depth_at_price_cap() -> None:
+    market = _moneyline_market().with_tick_size(Decimal("0.001"))
+    now = datetime(2026, 4, 27, tzinfo=timezone.utc)
+    service = TradingDecisionService(
+        extension_hooks=CurrentStrategy(
+            config=CurrentStrategyConfig(
+                sports_min_liquidity_usdc=Decimal("0.01"),
+                sports_min_expected_profit_usdc=Decimal("0.001"),
+                sports_profit_take_min_profit_usdc=Decimal("0.001"),
+            ),
+        ).hooks,
+    )
+
+    plan = service.build_entry_plan(
+        market=market,
+        token_id="home",
+        orderbook=OrderbookSnapshot(
+            token_id="home",
+            best_bid=Decimal("0.999"),
+            best_ask=None,
+            bids=(PriceLevel(price=Decimal("0.999"), size=Decimal("20")),),
+            asks=(),
+            received_at=now,
+            condition_id="moneyline-condition",
+        ),
+        trace_id="trace-ended-moneyline-plan-missing-ask",
+        portfolio_budget_usdc=Decimal("10"),
+        available_usdc=Decimal("10"),
+        max_order_usdc=Decimal("10"),
+        max_market_usdc=Decimal("10"),
+        max_total_usdc=Decimal("10"),
+        metadata={
+            "sports_tail_entry_signal_reason": "live_outcome_lock_candidate",
+            "sports_tail_game": {
+                "league": "NBA",
+                "home_name": "NYK",
+                "away_name": "BOS",
+                "home_score": 111,
+                "away_score": 104,
+                "period": "Final",
+                "seconds_remaining": 0,
+                "status": "ended",
+                "observed_at": "2026-04-27T00:00:00+00:00",
+            },
+        },
+    )
+
+    assert plan.ready_to_trade is True
+    assert plan.intent is not None
+    assert plan.intent.token_id == "home"
+    assert plan.intent.price == Decimal("0.97")
+    assert plan.intent.order_type == OrderType.GTC
+    assert plan.intent.post_only is True
+    assert plan.metadata["sports_tail_reason"] == "ended_not_closed_moneyline"
+    assert plan.metadata["sports_tail_maker_bid_reason"] == "missing_best_ask_locked_outcome"
 
 
 def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:

@@ -673,7 +673,6 @@ def _allocation_skip_reason(
     )
     locked_maker_candidate = (
         _sports_tail_maker_bid_signal_from_metadata(context)
-        and _is_tennis_set_winner_market(snapshot.market)
         and (
             (best_ask is None and locked_outcome_signal)
             or (best_ask is not None and best_ask <= Decimal("1") and best_ask > price_cap)
@@ -1476,10 +1475,29 @@ def _sports_tail_maker_bid_signal(
     context: ExtensionContext,
     sports_metadata: Mapping[str, object],
 ) -> bool:
-    return (
-        _sports_tail_locked_outcome_signal(context)
-        and sports_metadata.get("sports_tail_reason") == "tennis_set_winner_locked"
-    ) or _sports_tail_near_lock_maker_signal(context, sports_metadata)
+    return _sports_tail_locked_maker_signal(context, sports_metadata) or _sports_tail_near_lock_maker_signal(
+        context,
+        sports_metadata,
+    )
+
+
+def _sports_tail_locked_maker_signal(
+    context: ExtensionContext,
+    sports_metadata: Mapping[str, object],
+) -> bool:
+    """判断已锁定结果是否允许用盈利 maker bid 入场。"""
+
+    if not _sports_tail_locked_outcome_signal(context):
+        return False
+    reason = str(sports_metadata.get("sports_tail_reason") or "")
+    return reason.startswith("ended_not_closed_") or reason in {
+        "tennis_set_winner_locked",
+        "totals_over_locked",
+        "tennis_totals_over_locked",
+        "tennis_totals_over_min_final_games_locked",
+        "tennis_set_totals_over_locked",
+        "tennis_set_games_over_locked",
+    }
 
 
 def _sports_tail_locked_maker_bid_metadata(
@@ -1493,9 +1511,7 @@ def _sports_tail_locked_maker_bid_metadata(
 
     if best_ask is None or not (allowed_price < best_ask <= Decimal("1")):
         return {}
-    if _sports_tail_locked_outcome_signal(context) and sports_metadata.get("sports_tail_reason") == (
-        "tennis_set_winner_locked"
-    ):
+    if _sports_tail_locked_maker_signal(context, sports_metadata):
         return {
             "sports_tail_maker_bid_reason": "ask_above_locked_price_cap",
             "sports_tail_observed_best_ask": str(best_ask),
@@ -1517,15 +1533,9 @@ def _sports_tail_missing_ask_locked_maker_bid(
 ) -> dict[str, object]:
     """返回锁定结果缺 ask 时主动挂盈利 bid 的审计 metadata。"""
 
-    if (
-        _sports_tail_locked_outcome_signal(context)
-        and sports_metadata.get("sports_tail_reason") == "tennis_set_winner_locked"
-        and allowed_price == context.orderbook.best_bid
-    ):
+    if _sports_tail_locked_maker_signal(context, sports_metadata) and allowed_price == context.orderbook.best_bid:
         return {}
-    if _sports_tail_locked_outcome_signal(context) and sports_metadata.get("sports_tail_reason") == (
-        "tennis_set_winner_locked"
-    ):
+    if _sports_tail_locked_maker_signal(context, sports_metadata):
         return {
             "sports_tail_maker_bid_reason": "missing_best_ask_locked_outcome",
             "sports_tail_order_price_cap": str(allowed_price),
@@ -1551,14 +1561,13 @@ def _maker_bid_liquidity_floor(
     )
     if not (
         _sports_tail_maker_bid_signal_from_metadata(context)
-        and _is_tennis_set_winner_market(snapshot.market)
         and (
             (best_ask is None and _sports_tail_locked_outcome_signal(context))
             or (best_ask is not None and price_cap < best_ask <= Decimal("1"))
         )
     ):
         return buyable_liquidity_usdc
-    min_order_budget = snapshot.market.min_order_size * (best_ask or price_cap)
+    min_order_budget = max(snapshot.market.min_order_size, snapshot.market.min_order_size * (best_ask or price_cap))
     requested_budget = context.amount_usdc or _metadata_decimal(context, "amount_usdc", "buy_budget_usdc")
     floor = requested_budget if requested_budget is not None and requested_budget > min_order_budget else min_order_budget
     return floor if floor > buyable_liquidity_usdc else buyable_liquidity_usdc
