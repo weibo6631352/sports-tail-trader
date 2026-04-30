@@ -1449,7 +1449,7 @@ def _live_source_gap_scope_markets(runtime: Any, markets: Sequence[Market]) -> t
     live-source gap，避免把诊断噪声误当成单场直播源缺口。
     """
 
-    hooks = getattr(getattr(runtime, "extension", None), "hooks", None)
+    hooks = _runtime_extension_hooks(runtime)
     if hooks is None:
         return tuple(markets)
     scoped: list[Market] = []
@@ -1461,6 +1461,24 @@ def _live_source_gap_scope_markets(runtime: Any, markets: Sequence[Market]) -> t
         if decision.selected:
             scoped.append(market)
     return tuple(scoped)
+
+
+def _runtime_extension_hooks(runtime: Any) -> Any | None:
+    """提取运行时已装配的扩展 hooks。
+
+    Admin 查询不直接依赖具体策略包；优先使用 runtime.extension，并在 API 运行时
+    只暴露应用服务对象时，从 MarketService 读取同一份 universe hooks。
+    """
+
+    extension = getattr(runtime, "extension", None)
+    hooks = getattr(extension, "hooks", None)
+    if hooks is not None:
+        return hooks
+    market_service = getattr(runtime, "market_service", None)
+    hooks = getattr(market_service, "extension_hooks", None)
+    if hooks is not None:
+        return hooks
+    return getattr(market_service, "_extension_hooks", None)
 
 
 def _live_source_gap_urgency(market: Market, *, now: datetime) -> str:

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.app.entry_plan import EntryPlan
+from polymarket_trader.app.market_service import MarketService
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
 from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.domain.account import AccountSnapshot
@@ -2633,6 +2634,17 @@ def test_admin_live_source_gap_diagnostics_groups_tracked_markets_without_live_s
     assert result["items"][0]["gap_urgency"] == "started_or_past_due"
 
 
+def test_admin_live_source_gap_diagnostics_uses_market_service_hooks_when_extension_absent() -> None:
+    result = asyncio.run(_run_admin_live_source_gap_with_market_service_hooks_flow())
+
+    assert result["total_tracked_markets"] == 2
+    assert result["tracked_markets"] == 1
+    assert result["missing_live_state_markets"] == 1
+    assert [item["market_slug"] for item in result["items"]] == [
+        "mlb-test-gap-2026-05-01",
+    ]
+
+
 def test_admin_confirmation_refuses_non_confirmable_candidate() -> None:
     result = asyncio.run(_run_admin_auto_candidate_confirmation_attempt())
 
@@ -4415,6 +4427,51 @@ async def _run_admin_live_source_gap_diagnostics_flow() -> dict[str, object]:
             registry=registry,
             entry_metadata_store=live_store,
             extension=CurrentStrategy(config=CurrentStrategyConfig()),
+        )
+    )
+    return await service.list_sports_live_source_gaps(limit=10, offset=0)
+
+
+async def _run_admin_live_source_gap_with_market_service_hooks_flow() -> dict[str, object]:
+    registry = MarketRegistry()
+    live_store = EntryMetadataStore()
+    missing_mlb_market = Market(
+        condition_id="mlb-gap-condition",
+        market_slug="mlb-test-gap-2026-05-01",
+        market_question="Test MLB live source gap",
+        event_title="Test MLB Gap",
+        event_slug="mlb-test-gap-2026-05-01",
+        category="Sports",
+        tags=("MLB",),
+        outcomes=(
+            MarketOutcome(token_id="mlb-home", outcome="Home"),
+            MarketOutcome(token_id="mlb-away", outcome="Away"),
+        ),
+        game_start_time=datetime(2026, 4, 30, 2, 0, tzinfo=timezone.utc),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    tennis_outright_market = Market(
+        condition_id="tennis-grand-slams",
+        market_slug="will-alcaraz-or-sinner-win-more-grand-slams-in-2026",
+        market_question="Will Alcaraz or Sinner win more Grand Slams in 2026?",
+        event_title="Will Alcaraz or Sinner win more Grand Slams in 2026?",
+        event_slug="will-alcaraz-or-sinner-win-more-grand-slams-in-2026",
+        category=None,
+        tags=("Tennis", "Sports", "Alcaraz", "Sinner"),
+        outcomes=(
+            MarketOutcome(token_id="slams-yes", outcome="Yes"),
+            MarketOutcome(token_id="slams-no", outcome="No"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    for market in (missing_mlb_market, tennis_outright_market):
+        registry.upsert(market)
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+    service = AdminService(
+        runtime=SimpleNamespace(
+            registry=registry,
+            entry_metadata_store=live_store,
+            market_service=MarketService(extension_hooks=strategy.hooks),
         )
     )
     return await service.list_sports_live_source_gaps(limit=10, offset=0)

@@ -35,6 +35,12 @@ class MarketService:
         self._market_tracker = market_tracker
         self._account_snapshot_provider = account_snapshot_provider
 
+    @property
+    def extension_hooks(self) -> ExtensionHooks:
+        """返回市场发现链路正在使用的扩展筛选 hooks。"""
+
+        return self._extension_hooks
+
     def ingest_raw_market(
         self,
         raw_market: Mapping[str, Any],
