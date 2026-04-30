@@ -60,6 +60,7 @@ class SportsLiveAggregateClient:
         self._closers = tuple(closers)
         self._now_provider = now_provider
         self._provider_timeout_s = max(0.1, float(provider_timeout_s))
+        self._provider_cache: dict[str, SportsLiveSnapshot] = {}
 
     async def aclose(self) -> None:
         """关闭聚合器持有的所有底层 client。"""
@@ -84,18 +85,26 @@ class SportsLiveAggregateClient:
         games: list[SportsLiveGame] = []
         for (source, _provider), result in zip(self._providers, results, strict=True):
             if isinstance(result, Exception):
-                source_statuses.append(
-                    SportsLiveSourceStatus(
-                        source=source,
-                        success=False,
-                        health=SportsLiveSourceHealth.FAILED,
-                        games_seen=0,
-                        observed_at=observed_at,
-                        last_error=str(result),
+                cached = self._provider_cache.get(source)
+                if cached is not None:
+                    source_statuses.append(_cached_source_status(source, cached, last_error=str(result)))
+                    games.extend(cached.games)
+                else:
+                    source_statuses.append(
+                        SportsLiveSourceStatus(
+                            source=source,
+                            success=False,
+                            health=SportsLiveSourceHealth.FAILED,
+                            games_seen=0,
+                            observed_at=observed_at,
+                            last_error=str(result),
+                        )
                     )
-                )
                 continue
-            source_statuses.append(_source_status_from_snapshot(source, result))
+            status = _source_status_from_snapshot(source, result)
+            source_statuses.append(status)
+            if status.success:
+                self._provider_cache[source] = result
             games.extend(result.games)
         return SportsLiveSnapshot(
             source="sports_live_aggregate",
@@ -116,6 +125,24 @@ async def _provider_snapshot_with_timeout(
         return await asyncio.wait_for(provider(), timeout=timeout_s)
     except TimeoutError as exc:
         raise TimeoutError(f"provider_timeout after {timeout_s:.3f}s") from exc
+
+
+def _cached_source_status(
+    source: str,
+    snapshot: SportsLiveSnapshot,
+    *,
+    last_error: str,
+) -> SportsLiveSourceStatus:
+    """外层 provider 超时时复用上次成功快照，避免清空全体育直播覆盖。"""
+
+    return SportsLiveSourceStatus(
+        source=source,
+        success=True,
+        health=SportsLiveSourceHealth.CACHED,
+        games_seen=len(snapshot.games),
+        observed_at=snapshot.observed_at,
+        last_error=last_error,
+    )
 
 
 def _dedupe_games(games: tuple[SportsLiveGame, ...]) -> tuple[SportsLiveGame, ...]:

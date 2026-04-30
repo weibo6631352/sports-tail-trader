@@ -94,6 +94,47 @@ def test_aggregate_client_keeps_healthy_sources_when_one_source_hangs() -> None:
     assert "provider_timeout" in (snapshot.source_statuses[0].last_error or "")
 
 
+def test_aggregate_client_reuses_last_successful_provider_snapshot_after_timeout() -> None:
+    observed = datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc)
+    calls = 0
+
+    async def flaky_sofascore_provider() -> SportsLiveSnapshot:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return await _snapshot(
+                "sofascore",
+                _game("sofascore", SportsLiveGameStatus.LIVE, observed),
+            )
+        await asyncio.sleep(10)
+        return SportsLiveSnapshot(source="sofascore", observed_at=observed, games=())
+
+    async def run() -> SportsLiveSnapshot:
+        client = SportsLiveAggregateClient(
+            providers=(
+                ("sofascore", flaky_sofascore_provider),
+                ("nhl", lambda: _snapshot("nhl", _game("nhl", SportsLiveGameStatus.LIVE, observed))),
+            ),
+            now_provider=lambda: observed,
+            provider_timeout_s=0.01,
+        )
+        await client.list_games()
+        return await client.list_games()
+
+    snapshot = asyncio.run(run())
+
+    assert len(snapshot.games) == 1
+    assert snapshot.games[0].source == "nhl"
+    assert [
+        (status.source, status.success, status.health, status.games_seen)
+        for status in snapshot.source_statuses
+    ] == [
+        ("sofascore", True, SportsLiveSourceHealth.CACHED, 1),
+        ("nhl", True, SportsLiveSourceHealth.SUCCESS_WITH_LIVE_DATA, 1),
+    ]
+    assert "provider_timeout" in (snapshot.source_statuses[0].last_error or "")
+
+
 def test_aggregate_client_classifies_empty_rate_limited_and_failed_sources() -> None:
     observed = datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc)
 
