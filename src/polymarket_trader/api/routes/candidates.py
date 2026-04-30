@@ -78,9 +78,15 @@ async def list_live_source_gaps(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     prefix: str | None = Query(default=None),
+    include_future_schedule: bool = Query(default=False),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
-    return await service.list_sports_live_source_gaps(limit=limit, offset=offset, prefix=prefix)
+    return await service.list_sports_live_source_gaps(
+        limit=limit,
+        offset=offset,
+        prefix=prefix,
+        include_future_schedule=include_future_schedule,
+    )
 
 
 @router.post("/live-states")

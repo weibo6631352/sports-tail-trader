@@ -2466,18 +2466,16 @@ def test_admin_live_source_gap_diagnostics_groups_tracked_markets_without_live_s
     assert result["total_tracked_markets"] == 4
     assert result["tracked_markets"] == 3
     assert result["live_state_markets"] == 1
-    assert result["missing_live_state_markets"] == 2
+    assert result["missing_live_state_markets"] == 1
+    assert result["deferred_future_schedule_markets"] == 1
     assert result["by_urgency"] == [
         {"urgency": "started_or_past_due", "count": 1},
-        {"urgency": "future_schedule", "count": 1},
     ]
     assert result["by_prefix"] == [
         {"prefix": "mlb", "count": 1},
-        {"prefix": "nba", "count": 1},
     ]
     assert [item["market_slug"] for item in result["items"]] == [
         "mlb-test-gap-2026-05-01",
-        "nba-nyk-bos-moneyline-1",
     ]
     assert result["items"][0]["gap_urgency"] == "started_or_past_due"
 

@@ -57,7 +57,7 @@
 - `SPORTS_LIVE_STATE_NHL_BASE_URL`：NHL score API 基础地址。
 - `SPORTS_LIVE_STATE_MLB_BASE_URL`：MLB Stats API 基础地址。
 - `SPORTS_LIVE_STATE_SOFASCORE_BASE_URL`：SofaScore 公开 scheduled-events API 基础地址。
-- `SPORTS_LIVE_STATE_SOFASCORE_LOOKAHEAD_DAYS`：SofaScore 除当前 UTC 比赛日外额外拉取的近未来天数，默认 `1`，上限 `3`；用于提前覆盖明天开赛的单场市场，避免等到比赛日才写入直播状态。
+- `SPORTS_LIVE_STATE_SOFASCORE_LOOKAHEAD_DAYS`：SofaScore 除当前 UTC 比赛日外额外拉取的近未来天数，默认 `3`，上限 `3`；用于提前覆盖近未来开赛的单场市场，避免等到比赛日才写入直播状态。
 - `SPORTS_LIVE_STATE_THESPORTSDB_BASE_URL`：TheSportsDB 公开 eventsday API 基础地址；当前只启用已验证可用的 NHL/MLB 映射，并在适配器内做本地限频缓存。
 - `SPORTS_LIVE_STATE_LEAGUES`：逗号分隔的联赛代码，例如 `nba,nhl,nfl,mlb,tennis,sports`；`sports` 是通用覆盖码，会让 SofaScore 拉取 basketball、ice-hockey、baseball、american-football、football、tennis 和 table-tennis 的 scheduled-events，用于整个体育市场的直播状态覆盖与匹配诊断。
 - `SPORTS_LIVE_STATE_INTERVAL_SECONDS`：P2 同步任务间隔，默认 `5` 秒。

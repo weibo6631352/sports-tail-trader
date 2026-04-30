@@ -838,6 +838,7 @@ class AdminService:
         limit: int = 100,
         offset: int = 0,
         prefix: str | None = None,
+        include_future_schedule: bool = False,
     ) -> dict[str, Any]:
         """诊断已跟踪市场中缺少体育直播状态的覆盖缺口。
 
@@ -873,6 +874,7 @@ class AdminService:
         )
         now = datetime.now(timezone.utc)
         missing_markets = []
+        deferred_future_schedule_count = 0
         normalized_prefix = None if prefix is None else prefix.strip().lower()
         for market in markets:
             record = None if store is None else store.find(
@@ -884,6 +886,10 @@ class AdminService:
                 continue
             market_prefix = _market_slug_prefix(market)
             if normalized_prefix and market_prefix != normalized_prefix:
+                continue
+            urgency = _live_source_gap_urgency(market, now=now)
+            if urgency == "future_schedule" and not include_future_schedule:
+                deferred_future_schedule_count += 1
                 continue
             missing_markets.append(market)
 
@@ -928,9 +934,11 @@ class AdminService:
                 "total_tracked_markets": len(all_markets),
                 "live_state_markets": len(live_state_records),
                 "missing_live_state_markets": len(missing_markets),
+                "deferred_future_schedule_markets": deferred_future_schedule_count,
                 "by_prefix": by_prefix,
                 "by_urgency": by_urgency,
                 "prefix": normalized_prefix,
+                "include_future_schedule": include_future_schedule,
             }
         )
         return payload
