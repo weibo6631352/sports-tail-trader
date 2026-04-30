@@ -304,6 +304,54 @@ def test_award_draft_trade_and_cba_props_are_outright_binary_props() -> None:
     assert [decision.selected for decision in decisions] == [False] * 4
 
 
+def test_hyphenated_draft_prop_with_placeholder_v_is_not_single_game() -> None:
+    market = Market(
+        condition_id="draft-placeholder-condition",
+        market_slug="will-player-v-be-the-first-pick-in-the-2026-nba-draft",
+        market_question="Will Player V be the first pick in the 2026 NBA draft?",
+        event_title="2026 NBA Draft: 1st Overall pick",
+        event_slug="2026-nba-draft-1st-overall-pick",
+        category="Sports",
+        tags=("NBA", "NBA Draft"),
+        outcomes=(
+            MarketOutcome(token_id="yes", outcome="Yes"),
+            MarketOutcome(token_id="no", outcome="No"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+    descriptor = describe_sports_market(market)
+    decision = select_market(CurrentStrategyConfig(), market)
+
+    assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
+    assert decision.selected is False
+    assert decision.reason == "outright_market_not_auto_tradable"
+
+
+def test_playoff_advance_props_are_not_single_game_live_markets() -> None:
+    market = Market(
+        condition_id="playoff-advance-condition",
+        market_slug="will-boston-celtics-advance-to-the-conference-finals-in-the-2026-nba-playoffs",
+        market_question="Will the Boston Celtics advance to the Conference Finals in the 2026 NBA Playoffs?",
+        event_title="NBA Playoffs: Team to advance to Conference Finals",
+        event_slug="nba-playoffs-team-to-advance-to-conference-finals",
+        category="Sports",
+        tags=("NBA", "2026 NBA Playoffs", "Conference Finals"),
+        outcomes=(
+            MarketOutcome(token_id="yes", outcome="Yes"),
+            MarketOutcome(token_id="no", outcome="No"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+    descriptor = describe_sports_market(market)
+    decision = select_market(CurrentStrategyConfig(), market)
+
+    assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
+    assert decision.selected is False
+    assert decision.reason == "outright_market_not_auto_tradable"
+
+
 def test_universe_accepts_tennis_market_when_gamma_tags_are_missing_but_slug_has_league() -> None:
     market = Market(
         condition_id="tagless-tennis-condition",

@@ -340,51 +340,66 @@ def _is_season_or_competition_prop(text: str) -> bool:
     这些市场可以解析方向，但不属于单场直播扫尾，不进入自动交易 universe。
     """
 
+    strong_competition_phrases = (
+        "draft",
+        "drafted",
+        "overall pick",
+        "award",
+        "awards",
+        "mvp",
+        "player of the year",
+        "rookie of the year",
+        "manager of the year",
+        "coach of the year",
+        "comeback player",
+        "defensive player",
+        "cba",
+        "collective bargaining",
+        "scorigami",
+        "season",
+        "champion",
+        "championship",
+        "advance to",
+        "conference semifinals",
+        "conference semi finals",
+        "conference finals",
+        "nba playoffs",
+        "nhl playoffs",
+        "mlb playoffs",
+        "postseason",
+        "world cup",
+        "champions league",
+        "premier league",
+        "la liga",
+        "bundesliga",
+        "serie a",
+        "ligue 1",
+        "ucl",
+    )
+    if _contains_any(text, strong_competition_phrases):
+        return True
+
+    matchup_sensitive_phrases = (
+        "top goal scorer",
+        "top goalscorer",
+        "golden boot",
+        "winner",
+        "next team",
+        "play for",
+        "sign with",
+        "traded to",
+        "be traded",
+    )
     return _contains_any(
         text,
-        (
-            "top goal scorer",
-            "top goalscorer",
-            "golden boot",
-            "winner",
-            "next team",
-            "play for",
-            "sign with",
-            "traded to",
-            "be traded",
-            "draft",
-            "drafted",
-            "overall pick",
-            "award",
-            "awards",
-            "mvp",
-            "player of the year",
-            "rookie of the year",
-            "manager of the year",
-            "coach of the year",
-            "comeback player",
-            "defensive player",
-            "cba",
-            "collective bargaining",
-            "scorigami",
-            "season",
-            "champion",
-            "championship",
-            "world cup",
-            "champions league",
-            "premier league",
-            "la liga",
-            "bundesliga",
-            "serie a",
-            "ligue 1",
-            "ucl",
-        ),
+        matchup_sensitive_phrases,
     ) and not _has_matchup_marker(text)
 
 
 def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
     padded = f" {text} "
-    return any(f" {phrase} " in padded for phrase in phrases)
+    hyphen_normalized = f" {text.replace('-', ' ')} "
+    return any(f" {phrase} " in padded or f" {phrase} " in hyphen_normalized for phrase in phrases)
 
 
 def _non_empty(*values: str | None) -> tuple[str, ...]:
