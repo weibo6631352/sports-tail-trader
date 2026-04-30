@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from polymarket_trader.config import Settings
 from strategies.current.sports_tail import (
     BaseballGameState,
     LiveGameState,
@@ -397,6 +398,7 @@ def test_tennis_moneyline_requires_near_locked_current_set() -> None:
 
 def test_default_discovery_scope_matches_live_source_coverage() -> None:
     config = CurrentStrategyConfig()
+    settings = Settings(_env_file=None)
 
     assert config.discovery_title_searches == ("nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
     assert "sports" not in config.sports_category_tokens
@@ -406,3 +408,4 @@ def test_default_discovery_scope_matches_live_source_coverage() -> None:
     assert "soccer" in config.sports_category_tokens
     assert {"table tennis", "table-tennis", "wtt"} <= set(config.sports_category_tokens)
     assert {"tennis", "atp", "wta"} <= set(config.sports_category_tokens)
+    assert settings.sports_live_state_sofascore_lookahead_days >= 2
