@@ -408,4 +408,4 @@ def test_default_discovery_scope_matches_live_source_coverage() -> None:
     assert "soccer" in config.sports_category_tokens
     assert {"table tennis", "table-tennis", "wtt"} <= set(config.sports_category_tokens)
     assert {"tennis", "atp", "wta"} <= set(config.sports_category_tokens)
-    assert settings.sports_live_state_sofascore_lookahead_days >= 2
+    assert settings.sports_live_state_sofascore_lookahead_days >= 3
