@@ -72,6 +72,45 @@ def test_live_state_match_accepts_compact_soccer_team_variants() -> None:
     assert match.matched_away_alias == "Union Touarga Sport"
 
 
+def test_live_state_match_accepts_accented_basketball_team_names() -> None:
+    market = Market(
+        condition_id="euroleague-fenerbahce-kaunas-condition",
+        market_slug="euroleague-fenerbah-kaunas-2026-04-30",
+        market_question="Fenerbahce vs. Zalgiris Kaunas",
+        event_title="Fenerbahce vs. Zalgiris Kaunas",
+        event_slug="euroleague-fenerbah-kaunas-2026-04-30",
+        game_start_time=datetime(2026, 4, 30, 16, 0, tzinfo=timezone.utc),
+        category="Sports",
+        tags=("Basketball", "Euroleague Basketball"),
+        outcomes=(
+            MarketOutcome(token_id="fenerbahce", outcome="Fenerbahce"),
+            MarketOutcome(token_id="zalgiris", outcome="Zalgiris Kaunas"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    game = SportsLiveGame(
+        source="sofascore",
+        source_event_id="16000001",
+        league="Euroleague",
+        home=SportsLiveTeam(name="Fenerbahçe Beko", score=0, short_name="Fenerbahçe"),
+        away=SportsLiveTeam(name="Žalgiris Kaunas", score=0, short_name="Žalgiris"),
+        status=SportsLiveGameStatus.SCHEDULED,
+        period="Not started",
+        observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
+        source_payload={
+            "sport": "basketball",
+            "start_timestamp": 1777564800,
+            "tournament": "Euroleague",
+        },
+    )
+
+    match = match_sports_live_game(market, game)
+
+    assert match is not None
+    assert match.matched_home_alias == "Fenerbahçe"
+    assert match.matched_away_alias == "Žalgiris Kaunas"
+
+
 def test_best_live_state_match_reuses_market_text_across_many_games(monkeypatch) -> None:
     market = _market("nba-phi-bos-2026-04-28")
     games = tuple(

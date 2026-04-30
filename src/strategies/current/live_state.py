@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 import re
+import unicodedata
 from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market
@@ -432,9 +433,16 @@ def _alias_score(alias: str) -> int:
 def _normalize_text(value: str | None) -> str:
     if not value:
         return ""
-    text = value.lower().replace("&", " and ")
+    text = _fold_ascii(value.lower().replace("&", " and "))
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return " ".join(text.split())
+
+
+def _fold_ascii(value: str) -> str:
+    """去除直播源球队名中的重音符号，保持跨来源队名匹配稳定。"""
+
+    normalized = unicodedata.normalize("NFKD", value)
+    return "".join(character for character in normalized if not unicodedata.combining(character))
 
 
 def _alias_text_variants(alias: str) -> tuple[str, ...]:
