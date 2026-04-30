@@ -369,6 +369,7 @@ def _is_season_or_competition_prop(text: str) -> bool:
         "mlb playoffs",
         "postseason",
         "world cup",
+        "wimbledon",
         "champions league",
         "europa league",
         "conference league",
@@ -386,6 +387,9 @@ def _is_season_or_competition_prop(text: str) -> bool:
         "most yellow cards",
         "most red cards",
         "most goal contributions",
+        "promoted to",
+        "name stadium",
+        "stadium after",
     )
     if _contains_any(text, strong_competition_phrases):
         return True

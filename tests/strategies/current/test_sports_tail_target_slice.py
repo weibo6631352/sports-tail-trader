@@ -552,6 +552,48 @@ def test_real_polymarket_season_award_and_leader_props_are_outright_binary_props
             ),
             trading_status=TradingStatus.ELIGIBLE,
         ),
+        Market(
+            condition_id="federer-wimbledon",
+            market_slug="will-roger-federer-play-at-wimbledon",
+            market_question="Will Roger Federer play at Wimbledon?",
+            event_title="Will Roger Federer play at Wimbledon?",
+            event_slug="will-roger-federer-play-at-wimbledon",
+            category="Sports",
+            tags=("ATP", "Sports", "Wimbledon", "Tennis", "Federer"),
+            outcomes=(
+                MarketOutcome(token_id="federer-yes", outcome="Yes"),
+                MarketOutcome(token_id="federer-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
+        Market(
+            condition_id="wrexham-promoted",
+            market_slug="will-wrexham-be-promoted-to-the-epl",
+            market_question="Will Wrexham be promoted to the EPL?",
+            event_title="Will Wrexham be promoted to the EPL?",
+            event_slug="will-wrexham-be-promoted-to-the-epl",
+            category="Sports",
+            tags=("Sports", "Soccer"),
+            outcomes=(
+                MarketOutcome(token_id="wrexham-yes", outcome="Yes"),
+                MarketOutcome(token_id="wrexham-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
+        Market(
+            condition_id="stadium-name",
+            market_slug="washington-commanders-agree-to-name-stadium-after-trump",
+            market_question="Washington Commanders agree to name stadium after Trump?",
+            event_title="Washington Commanders agree to name stadium after Trump?",
+            event_slug="washington-commanders-agree-to-name-stadium-after-trump",
+            category="Sports",
+            tags=("NFL", "Sports", "Politics"),
+            outcomes=(
+                MarketOutcome(token_id="stadium-yes", outcome="Yes"),
+                MarketOutcome(token_id="stadium-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
     )
 
     for market in markets:
