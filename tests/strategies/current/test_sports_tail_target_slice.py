@@ -678,6 +678,20 @@ def test_real_polymarket_season_award_and_leader_props_are_outright_binary_props
             ),
             trading_status=TradingStatus.ELIGIBLE,
         ),
+        Market(
+            condition_id="team-sale-buyer",
+            market_slug="will-jeff-bezos-buy-the-seattle-seahawks-794",
+            market_question="Will Jeff Bezos buy the Seattle Seahawks?",
+            event_title="Who will buy the Seattle Seahawks?",
+            event_slug="who-will-buy-the-seattle-seahawks-814",
+            category="Sports",
+            tags=("Sports", "Business", "NFL"),
+            outcomes=(
+                MarketOutcome(token_id="buyer-yes", outcome="Yes"),
+                MarketOutcome(token_id="buyer-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
     )
 
     for market in markets:

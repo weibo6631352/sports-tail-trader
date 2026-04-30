@@ -397,6 +397,10 @@ def _is_season_or_competition_prop(text: str) -> bool:
         "confirmed relationship",
         "out as",
         "leave illinois",
+        "buy the",
+        "who will buy",
+        "purchase the",
+        "acquire the",
     )
     if _contains_any(text, strong_competition_phrases):
         return True
