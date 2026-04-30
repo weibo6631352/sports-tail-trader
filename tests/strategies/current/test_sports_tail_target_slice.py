@@ -284,6 +284,20 @@ def test_award_draft_trade_and_cba_props_are_outright_binary_props() -> None:
             trading_status=TradingStatus.ELIGIBLE,
         ),
         Market(
+            condition_id="leave-team-condition",
+            market_slug="nba-stephen-curry-to-leave-warriors",
+            market_question="NBA: Stephen Curry to leave Warriors?",
+            event_title="NBA: Stephen Curry to leave Warriors?",
+            event_slug="nba-stephen-curry-to-leave-warriors",
+            category="Sports",
+            tags=("NBA", "Basketball", "Stephen Curry", "Sports"),
+            outcomes=(
+                MarketOutcome(token_id="leave-yes", outcome="Yes"),
+                MarketOutcome(token_id="leave-no", outcome="No"),
+            ),
+            trading_status=TradingStatus.ELIGIBLE,
+        ),
+        Market(
             condition_id="cba-condition",
             market_slug="new-mlb-cba-by-dec-1",
             market_question="New MLB CBA by Dec. 1?",
@@ -299,9 +313,9 @@ def test_award_draft_trade_and_cba_props_are_outright_binary_props() -> None:
     descriptors = tuple(describe_sports_market(market) for market in markets)
     decisions = tuple(select_market(CurrentStrategyConfig(), market) for market in markets)
 
-    assert [descriptor.market_type for descriptor in descriptors] == [SportsMarketType.BINARY_PROP] * 4
-    assert [descriptor.market_family for descriptor in descriptors] == [SportsMarketFamily.OUTRIGHT] * 4
-    assert [decision.selected for decision in decisions] == [False] * 4
+    assert [descriptor.market_type for descriptor in descriptors] == [SportsMarketType.BINARY_PROP] * 5
+    assert [descriptor.market_family for descriptor in descriptors] == [SportsMarketFamily.OUTRIGHT] * 5
+    assert [decision.selected for decision in decisions] == [False] * 5
 
 
 def test_hyphenated_draft_prop_with_placeholder_v_is_not_single_game() -> None:

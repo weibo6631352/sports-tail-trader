@@ -398,6 +398,7 @@ def _is_season_or_competition_prop(text: str) -> bool:
         "next team",
         "play for",
         "sign with",
+        "to leave",
         "traded to",
         "be traded",
     )
