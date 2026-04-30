@@ -390,6 +390,13 @@ def _is_season_or_competition_prop(text: str) -> bool:
         "promoted to",
         "name stadium",
         "stadium after",
+        "start week 1",
+        "starting qb",
+        "rostered by",
+        "grand slams",
+        "confirmed relationship",
+        "out as",
+        "leave illinois",
     )
     if _contains_any(text, strong_competition_phrases):
         return True
