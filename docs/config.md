@@ -106,12 +106,12 @@
 - 资金效率参数：`sports_min_expected_profit_usdc` 和 `sports_min_expected_profit_per_hour_usdc` 控制等待权威结算时的最低预期毛利润与每小时资金效率，`sports_settlement_hold_minutes` 是保守结算占用时长估算。低于结算效率门槛的单子不会直接长期持有；一档 profit-take SELL 只要满足 `sports_profit_take_min_profit_usdc` 的绝对毛利润，或按 `sports_profit_take_hold_minutes` 折算后的每小时资金效率达到 `sports_min_expected_profit_per_hour_usdc`，就允许买入并在成交后挂卖。结算效率已经达标的单子也会在一档 profit-take 毛利润达标时附加止盈挂单，成交则提前释放资金，未成交则继续等待权威结算。
 - 历史仓位补救：`sports_recovery_profit_take_enabled` 默认开启，用于恢复侧发现近端高成本价、无开放 SELL 的旧仓或漏挂止盈仓位时补一张 profit-take SELL；`sports_recovery_profit_take_min_avg_price` 限定只处理均价不低于默认 `0.90` 的仓位，预期毛利润仍沿用 `sports_profit_take_min_profit_usdc`，避免把低成本 settlement 仓位误改成主动退出。若历史市场缺少完整 outcomes 导致体育目标无法解析，恢复侧只允许 eligible 市场做这种 sell-only profit-take 补救，并继续暂停该市场新增交易。
 - 候选市场减仓：本地市场仍处于 `candidate` 时，框架风控只允许已有持仓完全覆盖的 SELL 减仓退出通过；BUY 或无持仓 SELL 仍按 market gate 拒绝，避免把历史补救扩大成新增风险暴露。
-- 体育扫尾模型和权限：`src/strategies/current/sports_tail.py`。策略目标范围是整个体育市场；所有体育盘口应优先被解析成统一 market family / market type / side / line。没有专用胜率模型的单场 Yes/No prop 只做 record-only 候选诊断，不能绕过策略评估、资金效率和风控进入自动执行。
+- 体育扫尾模型和权限：`src/strategies/current/sports_tail/`（拆分为 types/parsing/leagues/slug/core/mlb/tennis/evaluator 子模块）。策略目标范围是整个体育市场；所有体育盘口应优先被解析成统一 market family / market type / side / line。没有专用胜率模型的单场 Yes/No prop 只做 record-only 候选诊断，不能绕过策略评估、资金效率和风控进入自动执行。
 - 体育扫尾策略级风控：`src/strategies/current/risk.py`
 - 体育扫尾退出计划：`src/strategies/current/exit_plan.py`
 - 盘口方向解析：`src/strategies/current/outcomes.py`
 - 市场筛选：`src/strategies/current/universe.py`
-- 交易决策：`src/strategies/current/trading.py`
+- 交易决策：`src/strategies/current/trading/`（拆分为 hooks/allocation/gates/matching/pricing/exit_overlay/risk_limits/helpers 子模块）
 - 恢复与跟踪：`src/strategies/current/recovery.py` / `src/strategies/current/tracking.py`
 - 扩展契约：`src/polymarket_trader/extension_api/`
 - 扩展外部配置路径：`EXTENSION_CONFIG_PATH`

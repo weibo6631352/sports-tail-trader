@@ -16,7 +16,7 @@
 - 改 discovery 粗筛：[src/strategies/current/config.py](./src/strategies/current/config.py) 的 `discovery_title_searches` / `discovery_tag_slugs`，或 [src/strategies/current/strategy.py](./src/strategies/current/strategy.py) 的 `discovery_queries()`；官方 Gamma Events keyset 文档见 <https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination>
 - 改市场筛选：[src/strategies/current/universe.py](./src/strategies/current/universe.py)
 - 改策略配置：[src/strategies/current/config.py](./src/strategies/current/config.py)
-- 改分配、入场、退出：[src/strategies/current/trading.py](./src/strategies/current/trading.py)
+- 改分配、入场、退出：[src/strategies/current/trading/](./src/strategies/current/trading/)
 - 改恢复和保留跟踪：[src/strategies/current/recovery.py](./src/strategies/current/recovery.py) / [src/strategies/current/tracking.py](./src/strategies/current/tracking.py)
 - 看策略装配入口：[src/strategies/current/strategy.py](./src/strategies/current/strategy.py)
 - 看扩展 API 契约：[src/polymarket_trader/extension_api](./src/polymarket_trader/extension_api)
@@ -79,7 +79,7 @@
 - 运行入口：[src/strategies/current/strategy.py](./src/strategies/current/strategy.py)
 - 策略配置：[src/strategies/current/config.py](./src/strategies/current/config.py)
 - discovery query / universe：[src/strategies/current/strategy.py](./src/strategies/current/strategy.py) / [src/strategies/current/config.py](./src/strategies/current/config.py) / [src/strategies/current/universe.py](./src/strategies/current/universe.py)
-- 交易决策：[src/strategies/current/trading.py](./src/strategies/current/trading.py)
+- 交易决策：[src/strategies/current/trading/](./src/strategies/current/trading/)
 - 恢复 / 跟踪：[src/strategies/current/recovery.py](./src/strategies/current/recovery.py) / [src/strategies/current/tracking.py](./src/strategies/current/tracking.py)
 - 扩展 API 契约：[src/polymarket_trader/extension_api/hooks.py](./src/polymarket_trader/extension_api/hooks.py) / [src/polymarket_trader/extension_api/decisions.py](./src/polymarket_trader/extension_api/decisions.py)
 
