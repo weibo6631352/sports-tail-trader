@@ -9,7 +9,7 @@ Sports Tail Trader 是一个跑实盘资金的 Polymarket 体育扫尾交易后�
 - 主包 [src/polymarket_trader](./src/polymarket_trader)：分 `api / app / domain / infra / observability / runtime / workers / extension_api`。
 - 策略实现 [src/strategies/current](./src/strategies/current)：当前体育扫尾策略；`EXTENSION_MODULE` 装配单一业务扩展。
 - 前端管理台 [frontend](./frontend)：Admin UI 与策略展示扩展槽。
-- 长期文档 [docs/](./docs)：业务需求、设计文档、市场发现链路、runbook 等；接手任务前先看 [docs/开发进度.md](./docs/开发进度.md) 了解当前状态。
+- 长期文档 [docs/](./docs)：业务需求、设计文档、市场发现链路、runbook 等；当前状态以代码和 `git log` 为准。
 - Python 3.12，`src` layout，FastAPI + asyncpg + SQLAlchemy + py-clob-client-v2 + websockets。
 
 ## 2. 常用命令
@@ -133,7 +133,7 @@ runtime -> domain
 - 注释只写非显然的 WHY：隐含约束、不变量、绕过特定 bug 的处理、会让读者意外的行为。命名能表达的 WHAT 不另加注释。
 - 涉及风控、状态机、资金计算、并发边界等关键业务步骤的边界条件，应当用中文写明。
 - 新增接口、配置项、运行时状态或人工操作入口时，同步更新对应文档。
-- 不写一次性执行清单、改造计划或已被代码取代的历史表述；这些走 PR / 进度文档。
+- 不写一次性执行清单、改造计划、进度日志或已被代码取代的历史表述；这些信息走 PR description 和 `git log`，不进仓库文档。规则类约束统一沉到本文件。
 
 ## 13. 多 agent 协作
 
