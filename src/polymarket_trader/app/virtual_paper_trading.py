@@ -28,8 +28,8 @@ from polymarket_trader.infra.polymarket.order_executor import (
 )
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.serialization import jsonable
-from polymarket_trader.workers.trading_decision_worker import TradingDecisionWorker
-from polymarket_trader.workers.trading_decision_worker_result import TradingDecisionWorkerResult
+from polymarket_trader.workers.trading_decision import TradingDecisionWorker
+from polymarket_trader.workers.trading_decision import TradingDecisionWorkerResult
 
 _REJECTION_SAMPLE_LIMIT = 12
 

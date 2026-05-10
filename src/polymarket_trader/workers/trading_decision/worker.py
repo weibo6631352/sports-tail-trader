@@ -25,7 +25,7 @@ from polymarket_trader.domain.account import AccountSnapshot, MarketPauseSource
 from polymarket_trader.extension_api import ExtensionAction, ExtensionContext, MarketTokenView
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
-from polymarket_trader.workers.trading_decision_event_payloads import (
+from .event_payloads import (
     TRADING_DECISION_WORKER_ORIGIN,
     coerce_order_result_from_event,
     is_self_emitted,
@@ -40,8 +40,8 @@ from polymarket_trader.workers.trading_decision_event_payloads import (
     snapshot_available_usdc,
     snapshot_position,
 )
-from polymarket_trader.workers.trading_order_result_processor import TradingOrderResultProcessor
-from polymarket_trader.workers.trading_decision_worker_result import TradingDecisionWorkerResult
+from .order_result_processor import TradingOrderResultProcessor
+from .result import TradingDecisionWorkerResult
 
 PositionsProvider = Callable[[], Iterable[Position]]
 OpenOrdersProvider = Callable[[], Iterable[Order]]

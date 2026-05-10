@@ -13,7 +13,7 @@ from polymarket_trader.extension_api.decisions import (
     UniverseDecision,
 )
 from polymarket_trader.runtime.registry import MarketRegistry
-from polymarket_trader.workers.market_ws_worker import MarketWsWorker
+from polymarket_trader.workers.market_ws import MarketWsWorker
 
 
 class _IncludeAllHooks:

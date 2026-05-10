@@ -84,12 +84,12 @@ from polymarket_trader.runtime.ws_loops import (
 )
 from polymarket_trader.extension_api import BusinessExtension
 from polymarket_trader.workers.market_discovery_worker import MarketDiscoveryWorker
-from polymarket_trader.workers.market_ws_worker import MarketWsWorker
-from polymarket_trader.workers.persistence_worker import PersistenceWorker
-from polymarket_trader.workers.reconcile_worker import ReconcileWorker
+from polymarket_trader.workers.market_ws import MarketWsWorker
+from polymarket_trader.workers.persistence import PersistenceWorker
+from polymarket_trader.workers.reconcile import ReconcileWorker
 from polymarket_trader.workers.sports_live_state_worker import SportsLiveStateWorker
-from polymarket_trader.workers.trading_decision_worker import TradingDecisionWorker
-from polymarket_trader.workers.user_ws_worker import UserWsWorker
+from polymarket_trader.workers.trading_decision import TradingDecisionWorker
+from polymarket_trader.workers.user_ws import UserWsWorker
 
 logger = logging.getLogger(__name__)
 

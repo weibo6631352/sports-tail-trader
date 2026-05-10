@@ -4,7 +4,7 @@ from polymarket_trader.app.admin_serialization import AdminSerializer
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import AuditEvent, OutboxEvent
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
-from polymarket_trader.workers.persistence_records import PersistenceRecordBuilder
+from polymarket_trader.workers.persistence import PersistenceRecordBuilder
 
 
 def test_admin_audit_event_serialization_exposes_payload_for_candidate_replay() -> None:

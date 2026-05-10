@@ -21,9 +21,9 @@ from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry, MarketRegistrySnapshot
 from polymarket_trader.serialization import jsonable
-from polymarket_trader.workers.market_ws_worker import MarketWsWorker
-from polymarket_trader.workers.reconcile_action_applier import ReconcileActionApplier
-from polymarket_trader.workers.reconcile_authority_refresher import (
+from polymarket_trader.workers.market_ws import MarketWsWorker
+from .action_applier import ReconcileActionApplier
+from .authority_refresher import (
     AuthoritativeRefreshFailure,
     AuthoritativeRefreshSummary,
     DataAuthorityClient,

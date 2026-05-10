@@ -15,8 +15,8 @@ from polymarket_trader.runtime.ws_loops import (
     market_ws_subscription_token_ids,
     user_ws_subscription_condition_ids,
 )
-from polymarket_trader.workers.market_ws_worker import MarketWsWorker
-from polymarket_trader.workers.user_ws_worker import UserWsWorker
+from polymarket_trader.workers.market_ws import MarketWsWorker
+from polymarket_trader.workers.user_ws import UserWsWorker
 
 
 def test_market_ws_status_can_return_lightweight_summary() -> None:

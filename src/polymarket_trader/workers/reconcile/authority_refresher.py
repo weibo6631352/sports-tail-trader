@@ -14,7 +14,7 @@ from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.registry import MarketRegistry, MarketRegistrySnapshot
-from polymarket_trader.workers.market_ws_worker import MarketWsWorker
+from polymarket_trader.workers.market_ws import MarketWsWorker
 
 RegistrySnapshotProvider = Callable[[], MarketRegistrySnapshot]
 _AUTHORITY_CALL_TIMEOUT_S = 5.0

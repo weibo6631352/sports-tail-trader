@@ -11,7 +11,7 @@ from polymarket_trader.domain.events import DomainEvent, OutboxPriority
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
-from polymarket_trader.workers.user_ws_projection import (
+from .projection import (
     UserWsAccountProjector,
     extract_trace_id as _extract_trace_id,
     flatten_message as _flatten_message,

@@ -24,7 +24,7 @@ from polymarket_trader.domain.state_machine import MarketLifecycle
 from polymarket_trader.extension_api import ExtensionContext, MarketTokenView
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.serialization import jsonable
-from polymarket_trader.workers.trading_decision_event_payloads import (
+from .event_payloads import (
     TRADING_DECISION_WORKER_ORIGIN,
     coerce_order_result_from_event,
     result_event_type,
@@ -34,7 +34,7 @@ from polymarket_trader.workers.trading_decision_event_payloads import (
     serialize_review,
     snapshot_position,
 )
-from polymarket_trader.workers.trading_decision_worker_result import TradingDecisionWorkerResult
+from .result import TradingDecisionWorkerResult
 
 
 class TradingOrderResultHost(Protocol):

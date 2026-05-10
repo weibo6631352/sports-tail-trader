@@ -13,9 +13,9 @@ from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.infra.polymarket import market_ws_adapter
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry
-from polymarket_trader.workers.market_book_projector import BookState as _BookState
-from polymarket_trader.workers.market_book_projector import MarketBookProjector
-from polymarket_trader.workers.market_ws_market_updater import MarketWsMarketUpdater
+from .book_projector import BookState as _BookState
+from .book_projector import MarketBookProjector
+from .market_updater import MarketWsMarketUpdater
 
 
 def _utc_now() -> datetime:

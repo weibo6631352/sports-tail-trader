@@ -25,9 +25,9 @@ from polymarket_trader.app.reconcile_service import ReconcileService
 from polymarket_trader.app.reconcile_service import ReconcileActionType
 from polymarket_trader.main import _is_reconcile_trigger
 from polymarket_trader.main import _runtime_trace_id
-from polymarket_trader.workers.market_ws_worker import MarketWsWorker
-from polymarket_trader.workers.reconcile_authority_refresher import ReconcileAuthorityRefresher
-from polymarket_trader.workers.reconcile_worker import ReconcileWorker
+from polymarket_trader.workers.market_ws import MarketWsWorker
+from polymarket_trader.workers.reconcile import ReconcileAuthorityRefresher
+from polymarket_trader.workers.reconcile import ReconcileWorker
 
 
 class _NoopHooks:

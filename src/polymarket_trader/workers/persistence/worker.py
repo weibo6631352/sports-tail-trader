@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
 from polymarket_trader.domain.events import OutboxEvent
-from polymarket_trader.workers.persistence_records import (
+from .records import (
     PersistencePlannedRecord as _PlannedRecord,
     PersistenceRecordBuilder,
     route_key,
