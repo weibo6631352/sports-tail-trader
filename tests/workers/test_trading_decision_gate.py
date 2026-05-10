@@ -15,7 +15,7 @@ from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.order import BuyOrderIntent, ManagedOrderIntent, OrderResult, OrderResultStatus, OrderSide
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.position import Position
-from polymarket_trader.extension_api import ExtensionContext, ExtensionDecision
+from polymarket_trader.extension_api import DecisionKind, ExtensionContext, ExtensionDecision
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.domain.state_machine import MarketLifecycle
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
@@ -138,6 +138,7 @@ class _ScaleInDecisionService:
             amount_usdc=Decimal("3"),
             market_slug=self.market.market_slug,
             allow_open_exit_overlap=True,
+            intent_tags=frozenset({"scale_in"}),
         )
         return EntryPlan(
             trace_id=trace_id,
@@ -147,7 +148,7 @@ class _ScaleInDecisionService:
             allocation=allocation,
             intent=intent,
             reason="strategy_scale_in",
-            metadata={"sports_tail_opportunity_type": "scale_in_advantage"},
+            decision_kind=DecisionKind.SCALE_IN,
         )
 
     def resolve_market(self, *, condition_id: str | None, token_id: str | None) -> Market | None:

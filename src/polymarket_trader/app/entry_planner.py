@@ -17,7 +17,10 @@ from polymarket_trader.extension_api import (
     ExtensionHooks,
     MarketTokenView,
 )
+from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
+from polymarket_trader.extension_api.recorder import DecisionRecorder
 from polymarket_trader.observability.trace import ensure_trace_id
+from polymarket_trader.runtime.decision_recorder import build_decision_record
 from polymarket_trader.runtime.registry import MarketRegistry
 
 OrderbookReader = Callable[[str], OrderbookSnapshot | None]
@@ -30,10 +33,12 @@ class EntryPlanner:
         extension_hooks: ExtensionHooks,
         registry: MarketRegistry | None = None,
         orderbook_reader: OrderbookReader | None = None,
+        decision_recorder: DecisionRecorder | None = None,
     ) -> None:
         self._extension_hooks = extension_hooks
         self._registry = registry
         self._orderbook_reader = orderbook_reader
+        self._decision_recorder = decision_recorder
 
     def build_entry_plan(
         self,
@@ -52,6 +57,7 @@ class EntryPlanner:
         positions: Iterable[Position] = (),
         open_orders: Iterable[Order] = (),
         metadata: Mapping[str, Any] | None = None,
+        manual_confirmation: ManualConfirmation | None = None,
     ) -> EntryPlan:
         trace_id = trace_id or ensure_trace_id()
         base_metadata = dict(metadata or {})
@@ -130,6 +136,7 @@ class EntryPlanner:
                 max_market_usdc=max_market_usdc,
                 max_total_usdc=max_total_usdc,
                 metadata=base_metadata,
+                manual_confirmation=manual_confirmation,
             )
         )
         plan = sizing.allocation_plan
@@ -140,6 +147,8 @@ class EntryPlanner:
         )
         reason = sizing.reason or plan.reason
         intent = None
+        decision_kind = None
+        summary = None
         plan_metadata: dict[str, Any] = dict(base_metadata)
         plan_metadata.update(sizing.metadata or {})
 
@@ -147,26 +156,33 @@ class EntryPlanner:
             focus_token_id = allocation.token_id or focus_token_id
             reason = allocation.reason or reason
             if allocation.buy_budget_usdc > Decimal("0"):
-                decision = self._extension_hooks.decide_entry(
-                    self._entry_decision_context(
-                        trace_id=trace_id,
-                        market=resolved_market,
-                        token_id=allocation.token_id or resolved_token_id,
-                        orderbook=resolved_orderbook,
-                        account_snapshot=account_snapshot,
-                        position=position_index.get((resolved_market.condition_id, focus_token_id)),
-                        open_orders=_open_orders_for(open_orders, resolved_market.condition_id, focus_token_id),
-                        portfolio_budget_usdc=portfolio_budget_usdc,
-                        available_usdc=available_usdc,
-                        max_order_usdc=max_order_usdc,
-                        max_market_usdc=max_market_usdc,
-                        max_total_usdc=max_total_usdc,
-                        allocation_plan=plan,
-                        allocation=allocation,
-                        metadata=base_metadata,
-                    )
+                entry_context = self._entry_decision_context(
+                    trace_id=trace_id,
+                    market=resolved_market,
+                    token_id=allocation.token_id or resolved_token_id,
+                    orderbook=resolved_orderbook,
+                    account_snapshot=account_snapshot,
+                    position=position_index.get((resolved_market.condition_id, focus_token_id)),
+                    open_orders=_open_orders_for(open_orders, resolved_market.condition_id, focus_token_id),
+                    portfolio_budget_usdc=portfolio_budget_usdc,
+                    available_usdc=available_usdc,
+                    max_order_usdc=max_order_usdc,
+                    max_market_usdc=max_market_usdc,
+                    max_total_usdc=max_total_usdc,
+                    allocation_plan=plan,
+                    allocation=allocation,
+                    metadata=base_metadata,
+                    manual_confirmation=manual_confirmation,
+                )
+                decision = self._extension_hooks.decide_entry(entry_context)
+                self._record_decision(
+                    hook_name="decide_entry",
+                    context=entry_context,
+                    decision=decision,
                 )
                 plan_metadata.update(decision.metadata)
+                decision_kind = decision.decision_kind
+                summary = decision.summary
                 intent = decision_to_trade_intent(
                     trace_id=trace_id,
                     market=resolved_market,
@@ -185,6 +201,8 @@ class EntryPlanner:
             intent=intent,
             eligible_market_count=plan.eligible_market_count,
             reason=reason,
+            decision_kind=decision_kind,
+            summary=summary,
             metadata=plan_metadata,
         )
 
@@ -205,6 +223,7 @@ class EntryPlanner:
         max_market_usdc: Decimal,
         max_total_usdc: Decimal,
         metadata: Mapping[str, Any],
+        manual_confirmation: ManualConfirmation | None = None,
     ) -> ExtensionContext:
         effective_available_usdc = available_usdc if available_usdc is not None else portfolio_budget_usdc
         context_metadata: dict[str, Any] = dict(metadata)
@@ -237,6 +256,7 @@ class EntryPlanner:
             max_order_usdc=max_order_usdc,
             max_market_usdc=max_market_usdc,
             max_total_usdc=max_total_usdc,
+            manual_confirmation=manual_confirmation,
             metadata=context_metadata,
         )
 
@@ -258,6 +278,7 @@ class EntryPlanner:
         allocation_plan: AllocationPlan,
         allocation: Allocation,
         metadata: Mapping[str, Any],
+        manual_confirmation: ManualConfirmation | None = None,
     ) -> ExtensionContext:
         context_metadata: dict[str, Any] = dict(metadata)
         context_metadata.update(
@@ -295,6 +316,7 @@ class EntryPlanner:
             allocation_plan=allocation_plan,
             allocation=allocation,
             amount_usdc=allocation.buy_budget_usdc,
+            manual_confirmation=manual_confirmation,
             metadata=context_metadata,
         )
 
@@ -387,6 +409,29 @@ class EntryPlanner:
         if self._orderbook_reader is None:
             return None
         return self._orderbook_reader(token_id)
+
+    def _record_decision(
+        self,
+        *,
+        hook_name: str,
+        context: ExtensionContext,
+        decision: object,
+    ) -> None:
+        if self._decision_recorder is None:
+            return
+        record = build_decision_record(
+            hook_name=hook_name,
+            trace_id=context.trace_id,
+            context=context,
+            decision=decision,
+            condition_id=context.market.condition_id if context.market is not None else None,
+            token_id=context.token_id,
+            market_slug=context.market.market_slug if context.market is not None else None,
+        )
+        try:
+            self._decision_recorder.record(record)
+        except Exception:
+            return
 
 
 def _entry_account_inputs(

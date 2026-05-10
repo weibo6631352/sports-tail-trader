@@ -138,6 +138,8 @@ class _CandidateSelection:
         self.rejection_summary = dict(rejection_summary or _rejection_summary(()))
 
     def as_payload(self) -> dict[str, Any]:
+        summary = None if self.plan is None else self.plan.summary
+        extras = dict(summary.extras) if summary is not None else {}
         return {
             "condition_id": self.market.condition_id,
             "market_slug": self.market.market_slug,
@@ -145,9 +147,9 @@ class _CandidateSelection:
             "token_id": self.token_id,
             "plan_ready": None if self.plan is None else self.plan.ready_to_trade,
             "plan_reason": None if self.plan is None else self.plan.reason,
-            "action": None if self.plan is None or self.plan.metadata is None else self.plan.metadata.get("sports_tail_action"),
-            "sports_reason": None if self.plan is None or self.plan.metadata is None else self.plan.metadata.get("sports_tail_reason"),
-            "execution_permission": None if self.plan is None or self.plan.metadata is None else self.plan.metadata.get("sports_execution_permission"),
+            "action": None if summary is None else summary.action or None,
+            "reason": None if summary is None else summary.reason or None,
+            "execution_permission": extras.get("execution_permission"),
             "metadata": self.metadata,
         }
 
@@ -195,7 +197,8 @@ async def _select_candidate(
                 all_rejections.append(rejection)
                 continue
             opportunity_funnel["orderbook_available_count"] += 1
-            if "sports_tail_game" in metadata:
+            record = _entry_metadata_record_for_market(runtime, market)
+            if record is not None and record.live_state_payload:
                 opportunity_funnel["metadata_available_count"] += 1
             plan = _build_plan(
                 runtime,
@@ -206,10 +209,9 @@ async def _select_candidate(
                 metadata=metadata,
             )
             _record_plan(opportunity_funnel, plan)
-            action = "" if plan.metadata is None else str(plan.metadata.get("sports_tail_action") or "")
-            sports_reason = plan.reason or (
-                "" if plan.metadata is None else str(plan.metadata.get("sports_tail_reason") or "")
-            )
+            summary = plan.summary
+            action = "" if summary is None else str(summary.action or "")
+            sports_reason = plan.reason or ("" if summary is None else str(summary.reason or ""))
             rejection_summary = _rejection_summary(tuple(all_rejections))
             selection = _CandidateSelection(
                 market=market,
@@ -421,8 +423,8 @@ def _result_payload(
             ),
             "summary": {
                 "plan_ready": None if plan is None else plan.ready_to_trade,
-                "entry_action": None if plan is None or plan.metadata is None else plan.metadata.get("sports_tail_action"),
-                "entry_reason": None if plan is None or plan.metadata is None else plan.metadata.get("sports_tail_reason"),
+                "entry_action": None if plan is None or plan.summary is None else (plan.summary.action or None),
+                "entry_reason": None if plan is None or plan.summary is None else (plan.summary.reason or None),
                 "entry_order_status": None if entry_order is None else entry_order.status,
                 "follow_up_count": 0 if result is None else len(result.follow_up_intents),
                 "follow_up_price": None if result is None or not result.follow_up_intents else result.follow_up_intents[0].price,
@@ -476,14 +478,14 @@ def _steps(result: TradingDecisionWorkerResult | None) -> tuple[dict[str, Any], 
     if follow_up_intent is None:
         return (
             {"key": "real_data", "label": "真实候选数据", "status": "success", "detail": "来自当前 registry/orderbook/live metadata"},
-            {"key": "plan", "label": "入场计划", "status": "success" if plan is not None and plan.ready_to_trade else "failed", "detail": None if plan is None else plan.reason or plan.metadata.get("sports_tail_reason", "")},
+            {"key": "plan", "label": "入场计划", "status": "success" if plan is not None and plan.ready_to_trade else "failed", "detail": None if plan is None else plan.reason or (plan.summary.reason if plan.summary else "")},
             {"key": "entry_risk", "label": "BUY 风控", "status": _risk_status(review), "detail": _risk_reason(review)},
             {"key": "entry_order", "label": "BUY 虚拟提交", "status": "success" if entry_order is not None and entry_order.status == OrderResultStatus.FULL_FILL else "failed", "detail": None if entry_order is None else entry_order.reason},
             {"key": "settlement", "label": "等待结算", "status": "success", "detail": "不自动挂 follow-up SELL"},
         )
     return (
         {"key": "real_data", "label": "真实候选数据", "status": "success", "detail": "来自当前 registry/orderbook/live metadata"},
-        {"key": "plan", "label": "入场计划", "status": "success" if plan is not None and plan.ready_to_trade else "failed", "detail": None if plan is None else plan.reason or plan.metadata.get("sports_tail_reason", "")},
+        {"key": "plan", "label": "入场计划", "status": "success" if plan is not None and plan.ready_to_trade else "failed", "detail": None if plan is None else plan.reason or (plan.summary.reason if plan.summary else "")},
         {"key": "entry_risk", "label": "BUY 风控", "status": _risk_status(review), "detail": _risk_reason(review)},
         {"key": "entry_order", "label": "BUY 虚拟提交", "status": "success" if entry_order is not None and entry_order.status == OrderResultStatus.FULL_FILL else "failed", "detail": None if entry_order is None else entry_order.reason},
         {"key": "follow_up", "label": "跟单 SELL 计划", "status": "success" if follow_up_intent is not None else "failed", "detail": None if follow_up_intent is None else f"GTC SELL @ {follow_up_intent.price}"},
@@ -512,7 +514,8 @@ def _rejection(
     stage: str,
     plan: EntryPlan | None = None,
 ) -> dict[str, Any]:
-    metadata = dict(plan.metadata or {}) if plan is not None else {}
+    summary = None if plan is None else plan.summary
+    extras = dict(summary.extras) if summary is not None else {}
     return {
         "condition_id": market.condition_id,
         "market_slug": market.market_slug,
@@ -521,15 +524,15 @@ def _rejection(
         "reason": reason,
         "plan_ready": None if plan is None else plan.ready_to_trade,
         "plan_reason": None if plan is None else plan.reason,
-        "action": metadata.get("sports_tail_action"),
-        "sports_reason": metadata.get("sports_tail_reason"),
-        "sports_risk_reason": metadata.get("sports_risk_reason"),
-        "execution_permission": metadata.get("sports_execution_permission"),
-        "market_family": metadata.get("sports_market_family") or metadata.get("market_family"),
-        "market_type": metadata.get("market_type"),
-        "game_status": metadata.get("game_status"),
-        "best_ask": metadata.get("best_ask"),
-        "line": metadata.get("line"),
+        "action": None if summary is None else (summary.action or None),
+        "sports_reason": None if summary is None else (summary.reason or None),
+        "sports_risk_reason": extras.get("sports_risk_reason"),
+        "execution_permission": extras.get("execution_permission"),
+        "market_family": extras.get("sports_market_family"),
+        "market_type": None if summary is None else (summary.market_type or None),
+        "game_status": extras.get("game_status"),
+        "best_ask": None if summary is None or summary.best_ask is None else str(summary.best_ask),
+        "line": None if summary is None or summary.line is None else str(summary.line),
     }
 
 
@@ -562,18 +565,20 @@ def _empty_opportunity_funnel(
 
 
 def _record_plan(opportunity_funnel: dict[str, Any], plan: EntryPlan) -> None:
-    metadata = dict(plan.metadata or {})
+    summary = plan.summary
+    extras = dict(summary.extras) if summary is not None else {}
+    action = "" if summary is None else str(summary.action or "")
     opportunity_funnel["evaluated_token_count"] += 1
     opportunity_funnel["plan_built_count"] += 1
     if plan.ready_to_trade:
         opportunity_funnel["plan_ready_count"] += 1
-    if metadata.get("sports_tail_action") == "auto_execute":
+    if action == "auto_execute":
         opportunity_funnel["auto_execute_count"] += 1
-    _increment_count(opportunity_funnel["market_family_counts"], metadata.get("sports_market_family") or metadata.get("market_family"))
-    _increment_count(opportunity_funnel["market_type_counts"], metadata.get("market_type"))
-    _increment_count(opportunity_funnel["game_status_counts"], metadata.get("game_status"))
-    _increment_count(opportunity_funnel["action_counts"], metadata.get("sports_tail_action"))
-    _increment_count(opportunity_funnel["execution_permission_counts"], metadata.get("sports_execution_permission"))
+    _increment_count(opportunity_funnel["market_family_counts"], extras.get("sports_market_family"))
+    _increment_count(opportunity_funnel["market_type_counts"], None if summary is None else summary.market_type)
+    _increment_count(opportunity_funnel["game_status_counts"], extras.get("game_status"))
+    _increment_count(opportunity_funnel["action_counts"], action or None)
+    _increment_count(opportunity_funnel["execution_permission_counts"], extras.get("execution_permission"))
 
 
 def _record_rejection(opportunity_funnel: dict[str, Any], rejection: Mapping[str, Any]) -> None:
@@ -839,6 +844,17 @@ def _entry_metadata_for_market(runtime: Any, market: Market) -> dict[str, Any]:
             market_slug=market.market_slug,
             event_slug=market.event_slug,
         )
+    )
+
+
+def _entry_metadata_record_for_market(runtime: Any, market: Market):
+    store = getattr(runtime, "entry_metadata_store", None)
+    if store is None:
+        return None
+    return store.find(
+        condition_id=market.condition_id,
+        market_slug=market.market_slug,
+        event_slug=market.event_slug,
     )
 
 

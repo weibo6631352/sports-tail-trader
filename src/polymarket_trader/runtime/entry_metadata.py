@@ -31,7 +31,11 @@ def _identity(
 
 @dataclass(frozen=True, slots=True)
 class EntryMetadataRecord:
-    """入场判断前可补充的运行时 metadata 快照。"""
+    """入场判断前可补充的运行时 metadata 快照。
+
+    ``metadata`` 仍然是策略可透传的自由 dict（admin 详情透传用）；framework 决策
+    只读强类型 ``live_state_*`` 字段，避免再依赖策略私有 metadata key。
+    """
 
     condition_id: str | None = None
     market_slug: str | None = None
@@ -39,6 +43,10 @@ class EntryMetadataRecord:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     source: str = "manual"
     updated_at: datetime = field(default_factory=_utc_now)
+    live_state_signal_allowed: bool | None = None
+    live_state_signal_reason: str = ""
+    live_state_phase: str = ""
+    live_state_payload: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def key(self) -> str:
@@ -56,6 +64,10 @@ class EntryMetadataRecord:
             "metadata": jsonable(self.metadata),
             "source": self.source,
             "updated_at": self.updated_at.isoformat(),
+            "live_state_signal_allowed": self.live_state_signal_allowed,
+            "live_state_signal_reason": self.live_state_signal_reason,
+            "live_state_phase": self.live_state_phase,
+            "live_state_payload": jsonable(self.live_state_payload),
         }
 
 
@@ -79,6 +91,10 @@ class EntryMetadataStore:
         event_slug: str | None = None,
         source: str = "manual",
         updated_at: datetime | None = None,
+        live_state_signal_allowed: bool | None = None,
+        live_state_signal_reason: str = "",
+        live_state_phase: str = "",
+        live_state_payload: Mapping[str, Any] | None = None,
     ) -> EntryMetadataRecord:
         record = EntryMetadataRecord(
             condition_id=condition_id,
@@ -87,6 +103,10 @@ class EntryMetadataStore:
             metadata=dict(metadata),
             source=source,
             updated_at=updated_at or _utc_now(),
+            live_state_signal_allowed=live_state_signal_allowed,
+            live_state_signal_reason=live_state_signal_reason,
+            live_state_phase=live_state_phase,
+            live_state_payload=dict(live_state_payload or {}),
         )
         aliases = _record_identity_keys(record)
         with self._lock:

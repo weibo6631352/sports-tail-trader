@@ -74,7 +74,9 @@ from polymarket_trader.runtime.discovery_runner import (
     MARKET_DISCOVERY_TICK_SECONDS,
     run_market_discovery_scan,
 )
+from polymarket_trader.runtime.decision_recorder import InMemoryDecisionRecorder
 from polymarket_trader.runtime.event_bus import EventBus
+from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
 from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics as _sync_runtime_metrics
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.runtime.ws_loops import (
@@ -98,8 +100,18 @@ logger = logging.getLogger(__name__)
 class RuntimeComponents:
     settings: Settings
     readiness: StartupReadiness
-    extension: BusinessExtension
+    extensions: tuple[BusinessExtension, ...]
     logging_runtime: LoggingRuntime
+
+    @property
+    def extension(self) -> BusinessExtension:
+        """单策略快捷访问；多策略并存接入时由调用侧改为按 routing_key 选择。"""
+
+        if not self.extensions:
+            raise RuntimeError("no extensions configured")
+        if len(self.extensions) > 1:
+            raise RuntimeError("multiple extensions are configured; pick one explicitly")
+        return self.extensions[0]
     gamma_client: GammaClient
     clob_client: ClobClient
     data_client: DataClient
@@ -134,6 +146,7 @@ class RuntimeComponents:
     maintenance_process_pool: ProcessPoolExecutor
     background_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
     admin_service: object | None = None
+    decision_recorder: InMemoryDecisionRecorder | None = None
     bootstrap_summary: dict[str, Any] = field(default_factory=dict)
 
 
@@ -281,9 +294,11 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         balance_usdc=settings.portfolio_budget_usdc,
         allowance_usdc=settings.portfolio_budget_usdc,
     )
+    lifecycle_bus = InProcessLifecycleBus()
     extension_ports = build_extension_ports(
         registry=registry,
         snapshot_provider=account_state_store.snapshot,
+        lifecycle_bus=lifecycle_bus,
     )
     if settings.extension_module is None:
         raise ConfigLoadError(
@@ -333,13 +348,16 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         market_tracker=market_ws_worker,
         account_snapshot_provider=account_state_store.snapshot,
     )
+    decision_recorder = InMemoryDecisionRecorder()
     trading_decision_service = TradingDecisionService(
         extension_hooks=extension.hooks,
         registry=registry,
         orderbook_reader=market_ws_worker.snapshot,
+        decision_recorder=decision_recorder,
     )
     trading_service = TradingService(
         executor=order_executor,
+        lifecycle_bus=lifecycle_bus,
     )
     user_ws_worker = UserWsWorker(
         event_bus=event_bus,
@@ -394,6 +412,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         clob_client=clob_client,
         data_client=data_client,
         trading_client=trading_client,
+        lifecycle_bus=lifecycle_bus,
     )
     market_discovery_worker = MarketDiscoveryWorker(
         market_service=market_service,
@@ -404,25 +423,26 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     sports_live_state_client: SportsLiveAggregateClient | None = None
     sports_live_state_worker: SportsLiveStateWorker | None = None
     if settings.sports_live_state_enabled:
-        sports_live_state_client = _build_sports_live_state_client(settings)
-        sports_live_state_matcher = getattr(extension.hooks, "match_sports_live_state", None)
-        if callable(sports_live_state_matcher):
+        live_state_hooks = extension.live_state_hooks
+        if live_state_hooks is None:
+            logger.warning(
+                "sports live state sync skipped because extension does not implement LiveStateHooks",
+                extra={"extension": getattr(extension.spec, "name", "unknown")},
+            )
+        else:
+            sports_live_state_client = _build_sports_live_state_client(settings)
             sports_live_state_worker = SportsLiveStateWorker(
                 snapshot_provider=sports_live_state_client.list_games,
-                match_live_state=sports_live_state_matcher,
+                match_live_state=live_state_hooks.match_live_state,
                 registry=registry,
                 entry_metadata_store=entry_metadata_store,
                 event_bus=event_bus,
                 market_tracker=market_ws_worker.track_market,
+                lifecycle_bus=lifecycle_bus,
                 enabled=True,
                 source="sports_live_aggregate",
                 leagues=settings.sports_live_state_league_codes,
                 publish_entry_signals=settings.sports_live_state_publish_entry_signals,
-            )
-        else:
-            logger.warning(
-                "sports live state sync disabled because extension lacks match_sports_live_state hook",
-                extra={"extension": getattr(extension.spec, "name", "unknown")},
             )
     scheduler = Scheduler()
     supervisor = Supervisor(
@@ -443,7 +463,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     return RuntimeComponents(
         settings=settings,
         readiness=readiness,
-        extension=extension,
+        extensions=(extension,),
         logging_runtime=logging_runtime,
         gamma_client=gamma_client,
         clob_client=clob_client,
@@ -469,6 +489,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         trading_decision_service=trading_decision_service,
         trading_service=trading_service,
         trading_decision_worker=trading_decision_worker,
+        decision_recorder=decision_recorder,
         reconcile_service=reconcile_service,
         reconcile_worker=reconcile_worker,
         scheduler=scheduler,

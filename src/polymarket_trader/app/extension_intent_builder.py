@@ -63,6 +63,7 @@ def decision_to_managed_intent(
             post_only=decision.post_only,
             market_slug=resolved_market_slug,
             allow_open_exit_overlap=bool(decision.metadata.get("allow_open_exit_overlap")),
+            intent_tags=decision.intent_tags,
             metadata=decision.metadata,
         )
     if decision.action == ExtensionAction.SELL:
@@ -77,6 +78,7 @@ def decision_to_managed_intent(
             order_type=decision.order_type or OrderType.GTC,
             post_only=decision.post_only,
             market_slug=resolved_market_slug,
+            intent_tags=decision.intent_tags,
             metadata=decision.metadata,
         )
     if decision.action == ExtensionAction.CANCEL:

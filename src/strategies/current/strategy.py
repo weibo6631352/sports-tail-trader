@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import re
@@ -14,13 +15,17 @@ from typing import Any, Mapping
 from polymarket_trader.extension_api import (
     AccountSnapshotView,
     BusinessExtension,
+    DecisionKind,
     DiscoveryQuery,
     EntrySizing,
     ExtensionSpec,
+    LiveStateHooks,
+    LiveStateMatch,
     RecoveryDecision,
     ExtensionContext,
     ExtensionDecision,
     ExtensionPorts,
+    StrategySummary,
     UniverseDecision,
 )
 
@@ -33,7 +38,7 @@ from strategies.current.discovery import (
     build_live_game_discovery_queries,
 )
 from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata, exit_price_for_context
-from strategies.current.live_state import sports_live_metadata_match, sports_tail_entry_signal_gate
+from strategies.current.live_state import build_live_state_match
 from strategies.current.outcomes import describe_sports_market
 from strategies.current.recovery import decide_recovery
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
@@ -103,6 +108,12 @@ class CurrentStrategy:
     @property
     def hooks(self) -> "CurrentStrategy":
         """暴露策略 hook 集合。"""
+
+        return self
+
+    @property
+    def live_state_hooks(self) -> "LiveStateHooks":
+        """本策略消费体育直播；自身同时实现 ``LiveStateHooks``。"""
 
         return self
 
@@ -204,17 +215,26 @@ class CurrentStrategy:
     def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
         """根据盘口和预算生成 BUY 决策。"""
 
-        return decide_entry(self._config, context)
+        return _enrich_decision(decide_entry(self._config, context), default_kind=DecisionKind.ENTRY)
 
     def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
         """根据持仓状态生成 SELL 决策。"""
 
-        return decide_exit(self._config, context)
+        return _enrich_decision(decide_exit(self._config, context), default_kind=DecisionKind.EXIT)
 
     def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:
         """根据热状态生成恢复语义。"""
 
-        return decide_recovery(self._config, context)
+        recovery = decide_recovery(self._config, context)
+        if not recovery.actions:
+            return recovery
+        enriched = tuple(_enrich_decision(action, default_kind=DecisionKind.RECOVERY) for action in recovery.actions)
+        return RecoveryDecision(
+            reason=recovery.reason,
+            actions=enriched,
+            pause_trading=recovery.pause_trading,
+            pause_reason=recovery.pause_reason,
+        )
 
     def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
         """根据成交结果生成后续动作。"""
@@ -248,35 +268,41 @@ class CurrentStrategy:
             exit_metadata["sports_exit_target_price"] = str(target_price)
             exit_metadata["sports_exit_source_reason"] = "profit_take_after_buy_fill"
             return (
-                ExtensionDecision.sell(
-                    reason="strategy_profit_take",
-                    token_id=context.order_result.token_id,
-                    price=target_price,
-                    size_shares=context.order_result.matched_shares,
-                    market_slug=context.order_result.market_slug or (
-                        context.market.market_slug if context.market is not None else None
+                _enrich_decision(
+                    ExtensionDecision.sell(
+                        reason="strategy_profit_take",
+                        token_id=context.order_result.token_id,
+                        price=target_price,
+                        size_shares=context.order_result.matched_shares,
+                        market_slug=context.order_result.market_slug or (
+                            context.market.market_slug if context.market is not None else None
+                        ),
+                        metadata=exit_metadata,
                     ),
-                    metadata=exit_metadata,
+                    default_kind=DecisionKind.FOLLOW_UP,
                 ),
             )
         if not self._config.auto_exit_enabled:
             return ()
         return (
-            ExtensionDecision.sell(
-                reason="strategy_exit",
-                token_id=context.order_result.token_id,
-                price=exit_price_for_context(self._config, context),
-                size_shares=context.order_result.matched_shares,
-                market_slug=context.order_result.market_slug or (
-                    context.market.market_slug if context.market is not None else None
-                ),
-                metadata=build_exit_plan_metadata(
-                    self._config,
-                    context,
+            _enrich_decision(
+                ExtensionDecision.sell(
+                    reason="strategy_exit",
                     token_id=context.order_result.token_id,
-                    source_reason="follow_up_after_buy_fill",
-                    target_size_shares=context.order_result.matched_shares,
+                    price=exit_price_for_context(self._config, context),
+                    size_shares=context.order_result.matched_shares,
+                    market_slug=context.order_result.market_slug or (
+                        context.market.market_slug if context.market is not None else None
+                    ),
+                    metadata=build_exit_plan_metadata(
+                        self._config,
+                        context,
+                        token_id=context.order_result.token_id,
+                        source_reason="follow_up_after_buy_fill",
+                        target_size_shares=context.order_result.matched_shares,
+                    ),
                 ),
+                default_kind=DecisionKind.FOLLOW_UP,
             ),
         )
 
@@ -304,40 +330,27 @@ class CurrentStrategy:
             reason=reason,
         )
 
-    def match_sports_live_state(
+    def match_live_state(
         self,
         market: Market,
         games: tuple[SportsLiveGame, ...],
-    ) -> tuple[Market, SportsLiveGame, Mapping[str, Any]] | None:
-        """将外部直播比赛集合匹配成当前策略可消费的 metadata。"""
+    ) -> "LiveStateMatch | None":
+        """将外部直播比赛集合匹配成 framework 可消费的 LiveStateMatch。"""
 
         descriptor = describe_sports_market(market)
         if not descriptor.accepted or descriptor.market_family.value != "single_game":
             return None
-        match = sports_live_metadata_match(market, self._candidate_live_games_for_market(market, games))
-        if match is None:
-            return None
-        matched_market, game, metadata = match
-        signal_allowed, signal_reason = sports_tail_entry_signal_gate(
-            matched_market,
-            game,
+        candidate_games = self._candidate_live_games_for_market(market, games)
+
+        def _bypass(matched_market, game):
+            return _market_tail_window_bypass_reason(matched_market, game, descriptor, self._config)
+
+        return build_live_state_match(
+            market,
+            candidate_games,
             market_end_horizon_seconds=self._config.sports_market_end_horizon_seconds,
+            bypass_resolver=_bypass,
         )
-        if not signal_allowed and signal_reason == "market_end_too_far":
-            bypass_reason = _market_tail_window_bypass_reason(
-                matched_market,
-                game,
-                descriptor,
-                self._config,
-            )
-            if bypass_reason is not None:
-                signal_allowed = True
-                signal_reason = bypass_reason
-        return matched_market, game, {
-            **metadata,
-            "sports_tail_entry_signal_allowed": signal_allowed,
-            "sports_tail_entry_signal_reason": signal_reason,
-        }
 
     def _candidate_live_games_for_market(
         self,
@@ -413,6 +426,70 @@ def _has_profit_take_follow_up(metadata: Mapping[str, object]) -> bool:
 
     return metadata.get("sports_exit_mode") == "profit_take" or bool(
         metadata.get("sports_profit_take_overlay_enabled")
+    )
+
+
+def _enrich_decision(decision: ExtensionDecision, *, default_kind: DecisionKind) -> ExtensionDecision:
+    """把策略私有 metadata 投影成 framework 中性的 ``StrategySummary``、
+    ``decision_kind`` 与 ``intent_tags``，让 framework / admin / 复盘只读这些强类型字段。
+
+    策略 metadata 仍然被保留（透传 audit 用），但 framework 不再按 metadata key 名读。
+    """
+
+    metadata = dict(decision.metadata or {})
+    is_scale_in = metadata.get("sports_tail_opportunity_type") == "scale_in_advantage"
+    decision_kind = decision.decision_kind if decision.decision_kind is not None else (
+        DecisionKind.SCALE_IN if is_scale_in else default_kind
+    )
+    intent_tags = decision.intent_tags if decision.intent_tags else (
+        frozenset({"scale_in"}) if is_scale_in else frozenset()
+    )
+    summary = decision.summary if decision.summary is not None else _build_strategy_summary(metadata)
+    return replace(
+        decision,
+        decision_kind=decision_kind,
+        intent_tags=intent_tags,
+        summary=summary,
+    )
+
+
+def _build_strategy_summary(metadata: Mapping[str, Any]) -> StrategySummary:
+    """从策略写入的 metadata 投影出 framework 展示用的 StrategySummary。"""
+
+    sports_tail_game = (
+        metadata.get("sports_tail_game") if isinstance(metadata.get("sports_tail_game"), Mapping) else {}
+    )
+    home = sports_tail_game.get("home_name") or ""
+    away = sports_tail_game.get("away_name") or ""
+    period = sports_tail_game.get("period") or ""
+    label_parts = [str(part).strip() for part in (home, "vs" if home and away else "", away, period) if str(part).strip()]
+    label = " ".join(label_parts)
+    return StrategySummary(
+        action=str(metadata.get("sports_tail_action") or ""),
+        reason=str(metadata.get("sports_tail_reason") or ""),
+        label=label,
+        market_type=str(metadata.get("market_type") or ""),
+        side=str(metadata.get("side") or ""),
+        line=_decimal_from_metadata(metadata.get("line")),
+        best_ask=_decimal_from_metadata(metadata.get("best_ask")),
+        observed_at=None,
+        manual_confirmed=bool(metadata.get("sports_tail_manual_confirmed")),
+        confirmed_by=str(metadata.get("sports_tail_confirmed_by") or ""),
+        confirm_reason=str(metadata.get("sports_tail_confirm_reason") or ""),
+        extras={
+            "league": sports_tail_game.get("league") or metadata.get("sports_league"),
+            "home_name": sports_tail_game.get("home_name"),
+            "away_name": sports_tail_game.get("away_name"),
+            "period": sports_tail_game.get("period"),
+            "observed_at": sports_tail_game.get("observed_at"),
+            "game_status": metadata.get("game_status") or sports_tail_game.get("status"),
+            "total_score": metadata.get("total_score"),
+            "seconds_remaining": metadata.get("seconds_remaining"),
+            "execution_permission": metadata.get("sports_execution_permission"),
+            "sports_market_family": metadata.get("sports_market_family"),
+            "sports_risk_reason": metadata.get("sports_risk_reason"),
+            "exit_plan": metadata.get("sports_exit_plan"),
+        },
     )
 
 

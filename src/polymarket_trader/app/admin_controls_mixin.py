@@ -1,7 +1,7 @@
 """AdminService 受控操作 mixin。
 
-包含人工触发的可写动作：reconcile、replace_order、upsert_sports_live_state、
-confirm_sports_tail_candidate。这些动作仍走 TradingService -> RiskManager ->
+包含人工触发的可写动作：reconcile、replace_order、upsert_live_state、
+confirm_candidate。这些动作仍走 TradingService -> RiskManager ->
 OrderExecutor 的主链路，不绕过统一服务。
 
 宿主 AdminService 提供 ``runtime``、``_order_controller``、``_entry_metadata_store``、
@@ -14,12 +14,14 @@ OrderExecutor 的主链路，不绕过统一服务。
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
 from polymarket_trader.app.admin_operations import normalize_condition_ids
 from polymarket_trader.domain.order import OrderResultStatus
+from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
 from polymarket_trader.workers.trading_decision import (
     snapshot_allowance,
     snapshot_available_usdc,
@@ -76,16 +78,18 @@ class AdminControlsMixin:
             trace_id=trace_id,
         )
 
-    async def upsert_sports_live_state(
+    async def upsert_live_state(
         self,
         *,
-        sports_tail_game: Mapping[str, Any],
+        payload: Mapping[str, Any],
+        signal_allowed: bool | None = None,
+        signal_reason: str = "",
         condition_id: str | None = None,
         market_slug: str | None = None,
         event_slug: str | None = None,
         source: str = "manual",
     ) -> dict[str, Any]:
-        """写入体育直播状态 metadata，不触发交易判断。"""
+        """人工写入策略可见的 live_state 状态。framework 不解析 ``payload`` 字段语义。"""
 
         store = self._entry_metadata_store()
         if store is None:
@@ -95,12 +99,15 @@ class AdminControlsMixin:
             market_slug=market_slug,
             event_slug=event_slug,
             source=source,
-            metadata={"sports_tail_game": dict(sports_tail_game)},
+            metadata=dict(payload),
+            live_state_signal_allowed=signal_allowed,
+            live_state_signal_reason=signal_reason,
+            live_state_payload=dict(payload),
         )
         return {"status": "ok", "record": record.as_payload()}
 
 
-    async def confirm_sports_tail_candidate(
+    async def confirm_candidate(
         self,
         *,
         condition_id: str | None = None,
@@ -155,12 +162,10 @@ class AdminControlsMixin:
                 "candidate": candidate,
             }
 
-        metadata.update(
-            {
-                "sports_tail_manual_confirmed": True,
-                "sports_tail_confirmed_by": operator,
-                "sports_tail_confirm_reason": note or "manual_confirm",
-            }
+        confirmation = ManualConfirmation(
+            operator=operator,
+            reason=note or "manual_confirm",
+            confirmed_at=datetime.now(timezone.utc),
         )
         plan = self._build_entry_plan_for_admin(
             market=market,
@@ -169,6 +174,7 @@ class AdminControlsMixin:
             account=account,
             trace_id=trace_id,
             metadata=metadata,
+            manual_confirmation=confirmation,
         )
         if not plan.ready_to_trade or plan.intent is None:
             return {

@@ -30,6 +30,8 @@ def test_discovery_queries_prioritize_live_game_queries_before_broad_queries() -
     )
     hooks = SimpleNamespace(
         discovery_queries=lambda: (DiscoveryQuery.title_search("nhl"),),
+    )
+    live_state_hooks = SimpleNamespace(
         discovery_queries_for_live_games=lambda games: (
             DiscoveryQuery(
                 name=f"live:{games[0].source_event_id}:oilers",
@@ -38,7 +40,7 @@ def test_discovery_queries_prioritize_live_game_queries_before_broad_queries() -
         ),
     )
     runtime = SimpleNamespace(
-        extension=SimpleNamespace(hooks=hooks),
+        extension=SimpleNamespace(hooks=hooks, live_state_hooks=live_state_hooks),
         sports_live_state_worker=SimpleNamespace(last_games=lambda: (game,)),
     )
 
@@ -78,15 +80,18 @@ def test_live_event_expansion_uses_stale_live_metadata_event_slugs() -> None:
             records=lambda: (
                 SimpleNamespace(
                     event_slug="atp-live-1",
-                    metadata={"sports_tail_game": {"status": "live"}},
+                    live_state_phase="live",
+                    live_state_payload={"status": "live"},
                 ),
                 SimpleNamespace(
                     event_slug="atp-live-2",
-                    metadata={"sports_tail_game": {"status": "live"}},
+                    live_state_phase="live",
+                    live_state_payload={"status": "live"},
                 ),
                 SimpleNamespace(
                     event_slug="kbo-scheduled",
-                    metadata={"sports_tail_game": {"status": "scheduled"}},
+                    live_state_phase="scheduled",
+                    live_state_payload={"status": "scheduled"},
                 ),
             )
         ),

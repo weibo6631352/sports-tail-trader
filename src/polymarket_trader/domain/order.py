@@ -64,6 +64,7 @@ class BuyOrderIntent:
     post_only: bool = False
     retry_count: int = 0
     allow_open_exit_overlap: bool = False
+    intent_tags: frozenset[str] = field(default_factory=frozenset)
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @property
@@ -91,6 +92,7 @@ class SellOrderIntent:
     idempotency_key: str | None = None
     post_only: bool = False
     retry_count: int = 0
+    intent_tags: frozenset[str] = field(default_factory=frozenset)
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @property

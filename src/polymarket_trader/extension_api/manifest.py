@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from polymarket_trader.extension_api.hooks import ExtensionHooks
+from polymarket_trader.extension_api.hooks import ExtensionHooks, LiveStateHooks
 from polymarket_trader.extension_api.ports import ExtensionPorts
 
 
@@ -23,6 +23,9 @@ class BusinessExtension(Protocol):
 
     @property
     def hooks(self) -> ExtensionHooks: ...
+
+    @property
+    def live_state_hooks(self) -> LiveStateHooks | None: ...
 
 
 @runtime_checkable

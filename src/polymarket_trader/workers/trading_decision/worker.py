@@ -709,13 +709,17 @@ def _match_position(
 
 
 def _plan_allows_position_increase(plan: EntryPlan) -> bool:
-    """判断计划是否是策略显式标记的受控加仓。"""
+    """判断计划是否是策略显式标记的受控加仓。
 
-    return (
-        plan.intent is not None
-        and getattr(plan.intent, "allow_open_exit_overlap", False)
-        and dict(plan.metadata or {}).get("sports_tail_opportunity_type") == "scale_in_advantage"
-    )
+    依据策略在决策对象上声明的 intent_tags（含 ``"scale_in"``）+ intent
+    自身的 ``allow_open_exit_overlap`` 双重标记，避免读策略私有 metadata 字符串。
+    """
+
+    intent = plan.intent
+    if intent is None or not getattr(intent, "allow_open_exit_overlap", False):
+        return False
+    tags = getattr(intent, "intent_tags", frozenset()) or frozenset()
+    return "scale_in" in tags
 
 
 def _state_allows_position_increase(state: MarketLifecycle, plan: EntryPlan) -> bool:

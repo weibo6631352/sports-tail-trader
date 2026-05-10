@@ -61,34 +61,48 @@ def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None
         market_slug="nba-game-1-moneyline",
         metadata={"sports_tail_game": {"status": "live"}},
         source="test",
+        live_state_signal_allowed=True,
+        live_state_phase="live",
+        live_state_payload={"status": "live"},
     )
     metadata_store.upsert(
         condition_id="condition-2",
         market_slug="nba-game-2-moneyline",
         metadata={"sports_tail_game": {"status": "scheduled"}},
         source="test",
+        live_state_signal_allowed=False,
+        live_state_signal_reason="sports_live_state_scheduled",
+        live_state_phase="scheduled",
+        live_state_payload={"status": "scheduled"},
     )
     metadata_store.upsert(
         condition_id="condition-4",
         market_slug="nba-game-4-moneyline",
         metadata={"sports_tail_game": {"status": "live"}},
         source="test",
+        live_state_signal_allowed=None,
+        live_state_phase="live",
+        live_state_payload={"status": "live"},
     )
     metadata_store.upsert(
         condition_id="condition-5",
         market_slug="nba-game-5-moneyline",
         metadata={"sports_tail_game": {"status": "ended"}},
         source="test",
+        live_state_signal_allowed=True,
+        live_state_signal_reason="ended_not_closed",
+        live_state_phase="ended",
+        live_state_payload={"status": "ended"},
     )
     metadata_store.upsert(
         condition_id="condition-6",
         market_slug="nba-game-6-moneyline",
-        metadata={
-            "sports_tail_game": {"status": "ended"},
-            "sports_tail_entry_signal_allowed": False,
-            "sports_tail_entry_signal_reason": "series_market_not_auto_tradable",
-        },
+        metadata={"sports_tail_game": {"status": "ended"}},
         source="test",
+        live_state_signal_allowed=False,
+        live_state_signal_reason="series_market_not_auto_tradable",
+        live_state_phase="ended",
+        live_state_payload={"status": "ended"},
     )
     account_store = AccountStateStore()
     account_store.replace_positions(

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Mapping
 
 from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.extension_api import ExtensionContext, ExtensionDecision
@@ -113,7 +112,7 @@ def _sports_tail_entry_gate(
     )
     metadata = _sports_tail_evaluation_metadata(evaluation)
     metadata.update(family_metadata)
-    metadata.update(_sports_tail_confirmation_metadata(context.metadata))
+    metadata.update(_sports_tail_confirmation_metadata(context))
     if not evaluation.accepted:
         return (
             ExtensionDecision.skip(reason=evaluation.reason, metadata=metadata),
@@ -142,7 +141,7 @@ def _sports_tail_entry_gate(
             ),
             metadata,
         )
-    if evaluation.action == TailAction.MANUAL_CONFIRM and _sports_tail_manual_confirmed(context.metadata):
+    if evaluation.action == TailAction.MANUAL_CONFIRM and _sports_tail_manual_confirmed(context):
         return (
             None,
             _sports_tail_price_cap(
@@ -255,10 +254,10 @@ def _sports_tail_allocation_gate(
     )
     metadata = _sports_tail_evaluation_metadata(evaluation)
     metadata.update(family_metadata)
-    metadata.update(_sports_tail_confirmation_metadata(context.metadata))
+    metadata.update(_sports_tail_confirmation_metadata(context))
     if not evaluation.accepted:
         return evaluation.reason, metadata
-    if evaluation.action == TailAction.MANUAL_CONFIRM and _sports_tail_manual_confirmed(context.metadata):
+    if evaluation.action == TailAction.MANUAL_CONFIRM and _sports_tail_manual_confirmed(context):
         return "", metadata
     if evaluation.action != TailAction.AUTO_EXECUTE:
         return f"sports_tail_{evaluation.action.value}", metadata
@@ -475,18 +474,25 @@ def _sports_tail_evaluation_metadata(evaluation: SportsTailEvaluation) -> dict[s
     return metadata
 
 
-def _sports_tail_manual_confirmed(metadata: Mapping[str, object]) -> bool:
-    return bool(metadata.get("sports_tail_manual_confirmed"))
+def _sports_tail_manual_confirmed(context: ExtensionContext) -> bool:
+    return context.manual_confirmation is not None
 
 
-def _sports_tail_confirmation_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
-    confirmed = _sports_tail_manual_confirmed(metadata)
-    result: dict[str, object] = {"sports_tail_manual_confirmed": confirmed}
-    for key in ("sports_tail_confirmed_by", "sports_tail_confirm_reason"):
-        value = metadata.get(key)
-        if value:
-            result[key] = value
-    return result
+def _sports_tail_confirmation_metadata(context: ExtensionContext) -> dict[str, object]:
+    """把 framework 注入的 ManualConfirmation 投影成策略 metadata 字段。
+
+    framework 不再读这些 ``sports_tail_*`` key（已通过 ``plan.summary.manual_confirmed``
+    展示），但策略内部 trading/gates 仍按它们做闸门判断，写回到策略 metadata 供 audit 透传。
+    """
+
+    confirmation = context.manual_confirmation
+    if confirmation is None:
+        return {"sports_tail_manual_confirmed": False}
+    return {
+        "sports_tail_manual_confirmed": True,
+        "sports_tail_confirmed_by": confirmation.operator,
+        "sports_tail_confirm_reason": confirmation.reason,
+    }
 
 
 # ---- 内部 ask depth 工具 -------------------------------------------------

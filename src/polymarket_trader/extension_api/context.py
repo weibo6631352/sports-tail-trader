@@ -12,6 +12,7 @@ from polymarket_trader.domain.order import Order, OrderResult
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.extension_api.decisions import EntryCandidate, MarketTokenView
+from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
 
 
 class AccountSnapshotView(Protocol):
@@ -51,7 +52,46 @@ class AccountSnapshotView(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class MarketView:
+    market: Market | None = None
+    token_id: str | None = None
+    orderbook: OrderbookSnapshot | None = None
+    market_token_views: tuple[MarketTokenView, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AccountView:
+    snapshot: AccountSnapshotView | None = None
+    position: Position | None = None
+    open_orders: tuple[Order, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class BudgetView:
+    portfolio_budget_usdc: Decimal | None = None
+    available_usdc: Decimal | None = None
+    max_order_usdc: Decimal | None = None
+    max_market_usdc: Decimal | None = None
+    max_total_usdc: Decimal | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SizingView:
+    allocation_plan: AllocationPlan | None = None
+    allocation: Allocation | None = None
+    amount_usdc: Decimal | None = None
+    size_shares: Decimal | None = None
+    entry_candidates: tuple[EntryCandidate, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ExtensionContext:
+    """框架向策略 hook 输入的上下文。
+
+    顶层字段保持向前兼容：策略既可以读 ``context.market`` 也可以读
+    ``context.market_view.market``；framework 内部新代码推荐使用子视图。
+    """
+
     trace_id: str
     market: Market | None = None
     token_id: str | None = None
@@ -72,4 +112,42 @@ class ExtensionContext:
     allocation: Allocation | None = None
     amount_usdc: Decimal | None = None
     size_shares: Decimal | None = None
+    manual_confirmation: ManualConfirmation | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def market_view(self) -> MarketView:
+        return MarketView(
+            market=self.market,
+            token_id=self.token_id,
+            orderbook=self.orderbook,
+            market_token_views=self.market_token_views,
+        )
+
+    @property
+    def account_view(self) -> AccountView:
+        return AccountView(
+            snapshot=self.account_snapshot,
+            position=self.position,
+            open_orders=self.open_orders,
+        )
+
+    @property
+    def budget_view(self) -> BudgetView:
+        return BudgetView(
+            portfolio_budget_usdc=self.portfolio_budget_usdc,
+            available_usdc=self.available_usdc,
+            max_order_usdc=self.max_order_usdc,
+            max_market_usdc=self.max_market_usdc,
+            max_total_usdc=self.max_total_usdc,
+        )
+
+    @property
+    def sizing_view(self) -> SizingView:
+        return SizingView(
+            allocation_plan=self.allocation_plan,
+            allocation=self.allocation,
+            amount_usdc=self.amount_usdc,
+            size_shares=self.size_shares,
+            entry_candidates=self.entry_candidates,
+        )

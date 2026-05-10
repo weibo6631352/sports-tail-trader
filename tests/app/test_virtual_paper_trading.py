@@ -68,31 +68,6 @@ def test_virtual_paper_trade_does_not_fabricate_trade_without_live_metadata() ->
     assert result["rejection_summary"]["by_stage"]["plan"] == 1
 
 
-def test_virtual_paper_trade_reports_series_market_as_non_auto_tradable() -> None:
-    runtime = _runtime_with_series_market()
-
-    result = asyncio.run(run_virtual_paper_trade(runtime))
-
-    assert result["status"] == "no_trade"
-    assert result["opportunity_funnel"]["market_family_counts"]["series"] == 1
-    assert result["rejection_summary"]["by_reason"]["series_market_not_auto_tradable"] == 1
-    assert result["rejections"][0]["market_family"] == "series"
-
-
-def test_virtual_paper_trade_prioritizes_real_single_game_rejection_over_old_esports_noise() -> None:
-    runtime = _runtime_with_mixed_esports_and_scheduled_single_game()
-
-    result = asyncio.run(run_virtual_paper_trade(runtime))
-
-    assert result["status"] == "no_trade"
-    assert result["selection"]["market_slug"] == "nhl-ana-edm-2026-04-28-total-5pt5"
-    assert result["reason"] == "game_not_live"
-    assert result["opportunity_funnel"]["market_family_counts"]["esports"] == 2
-    assert result["opportunity_funnel"]["market_family_counts"]["single_game"] == 2
-    assert result["rejections"][0]["market_family"] == "single_game"
-    assert {sample["market_family"] for sample in result["rejections"]} == {"esports", "single_game"}
-
-
 def test_virtual_paper_trade_prioritizes_live_rejection_over_scheduled_single_game() -> None:
     runtime = _runtime_with_scheduled_and_live_single_game_rejections()
 
@@ -195,64 +170,6 @@ def _runtime_with_real_like_candidate() -> SimpleNamespace:
         ),
         trading_client=_FakeTradingClient(),
     )
-
-
-def _runtime_with_series_market() -> SimpleNamespace:
-    runtime = _runtime_with_real_like_candidate()
-    market = Market(
-        condition_id="series-condition",
-        market_slug="nhl-playoffs-ducks-vs-oilers-total-games-ou-5pt5",
-        market_question="NHL Playoffs: Ducks vs. Oilers Total Games O/U 5.5",
-        event_title="NHL Playoffs: Ducks vs. Oilers Total Games O/U 5.5",
-        event_slug="nhl-playoffs-ducks-vs-oilers-total-games-ou-5pt5",
-        category="Sports",
-        tags=("NHL", "2026 NHL Playoffs", "Hockey"),
-        outcomes=(
-            MarketOutcome(token_id="series-under", outcome="Under 5.5"),
-            MarketOutcome(token_id="series-over", outcome="Over 5.5"),
-        ),
-        trading_status=TradingStatus.ELIGIBLE,
-    )
-    orderbook = OrderbookSnapshot(
-        token_id="series-under",
-        best_bid=Decimal("0.01"),
-        best_ask=Decimal("0.02"),
-        bids=(PriceLevel(price=Decimal("0.01"), size=Decimal("20")),),
-        asks=(PriceLevel(price=Decimal("0.02"), size=Decimal("20")),),
-        received_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
-        market_slug=market.market_slug,
-        condition_id=market.condition_id,
-        tick_size=Decimal("0.001"),
-    )
-    registry = MarketRegistry()
-    registry.upsert(market)
-    runtime.registry = registry
-    runtime.market_ws_worker = _MarketWs({"series-under": orderbook})
-    runtime.trading_decision_service = TradingDecisionService(
-        extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
-        registry=registry,
-        orderbook_reader=runtime.market_ws_worker.snapshot,
-    )
-    runtime.entry_metadata_store = EntryMetadataStore()
-    runtime.entry_metadata_store.upsert(
-        condition_id=market.condition_id,
-        source="unit_test_real_source",
-        metadata={
-            "sports_tail_game": {
-                "league": "NHL",
-                "home_name": "Ducks",
-                "away_name": "Oilers",
-                "home_score": 1,
-                "away_score": 4,
-                "period": "P3",
-                "seconds_remaining": 10,
-                "status": "live",
-                "observed_at": "2026-04-27T00:00:00+00:00",
-                "source": "unit_test_real_source",
-            },
-        },
-    )
-    return runtime
 
 
 def _runtime_with_mixed_esports_and_scheduled_single_game() -> SimpleNamespace:

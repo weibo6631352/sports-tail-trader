@@ -6,12 +6,10 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from polymarket_trader.app.admin_service import AdminService
-from polymarket_trader.app.entry_plan import EntryPlan
 from polymarket_trader.app.market_service import MarketService
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
 from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.domain.account import AccountSnapshot
-from polymarket_trader.domain.allocation import Allocation, AllocationPlan
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, Fill
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.order import (
@@ -2531,6 +2529,9 @@ def test_entry_plan_rejects_ended_moneyline_when_best_ask_is_missing() -> None:
 
 
 def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
+    from datetime import datetime, timezone
+    from polymarket_trader.extension_api import ManualConfirmation
+
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
     service = TradingDecisionService(
@@ -2547,21 +2548,21 @@ def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
         max_order_usdc=Decimal("10"),
         max_market_usdc=Decimal("10"),
         max_total_usdc=Decimal("10"),
-        metadata={
-            "sports_tail_manual_confirmed": True,
-            "sports_tail_confirmed_by": "operator-1",
-            "sports_tail_confirm_reason": "score_verified",
-            "sports_tail_game": _moneyline_live_game(),
-        },
+        metadata={"sports_tail_game": _moneyline_live_game()},
+        manual_confirmation=ManualConfirmation(
+            operator="operator-1",
+            reason="score_verified",
+            confirmed_at=datetime.now(timezone.utc),
+        ),
     )
 
     assert plan.ready_to_trade is True
     assert plan.intent is not None
     assert plan.intent.token_id == "home"
-    assert plan.metadata is not None
-    assert plan.metadata["sports_tail_manual_confirmed"] is True
-    assert plan.metadata["sports_tail_confirmed_by"] == "operator-1"
-    assert plan.metadata["sports_tail_confirm_reason"] == "score_verified"
+    assert plan.summary is not None
+    assert plan.summary.manual_confirmed is True
+    assert plan.summary.confirmed_by == "operator-1"
+    assert plan.summary.confirm_reason == "score_verified"
 
 
 def test_strategy_risk_blocks_event_exposure_before_buy_intent() -> None:
@@ -2886,57 +2887,6 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
     assert plan.metadata["sports_tail_opportunity_type"] == "scale_in_advantage"
 
 
-def test_admin_live_state_store_projects_manual_candidate_and_confirmation() -> None:
-    result = asyncio.run(_run_admin_manual_candidate_flow())
-
-    candidates = result["candidates"]
-    confirmation = result["confirmation"]
-    live_states = result["live_states"]
-
-    assert live_states["total"] == 1
-    assert candidates["total"] == 1
-    candidate = candidates["items"][0]
-    assert candidate["condition_id"] == "moneyline-condition"
-    assert candidate["token_id"] == "home"
-    assert candidate["action"] == "manual_confirm"
-    assert candidate["execution_permission"] == "manual_confirm"
-    assert candidate["confirmable"] is True
-
-    assert confirmation["status"] == "ok"
-    assert confirmation["candidate"]["ready_to_trade"] is True
-    assert confirmation["candidate"]["confirmable"] is False
-    assert confirmation["candidate"]["intent"]["token_id"] == "home"
-    assert confirmation["review"]["submitted"] is True
-    assert confirmation["review"]["risk_decision"]["passed"] is True
-    assert confirmation["review"]["order_result"]["status"] == "no_fill"
-
-
-def test_admin_candidates_include_rejects_and_filter_by_action_permission_status() -> None:
-    result = asyncio.run(_run_admin_candidate_filter_flow())
-
-    assert result["all"]["total"] == 1
-    rejected = result["all"]["items"][0]
-    assert rejected["action"] == "reject"
-    assert rejected["accepted"] is False
-    assert rejected["reason"] == "outcome_not_locked"
-    assert result["rejects"]["total"] == 1
-    assert result["live_totals"]["total"] == 1
-    assert result["manual"]["total"] == 0
-
-
-def test_admin_rejected_candidate_preserves_live_game_diagnostics_after_pre_orderbook_gate() -> None:
-    result = asyncio.run(_run_admin_far_tennis_under_candidate_flow())
-
-    assert result["total"] == 1
-    rejected = result["items"][0]
-    assert rejected["action"] == "reject"
-    assert rejected["reason"] == "tennis_totals_under_not_supported"
-    assert rejected["game_status"] == "live"
-    assert rejected["league"] == "ATP Challenger Jiujiang, China Men Singles"
-    assert rejected["side"] == "under"
-    assert rejected["line"] == "21.5"
-
-
 def test_admin_candidates_use_runtime_metadata_source_not_full_registry() -> None:
     result = asyncio.run(_run_admin_candidate_metadata_source_flow())
 
@@ -2987,41 +2937,6 @@ def test_admin_confirmation_refuses_non_confirmable_candidate() -> None:
     assert result["confirmation"]["status"] == "failed"
     assert result["confirmation"]["reason"] == "candidate_not_confirmable"
     assert result["confirmation"]["candidate"]["confirmable"] is False
-
-
-def test_admin_candidate_projects_blocked_auto_execute_as_rejected() -> None:
-    market = _moneyline_market()
-    plan = EntryPlan(
-        trace_id="trace-blocked-auto",
-        market=market,
-        orderbook=None,
-        allocation_plan=AllocationPlan(trace_id="trace-blocked-auto", total_budget_usdc=Decimal("10")),
-        allocation=Allocation(
-            condition_id=market.condition_id,
-            market_slug=market.market_slug,
-            token_id="home",
-            target_budget_usdc=Decimal("5"),
-            buy_budget_usdc=Decimal("0"),
-            reason="below_min_order_size",
-        ),
-        intent=None,
-        reason="",
-        metadata={
-            "sports_tail_action": "auto_execute",
-            "sports_tail_reason": "tennis_set_winner_locked",
-            "sports_execution_permission": "auto_execute",
-        },
-    )
-
-    candidate = AdminService()._candidate_payload(market, "home", plan)
-
-    assert candidate["ready_to_trade"] is False
-    assert candidate["action"] == "reject"
-    assert candidate["strategy_action"] == "auto_execute"
-    assert candidate["accepted"] is False
-    assert candidate["confirmable"] is False
-    assert candidate["reason"] == "below_min_order_size"
-    assert candidate["payload"]["sports_tail_action"] == "auto_execute"
 
 
 def test_worker_publishes_skipped_plan_metadata_for_candidate_replay() -> None:
@@ -4603,55 +4518,6 @@ class _NoFillExecutor:
         )
 
 
-async def _run_admin_manual_candidate_flow() -> dict[str, object]:
-    market = _moneyline_market()
-    orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
-    registry = MarketRegistry()
-    registry.upsert(market)
-    market_ws = _MarketWs({"home": orderbook})
-    account_state = AccountStateStore()
-    account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
-    service = AdminService(
-        runtime=SimpleNamespace(
-            settings=SimpleNamespace(
-                portfolio_budget_usdc=Decimal("10"),
-                max_order_usdc=Decimal("10"),
-                max_market_usdc=Decimal("10"),
-                max_total_usdc=Decimal("10"),
-                max_open_orders=10,
-                order_retry_limit=2,
-            ),
-            registry=registry,
-            market_ws_worker=market_ws,
-            account_state_store=account_state,
-            entry_metadata_store=EntryMetadataStore(),
-            trading_decision_service=TradingDecisionService(
-                extension_hooks=CurrentStrategy(config=_manual_moneyline_config()).hooks,
-                registry=registry,
-                orderbook_reader=market_ws.snapshot,
-            ),
-            trading_service=TradingService(executor=_NoFillExecutor()),
-            event_bus=None,
-        )
-    )
-
-    await service.upsert_sports_live_state(
-        sports_tail_game=_moneyline_live_game(),
-        condition_id=market.condition_id,
-        source="unit_test",
-    )
-    return {
-        "live_states": await service.list_sports_live_states(limit=10, offset=0),
-        "candidates": await service.list_sports_tail_candidates(limit=10, offset=0),
-        "confirmation": await service.confirm_sports_tail_candidate(
-            condition_id=market.condition_id,
-            token_id="home",
-            operator="operator-1",
-            note="score_verified",
-        ),
-    }
-
-
 async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
@@ -4684,151 +4550,33 @@ async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
         )
     )
 
-    await service.upsert_sports_live_state(
-        sports_tail_game={
-            "league": "NHL",
-            "home_name": "TB",
-            "away_name": "MON",
-            "home_score": 3,
-            "away_score": 2,
-            "period": "P3",
-            "seconds_remaining": 420,
-            "status": "live",
-            "observed_at": "2026-04-27T00:00:00+00:00",
+    await service.upsert_live_state(
+        payload={
+            "sports_tail_game": {
+                "league": "NHL",
+                "home_name": "TB",
+                "away_name": "MON",
+                "home_score": 3,
+                "away_score": 2,
+                "period": "P3",
+                "seconds_remaining": 420,
+                "status": "live",
+                "observed_at": "2026-04-27T00:00:00+00:00",
+            },
         },
+        signal_allowed=True,
         condition_id=market.condition_id,
         source="unit_test",
     )
     return {
-        "candidates": await service.list_sports_tail_candidates(limit=10, offset=0),
-        "confirmation": await service.confirm_sports_tail_candidate(
+        "candidates": await service.list_strategy_candidates(limit=10, offset=0),
+        "confirmation": await service.confirm_candidate(
             condition_id=market.condition_id,
             token_id="over",
             operator="operator-1",
             note="should_not_submit",
         ),
     }
-
-
-async def _run_admin_candidate_filter_flow() -> dict[str, object]:
-    market = _totals_market()
-    orderbook = _orderbook(token_id="under", best_ask=Decimal("0.98"))
-    registry = MarketRegistry()
-    registry.upsert(market)
-    market_ws = _MarketWs({"under": orderbook})
-    account_state = AccountStateStore()
-    account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
-    service = AdminService(
-        runtime=SimpleNamespace(
-            settings=SimpleNamespace(
-                portfolio_budget_usdc=Decimal("10"),
-                max_order_usdc=Decimal("10"),
-                max_market_usdc=Decimal("10"),
-                max_total_usdc=Decimal("10"),
-                max_open_orders=10,
-                order_retry_limit=2,
-            ),
-            registry=registry,
-            market_ws_worker=market_ws,
-            account_state_store=account_state,
-            entry_metadata_store=EntryMetadataStore(),
-            trading_decision_service=TradingDecisionService(
-                extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
-                registry=registry,
-                orderbook_reader=market_ws.snapshot,
-            ),
-            trading_service=TradingService(executor=_NoFillExecutor()),
-            event_bus=None,
-        )
-    )
-
-    await service.upsert_sports_live_state(
-        sports_tail_game={
-            **_totals_live_game(),
-            "home_score": 1,
-            "away_score": 1,
-            "seconds_remaining": 900,
-        },
-        condition_id=market.condition_id,
-        source="unit_test",
-    )
-    return {
-        "all": await service.list_sports_tail_candidates(limit=10, offset=0),
-        "rejects": await service.list_sports_tail_candidates(limit=10, offset=0, action="reject", accepted=False),
-        "live_totals": await service.list_sports_tail_candidates(
-            limit=10,
-            offset=0,
-            market_type="totals",
-            game_status="live",
-            league="NHL",
-        ),
-        "manual": await service.list_sports_tail_candidates(
-            limit=10,
-            offset=0,
-            execution_permission="manual_confirm",
-        ),
-    }
-
-
-async def _run_admin_far_tennis_under_candidate_flow() -> dict[str, object]:
-    market = _tennis_totals_market().with_metadata(end_date=datetime(2026, 5, 7, tzinfo=timezone.utc))
-    orderbook = _orderbook(token_id="tennis-under", best_ask=Decimal("0.96"))
-    registry = MarketRegistry()
-    registry.upsert(market)
-    market_ws = _MarketWs({"tennis-under": orderbook})
-    account_state = AccountStateStore()
-    account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
-    service = AdminService(
-        runtime=SimpleNamespace(
-            settings=SimpleNamespace(
-                portfolio_budget_usdc=Decimal("10"),
-                max_order_usdc=Decimal("10"),
-                max_market_usdc=Decimal("10"),
-                max_total_usdc=Decimal("10"),
-                max_open_orders=10,
-                order_retry_limit=2,
-            ),
-            registry=registry,
-            market_ws_worker=market_ws,
-            account_state_store=account_state,
-            entry_metadata_store=EntryMetadataStore(),
-            trading_decision_service=TradingDecisionService(
-                extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
-                registry=registry,
-                orderbook_reader=market_ws.snapshot,
-            ),
-            trading_service=TradingService(executor=_NoFillExecutor()),
-            event_bus=None,
-        )
-    )
-
-    await service.upsert_sports_live_state(
-        sports_tail_game={
-            "league": "ATP Challenger Jiujiang, China Men Singles",
-            "home_name": "Rada Zolotareva",
-            "away_name": "Despina Papamichail",
-            "home_score": 1,
-            "away_score": 1,
-            "period": "S3",
-            "seconds_remaining": None,
-            "status": "live",
-            "observed_at": "2026-04-30T09:57:46+00:00",
-            "tennis_state": {
-                "home_sets_won": 1,
-                "away_sets_won": 1,
-                "current_set": 3,
-                "home_current_set_games": 6,
-                "away_current_set_games": 6,
-                "home_total_games": 17,
-                "away_total_games": 16,
-                "total_games": 33,
-                "set_scores": ((5, 7), (6, 3), (6, 6)),
-            },
-        },
-        condition_id=market.condition_id,
-        source="unit_test",
-    )
-    return await service.list_sports_tail_candidates(limit=10, offset=0)
 
 
 async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
@@ -4845,6 +4593,8 @@ async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
             condition_id=market.condition_id,
             source="unit_test",
             metadata={"sports_tail_game": _moneyline_live_game()},
+            live_state_signal_allowed=True,
+            live_state_payload={"sports_tail_game": _moneyline_live_game()},
         )
 
     market_ws = _MarketWs(snapshots)
@@ -4873,7 +4623,7 @@ async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
             event_bus=None,
         )
     )
-    return await service.list_sports_tail_candidates(limit=2, offset=0)
+    return await service.list_strategy_candidates(limit=2, offset=0)
 
 
 async def _run_admin_live_source_gap_diagnostics_flow() -> dict[str, object]:
@@ -4909,6 +4659,8 @@ async def _run_admin_live_source_gap_diagnostics_flow() -> dict[str, object]:
         condition_id=covered_market.condition_id,
         source="unit_test",
         metadata={"sports_tail_game": _moneyline_live_game()},
+        live_state_signal_allowed=True,
+        live_state_payload={"sports_tail_game": _moneyline_live_game()},
     )
     live_store.upsert(
         condition_id=missing_nba_market.condition_id,

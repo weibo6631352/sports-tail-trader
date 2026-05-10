@@ -10,7 +10,6 @@ from polymarket_trader.app.admin_runtime_view import AdminRuntimeView
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
 from polymarket_trader.app.admin_service_helpers import (
     _RepositoryGroup,
-    _project_candidate_action,
 )
 from polymarket_trader.app.order_projection import AccountStateProjector, normalize_order_id
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
@@ -19,6 +18,7 @@ from polymarket_trader.domain.events import DomainEvent, DomainEventType, Outbox
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
+from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
 from polymarket_trader.workers.trading_decision import (
     TRADING_DECISION_WORKER_ORIGIN,
     serialize_allocation,
@@ -85,6 +85,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         account: AccountSnapshot,
         trace_id: str | None = None,
         metadata: Mapping[str, Any] | None = None,
+        manual_confirmation: "ManualConfirmation | None" = None,
     ):
         settings = getattr(self.runtime, "settings", None)
         return self._trading_decision_service().build_entry_plan(
@@ -103,15 +104,33 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             positions=account.positions,
             open_orders=account.open_orders,
             metadata=metadata if metadata is not None else self._entry_metadata_for_market(market),
+            manual_confirmation=manual_confirmation,
         )
 
     def _candidate_payload(self, market: Market, token_id: str, plan) -> dict[str, Any]:
-        metadata = dict(plan.metadata or {})
-        sports_tail_game = metadata.get("sports_tail_game") if isinstance(metadata.get("sports_tail_game"), Mapping) else {}
         outcome = market.get_outcome_by_token_id(token_id)
-        strategy_action = str(metadata.get("sports_tail_action") or "")
-        action, reason = _project_candidate_action(strategy_action, plan, metadata)
-        execution_permission = metadata.get("sports_execution_permission")
+        summary = plan.summary
+        extras = dict(summary.extras) if summary is not None else {}
+        execution_permission = extras.get("execution_permission") if extras else None
+        strategy_action = summary.action if summary is not None else ""
+        # 策略想 auto_execute 但 plan 因 framework 风控 / 资金 / 盘口被挡住时，
+        # admin 展示统一标 reject，让运营能区分"策略主动拒绝"vs"被框架挡住"。
+        if strategy_action == "auto_execute" and not plan.ready_to_trade:
+            action_label = "reject"
+            block_reason = ""
+            allocation = plan.allocation
+            if allocation is not None:
+                block_reason = str(allocation.release_reason or allocation.reason or "")
+            reason_text = block_reason or plan.reason or (summary.reason if summary is not None else "")
+        else:
+            action_label = strategy_action
+            reason_text = (summary.reason if summary is not None else "") or plan.reason or ""
+        accepted = bool(action_label and action_label != "reject")
+        confirmable = (
+            execution_permission == "manual_confirm"
+            and action_label == "manual_confirm"
+            and not (summary.manual_confirmed if summary is not None else False)
+        )
         return {
             "candidate_id": f"{plan.trace_id}:{market.condition_id}:{token_id}",
             "trace_id": plan.trace_id,
@@ -122,30 +141,26 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             "token_id": token_id,
             "outcome": None if outcome is None else outcome.outcome,
             "ready_to_trade": plan.ready_to_trade,
-            "accepted": bool(action and action != "reject"),
-            "confirmable": (
-                execution_permission == "manual_confirm"
-                and action == "manual_confirm"
-                and not bool(metadata.get("sports_tail_manual_confirmed"))
-            ),
-            "reason": reason,
-            "action": action,
+            "accepted": accepted,
+            "confirmable": confirmable,
+            "decision_kind": None if plan.decision_kind is None else plan.decision_kind.value,
+            "reason": reason_text,
+            "action": action_label,
             "strategy_action": strategy_action,
             "execution_permission": execution_permission,
-            "league": sports_tail_game.get("league") or metadata.get("sports_league"),
-            "home_name": sports_tail_game.get("home_name"),
-            "away_name": sports_tail_game.get("away_name"),
-            "period": sports_tail_game.get("period"),
-            "observed_at": sports_tail_game.get("observed_at"),
-            "market_type": metadata.get("market_type"),
-            "side": metadata.get("side"),
-            "line": metadata.get("line"),
-            "best_ask": metadata.get("best_ask"),
-            "total_score": metadata.get("total_score"),
-            "seconds_remaining": metadata.get("seconds_remaining"),
-            "game_status": metadata.get("game_status") or sports_tail_game.get("status"),
-            "sports_risk_reason": metadata.get("sports_risk_reason"),
-            "exit_plan": metadata.get("sports_exit_plan"),
+            "label": summary.label if summary is not None else "",
+            "market_type": summary.market_type if summary is not None else "",
+            "side": summary.side if summary is not None else "",
+            "line": (
+                decimal_text(summary.line) if summary is not None and summary.line is not None else None
+            ),
+            "best_ask": (
+                decimal_text(summary.best_ask) if summary is not None and summary.best_ask is not None else None
+            ),
+            "manual_confirmed": summary.manual_confirmed if summary is not None else False,
+            "confirmed_by": summary.confirmed_by if summary is not None else "",
+            "confirm_reason": summary.confirm_reason if summary is not None else "",
+            "extras": jsonable(extras),
             "allocation": None if plan.allocation is None else {
                 "target_budget_usdc": decimal_text(plan.allocation.target_budget_usdc),
                 "buy_budget_usdc": decimal_text(plan.allocation.buy_budget_usdc),
@@ -153,7 +168,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
                 "release_reason": plan.allocation.release_reason,
             },
             "intent": None if plan.intent is None else serialize_intent(plan.intent),
-            "payload": jsonable(metadata),
+            "payload": jsonable(plan.metadata or {}),
         }
 
     def _entry_metadata_for_market(self, market: Market) -> dict[str, Any]:
@@ -190,7 +205,8 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
 
         markets: dict[str, Market] = {}
         for record in store.records():
-            if "sports_tail_game" not in record.metadata:
+            # 候选只读取曾被策略 live_state hook 标记过的 market（即 record 上有 live_state_payload）
+            if not record.live_state_payload:
                 continue
             market = None
             if record.condition_id:
@@ -233,8 +249,8 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
                 payload={
                     "origin": "admin_candidate_confirm",
                     "entry_origin": TRADING_DECISION_WORKER_ORIGIN,
-                    "operator": jsonable((plan.metadata or {}).get("sports_tail_confirmed_by")),
-                    "confirm_reason": jsonable((plan.metadata or {}).get("sports_tail_confirm_reason")),
+                    "operator": jsonable(plan.summary.confirmed_by if plan.summary is not None else ""),
+                    "confirm_reason": jsonable(plan.summary.confirm_reason if plan.summary is not None else ""),
                     "allocation_plan": serialize_allocation_plan(plan),
                     "allocation": serialize_allocation(plan),
                     "plan_metadata": serialize_plan_metadata(plan),

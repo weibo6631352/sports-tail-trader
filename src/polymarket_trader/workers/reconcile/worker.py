@@ -17,8 +17,10 @@ from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.domain.account import AccountSnapshot, MarketPauseSource
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
+from polymarket_trader.extension_api.lifecycle import LifecycleEvent
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
+from polymarket_trader.runtime.lifecycle_bus import LifecyclePublisher
 from polymarket_trader.runtime.registry import MarketRegistry, MarketRegistrySnapshot
 from polymarket_trader.serialization import jsonable
 from polymarket_trader.workers.market_ws import MarketWsWorker
@@ -98,8 +100,10 @@ class ReconcileWorker:
         clob_client: OrderAuthorityClient | None = None,
         data_client: DataAuthorityClient | None = None,
         trading_client: TradingAuthorityClient | None = None,
+        lifecycle_bus: "LifecyclePublisher | None" = None,
     ) -> None:
         self._event_bus = event_bus
+        self._lifecycle_bus = lifecycle_bus
         if reconcile_service is None:
             raise ValueError("reconcile_service is required")
         self._reconcile_service = reconcile_service
@@ -325,6 +329,21 @@ class ReconcileWorker:
         self._last_completed_at = completed_at
         self._last_success_at = completed_at
         self._last_error = None
+
+        if self._lifecycle_bus is not None:
+            self._lifecycle_bus.publish(
+                LifecycleEvent.RECONCILE_PASSED,
+                trace_id=trace_id,
+                payload={
+                    "trace_id": trace_id,
+                    "started_at": self._last_started_at.isoformat() if self._last_started_at else None,
+                    "completed_at": completed_at.isoformat(),
+                    "market_count": len(plan.market_plans),
+                    "applied_action_count": len(applied_actions),
+                    "failed_action_count": len(failed_actions),
+                    "diff_count": plan.diff_count,
+                },
+            )
 
         return ReconcileWorkerResult(
             trace_id=trace_id,

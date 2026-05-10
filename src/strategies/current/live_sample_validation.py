@@ -4,7 +4,8 @@
 和 Polymarket market 样本放在同一个 fixture 中，校验 ESPN 字段归一化结果、
 比赛状态字段以及 market/game 匹配是否符合人工预期。
 
-它不参与交易主链路，不访问外部网络，也不改变运行态状态。
+它不参与交易主链路，不访问外部网络，也不改变运行态状态——属于离线 dev tool，
+CLAUDE.md §6 的运行时分层约束不适用，可直接 import infra/sports 复用 ESPN 解析。
 """
 
 from __future__ import annotations

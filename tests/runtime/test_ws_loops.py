@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market, MarketOutcome
 from polymarket_trader.runtime import ws_loops
+from polymarket_trader.runtime.entry_metadata import EntryMetadataRecord
 from polymarket_trader.workers.market_ws import MarketWsWorker
 from polymarket_trader.workers.user_ws import UserWsWorker
 
@@ -33,11 +34,14 @@ class _FakeRegistry:
 
 
 class _FakeEntryMetadataStore:
-    def __init__(self, metadata: Mapping[str, Any]) -> None:
-        self._metadata = metadata
+    def __init__(self, record: EntryMetadataRecord) -> None:
+        self._record = record
 
     def metadata_for(self, **_kwargs: Any) -> Mapping[str, Any]:
-        return self._metadata
+        return dict(self._record.metadata)
+
+    def find(self, **_kwargs: Any) -> EntryMetadataRecord:
+        return self._record
 
 
 class _FakePolymarketWsClient:
@@ -135,14 +139,14 @@ def test_market_ws_subscribes_strategy_allowed_tail_signal_even_when_gamma_end_d
     runtime = SimpleNamespace(
         registry=_FakeRegistry((market,)),
         entry_metadata_store=_FakeEntryMetadataStore(
-            {
-                "sports_tail_entry_signal_allowed": True,
-                "sports_tail_entry_signal_reason": "live_outcome_lock_candidate",
-                "sports_tail_game": {
-                    "status": "live",
-                    "period": "S2",
-                },
-            }
+            EntryMetadataRecord(
+                condition_id=market.condition_id,
+                metadata={"sports_tail_game": {"status": "live", "period": "S2"}},
+                live_state_signal_allowed=True,
+                live_state_signal_reason="live_outcome_lock_candidate",
+                live_state_phase="live",
+                live_state_payload={"status": "live", "period": "S2"},
+            )
         ),
         account_state_store=None,
     )
@@ -166,14 +170,14 @@ def test_market_ws_prewarms_live_market_even_before_tail_signal_window() -> None
     runtime = SimpleNamespace(
         registry=_FakeRegistry((market,)),
         entry_metadata_store=_FakeEntryMetadataStore(
-            {
-                "sports_tail_entry_signal_allowed": False,
-                "sports_tail_entry_signal_reason": "market_end_too_far",
-                "sports_tail_game": {
-                    "status": "live",
-                    "period": "S1",
-                },
-            }
+            EntryMetadataRecord(
+                condition_id=market.condition_id,
+                metadata={"sports_tail_game": {"status": "live", "period": "S1"}},
+                live_state_signal_allowed=False,
+                live_state_signal_reason="market_end_too_far",
+                live_state_phase="live",
+                live_state_payload={"status": "live", "period": "S1"},
+            )
         ),
         account_state_store=None,
     )

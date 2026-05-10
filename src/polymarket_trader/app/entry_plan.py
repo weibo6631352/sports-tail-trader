@@ -7,6 +7,8 @@ from polymarket_trader.domain.allocation import Allocation, AllocationPlan
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import TradableOrderIntent
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
+from polymarket_trader.extension_api.decisions import DecisionKind
+from polymarket_trader.extension_api.summary import StrategySummary
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +21,8 @@ class EntryPlan:
     intent: TradableOrderIntent | None
     eligible_market_count: int = 0
     reason: str = ""
+    decision_kind: DecisionKind | None = None
+    summary: StrategySummary | None = None
     metadata: Mapping[str, Any] | None = None
 
     @property

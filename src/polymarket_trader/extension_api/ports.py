@@ -8,6 +8,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.extension_api.context import AccountSnapshotView
+from polymarket_trader.extension_api.lifecycle import LifecycleBus
 
 
 class MarketReadPort(Protocol):
@@ -64,3 +65,4 @@ class ExtensionPorts:
     config: ConfigReadPort | None = None
     telemetry: TelemetryPort | None = None
     clock: ClockPort | None = None
+    lifecycle: LifecycleBus | None = None

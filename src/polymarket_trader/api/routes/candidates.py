@@ -11,10 +11,12 @@ from polymarket_trader.app.admin_service import AdminService
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
 
-class SportsLiveStateRequest(BaseModel):
-    """人工或外部采集器写入的体育直播状态。"""
+class LiveStateRequest(BaseModel):
+    """人工或外部采集器写入的策略可见 live_state；framework 不解析 payload 字段语义。"""
 
-    sports_tail_game: dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    signal_allowed: bool | None = None
+    signal_reason: str = ""
     condition_id: str | None = None
     market_slug: str | None = None
     event_slug: str | None = None
@@ -48,7 +50,7 @@ async def list_candidates(
     league: str | None = Query(default=None),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
-    return await service.list_sports_tail_candidates(
+    return await service.list_strategy_candidates(
         limit=limit,
         offset=offset,
         condition_id=condition_id,
@@ -91,7 +93,7 @@ async def list_live_source_gaps(
 
 @router.post("/live-states")
 async def upsert_live_state(
-    request: SportsLiveStateRequest,
+    request: LiveStateRequest,
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
     if not any((request.condition_id, request.market_slug, request.event_slug)):
@@ -99,8 +101,10 @@ async def upsert_live_state(
             status_code=422,
             detail="condition_id, market_slug, or event_slug is required",
         )
-    return await service.upsert_sports_live_state(
-        sports_tail_game=request.sports_tail_game,
+    return await service.upsert_live_state(
+        payload=request.payload,
+        signal_allowed=request.signal_allowed,
+        signal_reason=request.signal_reason,
         condition_id=request.condition_id,
         market_slug=request.market_slug,
         event_slug=request.event_slug,
@@ -113,7 +117,7 @@ async def confirm_candidate(
     request: ConfirmCandidateRequest,
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
-    return await service.confirm_sports_tail_candidate(
+    return await service.confirm_candidate(
         condition_id=request.condition_id,
         token_id=request.token_id,
         market_slug=request.market_slug,

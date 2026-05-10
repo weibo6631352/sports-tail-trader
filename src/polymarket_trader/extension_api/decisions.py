@@ -10,6 +10,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order, OrderType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
+from polymarket_trader.extension_api.summary import StrategySummary
 
 
 class ExtensionAction(StrEnum):
@@ -18,6 +19,17 @@ class ExtensionAction(StrEnum):
     SELL = "sell"
     CANCEL = "cancel"
     REPLACE = "replace"
+
+
+class DecisionKind(StrEnum):
+    """策略决策的语义分类。framework 用 decision_kind 而不是 metadata 字符串
+    判断"该决策是入场 / 加仓 / 退场 / 跟单 / 恢复"。策略下决策时必须显式声明。"""
+
+    ENTRY = "entry"
+    SCALE_IN = "scale_in"
+    EXIT = "exit"
+    FOLLOW_UP = "follow_up"
+    RECOVERY = "recovery"
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +92,9 @@ class ExtensionDecision:
     order_type: OrderType | None = None
     post_only: bool = False
     market_slug: str | None = None
+    decision_kind: DecisionKind | None = None
+    intent_tags: frozenset[str] = field(default_factory=frozenset)
+    summary: StrategySummary | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -87,9 +102,19 @@ class ExtensionDecision:
         cls,
         *,
         reason: str,
+        decision_kind: DecisionKind | None = None,
+        intent_tags: frozenset[str] | None = None,
+        summary: StrategySummary | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "ExtensionDecision":
-        return cls(action=ExtensionAction.SKIP, reason=reason, metadata=metadata or {})
+        return cls(
+            action=ExtensionAction.SKIP,
+            reason=reason,
+            decision_kind=decision_kind,
+            intent_tags=intent_tags or frozenset(),
+            summary=summary,
+            metadata=metadata or {},
+        )
 
     @classmethod
     def buy(
@@ -102,6 +127,9 @@ class ExtensionDecision:
         order_type: OrderType | None = None,
         post_only: bool = False,
         market_slug: str | None = None,
+        decision_kind: DecisionKind | None = None,
+        intent_tags: frozenset[str] | None = None,
+        summary: StrategySummary | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "ExtensionDecision":
         return cls(
@@ -113,6 +141,9 @@ class ExtensionDecision:
             order_type=order_type,
             post_only=post_only,
             market_slug=market_slug,
+            decision_kind=decision_kind,
+            intent_tags=intent_tags or frozenset(),
+            summary=summary,
             metadata=metadata or {},
         )
 
@@ -127,6 +158,9 @@ class ExtensionDecision:
         order_type: OrderType | None = None,
         post_only: bool = False,
         market_slug: str | None = None,
+        decision_kind: DecisionKind | None = None,
+        intent_tags: frozenset[str] | None = None,
+        summary: StrategySummary | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "ExtensionDecision":
         return cls(
@@ -138,6 +172,9 @@ class ExtensionDecision:
             order_type=order_type,
             post_only=post_only,
             market_slug=market_slug,
+            decision_kind=decision_kind,
+            intent_tags=intent_tags or frozenset(),
+            summary=summary,
             metadata=metadata or {},
         )
 
@@ -149,6 +186,9 @@ class ExtensionDecision:
         token_id: str | None,
         order_id: str,
         market_slug: str | None = None,
+        decision_kind: DecisionKind | None = None,
+        intent_tags: frozenset[str] | None = None,
+        summary: StrategySummary | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "ExtensionDecision":
         return cls(
@@ -157,6 +197,9 @@ class ExtensionDecision:
             token_id=token_id,
             order_id=order_id,
             market_slug=market_slug,
+            decision_kind=decision_kind,
+            intent_tags=intent_tags or frozenset(),
+            summary=summary,
             metadata=metadata or {},
         )
 
@@ -170,6 +213,9 @@ class ExtensionDecision:
         price: Decimal,
         size_shares: Decimal,
         market_slug: str | None = None,
+        decision_kind: DecisionKind | None = None,
+        intent_tags: frozenset[str] | None = None,
+        summary: StrategySummary | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "ExtensionDecision":
         return cls(
@@ -180,6 +226,9 @@ class ExtensionDecision:
             price=price,
             size_shares=size_shares,
             market_slug=market_slug,
+            decision_kind=decision_kind,
+            intent_tags=intent_tags or frozenset(),
+            summary=summary,
             metadata=metadata or {},
         )
 

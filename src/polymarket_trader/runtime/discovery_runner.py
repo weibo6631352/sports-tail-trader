@@ -288,14 +288,8 @@ def _live_event_slugs_for_expansion(runtime: Any, *, now: datetime) -> tuple[str
         event_slug = str(getattr(record, "event_slug", "") or "").strip()
         if not event_slug:
             continue
-        metadata = getattr(record, "metadata", {})
-        if not isinstance(metadata, Mapping):
-            continue
-        game = metadata.get("sports_tail_game")
-        if not isinstance(game, Mapping):
-            continue
-        status = str(game.get("status") or "").strip().lower()
-        if status not in {"live", "ended"}:
+        phase = (getattr(record, "live_state_phase", "") or "").strip().lower()
+        if phase not in {"live", "ended"}:
             continue
         expanded_at = state.live_event_expanded_at.get(event_slug)
         if expanded_at is not None and (now - expanded_at).total_seconds() < _LIVE_EVENT_EXPANSION_REFRESH_SECONDS:
@@ -346,7 +340,11 @@ def _configured_discovery_queries(hooks: Any) -> tuple[DiscoveryQuery, ...]:
 
 
 def _live_game_discovery_queries(runtime: Any, hooks: Any) -> tuple[DiscoveryQuery, ...]:
-    """从直播状态 worker 的最近比赛快照中提取策略高意图查询。"""
+    """从直播状态 worker 的最近比赛快照中提取策略高意图查询。
+
+    ``hooks`` 这里没用——live state 相关 hook 在 ``extension.live_state_hooks``，
+    策略未实现时直接跳过；framework 不再向核心 ExtensionHooks 强制 live state 接口。
+    """
 
     worker = getattr(runtime, "sports_live_state_worker", None)
     last_games = getattr(worker, "last_games", None)
@@ -355,10 +353,15 @@ def _live_game_discovery_queries(runtime: Any, hooks: Any) -> tuple[DiscoveryQue
     games = tuple(last_games())
     if not games:
         return ()
-    method = getattr(hooks, "discovery_queries_for_live_games", None)
-    if not callable(method):
+    extension = getattr(runtime, "extension", None)
+    live_state_hooks = getattr(extension, "live_state_hooks", None) if extension is not None else None
+    if live_state_hooks is None:
         return ()
-    return tuple(query for query in method(games) if isinstance(query, DiscoveryQuery) and query.name.strip())
+    return tuple(
+        query
+        for query in live_state_hooks.discovery_queries_for_live_games(games)
+        if isinstance(query, DiscoveryQuery) and query.name.strip()
+    )
 
 
 def _dedupe_discovery_queries(queries: tuple[DiscoveryQuery, ...]) -> tuple[DiscoveryQuery, ...]:

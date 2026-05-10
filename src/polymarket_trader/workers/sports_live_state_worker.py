@@ -7,7 +7,7 @@ EntryMetadataStore 供策略入场评估读取。它不直接判断交易机会�
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -21,16 +21,18 @@ from polymarket_trader.domain.sports_live import (
     SportsLiveSourceStatus,
     SportsLiveSyncStatus,
 )
+from polymarket_trader.extension_api.lifecycle import LifecycleEvent
+from polymarket_trader.extension_api.live_state import LiveStateMatch
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.event_bus import EventBus
+from polymarket_trader.runtime.lifecycle_bus import LifecyclePublisher
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.serialization import jsonable
 
 SportsLiveSnapshotProvider = Callable[[], Awaitable[SportsLiveSnapshot]]
-SportsLiveResolvedMatch = tuple[Market, SportsLiveGame, Mapping[str, Any]]
 SportsLiveStateMatcher = Callable[
     [Market, tuple[SportsLiveGame, ...]],
-    SportsLiveResolvedMatch | None,
+    LiveStateMatch | None,
 ]
 
 class SportsLiveMarketTracker(Protocol):
@@ -77,6 +79,7 @@ class SportsLiveStateWorker:
         entry_metadata_store: EntryMetadataStore,
         event_bus: EventBus | None = None,
         market_tracker: SportsLiveMarketTracker | Callable[[Market], None] | None = None,
+        lifecycle_bus: LifecyclePublisher | None = None,
         enabled: bool = True,
         source: str = "espn",
         leagues: tuple[str, ...] = (),
@@ -88,6 +91,7 @@ class SportsLiveStateWorker:
         self._entry_metadata_store = entry_metadata_store
         self._event_bus = event_bus
         self._market_tracker = market_tracker
+        self._lifecycle_bus = lifecycle_bus
         self._enabled = enabled
         self._source = source
         self._leagues = leagues
@@ -175,22 +179,24 @@ class SportsLiveStateWorker:
         matches = await self._match_markets(markets, snapshot.games)
         records_written = 0
         entry_signals = 0
-        for market, game, metadata in matches:
+        for match in matches:
+            market = match.market
             self._entry_metadata_store.upsert(
                 condition_id=market.condition_id,
                 market_slug=market.market_slug,
                 event_slug=market.event_slug,
                 source=f"sports_live:{snapshot.source}",
                 updated_at=snapshot.observed_at,
-                metadata=metadata,
+                metadata=dict(match.payload),
+                live_state_signal_allowed=match.signal_allowed,
+                live_state_signal_reason=match.signal_reason,
+                live_state_phase=match.phase,
+                live_state_payload=dict(match.payload),
             )
             records_written += 1
-            self._track_entry_signal_market(market=market, metadata=metadata)
-            entry_signals += await self._publish_entry_signal_events(
-                market=market,
-                game=game,
-                metadata=metadata,
-            )
+            self._track_entry_signal_market(match=match)
+            entry_signals += await self._publish_entry_signal_events(match=match)
+            self._publish_live_state_lifecycle(match=match)
 
         completed_at = _utc_now()
         self._last_games = snapshot.games
@@ -211,8 +217,8 @@ class SportsLiveStateWorker:
         self,
         markets: tuple[Market, ...],
         games: tuple[SportsLiveGame, ...],
-    ) -> tuple[SportsLiveResolvedMatch, ...]:
-        results: list[SportsLiveResolvedMatch] = []
+    ) -> tuple[LiveStateMatch, ...]:
+        results: list[LiveStateMatch] = []
         for index, market in enumerate(markets, start=1):
             match = self._match_live_state(market, games)
             if match is not None:
@@ -222,37 +228,48 @@ class SportsLiveStateWorker:
                 await asyncio.sleep(0)
         return tuple(results)
 
-    def _track_entry_signal_market(
-        self,
-        *,
-        market: Market,
-        metadata: Mapping[str, Any],
-    ) -> None:
+    def _publish_live_state_lifecycle(self, *, match: LiveStateMatch) -> None:
+        """让策略可订阅 LIVE_STATE_UPDATED 触发自家健康检查 / 信号缓存刷新。"""
+
+        if self._lifecycle_bus is None:
+            return
+        market = match.market
+        self._lifecycle_bus.publish(
+            LifecycleEvent.LIVE_STATE_UPDATED,
+            condition_id=market.condition_id,
+            market_slug=market.market_slug,
+            payload={
+                "source": match.game.source,
+                "source_event_id": match.game.source_event_id,
+                "signal_allowed": match.signal_allowed,
+                "signal_reason": match.signal_reason,
+                "phase": match.phase,
+                "payload": dict(match.payload),
+            },
+        )
+
+    def _track_entry_signal_market(self, *, match: LiveStateMatch) -> None:
         """把直播确认可进场的市场交给盘口 WS 跟踪，保证后续决策读取热盘口。"""
 
         if self._market_tracker is None:
             return
-        if metadata.get("sports_tail_entry_signal_allowed") is False:
+        if not match.signal_allowed:
             return
         tracker = self._market_tracker
         if callable(tracker):
-            tracker(market)
+            tracker(match.market)
             return
         track_market = getattr(tracker, "track_market", None)
         if callable(track_market):
-            track_market(market)
+            track_market(match.market)
 
-    async def _publish_entry_signal_events(
-        self,
-        *,
-        market: Market,
-        game: SportsLiveGame,
-        metadata: Mapping[str, Any],
-    ) -> int:
+    async def _publish_entry_signal_events(self, *, match: LiveStateMatch) -> int:
         if not self._entry_signal_publish_enabled or self._event_bus is None:
             return 0
-        if metadata.get("sports_tail_entry_signal_allowed") is False:
+        if not match.signal_allowed:
             return 0
+        market = match.market
+        game = match.game
         count = 0
         for token_id in market.token_ids:
             await self._event_bus.publish(
@@ -270,7 +287,8 @@ class SportsLiveStateWorker:
                         "origin": "sports_live_state_worker",
                         "source": game.source,
                         "source_event_id": game.source_event_id,
-                        "match": jsonable(metadata.get("sports_live_match")),
+                        "match": jsonable(match.payload),
+                        "signal_reason": match.signal_reason,
                     },
                 ),
             )

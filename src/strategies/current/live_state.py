@@ -14,6 +14,7 @@ from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import SportsLiveGame, SportsLiveGameStatus
+from polymarket_trader.extension_api.live_state import LiveStateMatch
 
 _GENERIC_ALIAS_TOKENS = {
     "a",
@@ -177,16 +178,45 @@ def best_sports_live_match(
     return max(matches, key=lambda item: item.score)
 
 
-def sports_live_metadata_match(
+def build_live_state_match(
     market: Market,
     games: tuple[SportsLiveGame, ...],
-) -> tuple[Market, SportsLiveGame, Mapping[str, Any]] | None:
-    """返回运行时同步 worker 可写入 metadata store 的匹配结果。"""
+    *,
+    market_end_horizon_seconds: int,
+    bypass_resolver: "callable | None" = None,
+) -> LiveStateMatch | None:
+    """框架 hook ``match_live_state`` 的策略侧实现：返回强类型 LiveStateMatch。
+
+    ``payload`` 由 ``SportsLiveMarketMatch.metadata()`` 给出（含游戏快照 + match 信息），
+    framework 不解释字段语义，admin/UI 可整体透传。
+    ``signal_allowed/reason`` 由 ``sports_tail_entry_signal_gate`` 决定，可被 bypass_resolver
+    在 ``market_end_too_far`` 情况下放行。
+    """
 
     match = best_sports_live_match(market, games)
     if match is None:
         return None
-    return match.market, match.game, match.metadata()
+    matched_market = match.market
+    game = match.game
+    signal_allowed, signal_reason = sports_tail_entry_signal_gate(
+        matched_market,
+        game,
+        market_end_horizon_seconds=market_end_horizon_seconds,
+    )
+    if not signal_allowed and signal_reason == "market_end_too_far" and bypass_resolver is not None:
+        bypass = bypass_resolver(matched_market, game)
+        if bypass is not None:
+            signal_allowed = True
+            signal_reason = bypass
+    payload = match.metadata()
+    return LiveStateMatch(
+        market=matched_market,
+        game=game,
+        signal_allowed=signal_allowed,
+        signal_reason=signal_reason,
+        phase=str(getattr(game.status, "value", game.status) or "").strip().lower(),
+        payload=payload,
+    )
 
 
 def sports_tail_entry_signal_gate(

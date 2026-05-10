@@ -22,6 +22,8 @@ from polymarket_trader.domain.order import (
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.risk import RiskDecision, RiskManager
+from polymarket_trader.extension_api.lifecycle import LifecycleEvent
+from polymarket_trader.runtime.lifecycle_bus import LifecyclePublisher
 
 
 class TradingService:
@@ -32,9 +34,11 @@ class TradingService:
         *,
         risk_manager: RiskManager | None = None,
         executor: object | None = None,
+        lifecycle_bus: LifecyclePublisher | None = None,
     ) -> None:
         self._risk_manager = risk_manager or RiskManager()
         self._executor = executor
+        self._lifecycle_bus = lifecycle_bus
 
     async def review_intent(
         self,
@@ -109,6 +113,12 @@ class TradingService:
             )
             submitted = False
             submission_error = None
+        self._publish_lifecycle(
+            intent=intent,
+            operation=operation,
+            risk_decision=risk_decision,
+            order_result=order_result,
+        )
         return TradingReviewResult(
             intent=intent,
             operation=operation,
@@ -134,6 +144,12 @@ class TradingService:
             intent,
             operation=operation,
         )
+        self._publish_lifecycle(
+            intent=intent,
+            operation=operation,
+            risk_decision=None,
+            order_result=order_result,
+        )
         return TradingReviewResult(
             intent=intent,
             operation=operation,
@@ -153,6 +169,12 @@ class TradingService:
             intent,
             operation=operation,
         )
+        self._publish_lifecycle(
+            intent=intent,
+            operation=operation,
+            risk_decision=None,
+            order_result=order_result,
+        )
         return TradingReviewResult(
             intent=intent,
             operation=operation,
@@ -160,6 +182,69 @@ class TradingService:
             submitted=submitted,
             order_result=order_result,
             submission_error=submission_error,
+        )
+
+    def _publish_lifecycle(
+        self,
+        *,
+        intent: ManagedOrderIntent,
+        operation: str,
+        risk_decision: RiskDecision | None,
+        order_result: OrderResult | None,
+    ) -> None:
+        """把订单结果转译为 lifecycle 事件供策略订阅。
+
+        映射按 ``operation`` 优先：cancel/replace 操作只发 ORDER_CANCELLED 或
+        ORDER_REJECTED，避免在 cancel 路径里发出 ORDER_SUBMITTED / ORDER_FILLED 误导策略。
+        NO_FILL / UNKNOWN_TIMEOUT 这种"等待状态"不产生事件，避免给策略噪音。
+        """
+
+        if self._lifecycle_bus is None:
+            return
+        status = order_result.status if order_result is not None else None
+        if operation in {"cancel", "replace"}:
+            if status in (OrderResultStatus.CANCELLED, OrderResultStatus.FULL_FILL, OrderResultStatus.PARTIAL_FILL):
+                event = LifecycleEvent.ORDER_CANCELLED
+            elif status in (OrderResultStatus.REJECTED, OrderResultStatus.FAILED):
+                event = LifecycleEvent.ORDER_REJECTED
+            else:
+                return
+        elif risk_decision is not None and not risk_decision.passed:
+            event = LifecycleEvent.ORDER_REJECTED
+        else:
+            if status in (OrderResultStatus.FULL_FILL, OrderResultStatus.PARTIAL_FILL):
+                event = LifecycleEvent.ORDER_FILLED
+            elif status == OrderResultStatus.LIVE:
+                event = LifecycleEvent.ORDER_SUBMITTED
+            elif status == OrderResultStatus.CANCELLED:
+                event = LifecycleEvent.ORDER_CANCELLED
+            elif status in (OrderResultStatus.REJECTED, OrderResultStatus.FAILED):
+                event = LifecycleEvent.ORDER_REJECTED
+            else:
+                return
+        payload: dict[str, Any] = {"operation": operation}
+        if order_result is not None:
+            payload.update(
+                {
+                    "status": order_result.status.value,
+                    "order_id": order_result.order_id,
+                    "trade_id": order_result.trade_id,
+                    "matched_shares": str(order_result.matched_shares),
+                    "spent_usdc": str(order_result.spent_usdc),
+                    "reason": order_result.reason,
+                    "retryable": order_result.retryable,
+                }
+            )
+        intent_tags = getattr(intent, "intent_tags", None)
+        if intent_tags:
+            payload["intent_tags"] = tuple(sorted(intent_tags))
+        self._lifecycle_bus.publish(
+            event,
+            trace_id=intent.trace_id,
+            condition_id=intent.condition_id,
+            token_id=intent.token_id,
+            market_slug=intent.market_slug,
+            payload=payload,
         )
 
     async def _execute_trade_intent(

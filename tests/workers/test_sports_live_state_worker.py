@@ -12,11 +12,22 @@ from polymarket_trader.domain.sports_live import (
     SportsLiveSourceStatus,
     SportsLiveTeam,
 )
+from polymarket_trader.extension_api.live_state import LiveStateMatch
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.workers.sports_live_state_worker import SportsLiveStateWorker
-from strategies.current.live_state import sports_live_metadata_match
+from strategies.current.live_state import build_live_state_match
+
+
+def _live_state_match_from_metadata(market, games):
+    """Test helper: 用策略侧 build_live_state_match 构造 LiveStateMatch。"""
+
+    return build_live_state_match(
+        market,
+        games,
+        market_end_horizon_seconds=900,
+    )
 
 
 def test_sports_live_state_worker_writes_metadata_and_entry_signals() -> None:
@@ -60,7 +71,7 @@ def test_sports_live_state_worker_tracks_entry_signal_market_for_market_ws() -> 
         tracker = _MarketTracker()
         worker = SportsLiveStateWorker(
             snapshot_provider=lambda: _snapshot(_game()),
-            match_live_state=sports_live_metadata_match,
+            match_live_state=_live_state_match_from_metadata,
             registry=registry,
             entry_metadata_store=EntryMetadataStore(),
             market_tracker=tracker,
@@ -86,10 +97,12 @@ def test_sports_live_state_worker_does_not_track_blocked_entry_signal_market() -
         tracker = _MarketTracker()
         worker = SportsLiveStateWorker(
             snapshot_provider=lambda: _snapshot(_game()),
-            match_live_state=lambda market, games: (
-                market,
-                games[0],
-                {
+            match_live_state=lambda market, games: LiveStateMatch(
+                market=market,
+                game=games[0],
+                signal_allowed=False,
+                signal_reason="market_end_too_far",
+                payload={
                     "sports_tail_game": {
                         "league": "NBA",
                         "home_name": "Knicks",
@@ -100,8 +113,6 @@ def test_sports_live_state_worker_does_not_track_blocked_entry_signal_market() -
                         "seconds_remaining": 90,
                         "status": "live",
                     },
-                    "sports_tail_entry_signal_allowed": False,
-                    "sports_tail_entry_signal_reason": "market_end_too_far",
                 },
             ),
             registry=registry,
@@ -137,7 +148,7 @@ def test_sports_live_state_worker_keeps_unmatched_markets_auditable() -> None:
                     away_abbreviation="MIA",
                 )
             ),
-            match_live_state=sports_live_metadata_match,
+            match_live_state=_live_state_match_from_metadata,
             registry=registry,
             entry_metadata_store=EntryMetadataStore(),
             enabled=True,
@@ -166,10 +177,12 @@ def test_sports_live_state_worker_writes_metadata_without_blocked_entry_signals(
         event_bus = EventBus(trading_capacity=10, maintenance_capacity=10, persistence_capacity=10)
         worker = SportsLiveStateWorker(
             snapshot_provider=lambda: _snapshot(_game()),
-            match_live_state=lambda market, games: (
-                market,
-                games[0],
-                {
+            match_live_state=lambda market, games: LiveStateMatch(
+                market=market,
+                game=games[0],
+                signal_allowed=False,
+                signal_reason="market_end_too_far",
+                payload={
                     "sports_tail_game": {
                         "league": "NBA",
                         "home_name": "Knicks",
@@ -180,8 +193,6 @@ def test_sports_live_state_worker_writes_metadata_without_blocked_entry_signals(
                         "seconds_remaining": 90,
                         "status": "live",
                     },
-                    "sports_tail_entry_signal_allowed": False,
-                    "sports_tail_entry_signal_reason": "market_end_too_far",
                 },
             ),
             registry=registry,
@@ -199,7 +210,10 @@ def test_sports_live_state_worker_writes_metadata_without_blocked_entry_signals(
         assert sync_result.records_written == 1
         assert sync_result.entry_signals_published == 0
         assert event_bus.trading_queue_depth() == 0
-        assert store.metadata_for(condition_id="moneyline-condition")["sports_tail_entry_signal_allowed"] is False
+        record = store.find(condition_id="moneyline-condition")
+        assert record is not None
+        assert record.live_state_signal_allowed is False
+        assert record.live_state_signal_reason == "market_end_too_far"
 
     asyncio.run(run())
 
@@ -217,7 +231,7 @@ def test_sports_live_state_worker_exposes_source_statuses() -> None:
                     SportsLiveSourceStatus(source="nba", success=False, last_error="timeout"),
                 ),
             ),
-            match_live_state=sports_live_metadata_match,
+            match_live_state=_live_state_match_from_metadata,
             registry=registry,
             entry_metadata_store=EntryMetadataStore(),
             enabled=True,
@@ -278,7 +292,7 @@ async def _run_sync_with_match() -> dict[str, object]:
     event_bus = EventBus(trading_capacity=10, maintenance_capacity=10, persistence_capacity=10)
     worker = SportsLiveStateWorker(
         snapshot_provider=lambda: _snapshot(_game()),
-        match_live_state=sports_live_metadata_match,
+        match_live_state=_live_state_match_from_metadata,
         registry=registry,
         entry_metadata_store=store,
         event_bus=event_bus,

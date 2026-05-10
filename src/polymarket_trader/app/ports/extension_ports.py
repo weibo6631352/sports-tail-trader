@@ -8,6 +8,7 @@ from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistry
+from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
 from polymarket_trader.extension_api import ExtensionPorts
 
 OrderbookReader = Callable[[str], OrderbookSnapshot | None]
@@ -123,6 +124,7 @@ def build_extension_ports(
     registry: MarketRegistry,
     snapshot_provider: AccountSnapshotProvider,
     orderbook_reader: OrderbookReader | None = None,
+    lifecycle_bus: InProcessLifecycleBus | None = None,
 ) -> ExtensionPorts:
     market_port = MarketDataPort(registry=registry, orderbook_reader=orderbook_reader)
     return ExtensionPorts(
@@ -133,6 +135,7 @@ def build_extension_ports(
         history=OrderHistoryPort(snapshot_provider=snapshot_provider),
         telemetry=NullTelemetryPort(),
         clock=UtcClockPort(),
+        lifecycle=lifecycle_bus,
     )
 
 

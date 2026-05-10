@@ -538,14 +538,14 @@ def test_current_strategy_prefilters_live_games_before_text_matching(monkeypatch
     )
     seen_game_count = 0
 
-    def counted_match(candidate_market, candidate_games):
+    def counted_match(candidate_market, candidate_games, **_kwargs):
         nonlocal seen_game_count
         seen_game_count = len(candidate_games)
         return None
 
-    monkeypatch.setattr(strategy_module, "sports_live_metadata_match", counted_match)
+    monkeypatch.setattr(strategy_module, "build_live_state_match", counted_match)
 
-    CurrentStrategy(config=CurrentStrategyConfig()).match_sports_live_state(market, games)
+    CurrentStrategy(config=CurrentStrategyConfig()).match_live_state(market, games)
 
     assert seen_game_count == 1
 
@@ -605,11 +605,11 @@ def test_current_strategy_reuses_live_game_prefilter_for_same_event(monkeypatch)
         return original_game_start_time(game)
 
     monkeypatch.setattr(strategy_module, "_game_start_time", counted_game_start_time)
-    monkeypatch.setattr(strategy_module, "sports_live_metadata_match", lambda _market, _games: None)
+    monkeypatch.setattr(strategy_module, "build_live_state_match", lambda _market, _games, **_kwargs: None)
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
-    strategy.match_sports_live_state(first_market, games)
-    strategy.match_sports_live_state(second_market, games)
+    strategy.match_live_state(first_market, games)
+    strategy.match_live_state(second_market, games)
 
     assert start_parse_calls == 1
 
@@ -646,15 +646,14 @@ def test_current_strategy_matches_wtt_table_tennis_live_state() -> None:
     )
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
-    match = strategy.match_sports_live_state(market, (game,))
+    match = strategy.match_live_state(market, (game,))
 
     assert match is not None
-    _market, matched_game, metadata = match
-    assert matched_game.source_event_id == "16094559"
-    assert metadata["sports_live_match"]["matched_home_alias"] == "Austria"
-    assert metadata["sports_live_match"]["matched_away_alias"] == "Italy"
-    assert metadata["sports_tail_entry_signal_allowed"] is False
-    assert metadata["sports_tail_entry_signal_reason"] == "sports_live_state_scheduled"
+    assert match.game.source_event_id == "16094559"
+    assert match.payload["sports_live_match"]["matched_home_alias"] == "Austria"
+    assert match.payload["sports_live_match"]["matched_away_alias"] == "Italy"
+    assert match.signal_allowed is False
+    assert match.signal_reason == "sports_live_state_scheduled"
 
 
 def test_current_strategy_marks_far_live_match_as_non_entry_signal() -> None:
@@ -664,14 +663,13 @@ def test_current_strategy_marks_far_live_match_as_non_entry_signal() -> None:
     game = _live_game()
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
-    match = strategy.match_sports_live_state(market, (game,))
+    match = strategy.match_live_state(market, (game,))
 
     assert match is not None
-    matched_market, matched_game, metadata = match
-    assert matched_market.condition_id == market.condition_id
-    assert matched_game.source_event_id == game.source_event_id
-    assert metadata["sports_tail_entry_signal_allowed"] is False
-    assert metadata["sports_tail_entry_signal_reason"] == "market_end_too_far"
+    assert match.market.condition_id == market.condition_id
+    assert match.game.source_event_id == game.source_event_id
+    assert match.signal_allowed is False
+    assert match.signal_reason == "market_end_too_far"
 
 
 def test_current_strategy_allows_far_mlb_signal_when_structured_tail_state_reached() -> None:
@@ -711,12 +709,11 @@ def test_current_strategy_allows_far_mlb_signal_when_structured_tail_state_reach
     )
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
-    match = strategy.match_sports_live_state(market, (game,))
+    match = strategy.match_live_state(market, (game,))
 
     assert match is not None
-    _matched_market, _matched_game, metadata = match
-    assert metadata["sports_tail_entry_signal_allowed"] is True
-    assert metadata["sports_tail_entry_signal_reason"] == "live_tail_state_candidate"
+    assert match.signal_allowed is True
+    assert match.signal_reason == "live_tail_state_candidate"
 
 
 def test_current_strategy_allows_far_tennis_set_winner_signal_after_set_completed() -> None:
@@ -761,12 +758,11 @@ def test_current_strategy_allows_far_tennis_set_winner_signal_after_set_complete
     )
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
-    match = strategy.match_sports_live_state(market, (game,))
+    match = strategy.match_live_state(market, (game,))
 
     assert match is not None
-    _matched_market, _matched_game, metadata = match
-    assert metadata["sports_tail_entry_signal_allowed"] is True
-    assert metadata["sports_tail_entry_signal_reason"] == "live_outcome_lock_candidate"
+    assert match.signal_allowed is True
+    assert match.signal_reason == "live_outcome_lock_candidate"
 
 
 def test_current_strategy_allows_far_tennis_match_total_when_minimum_final_games_crosses_line() -> None:
@@ -812,12 +808,11 @@ def test_current_strategy_allows_far_tennis_match_total_when_minimum_final_games
     )
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
-    match = strategy.match_sports_live_state(market, (game,))
+    match = strategy.match_live_state(market, (game,))
 
     assert match is not None
-    _matched_market, _matched_game, metadata = match
-    assert metadata["sports_tail_entry_signal_allowed"] is True
-    assert metadata["sports_tail_entry_signal_reason"] == "live_outcome_lock_candidate"
+    assert match.signal_allowed is True
+    assert match.signal_reason == "live_outcome_lock_candidate"
 
 
 def test_current_strategy_allows_far_tennis_moneyline_signal_when_tail_state_reached() -> None:
@@ -862,12 +857,11 @@ def test_current_strategy_allows_far_tennis_moneyline_signal_when_tail_state_rea
     )
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
-    match = strategy.match_sports_live_state(market, (game,))
+    match = strategy.match_live_state(market, (game,))
 
     assert match is not None
-    _matched_market, _matched_game, metadata = match
-    assert metadata["sports_tail_entry_signal_allowed"] is True
-    assert metadata["sports_tail_entry_signal_reason"] == "live_tail_state_candidate"
+    assert match.signal_allowed is True
+    assert match.signal_reason == "live_tail_state_candidate"
 
 
 def test_current_strategy_does_not_apply_single_game_live_source_to_series_market() -> None:
@@ -897,7 +891,7 @@ def test_current_strategy_does_not_apply_single_game_live_source_to_series_marke
     )
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
-    match = strategy.match_sports_live_state(market, (game,))
+    match = strategy.match_live_state(market, (game,))
 
     assert match is None
 
@@ -929,7 +923,7 @@ def test_current_strategy_does_not_apply_single_game_live_source_to_league_winne
     )
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
-    match = strategy.match_sports_live_state(market, (game,))
+    match = strategy.match_live_state(market, (game,))
 
     assert match is None
 

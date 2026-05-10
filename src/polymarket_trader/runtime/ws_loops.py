@@ -79,21 +79,20 @@ def _market_requires_market_ws(
         token_id in exposed_token_ids for token_id in market.token_ids
     ):
         return True
-    metadata = _entry_metadata_for_market(runtime, market)
-    signal_reason = str(metadata.get("sports_tail_entry_signal_reason") or "").strip()
-    if metadata.get("sports_tail_entry_signal_allowed") is False and signal_reason != "market_end_too_far":
+    record = _entry_metadata_record_for_market(runtime, market)
+    if record is None:
         return False
-    sports_tail_game = metadata.get("sports_tail_game")
-    if not isinstance(sports_tail_game, Mapping):
+    signal_reason = (record.live_state_signal_reason or "").strip()
+    if record.live_state_signal_allowed is False and signal_reason != "market_end_too_far":
         return False
-    status = str(sports_tail_game.get("status") or "").strip().lower()
-    if status == "ended":
+    phase = (record.live_state_phase or "").strip().lower()
+    if phase == "ended":
         return True
-    if status not in _MARKET_WS_LIVE_STATUSES:
+    if phase not in _MARKET_WS_LIVE_STATUSES:
         return False
-    if metadata.get("sports_tail_entry_signal_allowed") is True:
+    if record.live_state_signal_allowed is True:
         return True
-    if status == "live" and signal_reason == "market_end_too_far":
+    if phase == "live" and signal_reason == "market_end_too_far":
         return True
     return _market_end_within_tail_window(market, now=_utc_now())
 
@@ -114,17 +113,20 @@ def _market_end_within_tail_window(market: Any, *, now: datetime) -> bool:
     return seconds_until_end <= _MARKET_WS_TAIL_WINDOW_SECONDS
 
 
-def _entry_metadata_for_market(runtime: Any, market: Any) -> Mapping[str, Any]:
+def _entry_metadata_record_for_market(runtime: Any, market: Any) -> Any:
+    """读取 entry metadata 强类型记录；缺失时返回 None。"""
+
     store = getattr(runtime, "entry_metadata_store", None)
-    metadata_for = getattr(store, "metadata_for", None)
-    if not callable(metadata_for):
-        return {}
-    metadata = metadata_for(
+    if store is None:
+        return None
+    finder = getattr(store, "find", None)
+    if not callable(finder):
+        return None
+    return finder(
         condition_id=market.condition_id,
         market_slug=market.market_slug,
         event_slug=market.event_slug,
     )
-    return metadata if isinstance(metadata, Mapping) else {}
 
 
 def user_ws_subscription_condition_ids(runtime: Any) -> tuple[str, ...]:

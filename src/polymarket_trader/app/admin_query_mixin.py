@@ -593,6 +593,33 @@ class AdminQueryMixin:
     def metrics_snapshot(self) -> dict[str, Any]:
         return self._runtime_view().metrics_snapshot()
 
+    def dump_decision_records(self) -> dict[str, Any]:
+        """暴露当前进程 ``InMemoryDecisionRecorder`` 最近决策。
+
+        给 ``polymarket_trader.tools.replay_decisions dump-recorder`` CLI 抓取。
+        """
+
+        recorder = getattr(self.runtime, "decision_recorder", None)
+        if recorder is None:
+            return {"records": []}
+        snapshot = recorder.snapshot()
+        records = []
+        for record in snapshot:
+            records.append(
+                {
+                    "hook_name": record.hook_name,
+                    "trace_id": record.trace_id,
+                    "recorded_at": record.recorded_at.isoformat(),
+                    "condition_id": record.condition_id,
+                    "token_id": record.token_id,
+                    "market_slug": record.market_slug,
+                    "context_payload": dict(record.context_payload),
+                    "decision_payload": dict(record.decision_payload),
+                    "extras": dict(record.extras),
+                }
+            )
+        return {"records": records}
+
 
     async def list_sports_live_states(
         self,
@@ -606,7 +633,7 @@ class AdminQueryMixin:
         records = (
             ()
             if store is None
-            else tuple(record for record in store.records() if "sports_tail_game" in record.metadata)
+            else tuple(record for record in store.records() if bool(record.live_state_payload))
         )
         page = self._slice_sequence(records, limit=limit, offset=offset)
         return page_payload(page, serializer=lambda record: record.as_payload())
@@ -649,7 +676,7 @@ class AdminQueryMixin:
             else tuple(
                 record
                 for record in store.records()
-                if "sports_tail_game" in record.metadata and record.condition_id in scoped_condition_ids
+                if bool(record.live_state_payload) and record.condition_id in scoped_condition_ids
             )
         )
         if now is None:
@@ -663,7 +690,7 @@ class AdminQueryMixin:
                 market_slug=market.market_slug,
                 event_slug=market.event_slug,
             )
-            if record is not None and "sports_tail_game" in record.metadata:
+            if record is not None and bool(record.live_state_payload):
                 continue
             market_prefix = _market_slug_prefix(market)
             if normalized_prefix and market_prefix != normalized_prefix:
@@ -726,7 +753,7 @@ class AdminQueryMixin:
         )
         return payload
 
-    async def list_sports_tail_candidates(
+    async def list_strategy_candidates(
         self,
         *,
         limit: int = 100,
@@ -766,8 +793,8 @@ class AdminQueryMixin:
                     orderbook=orderbook,
                     account=account,
                 )
-                metadata = dict(plan.metadata or {})
-                if "sports_tail_reason" not in metadata:
+                summary = plan.summary
+                if summary is None or not summary.reason:
                     continue
                 candidate = self._candidate_payload(market, outcome.token_id, plan)
                 if not _candidate_matches_filters(

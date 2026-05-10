@@ -21,3 +21,12 @@ async def workers(service: AdminService = Depends(get_admin_service)) -> dict[st
 @router.get("/metrics")
 async def metrics(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
     return service.metrics_snapshot()
+
+
+@router.get("/admin/decisions/dump")
+async def dump_decision_records(
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """导出当前进程 ``InMemoryDecisionRecorder`` 的最近决策（供离线 replay 工具拉取）。"""
+
+    return service.dump_decision_records()

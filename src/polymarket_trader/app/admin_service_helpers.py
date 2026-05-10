@@ -162,25 +162,6 @@ def _text_filter_matches(value: object, expected: str | None) -> bool:
     return str(value or "").strip().lower() == expected.strip().lower()
 
 
-def _plan_block_reason(plan, metadata: Mapping[str, Any]) -> str:
-    """提取入场计划被资金、盘口或风控阻断后的最终可审计原因。"""
-
-    allocation = getattr(plan, "allocation", None)
-    if allocation is not None:
-        reason = str(allocation.release_reason or allocation.reason or "")
-        if reason:
-            return reason
-    return str(getattr(plan, "reason", "") or metadata.get("sports_tail_reason") or "")
-
-
-def _project_candidate_action(strategy_action: str, plan, metadata: Mapping[str, Any]) -> tuple[str, str]:
-    """把策略动作投影成候选展示的最终动作和原因。"""
-
-    if strategy_action == "auto_execute" and not bool(getattr(plan, "ready_to_trade", False)):
-        return "reject", _plan_block_reason(plan, metadata)
-    return strategy_action, str(metadata.get("sports_tail_reason") or getattr(plan, "reason", "") or "")
-
-
 def _market_slug_prefix(market: Market) -> str:
     """提取 market slug 的首段，用于直播源缺口聚合。"""
 
