@@ -18,7 +18,7 @@ from polymarket_trader.domain.position import Position
 from polymarket_trader.extension_api import ExtensionContext, ExtensionDecision
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.domain.state_machine import MarketLifecycle
-from polymarket_trader.workers.trading_decision_worker import TradingDecisionWorker
+from polymarket_trader.workers.trading_decision import TradingDecisionWorker
 
 
 class _FailingDecisionService:

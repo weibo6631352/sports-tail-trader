@@ -7,8 +7,8 @@ from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market, MarketOutcome
 from polymarket_trader.runtime import ws_loops
-from polymarket_trader.workers.market_ws_worker import MarketWsWorker
-from polymarket_trader.workers.user_ws_worker import UserWsWorker
+from polymarket_trader.workers.market_ws import MarketWsWorker
+from polymarket_trader.workers.user_ws import UserWsWorker
 
 
 class _FakeSupervisor:

@@ -16,7 +16,7 @@
 - 改 discovery 粗筛：[src/strategies/current/config.py](./src/strategies/current/config.py) 的 `discovery_title_searches` / `discovery_tag_slugs`，或 [src/strategies/current/strategy.py](./src/strategies/current/strategy.py) 的 `discovery_queries()`；官方 Gamma Events keyset 文档见 <https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination>
 - 改市场筛选：[src/strategies/current/universe.py](./src/strategies/current/universe.py)
 - 改策略配置：[src/strategies/current/config.py](./src/strategies/current/config.py)
-- 改分配、入场、退出：[src/strategies/current/trading.py](./src/strategies/current/trading.py)
+- 改分配、入场、退出：[src/strategies/current/trading/](./src/strategies/current/trading/)
 - 改恢复和保留跟踪：[src/strategies/current/recovery.py](./src/strategies/current/recovery.py) / [src/strategies/current/tracking.py](./src/strategies/current/tracking.py)
 - 看策略装配入口：[src/strategies/current/strategy.py](./src/strategies/current/strategy.py)
 - 看扩展 API 契约：[src/polymarket_trader/extension_api](./src/polymarket_trader/extension_api)
@@ -60,15 +60,12 @@
 
 ## 文档入口
 
-- [Codex Rules](./AGENTS.md)：仓库级开发规则、分层边界、结构改造准则和测试要求。
+- [Claude Rules](./CLAUDE.md)：仓库级开发规则、分层边界、结构改造准则和测试要求。
 - [使用说明书](./docs/使用说明书.md)：日常启动、页面操作、人工确认、验收和常见问题。
 - [业务需求](./docs/业务需求.md)：体育类扫尾交易的业务目标、盈利逻辑和操作规则。
 - [体育扫尾策略目标设计](./docs/体育扫尾策略设计.md)：从业务需求抽象出的目标模型、统一链路和策略边界。
 - [体育扫尾完整接线设计](./docs/体育扫尾完整接线设计.md)：后续实现前必须遵守的文件级接线、框架边界和管理台边界。
 - [体育直播状态输入设计](./docs/体育直播状态输入设计.md)：直播比分、阶段、剩余时间等运行时输入的接线边界。
-- [二次开发计划](./docs/二次开发计划.md)：围绕体育扫尾策略的后续开发里程碑、验收顺序和文档维护要求。
-- [开发实施计划](./docs/开发实施计划.md)：当前可执行开发切片、任务拆分和验证命令。
-- [开发进度](./docs/开发进度.md)：开发状态、验证结果、当前决策和遗留风险。
 - [策略验收与风控清单](./docs/策略验收与风控清单.md)：候选、价格、流动性、风控、执行权限和退出检查项。
 - [框架设计与边界](./docs/设计文档.md)：运行时装配、核心链路、业务扩展契约、前端边界和二次开发入口。
 - [市场发现链路说明](./docs/市场发现链路.md)：扩展 discovery hook、分页扫描、WS 热发现和运行时状态。
@@ -82,7 +79,7 @@
 - 运行入口：[src/strategies/current/strategy.py](./src/strategies/current/strategy.py)
 - 策略配置：[src/strategies/current/config.py](./src/strategies/current/config.py)
 - discovery query / universe：[src/strategies/current/strategy.py](./src/strategies/current/strategy.py) / [src/strategies/current/config.py](./src/strategies/current/config.py) / [src/strategies/current/universe.py](./src/strategies/current/universe.py)
-- 交易决策：[src/strategies/current/trading.py](./src/strategies/current/trading.py)
+- 交易决策：[src/strategies/current/trading/](./src/strategies/current/trading/)
 - 恢复 / 跟踪：[src/strategies/current/recovery.py](./src/strategies/current/recovery.py) / [src/strategies/current/tracking.py](./src/strategies/current/tracking.py)
 - 扩展 API 契约：[src/polymarket_trader/extension_api/hooks.py](./src/polymarket_trader/extension_api/hooks.py) / [src/polymarket_trader/extension_api/decisions.py](./src/polymarket_trader/extension_api/decisions.py)
 

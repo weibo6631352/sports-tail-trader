@@ -28,7 +28,7 @@ from polymarket_trader.domain.order import Order
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.registry import MarketRegistry
-from polymarket_trader.workers.trading_decision_worker import TradingDecisionWorker
+from polymarket_trader.workers.trading_decision import TradingDecisionWorker
 from polymarket_trader.extension_api import ExtensionContext, MarketTokenView
 
 from strategies.current.config import CurrentStrategyConfig, sports_tail_policy_from_config

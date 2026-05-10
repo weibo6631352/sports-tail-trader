@@ -1,0 +1,300 @@
+"""把 ExtensionContext 转成候选 AllocationMarketSnapshot，并计算 skip 原因。"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+from polymarket_trader.domain.allocation import (
+    Allocation,
+    AllocationPlan,
+    current_exposure_usdc,
+)
+from polymarket_trader.domain.market import TradingStatus
+from polymarket_trader.domain.order import OrderSide
+from polymarket_trader.extension_api import EntryCandidate, ExtensionContext
+
+from strategies.current.allocation import AllocationMarketSnapshot
+from strategies.current.config import CurrentStrategyConfig
+from strategies.current.outcomes import describe_sports_market, is_primary_token
+from strategies.current.universe import select_market
+
+from .gates import (
+    _ask_depth_notional,
+    _has_open_order,
+    _sports_tail_pre_orderbook_skip_reason,
+)
+from .pricing import _sports_tail_locked_outcome_signal, _sports_tail_price_cap
+
+
+def _empty_sizing_plan(context: ExtensionContext, reason: str) -> AllocationPlan:
+    """构造一个“无可分配预算”的 AllocationPlan。"""
+
+    from .helpers import _metadata_decimal
+    total_budget_usdc = context.portfolio_budget_usdc or _metadata_decimal(
+        context,
+        "portfolio_budget_usdc",
+    ) or Decimal("0")
+    return AllocationPlan(
+        trace_id=context.trace_id,
+        total_budget_usdc=total_budget_usdc,
+        reason=reason,
+    )
+
+
+def _candidate_snapshots(
+    context: ExtensionContext,
+) -> tuple[AllocationMarketSnapshot, ...]:
+    """从上下文中提取候选市场快照。
+
+    正常路径下，框架会把候选市场列表放在 ``ExtensionContext.entry_candidates``。
+    如果当前调用点没有提供这个列表，这里会退化为只用当前 market 生成一个 fallback
+    snapshot，保证逻辑仍可运行。
+    """
+
+    if context.entry_candidates:
+        return tuple(_entry_candidate_to_snapshot(candidate) for candidate in context.entry_candidates)
+    fallback = _fallback_snapshot(context)
+    return () if fallback is None else (fallback,)
+
+
+def _fallback_snapshot(
+    context: ExtensionContext,
+) -> AllocationMarketSnapshot | None:
+    """在缺少候选市场列表时，为当前 market 构造一个最小快照。"""
+
+    if context.market is None or context.orderbook is None:
+        return None
+    return AllocationMarketSnapshot(
+        market=context.market,
+        token_id=context.token_id or context.orderbook.token_id,
+        orderbook=context.orderbook,
+        position=context.position,
+        open_orders=context.open_orders,
+        tradable=context.market.trading_status == TradingStatus.ELIGIBLE,
+        risk_allowed=True,
+        market_active=context.market.trading_status == TradingStatus.ELIGIBLE,
+        market_open=context.market.trading_status == TradingStatus.ELIGIBLE,
+        clob_enabled=True,
+        resolved=context.market.trading_status == TradingStatus.RESOLVED,
+        cancelled=False,
+        archived=context.market.trading_status == TradingStatus.CLOSED,
+        liquidity_usdc=_ask_depth_notional(context.orderbook),
+        spread=context.orderbook.spread,
+        best_ask=context.orderbook.best_ask,
+        best_ask_size=context.orderbook.best_ask_size,
+        idempotency_key=(
+            f"{context.trace_id}:{context.market.condition_id}:{context.token_id or context.orderbook.token_id}"
+        ),
+    )
+
+
+def _entry_candidate_to_snapshot(candidate: EntryCandidate) -> AllocationMarketSnapshot:
+    return AllocationMarketSnapshot(
+        market=candidate.market,
+        token_id=candidate.token_id,
+        orderbook=candidate.orderbook,
+        position=candidate.position,
+        open_orders=candidate.open_orders,
+        tradable=candidate.market.trading_status == TradingStatus.ELIGIBLE,
+        risk_allowed=True,
+        market_active=candidate.market.trading_status == TradingStatus.ELIGIBLE,
+        market_open=candidate.market.trading_status == TradingStatus.ELIGIBLE,
+        clob_enabled=True,
+        resolved=candidate.market.trading_status == TradingStatus.RESOLVED,
+        cancelled=False,
+        archived=candidate.market.trading_status == TradingStatus.CLOSED,
+        liquidity_usdc=_ask_depth_notional(candidate.orderbook),
+        spread=candidate.orderbook.spread,
+        best_ask=candidate.orderbook.best_ask,
+        best_ask_size=candidate.orderbook.best_ask_size,
+        idempotency_key=candidate.idempotency_key,
+    )
+
+
+def _allocation_skip_reason(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    snapshot: AllocationMarketSnapshot,
+    *,
+    buyable_liquidity_usdc: Decimal,
+) -> str:
+    if _has_open_order(snapshot, OrderSide.BUY):
+        return "open_entry_detected"
+    has_open_exit = _has_open_order(snapshot, OrderSide.SELL) or (
+        snapshot.position is not None and snapshot.position.open_sell_shares > Decimal("0")
+    )
+    if has_open_exit and not snapshot.scale_in_allowed:
+        return "open_exit_detected"
+    if (
+        snapshot.position is not None
+        and snapshot.position.shares > Decimal("0")
+        and not snapshot.scale_in_allowed
+    ):
+        return "position_already_open"
+    universe_decision = select_market(config, snapshot.market)
+    if not universe_decision.selected:
+        return universe_decision.reason or "market_out_of_universe"
+    if not is_primary_token(snapshot.market, snapshot.token_id):
+        return "unsupported_outcome"
+    sports_pre_orderbook_reason = _sports_tail_pre_orderbook_skip_reason(config, context, snapshot)
+    if sports_pre_orderbook_reason:
+        return sports_pre_orderbook_reason
+    if not snapshot.tradable:
+        return "market_not_tradable"
+    if not snapshot.market_active:
+        return "market_not_active"
+    if not snapshot.market_open:
+        return "market_not_open"
+    if not snapshot.clob_enabled:
+        return "clob_disabled"
+    if snapshot.resolved:
+        return "market_resolved"
+    if snapshot.cancelled:
+        return "market_cancelled"
+    if snapshot.archived:
+        return "market_archived"
+    if not snapshot.risk_allowed:
+        return "risk_limit_reached"
+
+    best_ask = snapshot.best_ask if snapshot.best_ask is not None else (
+        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
+    )
+    locked_outcome_signal = _sports_tail_locked_outcome_signal(context)
+    price_cap = _sports_tail_price_cap(
+        config,
+        snapshot.market,
+        snapshot.token_id,
+        locked_outcome_signal=locked_outcome_signal,
+    )
+    if best_ask is None:
+        return "missing_best_ask"
+    if best_ask is not None and best_ask > price_cap:
+        return "price_above_entry_max"
+
+    spread = snapshot.spread if snapshot.spread is not None else (
+        snapshot.orderbook.spread if snapshot.orderbook is not None else None
+    )
+    if (
+        config.max_spread is not None
+        and spread is not None
+        and spread > config.max_spread
+        and not locked_outcome_signal
+    ):
+        return "spread_above_max"
+
+    if buyable_liquidity_usdc < config.min_liquidity_usdc:
+        return "liquidity_below_min"
+
+    return ""
+
+
+def _sports_market_skip_metadata(
+    snapshot: AllocationMarketSnapshot,
+    reason: str,
+) -> dict[str, object]:
+    """把 universe / allocation 早期跳过原因补成候选可读的体育审计字段。"""
+
+    descriptor = describe_sports_market(snapshot.market)
+    metadata: dict[str, object] = {
+        "sports_tail_action": "reject",
+        "sports_tail_reason": reason,
+        "sports_market_family": descriptor.market_family.value,
+    }
+    if descriptor.market_type is not None:
+        metadata["market_type"] = descriptor.market_type.value
+    for target in descriptor.targets:
+        if target.token_id == snapshot.token_id:
+            metadata["side"] = target.side.value
+            break
+    if descriptor.line is not None:
+        metadata["line"] = str(descriptor.line)
+    if snapshot.market.end_date is not None:
+        metadata["market_end_date"] = snapshot.market.end_date.isoformat()
+    if snapshot.best_ask is not None:
+        metadata["best_ask"] = str(snapshot.best_ask)
+    return metadata
+
+
+def _skipped_allocation(
+    snapshot: AllocationMarketSnapshot,
+    *,
+    reason: str,
+) -> Allocation:
+    return Allocation(
+        condition_id=snapshot.condition_id,
+        target_budget_usdc=Decimal("0"),
+        buy_budget_usdc=Decimal("0"),
+        market_slug=snapshot.market_slug,
+        token_id=snapshot.token_id,
+        current_exposure_usdc=current_exposure_usdc(snapshot.position, snapshot.open_orders),
+        released_budget_usdc=Decimal("0"),
+        reason=reason,
+        idempotency_key=snapshot.idempotency_key,
+        release_reason=reason,
+    )
+
+
+def _merge_allocation_plan(
+    *,
+    trace_id: str,
+    portfolio_budget_usdc: Decimal,
+    candidate_snapshots: tuple[AllocationMarketSnapshot, ...],
+    eligible_plan: AllocationPlan,
+    skipped_allocations: dict[tuple[str, str], Allocation],
+) -> AllocationPlan:
+    allocation_map = {
+        (allocation.condition_id, allocation.token_id or ""): allocation
+        for allocation in eligible_plan.allocations
+    }
+    allocation_map.update(skipped_allocations)
+    ordered_allocations: list[Allocation] = []
+    for snapshot in candidate_snapshots:
+        allocation = allocation_map.get((snapshot.condition_id, snapshot.token_id))
+        if allocation is not None:
+            ordered_allocations.append(allocation)
+    return AllocationPlan(
+        trace_id=trace_id,
+        total_budget_usdc=portfolio_budget_usdc,
+        allocations=tuple(ordered_allocations),
+        budget_changes=eligible_plan.budget_changes,
+        reason=eligible_plan.reason,
+    )
+
+
+def _pick_allocation(
+    allocations: tuple[Allocation, ...],
+    condition_id: str | None,
+    token_id: str | None,
+) -> Allocation | None:
+    """从分配结果中挑出当前目标 market 的那一项。"""
+
+    if condition_id is None or token_id is None:
+        return None
+    for allocation in allocations:
+        if allocation.condition_id == condition_id and allocation.token_id == token_id:
+            return allocation
+    return None
+
+
+def _sizing_reason(plan: AllocationPlan, allocation: Allocation | None) -> str:
+    """返回对外展示时更有解释力的 sizing 原因。
+
+    优先使用当前 allocation 的具体原因；
+    如果当前 market 没有单独原因，再退回整体 plan 的原因。
+    """
+
+    if allocation is not None and allocation.reason:
+        return allocation.reason
+    return plan.reason
+
+
+def _is_focus_snapshot(
+    context: ExtensionContext,
+    snapshot: AllocationMarketSnapshot,
+) -> bool:
+    """判断 allocation snapshot 是否对应当前触发入场判断的 token。"""
+
+    if context.market is None:
+        return False
+    focus_token_id = context.token_id or (context.orderbook.token_id if context.orderbook is not None else None)
+    return snapshot.condition_id == context.market.condition_id and snapshot.token_id == focus_token_id

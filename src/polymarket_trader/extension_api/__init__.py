@@ -16,6 +16,7 @@ from polymarket_trader.extension_api.errors import ExtensionLoadError
 from polymarket_trader.extension_api.hooks import ExtensionHooks
 from polymarket_trader.extension_api.manifest import (
     BusinessExtension,
+    ConfigValidator,
     ExtensionFactory,
     ExtensionManifest,
     ExtensionSpec,
@@ -40,6 +41,7 @@ __all__ = (
     "BusinessExtension",
     "ClockPort",
     "ConfigReadPort",
+    "ConfigValidator",
     "DomainEventType",
     "DiscoveryQuery",
     "EntryCandidate",
