@@ -211,59 +211,25 @@ class TradingDecisionWorker:
             snapshot.open_orders if snapshot is not None else tuple(self._open_orders_provider())
         )
         if snapshot is not None and not snapshot.allow_new_entries:
-            skipped = await self._publish(
-                DomainEventType.SKIPPED,
-                trace_id=event.trace_id,
-                market_slug=event.market_slug,
-                condition_id=event.condition_id,
-                token_id=event.token_id,
-                reason="entry_paused",
-                payload={
-                    "entry_event_id": event.event_id,
-                    "origin": TRADING_DECISION_WORKER_ORIGIN,
-                    "reason": "entry_paused",
-                    "account_snapshot": serialize_snapshot(snapshot),
-                    "allocation_plan": serialize_allocation_plan(plan),
-                    "allocation": serialize_allocation(plan),
-                    "plan_metadata": serialize_plan_metadata(plan),
-                },
-                priority=OutboxPriority.P3,
-            )
-            self._transition_market(plan.market, MarketLifecycle.PAUSED if plan.market else None)
-            return TradingDecisionWorkerResult(
-                entry_event=event,
+            return await self._emit_entry_skip(
+                event=event,
                 plan=plan,
-                review=None,
-                emitted_event=skipped,
-                state_after=self._state_for_market(plan.market),
+                trace_id=event.trace_id,
+                reason="entry_paused",
+                lifecycle=MarketLifecycle.PAUSED,
+                extra_payload={"account_snapshot": serialize_snapshot(snapshot)},
+                emit_in_tuple=False,
             )
 
         if not plan.ready_to_trade or plan.intent is None or plan.market is None or plan.orderbook is None:
-            skipped = await self._publish(
-                DomainEventType.SKIPPED,
-                trace_id=plan.trace_id,
-                market_slug=event.market_slug,
-                condition_id=event.condition_id,
-                token_id=event.token_id,
-                reason=plan.reason or "entry_not_ready",
-                payload={
-                    "entry_event_id": event.event_id,
-                    "origin": TRADING_DECISION_WORKER_ORIGIN,
-                    "reason": plan.reason or "entry_not_ready",
-                    "allocation_plan": serialize_allocation_plan(plan),
-                    "allocation": serialize_allocation(plan),
-                    "plan_metadata": serialize_plan_metadata(plan),
-                },
-                priority=OutboxPriority.P3,
-            )
-            self._transition_market(plan.market, MarketLifecycle.WATCHING_ORDERBOOK if plan.market else None)
-            return TradingDecisionWorkerResult(
-                entry_event=event,
+            return await self._emit_entry_skip(
+                event=event,
                 plan=plan,
-                review=None,
-                emitted_event=skipped,
-                emitted_events=(skipped,),
-                state_after=self._state_for_market(plan.market),
+                trace_id=plan.trace_id,
+                reason=plan.reason or "entry_not_ready",
+                lifecycle=MarketLifecycle.WATCHING_ORDERBOOK,
+                extra_payload=None,
+                emit_in_tuple=True,
             )
 
         focus_token_id = plan.intent.token_id
@@ -498,6 +464,55 @@ class TradingDecisionWorker:
         if self._account_state_store is not None:
             return self._account_state_store.snapshot()
         return snapshot
+
+    async def _emit_entry_skip(
+        self,
+        *,
+        event: DomainEvent,
+        plan: EntryPlan,
+        trace_id: str,
+        reason: str,
+        lifecycle: MarketLifecycle,
+        extra_payload: Mapping[str, object] | None,
+        emit_in_tuple: bool,
+    ) -> "TradingDecisionWorkerResult":
+        """统一发布入场 SKIP 事件 + 状态转换 + 构造 result。
+
+        ``emit_in_tuple`` 控制是否把 SKIP 事件同时写入 ``emitted_events`` 元组。
+        历史上两条入场跳过路径（entry_paused / entry_not_ready）只在该字段、
+        ``trace_id`` 来源、``reason`` 和 ``extra_payload`` 上有差别，其余完全相同。
+        """
+
+        payload: dict[str, object] = {
+            "entry_event_id": event.event_id,
+            "origin": TRADING_DECISION_WORKER_ORIGIN,
+            "reason": reason,
+            "allocation_plan": serialize_allocation_plan(plan),
+            "allocation": serialize_allocation(plan),
+            "plan_metadata": serialize_plan_metadata(plan),
+        }
+        if extra_payload:
+            payload.update(extra_payload)
+        skipped = await self._publish(
+            DomainEventType.SKIPPED,
+            trace_id=trace_id,
+            market_slug=event.market_slug,
+            condition_id=event.condition_id,
+            token_id=event.token_id,
+            reason=reason,
+            payload=payload,
+            priority=OutboxPriority.P3,
+        )
+        self._transition_market(plan.market, lifecycle if plan.market else None)
+        emitted_events_tuple: tuple[DomainEvent, ...] = (skipped,) if emit_in_tuple else ()
+        return TradingDecisionWorkerResult(
+            entry_event=event,
+            plan=plan,
+            review=None,
+            emitted_event=skipped,
+            emitted_events=emitted_events_tuple,
+            state_after=self._state_for_market(plan.market),
+        )
 
     async def _publish(
         self,
