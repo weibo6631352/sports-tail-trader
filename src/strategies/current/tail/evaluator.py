@@ -51,9 +51,9 @@ from .types import (
     SportsMarketSnapshot,
     SportsMarketType,
     SportsTailCandidate,
-    SportsTailEvaluation,
+    TailEvaluation,
     SportsTailOpportunityType,
-    SportsTailPolicy,
+    TailPolicy,
     TailRejectReason,
 )
 
@@ -62,9 +62,9 @@ def evaluate_tail_opportunity(
     game: LiveGameState | None,
     market: SportsMarketSnapshot,
     *,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
     now: datetime | None = None,
-) -> SportsTailEvaluation:
+) -> TailEvaluation:
     """评估体育盘口是否构成扫尾机会。"""
 
     family_reject_reason = _market_family_reject_reason(market.market_family)
@@ -140,9 +140,9 @@ def evaluate_scale_in_opportunity(
     game: LiveGameState | None,
     market: SportsMarketSnapshot,
     *,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
     now: datetime | None = None,
-) -> SportsTailEvaluation:
+) -> TailEvaluation:
     """评估已有持仓是否达到受控加仓所需的更严格优势状态。"""
 
     family_reject_reason = _market_family_reject_reason(market.market_family)
@@ -202,8 +202,8 @@ def evaluate_scale_in_opportunity(
 
 def _evaluate_ended_not_closed(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     """用最终比分判断已结束但未封盘 market 的确定性方向。"""
 
     market = candidate.market
@@ -220,8 +220,8 @@ def _evaluate_ended_not_closed(
 
 def _evaluate_nfl_manual_review(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     if candidate.market.market_type == SportsMarketType.TOTALS:
         evaluation = _evaluate_totals(candidate, policy)
     elif candidate.market.market_type == SportsMarketType.MONEYLINE:
@@ -238,7 +238,7 @@ def _evaluate_nfl_manual_review(
 def _common_reject_reason(
     game: LiveGameState,
     market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
     *,
     now: datetime | None,
 ) -> TailRejectReason | None:
@@ -262,7 +262,7 @@ def _common_reject_reason(
 def _market_data_reject_reason(
     game: LiveGameState,
     market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
 ) -> TailRejectReason | None:
     """检查不依赖比赛是否 live 的盘口和来源门槛。"""
 
@@ -280,7 +280,7 @@ def _market_data_reject_reason(
 def _max_entry_price(
     game: LiveGameState,
     market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
 ) -> Decimal:
     if (
         _is_tennis_game(game)
@@ -300,7 +300,7 @@ def _max_entry_price(
 
 def _is_stale(
     game: LiveGameState,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
     *,
     now: datetime | None,
 ) -> bool:
@@ -322,7 +322,7 @@ def _is_stale(
 
 def _market_end_too_far(
     market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
     *,
     now: datetime | None,
 ) -> bool:
@@ -346,7 +346,7 @@ def _market_end_too_far(
 def _can_bypass_market_end_window(
     game: LiveGameState,
     market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
 ) -> bool:
     """判断结果已数学锁定的 live 盘口是否可绕过 endDate 粗筛。
 

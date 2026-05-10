@@ -142,7 +142,7 @@ def test_live_game_discovery_queries_prioritize_live_games_before_scheduled_game
     )
 
     queries = build_live_game_discovery_queries(
-        CurrentStrategyConfig(sports_live_discovery_max_games=1, sports_live_discovery_max_queries=4),
+        CurrentStrategyConfig(tail_live_discovery_max_games=1, tail_live_discovery_max_queries=4),
         (scheduled, live),
     )
     title_searches = [str(query.params.get("title_search")) for query in queries]
@@ -175,7 +175,7 @@ def test_live_game_discovery_queries_prioritize_polymarket_covered_tennis() -> N
     )
 
     queries = build_live_game_discovery_queries(
-        CurrentStrategyConfig(sports_live_discovery_max_games=1, sports_live_discovery_max_queries=4),
+        CurrentStrategyConfig(tail_live_discovery_max_games=1, tail_live_discovery_max_queries=4),
         (itf_live, wta_live),
     )
     title_searches = [str(query.params.get("title_search")) for query in queries]

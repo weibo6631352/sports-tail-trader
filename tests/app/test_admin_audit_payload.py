@@ -18,8 +18,8 @@ def test_admin_audit_event_serialization_exposes_payload_for_candidate_replay() 
         trace_id="trace-audit",
         payload={
             "plan_metadata": {
-                "sports_tail_reason": "missing_live_game_state",
-                "sports_tail_action": "reject",
+                "tail_reason": "missing_live_game_state",
+                "tail_action": "reject",
             }
         },
     )
@@ -27,8 +27,8 @@ def test_admin_audit_event_serialization_exposes_payload_for_candidate_replay() 
     payload = serializer.audit_event(event)
 
     assert payload["payload"]["plan_metadata"] == {
-        "sports_tail_reason": "missing_live_game_state",
-        "sports_tail_action": "reject",
+        "tail_reason": "missing_live_game_state",
+        "tail_action": "reject",
     }
 
 
@@ -39,8 +39,8 @@ def test_persistence_audit_record_keeps_outbox_payload_for_candidate_replay() ->
         idempotency_key="audit:trace-persistence",
         payload={
             "plan_metadata": {
-                "sports_tail_reason": "missing_live_game_state",
-                "sports_tail_action": "reject",
+                "tail_reason": "missing_live_game_state",
+                "tail_action": "reject",
             }
         },
     )
@@ -49,6 +49,6 @@ def test_persistence_audit_record_keeps_outbox_payload_for_candidate_replay() ->
     audit_record = next(record for kind, record in records if kind == "audit")
 
     assert audit_record["plan_metadata"] == {
-        "sports_tail_reason": "missing_live_game_state",
-        "sports_tail_action": "reject",
+        "tail_reason": "missing_live_game_state",
+        "tail_action": "reject",
     }

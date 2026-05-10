@@ -5,7 +5,7 @@
 - `manifest.py`：策略 manifest
 - `strategy.py`：策略装配入口
 - `config.py`：策略配置 dataclass
-- `sports_tail/`：体育扫尾候选、执行权限、评估结果和拒绝原因（拆分为 types/parsing/leagues/slug/core/mlb/tennis/evaluator 子模块）
+- `tail/`：体育扫尾候选、执行权限、评估结果和拒绝原因（拆分为 types/parsing/leagues/slug/core/mlb/tennis/evaluator 子模块）
 - `live_state.py`：外部直播比赛状态与当前策略 market 的匹配和 metadata 映射
 - `outcomes.py`：体育盘口类型、盘口线和目标 token 方向解析
 - `universe.py`：返回后本地 universe 精筛
@@ -25,7 +25,7 @@
    再看有哪些业务参数可以改，哪些阈值会影响扫描、筛选和交易。
 3. `universe.py`
    理解扫回来的 market 为什么会被纳入或排除。
-4. `sports_tail/` / `outcomes.py` / `live_state.py`
+4. `tail/` / `outcomes.py` / `live_state.py`
    理解 `Totals`、`Moneyline`、`Spreads` 如何被统一建模、解析和评估。
 5. `risk.py` / `exit_plan.py` / `trading/`
    理解资金怎么分配、什么条件下会买、什么条件下会卖，以及买入后怎么保留退出计划。
@@ -37,7 +37,7 @@
 - 只想改搜索词、价格阈值、流动性门槛：
   先改 `config.py`
 - 想改体育盘口模型、执行权限或拒绝原因：
-  改 `sports_tail/`
+  改 `tail/`
 - 想改 outcome / token 方向解析：
   改 `outcomes.py`
 - 想改外部比分与 market 文本的匹配方式：

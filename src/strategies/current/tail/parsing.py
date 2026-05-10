@@ -17,11 +17,11 @@ def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState 
     """从策略上下文 metadata 中读取直播比赛状态。
 
     支持两种形态：
-    - `metadata["sports_tail_game"]` 是映射对象；
+    - `metadata["live_game"]` 是映射对象；
     - 直接在 metadata 顶层提供 `league/home_score/away_score/status` 等字段。
     """
 
-    raw_game = metadata.get("sports_tail_game")
+    raw_game = metadata.get("live_game")
     if raw_game is None:
         raw_game = metadata
     if not isinstance(raw_game, Mapping):

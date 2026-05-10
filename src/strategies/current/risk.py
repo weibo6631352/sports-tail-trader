@@ -27,7 +27,7 @@ class SportsRiskDecision:
     metadata: Mapping[str, object] | None = None
 
 
-def check_sports_entry_risk(
+def check_tail_entry_risk(
     config: CurrentStrategyConfig,
     *,
     market: Market,
@@ -55,31 +55,31 @@ def check_sports_entry_risk(
 
     consecutive_losses = _int_metadata(
         metadata,
-        "sports_tail_consecutive_losses",
-        "sports_consecutive_losses",
+        "tail_consecutive_losses",
+        "consecutive_losses",
         default=0,
     )
-    risk_metadata["sports_consecutive_losses"] = consecutive_losses
-    if config.sports_max_consecutive_losses >= 0 and consecutive_losses >= config.sports_max_consecutive_losses:
-        return _reject("sports_consecutive_loss_pause", risk_metadata)
+    risk_metadata["consecutive_losses"] = consecutive_losses
+    if config.tail_max_consecutive_losses >= 0 and consecutive_losses >= config.tail_max_consecutive_losses:
+        return _reject("consecutive_loss_pause", risk_metadata)
 
     event_exposure = _event_exposure_usdc(market, candidate_snapshots)
     event_after = event_exposure + buy_budget_usdc
-    risk_metadata["sports_event_exposure_usdc"] = str(event_exposure)
-    risk_metadata["sports_event_exposure_after_usdc"] = str(event_after)
-    risk_metadata["sports_max_event_exposure_usdc"] = str(config.sports_max_event_exposure_usdc)
-    if event_after > config.sports_max_event_exposure_usdc:
-        return _reject("sports_event_exposure_limit", risk_metadata)
+    risk_metadata["event_exposure_usdc"] = str(event_exposure)
+    risk_metadata["event_exposure_after_usdc"] = str(event_after)
+    risk_metadata["max_event_exposure_usdc"] = str(config.tail_max_event_exposure_usdc)
+    if event_after > config.tail_max_event_exposure_usdc:
+        return _reject("event_exposure_limit", risk_metadata)
 
     league = _league_key(market, metadata)
     league_exposure = _league_exposure_usdc(league, candidate_snapshots)
     league_after = league_exposure + buy_budget_usdc
-    risk_metadata["sports_league"] = league
-    risk_metadata["sports_league_exposure_usdc"] = str(league_exposure)
-    risk_metadata["sports_league_exposure_after_usdc"] = str(league_after)
-    risk_metadata["sports_max_league_exposure_usdc"] = str(config.sports_max_league_exposure_usdc)
-    if league_after > config.sports_max_league_exposure_usdc:
-        return _reject("sports_league_exposure_limit", risk_metadata)
+    risk_metadata["league"] = league
+    risk_metadata["league_exposure_usdc"] = str(league_exposure)
+    risk_metadata["league_exposure_after_usdc"] = str(league_after)
+    risk_metadata["max_league_exposure_usdc"] = str(config.tail_max_league_exposure_usdc)
+    if league_after > config.tail_max_league_exposure_usdc:
+        return _reject("league_exposure_limit", risk_metadata)
 
     daily_entry_usdc = _daily_entry_usdc(
         metadata,
@@ -89,18 +89,18 @@ def check_sports_entry_risk(
         now=now,
     )
     daily_after = daily_entry_usdc + buy_budget_usdc
-    risk_metadata["sports_daily_entry_usdc"] = str(daily_entry_usdc)
-    risk_metadata["sports_daily_entry_after_usdc"] = str(daily_after)
-    risk_metadata["sports_max_daily_entry_usdc"] = str(config.sports_max_daily_entry_usdc)
-    if daily_after > config.sports_max_daily_entry_usdc:
-        return _reject("sports_daily_entry_limit", risk_metadata)
+    risk_metadata["daily_entry_usdc"] = str(daily_entry_usdc)
+    risk_metadata["daily_entry_after_usdc"] = str(daily_after)
+    risk_metadata["max_daily_entry_usdc"] = str(config.tail_max_daily_entry_usdc)
+    if daily_after > config.tail_max_daily_entry_usdc:
+        return _reject("daily_entry_limit", risk_metadata)
 
-    risk_metadata["sports_risk_reason"] = "passed"
+    risk_metadata["risk_reason"] = "passed"
     return SportsRiskDecision(passed=True, metadata=risk_metadata)
 
 
 def _reject(reason: str, metadata: dict[str, object]) -> SportsRiskDecision:
-    metadata["sports_risk_reason"] = reason
+    metadata["risk_reason"] = reason
     return SportsRiskDecision(passed=False, reason=reason, metadata=metadata)
 
 
@@ -113,14 +113,14 @@ def _base_metadata(
     metadata: Mapping[str, object],
 ) -> dict[str, object]:
     return {
-        "sports_risk_reason": "pending",
-        "sports_risk_condition_id": market.condition_id,
-        "sports_risk_token_id": token_id,
-        "sports_risk_event_key": _event_key(market),
-        "sports_risk_candidate_count": len(candidate_snapshots),
-        "sports_risk_buy_budget_usdc": str(buy_budget_usdc),
-        "sports_live_source": _nested_text(metadata, "sports_tail_game", "source"),
-        "sports_live_source_event_id": _nested_text(metadata, "sports_tail_game", "source_event_id"),
+        "risk_reason": "pending",
+        "risk_condition_id": market.condition_id,
+        "risk_token_id": token_id,
+        "risk_event_key": _event_key(market),
+        "risk_candidate_count": len(candidate_snapshots),
+        "risk_buy_budget_usdc": str(buy_budget_usdc),
+        "live_source": _nested_text(metadata, "live_game", "source"),
+        "live_source_event_id": _nested_text(metadata, "live_game", "source_event_id"),
     }
 
 
@@ -176,8 +176,8 @@ def _daily_entry_usdc(
 
     explicit = _decimal_metadata(
         metadata,
-        "sports_tail_daily_entry_usdc",
-        "sports_daily_entry_usdc",
+        "tail_daily_entry_usdc",
+        "daily_entry_usdc",
         default=None,
     )
     if explicit is not None:
@@ -187,11 +187,11 @@ def _daily_entry_usdc(
         return Decimal("0")
 
     today = _utc_date(now)
-    sports_condition_ids = {focus_market.condition_id}
-    sports_condition_ids.update(snapshot.condition_id for snapshot in candidate_snapshots)
+    tail_condition_ids = {focus_market.condition_id}
+    tail_condition_ids.update(snapshot.condition_id for snapshot in candidate_snapshots)
     total = Decimal("0")
     for fill in fills:
-        if getattr(fill, "condition_id", None) not in sports_condition_ids:
+        if getattr(fill, "condition_id", None) not in tail_condition_ids:
             continue
         if str(getattr(fill, "side", "") or "").upper() != "BUY":
             continue
@@ -232,7 +232,7 @@ def _event_key(market: Market) -> str:
 
 
 def _league_key(market: Market, metadata: Mapping[str, object]) -> str:
-    game_league = _nested_text(metadata, "sports_tail_game", "league")
+    game_league = _nested_text(metadata, "live_game", "league")
     if game_league:
         return game_league.lower()
     return _market_league_key(market)

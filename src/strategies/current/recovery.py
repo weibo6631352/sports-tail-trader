@@ -11,8 +11,8 @@ from polymarket_trader.extension_api import RecoveryDecision, ExtensionContext, 
 
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata, exit_price_for_context
-from strategies.current.outcomes import sports_token_targets
-from strategies.current.sports_tail import LiveGameStatus, live_game_state_from_metadata
+from strategies.current.outcomes import tail_token_targets
+from strategies.current.tail import LiveGameStatus, live_game_state_from_metadata
 
 
 def decide_recovery(
@@ -22,14 +22,14 @@ def decide_recovery(
     if context.market is None:
         return RecoveryDecision(reason="missing_market_state")
 
-    managed_token_ids = {target.token_id for target in sports_token_targets(context.market)}
-    missing_sports_target = not managed_token_ids
+    managed_token_ids = {target.token_id for target in tail_token_targets(context.market)}
+    missing_target = not managed_token_ids
 
     account_snapshot = context.account_snapshot
     positions = []
     if context.position is not None and (
         context.position.token_id in managed_token_ids
-        or (missing_sports_target and context.position.condition_id == context.market.condition_id)
+        or (missing_target and context.position.condition_id == context.market.condition_id)
     ):
         positions.append(context.position)
     if account_snapshot is not None:
@@ -47,7 +47,7 @@ def decide_recovery(
         order
         for order in context.open_orders
         if order.token_id in managed_token_ids
-        or (missing_sports_target and order.condition_id == context.market.condition_id)
+        or (missing_target and order.condition_id == context.market.condition_id)
     )
     if not open_orders and account_snapshot is not None:
         if managed_token_ids:
@@ -81,7 +81,7 @@ def decide_recovery(
                 )
             )
             continue
-        if missing_sports_target:
+        if missing_target:
             continue
         if not config.auto_exit_enabled and _is_open_exit_order(order) and not _is_profit_take_exit_order(order):
             actions.append(
@@ -106,7 +106,7 @@ def decide_recovery(
         uncovered_shares = position.shares - open_exit_shares
         if uncovered_shares <= Decimal("0"):
             continue
-        if config.auto_exit_enabled and not missing_sports_target:
+        if config.auto_exit_enabled and not missing_target:
             exit_metadata = dict(recovery_metadata)
             exit_metadata.update(
                 build_exit_plan_metadata(
@@ -128,7 +128,7 @@ def decide_recovery(
                 )
             )
             continue
-        if missing_sports_target and context.market.trading_status != TradingStatus.ELIGIBLE:
+        if missing_target and context.market.trading_status != TradingStatus.ELIGIBLE:
             continue
         profit_take_action = _recovery_profit_take_action(
             config,
@@ -146,13 +146,13 @@ def decide_recovery(
         TradingStatus.RESOLVED,
     } or (
         account_snapshot is not None and account_snapshot.is_market_paused(context.market.condition_id)
-    ) or abnormal_pause_reason is not None or missing_sports_target
+    ) or abnormal_pause_reason is not None or missing_target
     return RecoveryDecision(
         reason="strategy_recovery",
         actions=tuple(actions),
         pause_trading=pause_trading,
         pause_reason=abnormal_pause_reason
-        or ("missing_sports_target" if missing_sports_target else "")
+        or ("missing_target" if missing_target else "")
         or ("market_not_tradable" if pause_trading else ""),
     )
 
@@ -174,7 +174,7 @@ def _should_cancel_open_entry_order(
 
     if not _is_open_entry_order(order):
         return False
-    max_resting_seconds = config.sports_entry_maker_max_resting_seconds
+    max_resting_seconds = config.tail_entry_maker_max_resting_seconds
     if max_resting_seconds <= 0:
         return True
     opened_at = order.created_at or order.updated_at
@@ -220,18 +220,18 @@ def _recovery_profit_take_action(
     仍保持 settlement-only，避免为了很小价差长期挂出不必要的 SELL。
     """
 
-    if not config.sports_recovery_profit_take_enabled:
+    if not config.tail_recovery_profit_take_enabled:
         return None
     if position.shares <= Decimal("0") or position.cost_usdc <= Decimal("0"):
         return None
     average_price = position.cost_usdc / position.shares
-    if average_price < config.sports_recovery_profit_take_min_avg_price or average_price >= Decimal("1"):
+    if average_price < config.tail_recovery_profit_take_min_avg_price or average_price >= Decimal("1"):
         return None
     target_price, price_source = _recovery_profit_take_price(context, position.token_id, average_price)
     if target_price is None or target_price > Decimal("1"):
         return None
     expected_profit = uncovered_shares * (target_price - average_price)
-    if expected_profit < config.sports_profit_take_min_profit_usdc:
+    if expected_profit < config.tail_profit_take_min_profit_usdc:
         return None
     exit_metadata = dict(recovery_metadata)
     exit_metadata.update(
@@ -245,21 +245,21 @@ def _recovery_profit_take_action(
     )
     exit_metadata.update(
         {
-            "sports_exit_mode": "profit_take",
-            "sports_exit_source_reason": "recovery_profit_take",
-            "sports_profit_take_target_price": str(target_price),
-            "sports_profit_take_price_source": price_source,
-            "sports_profit_take_expected_profit_usdc": _decimal_metadata_text(expected_profit),
-            "sports_recovery_position_avg_price": _decimal_metadata_text(average_price),
+            "exit_mode": "profit_take",
+            "exit_source_reason": "recovery_profit_take",
+            "profit_take_target_price": str(target_price),
+            "profit_take_price_source": price_source,
+            "profit_take_expected_profit_usdc": _decimal_metadata_text(expected_profit),
+            "recovery_position_avg_price": _decimal_metadata_text(average_price),
         }
     )
-    plan = exit_metadata.get("sports_exit_plan")
+    plan = exit_metadata.get("exit_plan")
     if isinstance(plan, dict):
         plan["target_exit_price"] = str(target_price)
         plan["primary_action"] = "place_recovery_profit_take_gtc_sell"
         plan["settlement_rule"] = "keep_profit_take_order_until_fill_or_authoritative_resolution"
         plan["recovery_rule"] = "preserve_existing_profit_take_exit_order"
-    exit_metadata["sports_exit_target_price"] = str(target_price)
+    exit_metadata["exit_target_price"] = str(target_price)
     return ExtensionDecision.sell(
         reason="recovery_profit_take",
         token_id=position.token_id,
@@ -361,8 +361,8 @@ def _max_live_state_age_seconds(config: CurrentStrategyConfig, game) -> int:
 
     league = str(getattr(game, "league", "") or "").strip().lower()
     if getattr(game, "tennis_state", None) is not None or "tennis" in league or league in {"atp", "wta"}:
-        return config.sports_tennis_max_game_state_age_seconds
-    return config.sports_max_game_state_age_seconds
+        return config.tail_tennis_max_game_state_age_seconds
+    return config.tail_max_game_state_age_seconds
 
 
 def _recovery_metadata(
@@ -372,10 +372,10 @@ def _recovery_metadata(
     abnormal_pause_reason: str | None,
 ) -> dict[str, object]:
     metadata: dict[str, object] = {
-        "sports_recovery_reason": abnormal_pause_reason or "strategy_recovery",
+        "recovery_reason": abnormal_pause_reason or "strategy_recovery",
     }
     if abnormal_pause_reason is not None:
-        metadata["sports_recovery_pause_reason"] = abnormal_pause_reason
+        metadata["recovery_pause_reason"] = abnormal_pause_reason
         metadata.update(
             build_exit_plan_metadata(
                 config,

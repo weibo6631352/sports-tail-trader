@@ -93,14 +93,38 @@ def serialize_allocation(plan: EntryPlan) -> dict[str, object] | None:
 
 
 def serialize_plan_metadata(plan: EntryPlan) -> dict[str, object]:
-    """序列化入场计划的审计 metadata。
+    """序列化入场计划的审计 payload。
 
-    metadata 由 app 层透传，可能包含策略候选原因、执行权限或事件输入。
-    这里仅做 JSON 友好转换，不解释具体策略字段。
+    framework 写 audit 时只读 ``plan.summary`` (强类型) + ``plan.decision_kind``；
+    ``plan.metadata`` 整体作为策略私有透传字典放入 ``strategy_payload`` 字段，
+    framework 不解释其字段语义，audit 读侧（trade_replay 等）应只读 strategy_summary
+    与 strategy_payload，不再按 metadata 内具体 key 名查找。
     """
 
-    metadata = jsonable(plan.metadata or {})
-    return metadata if isinstance(metadata, dict) else {"value": metadata}
+    payload: dict[str, object] = {
+        "decision_kind": None if plan.decision_kind is None else plan.decision_kind.value,
+        "intent_tags": tuple(sorted(plan.intent.intent_tags)) if plan.intent is not None and getattr(plan.intent, "intent_tags", None) else (),
+        "strategy_payload": jsonable(plan.metadata or {}),
+    }
+    if plan.summary is not None:
+        summary = plan.summary
+        payload["strategy_summary"] = {
+            "action": summary.action,
+            "reason": summary.reason,
+            "label": summary.label,
+            "market_type": summary.market_type,
+            "side": summary.side,
+            "line": None if summary.line is None else str(summary.line),
+            "best_ask": None if summary.best_ask is None else str(summary.best_ask),
+            "observed_at": None if summary.observed_at is None else summary.observed_at.isoformat(),
+            "manual_confirmed": summary.manual_confirmed,
+            "confirmed_by": summary.confirmed_by,
+            "confirm_reason": summary.confirm_reason,
+            "extras": jsonable(summary.extras or {}),
+        }
+    else:
+        payload["strategy_summary"] = None
+    return payload
 
 
 def serialize_intent(intent: ManagedOrderIntent) -> dict[str, object]:

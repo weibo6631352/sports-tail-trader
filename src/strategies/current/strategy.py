@@ -139,19 +139,19 @@ class CurrentStrategy:
                 )
             )
 
-        if not self._config.sports_enabled_market_types:
+        if not self._config.tail_enabled_market_types:
             issues.append(
                 ConfigIssue(
-                    field="sports_enabled_market_types",
+                    field="tail_enabled_market_types",
                     code="empty_enabled_market_types",
                     message="策略未启用任何体育盘口类型，体育扫尾入场将永远 SKIP",
                 )
             )
 
         auto_permissions = {
-            "totals": self._config.sports_totals_execution_permission,
-            "moneyline": self._config.sports_moneyline_execution_permission,
-            "spreads": self._config.sports_spreads_execution_permission,
+            "totals": self._config.tail_totals_execution_permission,
+            "moneyline": self._config.tail_moneyline_execution_permission,
+            "spreads": self._config.tail_spreads_execution_permission,
         }
         any_auto = any(
             permission.value == "auto_execute" for permission in auto_permissions.values()
@@ -166,14 +166,14 @@ class CurrentStrategy:
             )
 
         if (
-            self._config.sports_scale_in_max_buy_fills > 1
-            and self._config.sports_scale_in_budget_fraction <= Decimal("0")
+            self._config.tail_scale_in_max_buy_fills > 1
+            and self._config.tail_scale_in_budget_fraction <= Decimal("0")
         ):
             issues.append(
                 ConfigIssue(
-                    field="sports_scale_in_budget_fraction",
+                    field="tail_scale_in_budget_fraction",
                     code="invalid_scale_in_budget",
-                    message="允许加仓但 sports_scale_in_budget_fraction <= 0，加仓预算永远为 0",
+                    message="允许加仓但 tail_scale_in_budget_fraction <= 0，加仓预算永远为 0",
                 )
             )
 
@@ -247,7 +247,7 @@ class CurrentStrategy:
             return ()
         intent_metadata = _order_intent_metadata(context.order_result.intent)
         if _has_profit_take_follow_up(intent_metadata):
-            target_price = _decimal_from_metadata(intent_metadata.get("sports_profit_take_target_price"))
+            target_price = _decimal_from_metadata(intent_metadata.get("profit_take_target_price"))
             if target_price is None:
                 return ()
             target_price = cap_price_to_clob_limit(target_price, tick_size=_effective_tick_size(context))
@@ -259,14 +259,14 @@ class CurrentStrategy:
                 target_size_shares=context.order_result.matched_shares,
             )
             exit_metadata.update(intent_metadata)
-            exit_plan = exit_metadata.get("sports_exit_plan")
+            exit_plan = exit_metadata.get("exit_plan")
             if isinstance(exit_plan, dict):
                 exit_plan["target_exit_price"] = str(target_price)
                 exit_plan["primary_action"] = "place_profit_take_gtc_sell_after_buy_fill"
                 exit_plan["settlement_rule"] = "keep_profit_take_order_until_fill_or_authoritative_resolution"
                 exit_plan["recovery_rule"] = "cancel_open_entry_orders_and_cover_profit_take_positions"
-            exit_metadata["sports_exit_target_price"] = str(target_price)
-            exit_metadata["sports_exit_source_reason"] = "profit_take_after_buy_fill"
+            exit_metadata["exit_target_price"] = str(target_price)
+            exit_metadata["exit_source_reason"] = "profit_take_after_buy_fill"
             return (
                 _enrich_decision(
                     ExtensionDecision.sell(
@@ -348,7 +348,7 @@ class CurrentStrategy:
         return build_live_state_match(
             market,
             candidate_games,
-            market_end_horizon_seconds=self._config.sports_market_end_horizon_seconds,
+            market_end_horizon_seconds=self._config.tail_market_end_horizon_seconds,
             bypass_resolver=_bypass,
         )
 
@@ -424,8 +424,8 @@ def _effective_tick_size(context: ExtensionContext) -> Decimal | None:
 def _has_profit_take_follow_up(metadata: Mapping[str, object]) -> bool:
     """判断 BUY 成交后是否需要补挂主动止盈单。"""
 
-    return metadata.get("sports_exit_mode") == "profit_take" or bool(
-        metadata.get("sports_profit_take_overlay_enabled")
+    return metadata.get("exit_mode") == "profit_take" or bool(
+        metadata.get("profit_take_overlay_enabled")
     )
 
 
@@ -437,7 +437,7 @@ def _enrich_decision(decision: ExtensionDecision, *, default_kind: DecisionKind)
     """
 
     metadata = dict(decision.metadata or {})
-    is_scale_in = metadata.get("sports_tail_opportunity_type") == "scale_in_advantage"
+    is_scale_in = metadata.get("opportunity_type") == "scale_in_advantage"
     decision_kind = decision.decision_kind if decision.decision_kind is not None else (
         DecisionKind.SCALE_IN if is_scale_in else default_kind
     )
@@ -456,39 +456,39 @@ def _enrich_decision(decision: ExtensionDecision, *, default_kind: DecisionKind)
 def _build_strategy_summary(metadata: Mapping[str, Any]) -> StrategySummary:
     """从策略写入的 metadata 投影出 framework 展示用的 StrategySummary。"""
 
-    sports_tail_game = (
-        metadata.get("sports_tail_game") if isinstance(metadata.get("sports_tail_game"), Mapping) else {}
+    live_game = (
+        metadata.get("live_game") if isinstance(metadata.get("live_game"), Mapping) else {}
     )
-    home = sports_tail_game.get("home_name") or ""
-    away = sports_tail_game.get("away_name") or ""
-    period = sports_tail_game.get("period") or ""
+    home = live_game.get("home_name") or ""
+    away = live_game.get("away_name") or ""
+    period = live_game.get("period") or ""
     label_parts = [str(part).strip() for part in (home, "vs" if home and away else "", away, period) if str(part).strip()]
     label = " ".join(label_parts)
     return StrategySummary(
-        action=str(metadata.get("sports_tail_action") or ""),
-        reason=str(metadata.get("sports_tail_reason") or ""),
+        action=str(metadata.get("tail_action") or ""),
+        reason=str(metadata.get("tail_reason") or ""),
         label=label,
         market_type=str(metadata.get("market_type") or ""),
         side=str(metadata.get("side") or ""),
         line=_decimal_from_metadata(metadata.get("line")),
         best_ask=_decimal_from_metadata(metadata.get("best_ask")),
         observed_at=None,
-        manual_confirmed=bool(metadata.get("sports_tail_manual_confirmed")),
-        confirmed_by=str(metadata.get("sports_tail_confirmed_by") or ""),
-        confirm_reason=str(metadata.get("sports_tail_confirm_reason") or ""),
+        manual_confirmed=bool(metadata.get("manual_confirmed")),
+        confirmed_by=str(metadata.get("confirmed_by") or ""),
+        confirm_reason=str(metadata.get("confirm_reason") or ""),
         extras={
-            "league": sports_tail_game.get("league") or metadata.get("sports_league"),
-            "home_name": sports_tail_game.get("home_name"),
-            "away_name": sports_tail_game.get("away_name"),
-            "period": sports_tail_game.get("period"),
-            "observed_at": sports_tail_game.get("observed_at"),
-            "game_status": metadata.get("game_status") or sports_tail_game.get("status"),
+            "league": live_game.get("league"),
+            "home_name": live_game.get("home_name"),
+            "away_name": live_game.get("away_name"),
+            "period": live_game.get("period"),
+            "observed_at": live_game.get("observed_at"),
+            "game_status": metadata.get("game_status") or live_game.get("status"),
             "total_score": metadata.get("total_score"),
             "seconds_remaining": metadata.get("seconds_remaining"),
-            "execution_permission": metadata.get("sports_execution_permission"),
-            "sports_market_family": metadata.get("sports_market_family"),
-            "sports_risk_reason": metadata.get("sports_risk_reason"),
-            "exit_plan": metadata.get("sports_exit_plan"),
+            "execution_permission": metadata.get("execution_permission"),
+            "market_family": metadata.get("market_family"),
+            "risk_reason": metadata.get("risk_reason"),
+            "exit_plan": metadata.get("exit_plan"),
         },
     )
 
@@ -555,8 +555,8 @@ def _market_has_live_tail_state(
         if seconds_remaining is None:
             return False
         return (
-            seconds_remaining <= config.sports_max_moneyline_seconds_remaining
-            and abs(game.home.score - game.away.score) >= config.sports_min_moneyline_lead
+            seconds_remaining <= config.tail_max_moneyline_seconds_remaining
+            and abs(game.home.score - game.away.score) >= config.tail_min_moneyline_lead
         )
     return False
 

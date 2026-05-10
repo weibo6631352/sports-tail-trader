@@ -13,7 +13,7 @@ from decimal import Decimal
 from polymarket_trader.config import ConfigLoadError, Settings
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.strategy import CurrentStrategy
-from strategies.current.sports_tail import ExecutionPermission
+from strategies.current.tail import ExecutionPermission
 
 
 def _settings(**overrides) -> Settings:
@@ -55,7 +55,7 @@ def test_validate_config_flags_empty_discovery_inputs() -> None:
 
 
 def test_validate_config_flags_disabled_market_types() -> None:
-    config = replace(CurrentStrategyConfig(), sports_enabled_market_types=())
+    config = replace(CurrentStrategyConfig(), tail_enabled_market_types=())
 
     issues = _strategy(config).validate_config(_settings())
 
@@ -66,7 +66,7 @@ def test_validate_config_flags_zero_portfolio_when_auto_execute() -> None:
     # PORTFOLIO_BUDGET 为 0 但仍有 auto_execute 盘口，应当阻止启动。
     config = replace(
         CurrentStrategyConfig(),
-        sports_totals_execution_permission=ExecutionPermission.AUTO_EXECUTE,
+        tail_totals_execution_permission=ExecutionPermission.AUTO_EXECUTE,
     )
 
     issues = _strategy(config).validate_config(_settings(portfolio_budget_usdc=Decimal("0")))
@@ -77,8 +77,8 @@ def test_validate_config_flags_zero_portfolio_when_auto_execute() -> None:
 def test_validate_config_flags_invalid_scale_in_budget_fraction() -> None:
     config = replace(
         CurrentStrategyConfig(),
-        sports_scale_in_max_buy_fills=2,
-        sports_scale_in_budget_fraction=Decimal("0"),
+        tail_scale_in_max_buy_fills=2,
+        tail_scale_in_budget_fraction=Decimal("0"),
     )
 
     issues = _strategy(config).validate_config(_settings())
@@ -91,7 +91,7 @@ def test_validate_config_returns_all_issues_at_once() -> None:
         CurrentStrategyConfig(),
         discovery_title_searches=(),
         discovery_tag_slugs=(),
-        sports_enabled_market_types=(),
+        tail_enabled_market_types=(),
     )
 
     issues = _strategy(config).validate_config(_settings())
@@ -104,7 +104,7 @@ def test_validate_config_returns_all_issues_at_once() -> None:
 def test_config_load_error_carries_extension_issues() -> None:
     """ConfigLoadError 仍然能正常承载策略侧 ConfigIssue。"""
 
-    config = replace(CurrentStrategyConfig(), sports_enabled_market_types=())
+    config = replace(CurrentStrategyConfig(), tail_enabled_market_types=())
     issues = _strategy(config).validate_config(_settings())
 
     error = ConfigLoadError(list(issues))
@@ -133,7 +133,7 @@ def test_validate_config_propagates_strategy_issues() -> None:
 
     from polymarket_trader.main import _validate_extension_config
 
-    config = replace(CurrentStrategyConfig(), sports_enabled_market_types=())
+    config = replace(CurrentStrategyConfig(), tail_enabled_market_types=())
     strategy = _strategy(config)
 
     issues = _validate_extension_config(strategy, _settings())

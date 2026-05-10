@@ -136,7 +136,7 @@ def _runtime_with_real_like_candidate() -> SimpleNamespace:
         condition_id=market.condition_id,
         source="unit_test_real_source",
         metadata={
-            "sports_tail_game": {
+            "live_game": {
                 "league": "NHL",
                 "home_name": "TB",
                 "away_name": "MON",
@@ -265,7 +265,7 @@ def _runtime_with_mixed_esports_and_scheduled_single_game() -> SimpleNamespace:
         condition_id=single_game.condition_id,
         source="unit_test_real_source",
         metadata={
-            "sports_tail_game": {
+            "live_game": {
                 "league": "NHL",
                 "home_name": "Oilers",
                 "away_name": "Ducks",
@@ -330,7 +330,7 @@ def _runtime_with_scheduled_and_live_single_game_rejections() -> SimpleNamespace
         condition_id=live_market.condition_id,
         source="unit_test_real_source",
         metadata={
-            "sports_tail_game": {
+            "live_game": {
                 "league": "NHL",
                 "home_name": "Rangers",
                 "away_name": "Devils",

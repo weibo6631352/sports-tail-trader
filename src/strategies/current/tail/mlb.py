@@ -12,16 +12,16 @@ from .types import (
     SportsMarketSnapshot,
     SportsMarketType,
     SportsTailCandidate,
-    SportsTailEvaluation,
-    SportsTailPolicy,
+    TailEvaluation,
+    TailPolicy,
     TailRejectReason,
 )
 
 
 def _evaluate_mlb_totals(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     game = candidate.game
     market = candidate.market
     if market.line is None:
@@ -40,8 +40,8 @@ def _evaluate_mlb_totals(
 
 def _evaluate_mlb_moneyline(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     game = candidate.game
     market = candidate.market
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
@@ -62,8 +62,8 @@ def _evaluate_mlb_moneyline(
 
 def _evaluate_mlb_spreads(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     game = candidate.game
     market = candidate.market
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
@@ -82,7 +82,7 @@ def _evaluate_mlb_spreads(
 def _mlb_tail_state_reached(
     game: LiveGameState,
     market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
 ) -> bool:
     """按 MLB 的局数、出局和垒上状态判断是否已经进入尾盘。"""
 
@@ -136,7 +136,7 @@ def _mlb_side_tail_reject_reason(
 def _mlb_eighth_moneyline_lead_reached(
     game: LiveGameState,
     side: SportsMarketSide,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
 ) -> bool:
     """识别 MLB 第 8 局后段的受控 moneyline 领先方机会。
 
@@ -160,7 +160,7 @@ def _mlb_eighth_moneyline_lead_reached(
 def _mlb_eighth_moneyline_threat_reject_reason(
     game: LiveGameState,
     side: SportsMarketSide,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
 ) -> TailRejectReason | None:
     """第 8 局早期 moneyline 窗口内存在二/三垒威胁时给出可审计拒绝原因。"""
 

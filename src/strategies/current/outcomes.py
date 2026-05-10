@@ -11,7 +11,7 @@ from decimal import Decimal, InvalidOperation
 import re
 
 from polymarket_trader.domain.market import Market
-from strategies.current.sports_tail import SportsMarketFamily, SportsMarketSide, SportsMarketType
+from strategies.current.tail import SportsMarketFamily, SportsMarketSide, SportsMarketType
 
 _GENERIC_OUTCOMES = {"yes", "no"}
 _LINE_MARKER_PATTERN = r"(?:over|under|total(?:[\s:_/-]+games)?|spread|handicap)"
@@ -45,12 +45,12 @@ class SportsMarketDescriptor:
 def primary_token_id(market: Market) -> str:
     """返回第一个可管理 token，保留给旧调用侧使用。
 
-    新代码应优先使用 ``sports_token_targets()``，避免重新引入“固定主 token”假设。
+    新代码应优先使用 ``tail_token_targets()``，避免重新引入“固定主 token”假设。
     """
 
     descriptor = describe_sports_market(market)
     if not descriptor.targets:
-        raise ValueError(descriptor.reason or "missing_sports_target")
+        raise ValueError(descriptor.reason or "missing_target")
     return descriptor.targets[0].token_id
 
 
@@ -60,7 +60,7 @@ def is_primary_token(market: Market, token_id: str | None) -> bool:
     return token_id in describe_sports_market(market).target_token_ids
 
 
-def sports_token_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
+def tail_token_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
     """返回体育扫尾可管理的 token 方向。"""
 
     return describe_sports_market(market).targets
@@ -73,7 +73,7 @@ def describe_sports_market(market: Market) -> SportsMarketDescriptor:
     market_family = _market_family(market, text)
     market_type = _market_type(market, text)
     if market_type is None:
-        return SportsMarketDescriptor(accepted=False, reason="unsupported_sports_market_type")
+        return SportsMarketDescriptor(accepted=False, reason="unsupported_market_type")
 
     line = _market_line(text) if market_type in {SportsMarketType.TOTALS, SportsMarketType.SPREADS} else None
     if market_type in {SportsMarketType.TOTALS, SportsMarketType.SPREADS} and line is None:
@@ -97,7 +97,7 @@ def target_for_token(market: Market, token_id: str | None) -> SportsTokenTarget 
 
     if token_id is None:
         return None
-    for target in sports_token_targets(market):
+    for target in tail_token_targets(market):
         if target.token_id == token_id:
             return target
     return None
@@ -170,7 +170,7 @@ def _market_family(market: Market, text: str) -> SportsMarketFamily:
 
 def _market_family_reason(market_family: SportsMarketFamily) -> str:
     if market_family == SportsMarketFamily.SINGLE_GAME:
-        return "sports_market_selected"
+        return "market_selected"
     if market_family == SportsMarketFamily.SERIES:
         return "series_market_not_auto_tradable"
     if market_family == SportsMarketFamily.OUTRIGHT:

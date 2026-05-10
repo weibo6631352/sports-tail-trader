@@ -141,7 +141,7 @@ def test_market_ws_subscribes_strategy_allowed_tail_signal_even_when_gamma_end_d
         entry_metadata_store=_FakeEntryMetadataStore(
             EntryMetadataRecord(
                 condition_id=market.condition_id,
-                metadata={"sports_tail_game": {"status": "live", "period": "S2"}},
+                metadata={"live_game": {"status": "live", "period": "S2"}},
                 live_state_signal_allowed=True,
                 live_state_signal_reason="live_outcome_lock_candidate",
                 live_state_phase="live",
@@ -172,7 +172,7 @@ def test_market_ws_prewarms_live_market_even_before_tail_signal_window() -> None
         entry_metadata_store=_FakeEntryMetadataStore(
             EntryMetadataRecord(
                 condition_id=market.condition_id,
-                metadata={"sports_tail_game": {"status": "live", "period": "S1"}},
+                metadata={"live_game": {"status": "live", "period": "S1"}},
                 live_state_signal_allowed=False,
                 live_state_signal_reason="market_end_too_far",
                 live_state_phase="live",

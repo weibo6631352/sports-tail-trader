@@ -25,19 +25,19 @@ from .allocation import (
     _pick_allocation,
     _sizing_reason,
     _skipped_allocation,
-    _sports_market_skip_metadata,
+    _market_skip_metadata,
 )
-from .exit_overlay import _apply_profit_take_exit_plan, _sports_capital_efficiency_gate
+from .exit_overlay import _apply_profit_take_exit_plan, _capital_efficiency_gate
 from .gates import (
     _ask_depth_notional,
     _scale_in_allocation_gate,
     _scale_in_entry_gate,
-    _sports_tail_allocation_gate,
-    _sports_tail_entry_gate,
+    _tail_allocation_gate,
+    _tail_entry_gate,
 )
 from .helpers import _metadata_decimal, _metadata_text
-from .pricing import _sports_tail_locked_outcome_signal, _sports_tail_price_cap
-from .risk_limits import _apply_sports_risk_limits
+from .pricing import _tail_locked_outcome_signal, _tail_price_cap
+from .risk_limits import _apply_tail_risk_limits
 
 
 def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> EntrySizing:
@@ -84,11 +84,11 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
     skipped_allocations: dict[tuple[str, str], Allocation] = {}
     sizing_metadata: dict[str, object] = {}
     for snapshot in candidate_snapshots:
-        price_cap = _sports_tail_price_cap(
+        price_cap = _tail_price_cap(
             config,
             snapshot.market,
             snapshot.token_id,
-            locked_outcome_signal=_sports_tail_locked_outcome_signal(context),
+            locked_outcome_signal=_tail_locked_outcome_signal(context),
         )
         buyable_liquidity_usdc = _ask_depth_notional(
             snapshot.orderbook,
@@ -113,19 +113,19 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
         )
         if not skip_reason:
             if scale_in_allowed:
-                sports_metadata = scale_in_metadata
+                tail_metadata = scale_in_metadata
             else:
-                skip_reason, sports_metadata = _sports_tail_allocation_gate(
+                skip_reason, tail_metadata = _tail_allocation_gate(
                     config,
                     context,
                     snapshot,
                     buyable_liquidity_usdc=buyable_liquidity_usdc,
                 )
             if _is_focus_snapshot(context, snapshot):
-                sizing_metadata.update(sports_metadata)
+                sizing_metadata.update(tail_metadata)
         if skip_reason:
-            if _is_focus_snapshot(context, snapshot) and "sports_tail_reason" not in sizing_metadata:
-                sizing_metadata.update(_sports_market_skip_metadata(snapshot, skip_reason))
+            if _is_focus_snapshot(context, snapshot) and "tail_reason" not in sizing_metadata:
+                sizing_metadata.update(_market_skip_metadata(snapshot, skip_reason))
             skipped_allocations[(snapshot.condition_id, snapshot.token_id)] = _skipped_allocation(
                 snapshot,
                 reason=skip_reason,
@@ -149,7 +149,7 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
         eligible_plan=eligible_plan,
         skipped_allocations=skipped_allocations,
     )
-    plan, risk_metadata = _apply_sports_risk_limits(
+    plan, risk_metadata = _apply_tail_risk_limits(
         config,
         context,
         plan=plan,
@@ -176,14 +176,14 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         return ExtensionDecision.skip(reason="missing_market_state")
 
     scale_in_gate = _scale_in_entry_gate(config, context)
-    sports_gate = scale_in_gate or _sports_tail_entry_gate(config, context)
-    if sports_gate is not None:
-        decision, allowed_price, sports_metadata = sports_gate
+    tail_gate = scale_in_gate or _tail_entry_gate(config, context)
+    if tail_gate is not None:
+        decision, allowed_price, tail_metadata = tail_gate
         if decision is not None:
             return decision
     else:
         allowed_price = config.entry_no_price_max
-        sports_metadata = {}
+        tail_metadata = {}
 
     best_ask = context.orderbook.best_ask
     if best_ask is None:
@@ -197,13 +197,13 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         return ExtensionDecision.skip(reason="missing_entry_amount")
 
     token_id = context.token_id or context.orderbook.token_id
-    decision_metadata = dict(sports_metadata)
-    efficiency_allowed, efficiency_reason, efficiency_metadata = _sports_capital_efficiency_gate(
+    decision_metadata = dict(tail_metadata)
+    efficiency_allowed, efficiency_reason, efficiency_metadata = _capital_efficiency_gate(
         config,
         context,
         entry_price=entry_price,
         amount_usdc=amount_usdc,
-        sports_metadata=decision_metadata,
+        tail_metadata=decision_metadata,
     )
     decision_metadata.update(efficiency_metadata)
     if not efficiency_allowed:
@@ -213,11 +213,11 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
             config,
             context,
             token_id=token_id,
-            source_reason=str(sports_metadata.get("sports_tail_reason") or "strategy_entry"),
+            source_reason=str(tail_metadata.get("tail_reason") or "strategy_entry"),
         )
     )
     _apply_profit_take_exit_plan(decision_metadata)
-    decision_reason = "strategy_scale_in" if sports_metadata.get("sports_tail_opportunity_type") == (
+    decision_reason = "strategy_scale_in" if tail_metadata.get("opportunity_type") == (
         "scale_in_advantage"
     ) else "strategy_entry"
     return ExtensionDecision.buy(

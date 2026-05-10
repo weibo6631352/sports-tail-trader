@@ -38,11 +38,11 @@ def test_sports_live_state_worker_writes_metadata_and_entry_signals() -> None:
     first_event = result["first_event"]
     second_event = result["second_event"]
 
-    assert metadata["sports_tail_game"]["league"] == "NBA"
-    assert metadata["sports_tail_game"]["home_score"] == 102
-    assert metadata["sports_tail_game"]["away_score"] == 94
-    assert metadata["sports_tail_game"]["seconds_remaining"] == 90
-    assert metadata["sports_live_match"]["source_event_id"] == "game-1"
+    assert metadata["live_game"]["league"] == "NBA"
+    assert metadata["live_game"]["home_score"] == 102
+    assert metadata["live_game"]["away_score"] == 94
+    assert metadata["live_game"]["seconds_remaining"] == 90
+    assert metadata["live_match"]["source_event_id"] == "game-1"
     assert status.last_games_seen == 1
     assert status.last_matches == 1
     assert status.last_records_written == 1
@@ -59,8 +59,8 @@ def test_sports_live_state_worker_indexes_metadata_by_event_identity() -> None:
     by_market_slug = result["store"].metadata_for(market_slug="nba-nyk-bos-moneyline")
     by_event_slug = result["store"].metadata_for(event_slug="new-york-knicks-vs-boston-celtics")
 
-    assert by_market_slug["sports_live_match"]["source_event_id"] == "game-1"
-    assert by_event_slug["sports_live_match"]["source_event_id"] == "game-1"
+    assert by_market_slug["live_match"]["source_event_id"] == "game-1"
+    assert by_event_slug["live_match"]["source_event_id"] == "game-1"
 
 
 def test_sports_live_state_worker_tracks_entry_signal_market_for_market_ws() -> None:
@@ -103,7 +103,7 @@ def test_sports_live_state_worker_does_not_track_blocked_entry_signal_market() -
                 signal_allowed=False,
                 signal_reason="market_end_too_far",
                 payload={
-                    "sports_tail_game": {
+                    "live_game": {
                         "league": "NBA",
                         "home_name": "Knicks",
                         "away_name": "Celtics",
@@ -183,7 +183,7 @@ def test_sports_live_state_worker_writes_metadata_without_blocked_entry_signals(
                 signal_allowed=False,
                 signal_reason="market_end_too_far",
                 payload={
-                    "sports_tail_game": {
+                    "live_game": {
                         "league": "NBA",
                         "home_name": "Knicks",
                         "away_name": "Celtics",

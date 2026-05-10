@@ -20,9 +20,9 @@ from .types import (
     SportsMarketSnapshot,
     SportsMarketType,
     SportsTailCandidate,
-    SportsTailEvaluation,
+    TailEvaluation,
     SportsTailOpportunityType,
-    SportsTailPolicy,
+    TailPolicy,
     TailRejectReason,
     TennisGameState,
 )
@@ -33,8 +33,8 @@ from .types import (
 
 def _evaluate_tennis_totals(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     """评估网球 totals 盘口。
 
     网球 totals 至少分为整场总局数和总盘数两类。这里先按 market slug 区分
@@ -81,8 +81,8 @@ def _evaluate_tennis_totals(
 
 def _evaluate_tennis_moneyline(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     """评估网球胜负线的临近锁定场景。
 
     网球没有固定倒计时，因此只使用“已领先盘数 + 当前盘接近拿下”的结构化状态。
@@ -111,8 +111,8 @@ def _evaluate_tennis_moneyline(
 
 def _evaluate_tennis_set_winner(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     """用 SofaScore 每盘局分判断 set winner 盘口是否已经锁定。"""
 
     market = candidate.market
@@ -148,8 +148,8 @@ def _evaluate_tennis_set_winner(
 
 def _evaluate_ended_tennis(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     market = candidate.market
     state = candidate.game.tennis_state
     if state is None:
@@ -231,8 +231,8 @@ def _evaluate_ended_tennis(
 
 def _evaluate_ended_tennis_set_winner(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     market = candidate.market
     state = candidate.game.tennis_state
     if state is None:
@@ -258,8 +258,8 @@ def _evaluate_ended_tennis_set_winner(
 
 def _evaluate_tennis_scale_in(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     market = candidate.market
     if market.market_type == SportsMarketType.TOTALS:
         return _evaluate_tennis_totals_scale_in(candidate, policy)
@@ -290,8 +290,8 @@ def _evaluate_tennis_scale_in(
 
 def _evaluate_tennis_totals_scale_in(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     """按网球盘口结算范围评估 totals 受控加仓。"""
 
     market = candidate.market

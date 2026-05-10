@@ -21,9 +21,9 @@ from strategies.current.universe import select_market
 from .gates import (
     _ask_depth_notional,
     _has_open_order,
-    _sports_tail_pre_orderbook_skip_reason,
+    _tail_pre_orderbook_skip_reason,
 )
-from .pricing import _sports_tail_locked_outcome_signal, _sports_tail_price_cap
+from .pricing import _tail_locked_outcome_signal, _tail_price_cap
 
 
 def _empty_sizing_plan(context: ExtensionContext, reason: str) -> AllocationPlan:
@@ -136,9 +136,9 @@ def _allocation_skip_reason(
         return universe_decision.reason or "market_out_of_universe"
     if not is_primary_token(snapshot.market, snapshot.token_id):
         return "unsupported_outcome"
-    sports_pre_orderbook_reason = _sports_tail_pre_orderbook_skip_reason(config, context, snapshot)
-    if sports_pre_orderbook_reason:
-        return sports_pre_orderbook_reason
+    tail_pre_orderbook_reason = _tail_pre_orderbook_skip_reason(config, context, snapshot)
+    if tail_pre_orderbook_reason:
+        return tail_pre_orderbook_reason
     if not snapshot.tradable:
         return "market_not_tradable"
     if not snapshot.market_active:
@@ -159,8 +159,8 @@ def _allocation_skip_reason(
     best_ask = snapshot.best_ask if snapshot.best_ask is not None else (
         snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
     )
-    locked_outcome_signal = _sports_tail_locked_outcome_signal(context)
-    price_cap = _sports_tail_price_cap(
+    locked_outcome_signal = _tail_locked_outcome_signal(context)
+    price_cap = _tail_price_cap(
         config,
         snapshot.market,
         snapshot.token_id,
@@ -188,7 +188,7 @@ def _allocation_skip_reason(
     return ""
 
 
-def _sports_market_skip_metadata(
+def _market_skip_metadata(
     snapshot: AllocationMarketSnapshot,
     reason: str,
 ) -> dict[str, object]:
@@ -196,9 +196,9 @@ def _sports_market_skip_metadata(
 
     descriptor = describe_sports_market(snapshot.market)
     metadata: dict[str, object] = {
-        "sports_tail_action": "reject",
-        "sports_tail_reason": reason,
-        "sports_market_family": descriptor.market_family.value,
+        "tail_action": "reject",
+        "tail_reason": reason,
+        "market_family": descriptor.market_family.value,
     }
     if descriptor.market_type is not None:
         metadata["market_type"] = descriptor.market_type.value

@@ -15,10 +15,10 @@ from polymarket_trader.extension_api import ExtensionContext
 
 from strategies.current.allocation import AllocationMarketSnapshot
 from strategies.current.config import CurrentStrategyConfig
-from strategies.current.risk import check_sports_entry_risk
+from strategies.current.risk import check_tail_entry_risk
 
 
-def _apply_sports_risk_limits(
+def _apply_tail_risk_limits(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
     *,
@@ -42,7 +42,7 @@ def _apply_sports_risk_limits(
         if snapshot is None or allocation.buy_budget_usdc <= Decimal("0"):
             updated_allocations.append(allocation)
             continue
-        risk_decision = check_sports_entry_risk(
+        risk_decision = check_tail_entry_risk(
             config,
             market=snapshot.market,
             token_id=snapshot.token_id,
@@ -86,7 +86,7 @@ def _apply_sports_risk_limits(
             plan,
             allocations=tuple(updated_allocations),
             budget_changes=(*plan.budget_changes, *extra_budget_changes),
-            reason=plan.reason if plan.reason else "sports_risk_limited",
+            reason=plan.reason if plan.reason else "risk_limited",
         ),
         focus_metadata,
     )

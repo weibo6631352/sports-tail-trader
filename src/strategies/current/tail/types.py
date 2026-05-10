@@ -217,7 +217,7 @@ class LiveGameState:
 
 
 @dataclass(frozen=True, slots=True)
-class SportsTailPolicy:
+class TailPolicy:
     """体育扫尾评估策略参数。"""
 
     enabled_market_types: tuple[SportsMarketType, ...] = (
@@ -284,7 +284,7 @@ class SportsTailCandidate:
 
 
 @dataclass(frozen=True, slots=True)
-class SportsTailEvaluation:
+class TailEvaluation:
     """统一体育扫尾评估结果。"""
 
     accepted: bool

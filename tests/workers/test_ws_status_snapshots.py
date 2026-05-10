@@ -59,7 +59,7 @@ def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None
     metadata_store.upsert(
         condition_id="condition-1",
         market_slug="nba-game-1-moneyline",
-        metadata={"sports_tail_game": {"status": "live"}},
+        metadata={"live_game": {"status": "live"}},
         source="test",
         live_state_signal_allowed=True,
         live_state_phase="live",
@@ -68,7 +68,7 @@ def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None
     metadata_store.upsert(
         condition_id="condition-2",
         market_slug="nba-game-2-moneyline",
-        metadata={"sports_tail_game": {"status": "scheduled"}},
+        metadata={"live_game": {"status": "scheduled"}},
         source="test",
         live_state_signal_allowed=False,
         live_state_signal_reason="sports_live_state_scheduled",
@@ -78,7 +78,7 @@ def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None
     metadata_store.upsert(
         condition_id="condition-4",
         market_slug="nba-game-4-moneyline",
-        metadata={"sports_tail_game": {"status": "live"}},
+        metadata={"live_game": {"status": "live"}},
         source="test",
         live_state_signal_allowed=None,
         live_state_phase="live",
@@ -87,7 +87,7 @@ def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None
     metadata_store.upsert(
         condition_id="condition-5",
         market_slug="nba-game-5-moneyline",
-        metadata={"sports_tail_game": {"status": "ended"}},
+        metadata={"live_game": {"status": "ended"}},
         source="test",
         live_state_signal_allowed=True,
         live_state_signal_reason="ended_not_closed",
@@ -97,7 +97,7 @@ def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None
     metadata_store.upsert(
         condition_id="condition-6",
         market_slug="nba-game-6-moneyline",
-        metadata={"sports_tail_game": {"status": "ended"}},
+        metadata={"live_game": {"status": "ended"}},
         source="test",
         live_state_signal_allowed=False,
         live_state_signal_reason="series_market_not_auto_tradable",

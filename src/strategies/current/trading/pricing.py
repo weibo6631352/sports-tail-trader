@@ -10,7 +10,7 @@ from strategies.current.config import CurrentStrategyConfig
 from strategies.current.outcomes import describe_sports_market, target_for_token
 
 
-def _sports_tail_price_cap(
+def _tail_price_cap(
     config: CurrentStrategyConfig,
     market,
     token_id: str | None,
@@ -23,20 +23,20 @@ def _sports_tail_price_cap(
     if token_id is not None and target_for_token(market, token_id) is None:
         return config.entry_no_price_max
     if locked_outcome_signal and descriptor.market_type.value == "moneyline" and _is_tennis_set_winner_market(market):
-        return config.sports_tennis_locked_moneyline_max_entry_price
+        return config.tail_tennis_locked_moneyline_max_entry_price
     if descriptor.market_type.value == "totals":
-        return config.sports_totals_max_entry_price
+        return config.tail_totals_max_entry_price
     if descriptor.market_type.value == "moneyline":
-        return config.sports_moneyline_max_entry_price
+        return config.tail_moneyline_max_entry_price
     if descriptor.market_type.value == "spreads":
-        return config.sports_spreads_max_entry_price
+        return config.tail_spreads_max_entry_price
     return config.entry_no_price_max
 
 
-def _sports_tail_locked_outcome_signal(context: ExtensionContext) -> bool:
+def _tail_locked_outcome_signal(context: ExtensionContext) -> bool:
     """判断 live-state 是否已经标记当前市场为数学锁定候选。"""
 
-    return str(context.metadata.get("sports_tail_entry_signal_reason") or "") in {
+    return str(context.metadata.get("entry_signal_reason") or "") in {
         "live_outcome_lock_candidate",
         "ended_not_closed",
     }

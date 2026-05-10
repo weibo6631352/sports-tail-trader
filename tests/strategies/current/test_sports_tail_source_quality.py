@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from polymarket_trader.config import Settings
-from strategies.current.sports_tail import (
+from strategies.current.tail import (
     BaseballGameState,
     LiveGameState,
     LiveGameStatus,
@@ -13,14 +13,14 @@ from strategies.current.sports_tail import (
     SportsMarketSide,
     SportsMarketSnapshot,
     SportsMarketType,
-    SportsTailPolicy,
+    TailPolicy,
     TennisGameState,
     evaluate_tail_opportunity,
 )
 from strategies.current.config import CurrentStrategyConfig
 
 
-def test_sports_tail_rejects_live_source_conflict() -> None:
+def test_tail_rejects_live_source_conflict() -> None:
     game = LiveGameState(
         league="NBA",
         home_name="Orlando Magic",
@@ -47,13 +47,13 @@ def test_sports_tail_rejects_live_source_conflict() -> None:
         buyable_liquidity_usdc=Decimal("10"),
     )
 
-    result = evaluate_tail_opportunity(game, market, policy=SportsTailPolicy())
+    result = evaluate_tail_opportunity(game, market, policy=TailPolicy())
 
     assert result.accepted is False
     assert result.reason == "live_source_conflict"
 
 
-def test_sports_tail_rejects_non_single_game_market_before_score_lock_logic() -> None:
+def test_tail_rejects_non_single_game_market_before_score_lock_logic() -> None:
     game = LiveGameState(
         league="NHL",
         home_name="Anaheim Ducks",
@@ -74,7 +74,7 @@ def test_sports_tail_rejects_non_single_game_market_before_score_lock_logic() ->
         buyable_liquidity_usdc=Decimal("10"),
     )
 
-    result = evaluate_tail_opportunity(game, market, policy=SportsTailPolicy())
+    result = evaluate_tail_opportunity(game, market, policy=TailPolicy())
 
     assert result.accepted is False
     assert result.reason == "series_market_not_auto_tradable"
@@ -109,7 +109,7 @@ def test_mlb_moneyline_uses_baseball_state_instead_of_seconds_remaining() -> Non
         buyable_liquidity_usdc=Decimal("10"),
     )
 
-    result = evaluate_tail_opportunity(game, market, policy=SportsTailPolicy(min_moneyline_lead=3))
+    result = evaluate_tail_opportunity(game, market, policy=TailPolicy(min_moneyline_lead=3))
 
     assert result.accepted is True
     assert result.action == TailAction.AUTO_EXECUTE
@@ -136,7 +136,7 @@ def test_nfl_moneyline_requires_manual_review_even_with_clock_and_lead() -> None
         buyable_liquidity_usdc=Decimal("10"),
     )
 
-    result = evaluate_tail_opportunity(game, market, policy=SportsTailPolicy(min_moneyline_lead=6))
+    result = evaluate_tail_opportunity(game, market, policy=TailPolicy(min_moneyline_lead=6))
 
     assert result.accepted is True
     assert result.action == TailAction.MANUAL_CONFIRM
@@ -171,7 +171,7 @@ def test_tennis_totals_over_locked_can_auto_execute_from_live_games_state() -> N
         buyable_liquidity_usdc=Decimal("10"),
     )
 
-    result = evaluate_tail_opportunity(game, market, policy=SportsTailPolicy())
+    result = evaluate_tail_opportunity(game, market, policy=TailPolicy())
 
     assert result.accepted is True
     assert result.action == TailAction.AUTO_EXECUTE
@@ -207,7 +207,7 @@ def test_tennis_set_totals_use_set_count_not_total_games() -> None:
         market_slug="wta-guo-jakupov-2026-04-27-set-totals-2pt5",
     )
 
-    result = evaluate_tail_opportunity(game, market, policy=SportsTailPolicy())
+    result = evaluate_tail_opportunity(game, market, policy=TailPolicy())
 
     assert result.accepted is False
     assert result.reason == "tennis_not_late_enough"
@@ -242,7 +242,7 @@ def test_tennis_set_totals_over_locked_when_deciding_set_started() -> None:
         market_slug="wta-zolota-yua-2026-04-27-set-totals-2pt5",
     )
 
-    result = evaluate_tail_opportunity(game, market, policy=SportsTailPolicy())
+    result = evaluate_tail_opportunity(game, market, policy=TailPolicy())
 
     assert result.accepted is True
     assert result.reason == "tennis_set_totals_over_locked"
@@ -277,7 +277,7 @@ def test_tennis_first_set_winner_is_not_treated_as_match_moneyline() -> None:
         market_slug="wta-guo-jakupov-2026-04-27-first-set-winner-Guo-vs-Jakupovic",
     )
 
-    result = evaluate_tail_opportunity(game, market, policy=SportsTailPolicy())
+    result = evaluate_tail_opportunity(game, market, policy=TailPolicy())
 
     assert result.accepted is False
     assert result.reason == "tennis_set_winner_not_supported"
@@ -313,7 +313,7 @@ def test_tennis_first_set_winner_locked_from_per_set_score() -> None:
         market_slug="wta-guo-jakupov-2026-04-27-first-set-winner-Guo-vs-Jakupovic",
     )
 
-    result = evaluate_tail_opportunity(game, market, policy=SportsTailPolicy())
+    result = evaluate_tail_opportunity(game, market, policy=TailPolicy())
 
     assert result.accepted is True
     assert result.action == TailAction.AUTO_EXECUTE
@@ -354,7 +354,7 @@ def test_tennis_state_uses_wider_freshness_window_than_clock_sports() -> None:
     result = evaluate_tail_opportunity(
         game,
         market,
-        policy=SportsTailPolicy(max_game_state_age_seconds=10, tennis_max_game_state_age_seconds=35),
+        policy=TailPolicy(max_game_state_age_seconds=10, tennis_max_game_state_age_seconds=35),
         now=datetime(2026, 4, 28, 7, 0, 25, tzinfo=timezone.utc),
     )
 
@@ -390,7 +390,7 @@ def test_tennis_moneyline_requires_near_locked_current_set() -> None:
         buyable_liquidity_usdc=Decimal("10"),
     )
 
-    result = evaluate_tail_opportunity(game, market, policy=SportsTailPolicy())
+    result = evaluate_tail_opportunity(game, market, policy=TailPolicy())
 
     assert result.accepted is True
     assert result.reason == "tennis_moneyline_near_locked"
@@ -401,11 +401,11 @@ def test_default_discovery_scope_matches_live_source_coverage() -> None:
     settings = Settings(_env_file=None)
 
     assert config.discovery_title_searches == ("nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
-    assert "sports" not in config.sports_category_tokens
+    assert "sports" not in config.tail_category_tokens
     assert {"nba", "nhl", "nfl", "mlb", "basketball", "hockey", "football", "baseball"} <= set(
-        config.sports_category_tokens
+        config.tail_category_tokens
     )
-    assert "soccer" in config.sports_category_tokens
-    assert {"table tennis", "table-tennis", "wtt"} <= set(config.sports_category_tokens)
-    assert {"tennis", "atp", "wta"} <= set(config.sports_category_tokens)
+    assert "soccer" in config.tail_category_tokens
+    assert {"table tennis", "table-tennis", "wtt"} <= set(config.tail_category_tokens)
+    assert {"tennis", "atp", "wta"} <= set(config.tail_category_tokens)
     assert settings.sports_live_state_sofascore_lookahead_days >= 3

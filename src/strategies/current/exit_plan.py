@@ -71,10 +71,10 @@ def build_exit_plan_metadata(
     if game_snapshot:
         plan["live_state"] = game_snapshot
     return {
-        "sports_exit_plan_version": EXIT_PLAN_VERSION,
-        "sports_exit_target_price": str(exit_price),
-        "sports_exit_source_reason": source_reason,
-        "sports_exit_plan": plan,
+        "exit_plan_version": EXIT_PLAN_VERSION,
+        "exit_target_price": str(exit_price),
+        "exit_source_reason": source_reason,
+        "exit_plan": plan,
     }
 
 
@@ -115,7 +115,7 @@ def _effective_tick_size(context: ExtensionContext) -> Decimal | None:
 
 
 def _game_snapshot(metadata: Mapping[str, object]) -> dict[str, object]:
-    raw_game = metadata.get("sports_tail_game")
+    raw_game = metadata.get("live_game")
     if not isinstance(raw_game, Mapping):
         return {}
     result: dict[str, object] = {}

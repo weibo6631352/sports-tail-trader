@@ -110,7 +110,7 @@ def build_live_game_discovery_queries(
     )
     queries: list[DiscoveryQuery] = []
     seen: set[tuple[str, str | None]] = set()
-    for game in active_games[: config.sports_live_discovery_max_games]:
+    for game in active_games[: config.tail_live_discovery_max_games]:
         for term in _game_query_terms(game):
             for tag_slug in tag_slugs or (None,):
                 key = (term, tag_slug)
@@ -128,7 +128,7 @@ def build_live_game_discovery_queries(
                         params=params,
                     )
                 )
-                if len(queries) >= config.sports_live_discovery_max_queries:
+                if len(queries) >= config.tail_live_discovery_max_queries:
                     return tuple(queries)
     return tuple(queries)
 

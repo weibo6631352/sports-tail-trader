@@ -12,7 +12,7 @@ from dataclasses import replace
 from typing import Any, Mapping
 
 from strategies.current.outcomes import SportsTokenTarget, target_for_token
-from strategies.current.sports_tail import LiveGameState, SportsMarketSide
+from strategies.current.tail import LiveGameState, SportsMarketSide
 
 
 _GENERIC_COMPETITOR_TOKENS = {
@@ -34,7 +34,7 @@ _GENERIC_COMPETITOR_TOKENS = {
 }
 
 
-def _sports_target_for_live_game(
+def _target_for_live_game(
     market,
     token_id: str | None,
     *,
@@ -50,7 +50,7 @@ def _sports_target_for_live_game(
 
     target = target_for_token(market, token_id)
     if target is None:
-        return None, "unsupported_sports_token"
+        return None, "unsupported_token"
     if target.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
         return target, ""
     if game is None:
@@ -58,7 +58,7 @@ def _sports_target_for_live_game(
 
     live_side = _live_side_for_outcome_label(target.label, game=game, metadata=metadata)
     if live_side is None:
-        return None, "sports_token_live_side_mismatch"
+        return None, "token_live_side_mismatch"
     return replace(target, side=live_side), ""
 
 
@@ -74,7 +74,7 @@ def _live_side_for_outcome_label(
     if not label_text:
         return None
 
-    match_metadata = metadata.get("sports_live_match")
+    match_metadata = metadata.get("live_match")
     match_mapping = match_metadata if isinstance(match_metadata, Mapping) else {}
     home_aliases = _competitor_aliases(
         game.home_name,

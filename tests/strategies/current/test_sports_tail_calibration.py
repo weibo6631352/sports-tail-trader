@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from strategies.current.calibration import run_sports_tail_calibration
+from strategies.current.calibration import run_tail_calibration
 
 
 def test_calibration_reports_moneyline_and_spreads_threshold_effects() -> None:
@@ -76,7 +76,7 @@ def test_calibration_reports_moneyline_and_spreads_threshold_effects() -> None:
         ],
     }
 
-    report = run_sports_tail_calibration(sample).as_payload()
+    report = run_tail_calibration(sample).as_payload()
     variants = {variant["name"]: variant for variant in report["variants"]}
 
     assert variants["base"]["accepted_count"] == 2

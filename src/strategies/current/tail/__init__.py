@@ -1,8 +1,8 @@
 """体育直播扫尾策略包。
 
-把原 ``sports_tail.py`` 拆分为 types/parsing/leagues/slug/core/mlb/tennis/evaluator
-等子模块。``__init__`` 统一对外暴露公开类型和评估入口，调用方继续按
-``from strategies.current.sports_tail import X`` 使用即可。
+拆分为 types/parsing/leagues/slug/core/mlb/tennis/evaluator 等子模块；
+``__init__`` 统一对外暴露公开类型和评估入口，调用方按
+``from strategies.current.tail import X`` 使用即可。
 """
 
 from __future__ import annotations
@@ -24,9 +24,9 @@ from .types import (
     SportsMarketSnapshot,
     SportsMarketType,
     SportsTailCandidate,
-    SportsTailEvaluation,
+    TailEvaluation,
     SportsTailOpportunityType,
-    SportsTailPolicy,
+    TailPolicy,
     TailAction,
     TailRejectReason,
     TennisGameState,
@@ -44,9 +44,9 @@ __all__ = [
     "SportsMarketSnapshot",
     "SportsMarketType",
     "SportsTailCandidate",
-    "SportsTailEvaluation",
+    "TailEvaluation",
     "SportsTailOpportunityType",
-    "SportsTailPolicy",
+    "TailPolicy",
     "TailAction",
     "TailRejectReason",
     "TennisGameState",

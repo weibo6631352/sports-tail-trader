@@ -19,9 +19,9 @@ from .types import (
     SportsMarketSnapshot,
     SportsMarketType,
     SportsTailCandidate,
-    SportsTailEvaluation,
+    TailEvaluation,
     SportsTailOpportunityType,
-    SportsTailPolicy,
+    TailPolicy,
     TailAction,
     TailRejectReason,
 )
@@ -31,7 +31,7 @@ def _candidate(game: LiveGameState, market: SportsMarketSnapshot) -> SportsTailC
     return SportsTailCandidate(
         game=game,
         market=market,
-        reason="sports_tail_candidate",
+        reason="tail_candidate",
         metadata={
             "market_family": market.market_family.value,
             "market_type": market.market_type.value,
@@ -77,8 +77,8 @@ def _accept(
     permission: ExecutionPermission,
     *,
     opportunity_type: SportsTailOpportunityType = SportsTailOpportunityType.LIVE_TAIL,
-) -> SportsTailEvaluation:
-    return SportsTailEvaluation(
+) -> TailEvaluation:
+    return TailEvaluation(
         accepted=True,
         action=_action_for_permission(permission),
         reason=reason,
@@ -94,8 +94,8 @@ def _reject(
     reason: str,
     *,
     metadata: Mapping[str, Any] | None = None,
-) -> SportsTailEvaluation:
-    return SportsTailEvaluation(
+) -> TailEvaluation:
+    return TailEvaluation(
         accepted=False,
         action=TailAction.REJECT,
         reason=reason,
@@ -132,8 +132,8 @@ def _market_family_reject_reason(market_family: SportsMarketFamily) -> TailRejec
 
 def _evaluate_totals(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     game = candidate.game
     market = candidate.market
     if market.line is None:
@@ -157,8 +157,8 @@ def _evaluate_totals(
 
 def _evaluate_moneyline(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     game = candidate.game
     market = candidate.market
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
@@ -174,8 +174,8 @@ def _evaluate_moneyline(
 
 def _evaluate_spreads(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     game = candidate.game
     market = candidate.market
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
@@ -198,8 +198,8 @@ def _evaluate_spreads(
 
 def _evaluate_ended_totals(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     market = candidate.market
     if market.line is None:
         return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
@@ -223,8 +223,8 @@ def _evaluate_ended_totals(
 
 def _evaluate_ended_moneyline(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     market = candidate.market
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
@@ -240,8 +240,8 @@ def _evaluate_ended_moneyline(
 
 def _evaluate_ended_spreads(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     market = candidate.market
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
@@ -262,8 +262,8 @@ def _evaluate_ended_spreads(
 
 def _evaluate_moneyline_scale_in(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     game = candidate.game
     market = candidate.market
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
@@ -284,8 +284,8 @@ def _evaluate_moneyline_scale_in(
 
 def _evaluate_spreads_scale_in(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     game = candidate.game
     market = candidate.market
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
@@ -309,8 +309,8 @@ def _evaluate_spreads_scale_in(
 
 def _evaluate_totals_scale_in(
     candidate: SportsTailCandidate,
-    policy: SportsTailPolicy,
-) -> SportsTailEvaluation:
+    policy: TailPolicy,
+) -> TailEvaluation:
     game = candidate.game
     market = candidate.market
     if market.line is None:
@@ -345,7 +345,7 @@ def _evaluate_totals_scale_in(
 def _standard_totals_tail_state_reached(
     game: LiveGameState,
     market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
 ) -> bool:
     if market.line is None:
         return False
@@ -363,7 +363,7 @@ def _standard_totals_tail_state_reached(
 def _standard_moneyline_tail_state_reached(
     game: LiveGameState,
     market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
 ) -> bool:
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY} or game.seconds_remaining is None:
         return False
@@ -376,7 +376,7 @@ def _standard_moneyline_tail_state_reached(
 def _standard_spreads_tail_state_reached(
     game: LiveGameState,
     market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
 ) -> bool:
     if (
         market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}
@@ -394,7 +394,7 @@ def _standard_spreads_tail_state_reached(
 def _standard_tail_state_reached(
     game: LiveGameState,
     market: SportsMarketSnapshot,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
 ) -> bool:
     """复用常规运动尾盘条件判断是否可忽略 Gamma 的远期 endDate。"""
 

@@ -39,22 +39,22 @@ def select_market(config: CurrentStrategyConfig, market: Market) -> UniverseDeci
 
     descriptor = describe_sports_market(market)
     if not descriptor.accepted or descriptor.market_type is None:
-        return UniverseDecision.exclude(reason=descriptor.reason or "sports_market_parse_failed")
+        return UniverseDecision.exclude(reason=descriptor.reason or "market_parse_failed")
     if descriptor.market_family.value != "single_game":
         return UniverseDecision.exclude(reason=descriptor.reason)
 
-    category_tokens = _normalized_tokens(_sports_universe_text(market))
-    if not set(config.sports_category_tokens) & category_tokens:
-        return UniverseDecision.exclude(reason="sports_category_not_matched")
-    if descriptor.market_type not in config.sports_enabled_market_types:
-        return UniverseDecision.exclude(reason="sports_market_type_disabled")
+    category_tokens = _normalized_tokens(_universe_text(market))
+    if not set(config.tail_category_tokens) & category_tokens:
+        return UniverseDecision.exclude(reason="category_not_matched")
+    if descriptor.market_type not in config.tail_enabled_market_types:
+        return UniverseDecision.exclude(reason="market_type_disabled")
     return UniverseDecision.include(
-        reason="sports_market_selected",
+        reason="market_selected",
         metadata={
-            "sports_market_family": descriptor.market_family.value,
-            "sports_market_type": descriptor.market_type.value,
-            "sports_line": str(descriptor.line) if descriptor.line is not None else None,
-            "sports_target_count": len(descriptor.targets),
+            "market_family": descriptor.market_family.value,
+            "market_type_label": descriptor.market_type.value,
+            "market_line": str(descriptor.line) if descriptor.line is not None else None,
+            "target_count": len(descriptor.targets),
         },
     )
 
@@ -65,7 +65,7 @@ def _non_empty(*values: str | None) -> tuple[str, ...]:
     return tuple(value for value in values if value)
 
 
-def _sports_universe_text(market: Market) -> str:
+def _universe_text(market: Market) -> str:
     """汇总用于识别目标体育联赛的稳定市场文本。
 
     Gamma 部分网球市场会缺失 category/tags，但 slug 和 event_slug 仍然包含

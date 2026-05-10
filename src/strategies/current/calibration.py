@@ -15,14 +15,14 @@ from typing import Any, Mapping, Sequence
 
 from polymarket_trader.extension_api import load_mapping_file
 from polymarket_trader.serialization import jsonable
-from strategies.current.sports_tail import (
+from strategies.current.tail import (
     ExecutionPermission,
     LiveGameState,
     SportsMarketSide,
     SportsMarketSnapshot,
     SportsMarketType,
-    SportsTailEvaluation,
-    SportsTailPolicy,
+    TailEvaluation,
+    TailPolicy,
     evaluate_tail_opportunity,
     live_game_state_from_metadata,
 )
@@ -65,7 +65,7 @@ class CalibrationVariantReport:
     """一组策略阈值对应的批量校准报告。"""
 
     name: str
-    policy: SportsTailPolicy
+    policy: TailPolicy
     case_results: tuple[CalibrationCaseResult, ...]
     reason_counts: Mapping[str, int]
     by_market_type: Mapping[str, Mapping[str, Any]]
@@ -132,38 +132,38 @@ class SportsTailCalibrationReport:
         }
 
 
-def run_sports_tail_calibration(
+def run_tail_calibration(
     sample: Mapping[str, Any],
     *,
-    base_policy: SportsTailPolicy | None = None,
+    base_policy: TailPolicy | None = None,
 ) -> SportsTailCalibrationReport:
     """运行 Moneyline/Spreads/Totals 批量校准。
 
     ``sample`` 支持：
     - ``cases``：样本列表，每个样本包含 ``game``、``market`` 和可选 ``label``。
-    - ``policy_variants``：阈值组列表，每组用 ``overrides`` 覆盖 ``SportsTailPolicy``。
+    - ``policy_variants``：阈值组列表，每组用 ``overrides`` 覆盖 ``TailPolicy``。
     """
 
-    base_policy = base_policy or SportsTailPolicy()
+    base_policy = base_policy or TailPolicy()
     variants = _policy_variants(sample, base_policy)
     cases = _mapping_list(sample.get("cases"))
     generated_at = _datetime_value(sample.get("generated_at")) or datetime.now(timezone.utc)
     return SportsTailCalibrationReport(
-        rule_version=str(sample.get("rule_version") or "sports_tail.current"),
+        rule_version=str(sample.get("rule_version") or "tail.current"),
         generated_at=generated_at,
         variants=tuple(_run_variant(name, policy, cases, sample=sample) for name, policy in variants),
     )
 
 
-def run_sports_tail_calibration_file(path: str) -> SportsTailCalibrationReport:
+def run_tail_calibration_file(path: str) -> SportsTailCalibrationReport:
     """从 JSON/TOML 文件运行阈值校准。"""
 
-    return run_sports_tail_calibration(load_mapping_file(path))
+    return run_tail_calibration(load_mapping_file(path))
 
 
 def _run_variant(
     name: str,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
     cases: Sequence[Mapping[str, Any]],
     *,
     sample: Mapping[str, Any],
@@ -181,7 +181,7 @@ def _run_variant(
 def _evaluate_case(
     case: Mapping[str, Any],
     *,
-    policy: SportsTailPolicy,
+    policy: TailPolicy,
     sample: Mapping[str, Any],
 ) -> CalibrationCaseResult:
     game = _load_game(case)
@@ -210,7 +210,7 @@ def _evaluate_case(
 
 def _load_game(case: Mapping[str, Any]) -> LiveGameState | None:
     game_payload = _mapping(case.get("game"))
-    return live_game_state_from_metadata({"sports_tail_game": game_payload})
+    return live_game_state_from_metadata({"live_game": game_payload})
 
 
 def _load_market_snapshot(case: Mapping[str, Any]) -> SportsMarketSnapshot:
@@ -230,7 +230,7 @@ def _load_market_snapshot(case: Mapping[str, Any]) -> SportsMarketSnapshot:
 def _case_metadata(
     game: LiveGameState | None,
     market: SportsMarketSnapshot,
-    evaluation: SportsTailEvaluation,
+    evaluation: TailEvaluation,
     label: Mapping[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -248,13 +248,13 @@ def _case_metadata(
 
 def _policy_variants(
     sample: Mapping[str, Any],
-    base_policy: SportsTailPolicy,
-) -> tuple[tuple[str, SportsTailPolicy], ...]:
+    base_policy: TailPolicy,
+) -> tuple[tuple[str, TailPolicy], ...]:
     variants = _mapping_list(sample.get("policy_variants"))
     if not variants:
         overrides = _mapping(sample.get("policy"))
         return (("default", _policy_from_overrides(base_policy, overrides)),)
-    resolved: list[tuple[str, SportsTailPolicy]] = []
+    resolved: list[tuple[str, TailPolicy]] = []
     for index, variant in enumerate(variants):
         name = str(variant.get("name") or f"variant_{index + 1}")
         overrides = _mapping(variant.get("overrides") or variant.get("policy"))
@@ -263,10 +263,10 @@ def _policy_variants(
 
 
 def _policy_from_overrides(
-    base_policy: SportsTailPolicy,
+    base_policy: TailPolicy,
     overrides: Mapping[str, Any],
-) -> SportsTailPolicy:
-    supported = {field.name: getattr(base_policy, field.name) for field in fields(SportsTailPolicy)}
+) -> TailPolicy:
+    supported = {field.name: getattr(base_policy, field.name) for field in fields(TailPolicy)}
     values: dict[str, Any] = {}
     for key, value in overrides.items():
         if key not in supported:
@@ -333,10 +333,10 @@ def _market_type_summary(results: Sequence[CalibrationCaseResult]) -> dict[str, 
     }
 
 
-def _policy_payload(policy: SportsTailPolicy) -> dict[str, Any]:
+def _policy_payload(policy: TailPolicy) -> dict[str, Any]:
     return {
         field.name: jsonable(getattr(policy, field.name))
-        for field in fields(SportsTailPolicy)
+        for field in fields(TailPolicy)
     }
 
 
@@ -394,7 +394,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if len(args) != 1:
         print("usage: python -m strategies.current.calibration <fixture.json>", file=sys.stderr)
         return 2
-    report = run_sports_tail_calibration_file(args[0])
+    report = run_tail_calibration_file(args[0])
     print(json.dumps(report.as_payload(), ensure_ascii=False, indent=2))
     return 0
 

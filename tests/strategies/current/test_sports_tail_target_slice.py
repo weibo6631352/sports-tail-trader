@@ -29,10 +29,10 @@ from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
 from polymarket_trader.extension_api import ExtensionContext, MarketTokenView
 
-from strategies.current.config import CurrentStrategyConfig, sports_tail_policy_from_config
+from strategies.current.config import CurrentStrategyConfig, tail_policy_from_config
 from strategies.current.outcomes import SportsMarketFamily, describe_sports_market
 from strategies.current.recovery import decide_recovery
-from strategies.current.sports_tail import (
+from strategies.current.tail import (
     ExecutionPermission,
     LiveGameStatus,
     SportsMarketSnapshot,
@@ -49,12 +49,12 @@ from strategies.current.universe import select_market
 
 def _manual_moneyline_config() -> CurrentStrategyConfig:
     return CurrentStrategyConfig(
-        sports_moneyline_execution_permission=ExecutionPermission.MANUAL_CONFIRM,
+        tail_moneyline_execution_permission=ExecutionPermission.MANUAL_CONFIRM,
     )
 
 
-def test_config_expresses_complete_sports_tail_policy() -> None:
-    policy = sports_tail_policy_from_config(CurrentStrategyConfig())
+def test_config_expresses_complete_tail_policy() -> None:
+    policy = tail_policy_from_config(CurrentStrategyConfig())
 
     assert policy.enabled_market_types == (
         SportsMarketType.TOTALS,
@@ -72,7 +72,7 @@ def test_config_expresses_complete_sports_tail_policy() -> None:
 def test_live_game_metadata_preserves_scheduled_status() -> None:
     game = live_game_state_from_metadata(
         {
-            "sports_tail_game": {
+            "live_game": {
                 "league": "NBA",
                 "home_name": "Suns",
                 "away_name": "Thunder",
@@ -158,7 +158,7 @@ def test_universe_accepts_single_game_binary_props_for_whole_market_coverage() -
 
 
 def test_single_game_binary_props_are_record_only_until_specific_model_exists() -> None:
-    game = live_game_state_from_metadata({"sports_tail_game": _moneyline_live_game()})
+    game = live_game_state_from_metadata({"live_game": _moneyline_live_game()})
     market = SportsMarketSnapshot(
         market_type=SportsMarketType.BINARY_PROP,
         side=SportsMarketSide.YES,
@@ -174,7 +174,7 @@ def test_single_game_binary_props_are_record_only_until_specific_model_exists() 
     result = evaluate_tail_opportunity(
         game,
         market,
-        policy=sports_tail_policy_from_config(CurrentStrategyConfig()),
+        policy=tail_policy_from_config(CurrentStrategyConfig()),
         now=datetime(2026, 4, 27, 0, 0, 5, tzinfo=timezone.utc),
     )
 
@@ -384,7 +384,7 @@ def test_universe_accepts_tennis_market_when_gamma_tags_are_missing_but_slug_has
     decision = select_market(CurrentStrategyConfig(), market)
 
     assert decision.selected is True
-    assert decision.reason == "sports_market_selected"
+    assert decision.reason == "market_selected"
 
 
 def test_universe_accepts_kbo_market_when_live_source_supports_baseball() -> None:
@@ -406,7 +406,7 @@ def test_universe_accepts_kbo_market_when_live_source_supports_baseball() -> Non
     decision = select_market(CurrentStrategyConfig(), market)
 
     assert decision.selected is True
-    assert decision.reason == "sports_market_selected"
+    assert decision.reason == "market_selected"
 
 
 def test_universe_accepts_wtt_table_tennis_market_for_live_state_coverage() -> None:
@@ -429,7 +429,7 @@ def test_universe_accepts_wtt_table_tennis_market_for_live_state_coverage() -> N
     descriptor = describe_sports_market(market)
 
     assert decision.selected is True
-    assert decision.reason == "sports_market_selected"
+    assert decision.reason == "market_selected"
     assert descriptor.accepted is True
     assert descriptor.market_family == SportsMarketFamily.SINGLE_GAME
 
@@ -882,13 +882,13 @@ def test_entry_rejects_series_market_before_single_game_live_score_can_create_bu
             token_id="series-home",
             orderbook=orderbook,
             amount_usdc=Decimal("10"),
-            metadata={"sports_tail_game": _moneyline_live_game()},
+            metadata={"live_game": _moneyline_live_game()},
         ),
     )
 
     assert decision.action.value == "skip"
     assert decision.reason == "series_market_not_auto_tradable"
-    assert decision.metadata["sports_market_family"] == "series"
+    assert decision.metadata["market_family"] == "series"
 
 
 def test_sports_market_line_parser_handles_slug_decimal_without_using_event_date() -> None:
@@ -960,7 +960,7 @@ def test_entry_rejects_sports_market_without_live_game_state_before_creating_buy
     assert decision.reason == "missing_live_game_state"
 
 
-def test_totals_over_locked_can_create_buy_only_after_full_sports_gate_passes() -> None:
+def test_totals_over_locked_can_create_buy_only_after_full_tail_gate_passes() -> None:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
 
@@ -974,7 +974,7 @@ def test_totals_over_locked_can_create_buy_only_after_full_sports_gate_passes() 
             amount_usdc=Decimal("10"),
             now=datetime(2026, 4, 27, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NHL",
                     "home_name": "TB",
                     "away_name": "MON",
@@ -995,8 +995,8 @@ def test_totals_over_locked_can_create_buy_only_after_full_sports_gate_passes() 
     assert decision.amount_usdc == Decimal("10")
     assert decision.order_type is None
     assert decision.post_only is False
-    assert decision.metadata["sports_tail_reason"] == "totals_over_locked"
-    assert decision.metadata["sports_execution_permission"] == "auto_execute"
+    assert decision.metadata["tail_reason"] == "totals_over_locked"
+    assert decision.metadata["execution_permission"] == "auto_execute"
 
 
 def test_ended_moneyline_can_create_buy_before_polymarket_closes_market() -> None:
@@ -1013,7 +1013,7 @@ def test_ended_moneyline_can_create_buy_before_polymarket_closes_market() -> Non
             amount_usdc=Decimal("10"),
             now=datetime(2026, 4, 27, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NBA",
                     "home_name": "NYK",
                     "away_name": "BOS",
@@ -1030,8 +1030,8 @@ def test_ended_moneyline_can_create_buy_before_polymarket_closes_market() -> Non
 
     assert decision.action.value == "buy"
     assert decision.token_id == "home"
-    assert decision.metadata["sports_tail_reason"] == "ended_not_closed_moneyline"
-    assert decision.metadata["sports_tail_opportunity_type"] == "ended_not_closed"
+    assert decision.metadata["tail_reason"] == "ended_not_closed_moneyline"
+    assert decision.metadata["opportunity_type"] == "ended_not_closed"
 
 
 def test_ended_totals_under_can_create_buy_when_final_score_is_below_line() -> None:
@@ -1048,7 +1048,7 @@ def test_ended_totals_under_can_create_buy_when_final_score_is_below_line() -> N
             amount_usdc=Decimal("10"),
             now=datetime(2026, 4, 27, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NHL",
                     "home_name": "TB",
                     "away_name": "MON",
@@ -1065,8 +1065,8 @@ def test_ended_totals_under_can_create_buy_when_final_score_is_below_line() -> N
 
     assert decision.action.value == "buy"
     assert decision.token_id == "under"
-    assert decision.metadata["sports_tail_reason"] == "ended_not_closed_totals_under"
-    assert decision.metadata["sports_tail_opportunity_type"] == "ended_not_closed"
+    assert decision.metadata["tail_reason"] == "ended_not_closed_totals_under"
+    assert decision.metadata["opportunity_type"] == "ended_not_closed"
 
 
 def test_ended_tennis_first_set_total_is_not_treated_as_total_sets_under() -> None:
@@ -1095,7 +1095,7 @@ def test_ended_tennis_first_set_total_is_not_treated_as_total_sets_under() -> No
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 30, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "WTA",
                     "home_name": "Yufei Ren",
                     "away_name": "Polona Hercog",
@@ -1135,7 +1135,7 @@ def test_ended_tennis_first_set_total_under_uses_first_set_score() -> None:
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 30, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "WTA",
                     "home_name": "Yufei Ren",
                     "away_name": "Polona Hercog",
@@ -1160,7 +1160,7 @@ def test_ended_tennis_first_set_total_under_uses_first_set_score() -> None:
 
     assert decision.action.value == "buy"
     assert decision.token_id == "first-set-under"
-    assert decision.metadata["sports_tail_reason"] == "ended_not_closed_tennis_set_games_under"
+    assert decision.metadata["tail_reason"] == "ended_not_closed_tennis_set_games_under"
 
 
 def test_ended_tennis_first_set_total_under_rejects_when_first_set_went_over() -> None:
@@ -1176,7 +1176,7 @@ def test_ended_tennis_first_set_total_under_rejects_when_first_set_went_over() -
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 30, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "WTA",
                     "home_name": "Yufei Ren",
                     "away_name": "Polona Hercog",
@@ -1216,7 +1216,7 @@ def test_live_tennis_first_set_total_over_uses_current_set_score() -> None:
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 30, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "WTA",
                     "home_name": "Yufei Ren",
                     "away_name": "Polona Hercog",
@@ -1241,7 +1241,7 @@ def test_live_tennis_first_set_total_over_uses_current_set_score() -> None:
 
     assert decision.action.value == "buy"
     assert decision.token_id == "first-set-over"
-    assert decision.metadata["sports_tail_reason"] == "tennis_set_games_over_locked"
+    assert decision.metadata["tail_reason"] == "tennis_set_games_over_locked"
     assert decision.metadata["scope_type"] == "tennis_set_games"
     assert decision.metadata["scope_number"] == 1
 
@@ -1259,7 +1259,7 @@ def test_live_tennis_first_set_total_under_uses_completed_first_set_score() -> N
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 30, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "WTA",
                     "home_name": "Yufei Ren",
                     "away_name": "Polona Hercog",
@@ -1286,7 +1286,7 @@ def test_live_tennis_first_set_total_under_uses_completed_first_set_score() -> N
 
     assert decision.action.value == "buy"
     assert decision.token_id == "first-set-under"
-    assert decision.metadata["sports_tail_reason"] == "tennis_set_games_under_locked"
+    assert decision.metadata["tail_reason"] == "tennis_set_games_under_locked"
     assert decision.metadata["scope_type"] == "tennis_set_games"
     assert decision.metadata["scope_number"] == 1
 
@@ -1304,7 +1304,7 @@ def test_live_tennis_current_set_total_under_waits_until_set_completed() -> None
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 30, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "WTA",
                     "home_name": "Yufei Ren",
                     "away_name": "Polona Hercog",
@@ -1357,7 +1357,7 @@ def test_period_total_market_is_not_treated_as_full_game_total() -> None:
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 30, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NBA",
                     "home_name": "NYK",
                     "away_name": "BOS",
@@ -1390,7 +1390,7 @@ def test_ended_moneyline_tie_is_not_traded_as_deterministic_result() -> None:
             amount_usdc=Decimal("10"),
             now=datetime(2026, 4, 27, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NBA",
                     "home_name": "NYK",
                     "away_name": "BOS",
@@ -1424,7 +1424,7 @@ def test_moneyline_uses_live_home_away_names_instead_of_outcome_order() -> None:
         trading_status=TradingStatus.ELIGIBLE,
     )
     metadata = {
-        "sports_tail_game": {
+        "live_game": {
             "league": "KBO",
             "home_name": "NC Dinos",
             "away_name": "Kia Tigers",
@@ -1435,13 +1435,13 @@ def test_moneyline_uses_live_home_away_names_instead_of_outcome_order() -> None:
             "status": "ended",
             "observed_at": "2026-04-28T12:55:00+00:00",
         },
-        "sports_live_match": {
+        "live_match": {
             "matched_home_alias": "NC Dinos",
             "matched_away_alias": "Kia Tigers",
         },
     }
 
-    config = CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01"))
+    config = CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01"))
 
     losing_token = decide_entry(
         config,
@@ -1472,7 +1472,7 @@ def test_moneyline_uses_live_home_away_names_instead_of_outcome_order() -> None:
     assert losing_token.reason == "outcome_not_locked"
     assert winning_token.action.value == "buy"
     assert winning_token.token_id == "nc"
-    assert winning_token.metadata["sports_tail_reason"] == "ended_not_closed_moneyline"
+    assert winning_token.metadata["tail_reason"] == "ended_not_closed_moneyline"
 
 
 def test_entry_plan_preserves_event_metadata_through_application_entry_path() -> None:
@@ -1497,7 +1497,7 @@ def test_entry_plan_preserves_event_metadata_through_application_entry_path() ->
         max_total_usdc=Decimal("10"),
         metadata={
             "source": "worker_payload",
-            "sports_tail_game": {
+            "live_game": {
                 "league": "NHL",
                 "home_name": "TB",
                 "away_name": "MON",
@@ -1517,10 +1517,10 @@ def test_entry_plan_preserves_event_metadata_through_application_entry_path() ->
     assert plan.intent.price == Decimal("0.98")
     assert plan.metadata is not None
     assert plan.metadata["source"] == "worker_payload"
-    assert plan.metadata["sports_tail_reason"] == "totals_over_locked"
-    assert plan.metadata["sports_execution_permission"] == "auto_execute"
-    assert plan.metadata["sports_exit_mode"] == "profit_take"
-    assert plan.metadata["sports_exit_plan"]["primary_action"] == "place_profit_take_gtc_sell_after_buy_fill"
+    assert plan.metadata["tail_reason"] == "totals_over_locked"
+    assert plan.metadata["execution_permission"] == "auto_execute"
+    assert plan.metadata["exit_mode"] == "profit_take"
+    assert plan.metadata["exit_plan"]["primary_action"] == "place_profit_take_gtc_sell_after_buy_fill"
 
 
 def test_follow_up_waits_for_settlement_by_default() -> None:
@@ -1569,7 +1569,7 @@ def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -
         max_market_usdc=Decimal("10"),
         max_total_usdc=Decimal("10"),
         metadata={
-            "sports_tail_game": {
+            "live_game": {
                 "league": "NBA",
                 "home_name": "NYK",
                 "away_name": "BOS",
@@ -1584,12 +1584,12 @@ def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -
     )
 
     assert plan.ready_to_trade is False
-    assert plan.reason == "sports_tail_manual_confirm"
+    assert plan.reason == "tail_manual_confirm"
     assert plan.allocation is not None
     assert plan.allocation.buy_budget_usdc == Decimal("0")
     assert plan.metadata is not None
-    assert plan.metadata["sports_tail_reason"] == "moneyline_late_lead"
-    assert plan.metadata["sports_execution_permission"] == "manual_confirm"
+    assert plan.metadata["tail_reason"] == "moneyline_late_lead"
+    assert plan.metadata["execution_permission"] == "manual_confirm"
 
 
 def test_tennis_allocation_filters_opposite_side_before_equal_weight_budget() -> None:
@@ -1617,7 +1617,7 @@ def test_tennis_allocation_filters_opposite_side_before_equal_weight_budget() ->
         max_market_usdc=Decimal("5"),
         max_total_usdc=Decimal("5"),
         metadata={
-            "sports_tail_game": {
+            "live_game": {
                 "league": "ATP Challenger",
                 "home_name": "Amir Omarkhanov",
                 "away_name": "Denis Yevseyev",
@@ -1652,7 +1652,7 @@ def test_tennis_moneyline_first_set_lead_is_not_tail_enough() -> None:
     market = _tennis_moneyline_market()
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-tennis-first-set",
             market=market,
@@ -1661,7 +1661,7 @@ def test_tennis_moneyline_first_set_lead_is_not_tail_enough() -> None:
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     **_tennis_near_locked_live_game(),
                     "tennis_state": {
                         "home_sets_won": 0,
@@ -1689,7 +1689,7 @@ def test_tennis_moneyline_requires_current_set_tail_after_set_lead() -> None:
     market = _tennis_moneyline_market()
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-tennis-too-early-second-set",
             market=market,
@@ -1698,7 +1698,7 @@ def test_tennis_moneyline_requires_current_set_tail_after_set_lead() -> None:
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     **_tennis_near_locked_live_game(),
                     "tennis_state": {
                         "home_sets_won": 1,
@@ -1726,7 +1726,7 @@ def test_tennis_moneyline_tail_bypasses_far_gamma_end_date() -> None:
     )
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-tennis-tail-far-gamma-end",
             market=market,
@@ -1734,13 +1734,13 @@ def test_tennis_moneyline_tail_bypasses_far_gamma_end_date() -> None:
             orderbook=_orderbook(token_id="tennis-home", best_ask=Decimal("0.56")),
             amount_usdc=Decimal("5"),
             now=now,
-            metadata={"sports_tail_game": _tennis_near_locked_live_game()},
+            metadata={"live_game": _tennis_near_locked_live_game()},
         ),
     )
 
     assert decision.action.value == "buy"
     assert decision.reason == "strategy_entry"
-    assert decision.metadata["sports_tail_reason"] == "tennis_moneyline_near_locked"
+    assert decision.metadata["tail_reason"] == "tennis_moneyline_near_locked"
 
 
 def test_low_settlement_efficiency_entry_uses_profit_take_exit_plan_when_viable() -> None:
@@ -1748,10 +1748,10 @@ def test_low_settlement_efficiency_entry_uses_profit_take_exit_plan_when_viable(
 
     decision = decide_entry(
         CurrentStrategyConfig(
-            sports_min_liquidity_usdc=Decimal("0.01"),
-            sports_min_expected_profit_usdc=Decimal("0.10"),
-            sports_min_expected_profit_per_hour_usdc=Decimal("0.10"),
-            sports_profit_take_min_profit_usdc=Decimal("0.03"),
+            tail_min_liquidity_usdc=Decimal("0.01"),
+            tail_min_expected_profit_usdc=Decimal("0.10"),
+            tail_min_expected_profit_per_hour_usdc=Decimal("0.10"),
+            tail_profit_take_min_profit_usdc=Decimal("0.03"),
         ),
         ExtensionContext(
             trace_id="trace-profit-take-entry",
@@ -1761,7 +1761,7 @@ def test_low_settlement_efficiency_entry_uses_profit_take_exit_plan_when_viable(
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 27, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NHL",
                     "home_name": "TB",
                     "away_name": "MON",
@@ -1777,10 +1777,10 @@ def test_low_settlement_efficiency_entry_uses_profit_take_exit_plan_when_viable(
     )
 
     assert decision.action.value == "buy"
-    assert decision.metadata["sports_exit_mode"] == "profit_take"
-    assert decision.metadata["sports_profit_take_target_price"] == "0.99"
-    assert decision.metadata["sports_profit_take_expected_profit_usdc"] == "0.051020408163265306"
-    assert decision.metadata["sports_expected_settlement_profit_usdc"] == "0.102040816326530612"
+    assert decision.metadata["exit_mode"] == "profit_take"
+    assert decision.metadata["profit_take_target_price"] == "0.99"
+    assert decision.metadata["profit_take_expected_profit_usdc"] == "0.051020408163265306"
+    assert decision.metadata["expected_settlement_profit_usdc"] == "0.102040816326530612"
 
 
 def test_settlement_efficient_entry_adds_profit_take_overlay_when_viable() -> None:
@@ -1801,10 +1801,10 @@ def test_settlement_efficient_entry_adds_profit_take_overlay_when_viable() -> No
 
     decision = decide_entry(
         CurrentStrategyConfig(
-            sports_min_liquidity_usdc=Decimal("0.01"),
-            sports_min_expected_profit_usdc=Decimal("0.03"),
-            sports_min_expected_profit_per_hour_usdc=Decimal("0.10"),
-            sports_profit_take_min_profit_usdc=Decimal("0.02"),
+            tail_min_liquidity_usdc=Decimal("0.01"),
+            tail_min_expected_profit_usdc=Decimal("0.03"),
+            tail_min_expected_profit_per_hour_usdc=Decimal("0.10"),
+            tail_profit_take_min_profit_usdc=Decimal("0.02"),
         ),
         ExtensionContext(
             trace_id="trace-settlement-profit-take-overlay",
@@ -1814,7 +1814,7 @@ def test_settlement_efficient_entry_adds_profit_take_overlay_when_viable() -> No
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 27, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "MLB",
                     "home_name": "Brewers",
                     "away_name": "Diamondbacks",
@@ -1839,11 +1839,11 @@ def test_settlement_efficient_entry_adds_profit_take_overlay_when_viable() -> No
     )
 
     assert decision.action.value == "buy"
-    assert decision.metadata["sports_exit_mode"] == "settlement"
-    assert decision.metadata["sports_profit_take_overlay_enabled"] is True
-    assert decision.metadata["sports_profit_take_target_price"] == "0.94"
-    assert decision.metadata["sports_profit_take_expected_profit_usdc"] == "0.053763440860215054"
-    assert decision.metadata["sports_exit_plan"]["primary_action"] == "place_profit_take_gtc_sell_after_buy_fill"
+    assert decision.metadata["exit_mode"] == "settlement"
+    assert decision.metadata["profit_take_overlay_enabled"] is True
+    assert decision.metadata["profit_take_target_price"] == "0.94"
+    assert decision.metadata["profit_take_expected_profit_usdc"] == "0.053763440860215054"
+    assert decision.metadata["exit_plan"]["primary_action"] == "place_profit_take_gtc_sell_after_buy_fill"
 
 
 def test_low_settlement_efficiency_entry_rejects_when_profit_take_is_not_viable() -> None:
@@ -1851,10 +1851,10 @@ def test_low_settlement_efficiency_entry_rejects_when_profit_take_is_not_viable(
 
     decision = decide_entry(
         CurrentStrategyConfig(
-            sports_min_liquidity_usdc=Decimal("0.01"),
-            sports_min_expected_profit_usdc=Decimal("0.10"),
-            sports_min_expected_profit_per_hour_usdc=Decimal("2"),
-            sports_profit_take_min_profit_usdc=Decimal("0.06"),
+            tail_min_liquidity_usdc=Decimal("0.01"),
+            tail_min_expected_profit_usdc=Decimal("0.10"),
+            tail_min_expected_profit_per_hour_usdc=Decimal("2"),
+            tail_profit_take_min_profit_usdc=Decimal("0.06"),
         ),
         ExtensionContext(
             trace_id="trace-profit-take-reject",
@@ -1864,7 +1864,7 @@ def test_low_settlement_efficiency_entry_rejects_when_profit_take_is_not_viable(
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 27, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NHL",
                     "home_name": "TB",
                     "away_name": "MON",
@@ -1881,7 +1881,7 @@ def test_low_settlement_efficiency_entry_rejects_when_profit_take_is_not_viable(
 
     assert decision.action.value == "skip"
     assert decision.reason == "profit_take_not_viable"
-    assert decision.metadata["sports_profit_take_expected_profit_usdc"] == "0.051020408163265306"
+    assert decision.metadata["profit_take_expected_profit_usdc"] == "0.051020408163265306"
 
 
 def test_low_profit_entry_uses_profit_take_when_hourly_capital_efficiency_is_high() -> None:
@@ -1889,12 +1889,12 @@ def test_low_profit_entry_uses_profit_take_when_hourly_capital_efficiency_is_hig
 
     decision = decide_entry(
         CurrentStrategyConfig(
-            sports_min_liquidity_usdc=Decimal("0.01"),
-            sports_min_expected_profit_usdc=Decimal("0.10"),
-            sports_min_expected_profit_per_hour_usdc=Decimal("0.10"),
-            sports_profit_take_min_profit_usdc=Decimal("0.02"),
-            sports_totals_max_entry_price=Decimal("0.999"),
-            sports_profit_take_hold_minutes=2,
+            tail_min_liquidity_usdc=Decimal("0.01"),
+            tail_min_expected_profit_usdc=Decimal("0.10"),
+            tail_min_expected_profit_per_hour_usdc=Decimal("0.10"),
+            tail_profit_take_min_profit_usdc=Decimal("0.02"),
+            tail_totals_max_entry_price=Decimal("0.999"),
+            tail_profit_take_hold_minutes=2,
         ),
         ExtensionContext(
             trace_id="trace-profit-take-hourly-efficiency",
@@ -1904,7 +1904,7 @@ def test_low_profit_entry_uses_profit_take_when_hourly_capital_efficiency_is_hig
             amount_usdc=Decimal("5"),
             now=datetime(2026, 4, 27, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NHL",
                     "home_name": "TB",
                     "away_name": "MON",
@@ -1920,11 +1920,11 @@ def test_low_profit_entry_uses_profit_take_when_hourly_capital_efficiency_is_hig
     )
 
     assert decision.action.value == "buy"
-    assert decision.metadata["sports_exit_mode"] == "profit_take"
-    assert decision.metadata["sports_profit_take_target_price"] == "0.996"
-    assert decision.metadata["sports_profit_take_expected_profit_usdc"] == "0.005025125628140704"
-    assert decision.metadata["sports_profit_take_expected_profit_per_hour_usdc"] == "0.150753768844221106"
-    assert decision.metadata["sports_capital_efficiency_reason"] == "profit_take_hourly_efficiency_high"
+    assert decision.metadata["exit_mode"] == "profit_take"
+    assert decision.metadata["profit_take_target_price"] == "0.996"
+    assert decision.metadata["profit_take_expected_profit_usdc"] == "0.005025125628140704"
+    assert decision.metadata["profit_take_expected_profit_per_hour_usdc"] == "0.150753768844221106"
+    assert decision.metadata["capital_efficiency_reason"] == "profit_take_hourly_efficiency_high"
 
 
 def test_tennis_match_total_over_uses_minimum_possible_final_games_in_deciding_set() -> None:
@@ -1946,7 +1946,7 @@ def test_tennis_match_total_over_uses_minimum_possible_final_games_in_deciding_s
     )
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-tennis-min-final-games-total",
             market=market,
@@ -1955,7 +1955,7 @@ def test_tennis_match_total_over_uses_minimum_possible_final_games_in_deciding_s
             amount_usdc=Decimal("5"),
             now=now,
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "Shymkent II Kazakhstan",
                     "home_name": "Mathys Erhard",
                     "away_name": "Andrej Nedic",
@@ -1982,7 +1982,7 @@ def test_tennis_match_total_over_uses_minimum_possible_final_games_in_deciding_s
 
     assert decision.action.value == "buy"
     assert decision.reason == "strategy_entry"
-    assert decision.metadata["sports_tail_reason"] == "tennis_totals_over_min_final_games_locked"
+    assert decision.metadata["tail_reason"] == "tennis_totals_over_min_final_games_locked"
 
 
 def test_tennis_first_set_winner_current_set_near_locked_can_enter_before_set_ends() -> None:
@@ -2004,7 +2004,7 @@ def test_tennis_first_set_winner_current_set_near_locked_can_enter_before_set_en
     )
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-tennis-first-set-current-tail",
             market=market,
@@ -2013,7 +2013,7 @@ def test_tennis_first_set_winner_current_set_near_locked_can_enter_before_set_en
             amount_usdc=Decimal("5"),
             now=now,
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "Mauthausen, Austria",
                     "home_name": "Hugo Gaston",
                     "away_name": "Darwin Blanch",
@@ -2042,7 +2042,7 @@ def test_tennis_first_set_winner_current_set_near_locked_can_enter_before_set_en
 
     assert decision.action.value == "buy"
     assert decision.reason == "strategy_entry"
-    assert decision.metadata["sports_tail_reason"] == "tennis_set_winner_current_set_near_locked"
+    assert decision.metadata["tail_reason"] == "tennis_set_winner_current_set_near_locked"
 
 
 def test_tennis_first_set_winner_current_set_near_locked_requires_service_point_pressure() -> None:
@@ -2064,7 +2064,7 @@ def test_tennis_first_set_winner_current_set_near_locked_requires_service_point_
     )
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-tennis-first-set-current-tail-no-pressure",
             market=market,
@@ -2073,7 +2073,7 @@ def test_tennis_first_set_winner_current_set_near_locked_requires_service_point_
             amount_usdc=Decimal("5"),
             now=now,
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "Mauthausen, Austria",
                     "home_name": "Hugo Gaston",
                     "away_name": "Darwin Blanch",
@@ -2123,7 +2123,7 @@ def test_tennis_first_set_winner_current_set_near_locked_rejects_ask_above_price
     )
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-tennis-first-set-near-lock-maker",
             market=market,
@@ -2132,8 +2132,8 @@ def test_tennis_first_set_winner_current_set_near_locked_rejects_ask_above_price
             amount_usdc=Decimal("5"),
             now=now,
             metadata={
-                "sports_tail_entry_signal_reason": "live_tail_state_candidate",
-                "sports_tail_game": {
+                "entry_signal_reason": "live_tail_state_candidate",
+                "live_game": {
                     "league": "ATP Challenger Jiujiang, China Men Singles",
                     "home_name": "Bernard Tomic",
                     "away_name": "Marat Sharipov",
@@ -2183,7 +2183,7 @@ def test_tennis_completed_set_winner_rejects_market_ask_above_locked_price_cap()
     ).with_tick_size(Decimal("0.001"))
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-tennis-first-set-locked-wide-spread",
             market=market,
@@ -2200,8 +2200,8 @@ def test_tennis_completed_set_winner_rejects_market_ask_above_locked_price_cap()
             amount_usdc=Decimal("5"),
             now=now,
             metadata={
-                "sports_tail_entry_signal_reason": "live_outcome_lock_candidate",
-                "sports_tail_game": {
+                "entry_signal_reason": "live_outcome_lock_candidate",
+                "live_game": {
                     "league": "Shymkent 2, Kazakhstan",
                     "home_name": "Antoine Ghibaudo",
                     "away_name": "Samuele Pieri",
@@ -2248,7 +2248,7 @@ def test_tennis_completed_set_winner_rejects_ask_above_locked_price_cap() -> Non
     ).with_tick_size(Decimal("0.001"))
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-tennis-first-set-ask-one",
             market=market,
@@ -2265,8 +2265,8 @@ def test_tennis_completed_set_winner_rejects_ask_above_locked_price_cap() -> Non
             amount_usdc=Decimal("5"),
             now=now,
             metadata={
-                "sports_tail_entry_signal_reason": "live_outcome_lock_candidate",
-                "sports_tail_game": {
+                "entry_signal_reason": "live_outcome_lock_candidate",
+                "live_game": {
                     "league": "Mauthausen, Austria",
                     "home_name": "Hugo Gaston",
                     "away_name": "Darwin Blanch",
@@ -2313,7 +2313,7 @@ def test_tennis_completed_set_winner_rejects_missing_best_ask() -> None:
     ).with_tick_size(Decimal("0.001"))
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-tennis-first-set-missing-ask",
             market=market,
@@ -2330,8 +2330,8 @@ def test_tennis_completed_set_winner_rejects_missing_best_ask() -> None:
             amount_usdc=Decimal("5"),
             now=now,
             metadata={
-                "sports_tail_entry_signal_reason": "live_outcome_lock_candidate",
-                "sports_tail_game": {
+                "entry_signal_reason": "live_outcome_lock_candidate",
+                "live_game": {
                     "league": "Mauthausen, Austria",
                     "home_name": "Hugo Gaston",
                     "away_name": "Darwin Blanch",
@@ -2364,7 +2364,7 @@ def test_ended_moneyline_rejects_missing_best_ask() -> None:
     now = datetime(2026, 4, 27, tzinfo=timezone.utc)
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-ended-moneyline-missing-ask",
             market=market,
@@ -2381,8 +2381,8 @@ def test_ended_moneyline_rejects_missing_best_ask() -> None:
             amount_usdc=Decimal("10"),
             now=now,
             metadata={
-                "sports_tail_entry_signal_reason": "ended_not_closed",
-                "sports_tail_game": {
+                "entry_signal_reason": "ended_not_closed",
+                "live_game": {
                     "league": "NBA",
                     "home_name": "NYK",
                     "away_name": "BOS",
@@ -2421,9 +2421,9 @@ def test_entry_plan_rejects_locked_set_winner_when_only_limit_bid_would_work() -
     service = TradingDecisionService(
         extension_hooks=CurrentStrategy(
             config=CurrentStrategyConfig(
-                sports_min_liquidity_usdc=Decimal("0.01"),
-                sports_min_expected_profit_usdc=Decimal("0.001"),
-                sports_profit_take_min_profit_usdc=Decimal("0.001"),
+                tail_min_liquidity_usdc=Decimal("0.01"),
+                tail_min_expected_profit_usdc=Decimal("0.001"),
+                tail_profit_take_min_profit_usdc=Decimal("0.001"),
             ),
         ).hooks,
     )
@@ -2447,8 +2447,8 @@ def test_entry_plan_rejects_locked_set_winner_when_only_limit_bid_would_work() -
         max_market_usdc=Decimal("10"),
         max_total_usdc=Decimal("10"),
         metadata={
-            "sports_tail_entry_signal_reason": "live_outcome_lock_candidate",
-            "sports_tail_game": {
+            "entry_signal_reason": "live_outcome_lock_candidate",
+            "live_game": {
                 "league": "Mauthausen, Austria",
                 "home_name": "Hugo Gaston",
                 "away_name": "Darwin Blanch",
@@ -2482,9 +2482,9 @@ def test_entry_plan_rejects_ended_moneyline_when_best_ask_is_missing() -> None:
     service = TradingDecisionService(
         extension_hooks=CurrentStrategy(
             config=CurrentStrategyConfig(
-                sports_min_liquidity_usdc=Decimal("0.01"),
-                sports_min_expected_profit_usdc=Decimal("0.001"),
-                sports_profit_take_min_profit_usdc=Decimal("0.001"),
+                tail_min_liquidity_usdc=Decimal("0.01"),
+                tail_min_expected_profit_usdc=Decimal("0.001"),
+                tail_profit_take_min_profit_usdc=Decimal("0.001"),
             ),
         ).hooks,
     )
@@ -2508,8 +2508,8 @@ def test_entry_plan_rejects_ended_moneyline_when_best_ask_is_missing() -> None:
         max_market_usdc=Decimal("10"),
         max_total_usdc=Decimal("10"),
         metadata={
-            "sports_tail_entry_signal_reason": "ended_not_closed",
-            "sports_tail_game": {
+            "entry_signal_reason": "ended_not_closed",
+            "live_game": {
                 "league": "NBA",
                 "home_name": "NYK",
                 "away_name": "BOS",
@@ -2548,7 +2548,7 @@ def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
         max_order_usdc=Decimal("10"),
         max_market_usdc=Decimal("10"),
         max_total_usdc=Decimal("10"),
-        metadata={"sports_tail_game": _moneyline_live_game()},
+        metadata={"live_game": _moneyline_live_game()},
         manual_confirmation=ManualConfirmation(
             operator="operator-1",
             reason="score_verified",
@@ -2594,15 +2594,15 @@ def test_strategy_risk_blocks_event_exposure_before_buy_intent() -> None:
                 market_slug=market.market_slug,
             ),
         ),
-        metadata={"sports_tail_game": _totals_live_game()},
+        metadata={"live_game": _totals_live_game()},
     )
 
     assert plan.intent is None
     assert plan.allocation is not None
     assert plan.allocation.buy_budget_usdc == Decimal("0")
-    assert plan.allocation.reason == "sports_event_exposure_limit"
+    assert plan.allocation.reason == "event_exposure_limit"
     assert plan.metadata is not None
-    assert plan.metadata["sports_risk_reason"] == "sports_event_exposure_limit"
+    assert plan.metadata["risk_reason"] == "event_exposure_limit"
 
 
 def test_strategy_risk_uses_account_fills_for_daily_entry_limit() -> None:
@@ -2610,7 +2610,7 @@ def test_strategy_risk_uses_account_fills_for_daily_entry_limit() -> None:
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
     service = TradingDecisionService(
         extension_hooks=CurrentStrategy(
-            config=CurrentStrategyConfig(sports_max_daily_entry_usdc=Decimal("15"))
+            config=CurrentStrategyConfig(tail_max_daily_entry_usdc=Decimal("15"))
         ).hooks,
     )
 
@@ -2639,15 +2639,15 @@ def test_strategy_risk_uses_account_fills_for_daily_entry_limit() -> None:
         max_order_usdc=Decimal("10"),
         max_market_usdc=Decimal("100"),
         max_total_usdc=Decimal("100"),
-        metadata={"sports_tail_game": _totals_live_game()},
+        metadata={"live_game": _totals_live_game()},
     )
 
     assert plan.intent is None
     assert plan.allocation is not None
     assert plan.allocation.buy_budget_usdc == Decimal("0")
-    assert plan.allocation.reason == "sports_daily_entry_limit"
+    assert plan.allocation.reason == "daily_entry_limit"
     assert plan.metadata is not None
-    assert plan.metadata["sports_daily_entry_usdc"] == "12"
+    assert plan.metadata["daily_entry_usdc"] == "12"
 
 
 def test_strategy_risk_blocks_consecutive_loss_pause() -> None:
@@ -2668,16 +2668,16 @@ def test_strategy_risk_blocks_consecutive_loss_pause() -> None:
         max_market_usdc=Decimal("100"),
         max_total_usdc=Decimal("100"),
         metadata={
-            "sports_tail_consecutive_losses": 3,
-            "sports_tail_game": _totals_live_game(),
+            "tail_consecutive_losses": 3,
+            "live_game": _totals_live_game(),
         },
     )
 
     assert plan.intent is None
     assert plan.allocation is not None
-    assert plan.allocation.reason == "sports_consecutive_loss_pause"
+    assert plan.allocation.reason == "consecutive_loss_pause"
     assert plan.metadata is not None
-    assert plan.metadata["sports_consecutive_losses"] == 3
+    assert plan.metadata["consecutive_losses"] == 3
 
 
 def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_order() -> None:
@@ -2719,14 +2719,14 @@ def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_orde
         max_total_usdc=Decimal("20"),
         positions=(position,),
         open_orders=(exit_order,),
-        metadata={"sports_tail_game": _tennis_near_locked_live_game()},
+        metadata={"live_game": _tennis_near_locked_live_game()},
     )
 
     assert plan.intent is None
     assert plan.allocation is not None
     assert plan.allocation.reason == "open_exit_detected"
     assert plan.metadata is not None
-    assert plan.metadata["sports_tail_reason"] == "open_exit_detected"
+    assert plan.metadata["tail_reason"] == "open_exit_detected"
 
 
 def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_advantage_strengthens() -> None:
@@ -2756,7 +2756,7 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
     )
     service = TradingDecisionService(
         extension_hooks=CurrentStrategy(
-            config=CurrentStrategyConfig(sports_max_event_exposure_usdc=Decimal("40"))
+            config=CurrentStrategyConfig(tail_max_event_exposure_usdc=Decimal("40"))
         ).hooks,
     )
 
@@ -2772,7 +2772,7 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
         max_market_usdc=Decimal("40"),
         max_total_usdc=Decimal("60"),
         metadata={
-            "sports_tail_game": {
+            "live_game": {
                 "league": "NBA",
                 "home_name": "NYK",
                 "away_name": "BOS",
@@ -2792,8 +2792,8 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
     assert plan.intent.amount_usdc == Decimal("6")
     assert getattr(plan.intent, "allow_open_exit_overlap") is True
     assert plan.metadata is not None
-    assert plan.metadata["sports_tail_reason"] == "scale_in_moneyline_advantage"
-    assert plan.metadata["sports_tail_opportunity_type"] == "scale_in_advantage"
+    assert plan.metadata["tail_reason"] == "scale_in_moneyline_advantage"
+    assert plan.metadata["opportunity_type"] == "scale_in_advantage"
 
 
 def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
@@ -2838,7 +2838,7 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
     )
     service = TradingDecisionService(
         extension_hooks=CurrentStrategy(
-            config=CurrentStrategyConfig(sports_max_event_exposure_usdc=Decimal("40"))
+            config=CurrentStrategyConfig(tail_max_event_exposure_usdc=Decimal("40"))
         ).hooks,
     )
 
@@ -2854,7 +2854,7 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
         max_market_usdc=Decimal("40"),
         max_total_usdc=Decimal("60"),
         metadata={
-            "sports_tail_game": {
+            "live_game": {
                 "league": "WTA",
                 "home_name": "Rada Zolotareva",
                 "away_name": "Despina Papamichail",
@@ -2883,8 +2883,8 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
     assert plan.intent.amount_usdc == Decimal("6")
     assert getattr(plan.intent, "allow_open_exit_overlap") is True
     assert plan.metadata is not None
-    assert plan.metadata["sports_tail_reason"] == "scale_in_tennis_totals_over_advantage"
-    assert plan.metadata["sports_tail_opportunity_type"] == "scale_in_advantage"
+    assert plan.metadata["tail_reason"] == "scale_in_tennis_totals_over_advantage"
+    assert plan.metadata["opportunity_type"] == "scale_in_advantage"
 
 
 def test_admin_candidates_use_runtime_metadata_source_not_full_registry() -> None:
@@ -2951,10 +2951,10 @@ def test_worker_publishes_skipped_plan_metadata_for_candidate_replay() -> None:
     assert result.emitted_event is not None
     assert result.emitted_event.event_type == DomainEventType.SKIPPED
     assert result.emitted_event.reason == "missing_live_game_state"
-    assert result.emitted_event.payload["plan_metadata"]["source"] == "unit_test"
-    assert result.emitted_event.payload["plan_metadata"]["provider_marker"] == "from_provider"
-    assert result.emitted_event.payload["plan_metadata"]["sports_tail_reason"] == "missing_live_game_state"
-    assert result.emitted_event.payload["plan_metadata"]["sports_tail_action"] == "reject"
+    assert result.emitted_event.payload["plan_metadata"]["strategy_payload"]["source"] == "unit_test"
+    assert result.emitted_event.payload["plan_metadata"]["strategy_payload"]["provider_marker"] == "from_provider"
+    assert result.emitted_event.payload["plan_metadata"]["strategy_payload"]["tail_reason"] == "missing_live_game_state"
+    assert result.emitted_event.payload["plan_metadata"]["strategy_payload"]["tail_action"] == "reject"
 
 
 def test_worker_treats_live_state_entry_signal_as_entry_replay_trigger() -> None:
@@ -2965,7 +2965,7 @@ def test_worker_treats_live_state_entry_signal_as_entry_replay_trigger() -> None
     assert result.plan.ready_to_trade is True
     assert result.plan.intent is not None
     assert result.plan.intent.token_id == "over"
-    assert result.plan.metadata["sports_tail_reason"] == "totals_over_locked"
+    assert result.plan.metadata["tail_reason"] == "totals_over_locked"
 
 
 def test_moneyline_default_permission_enters_auto_buy_path() -> None:
@@ -2982,7 +2982,7 @@ def test_moneyline_default_permission_enters_auto_buy_path() -> None:
             amount_usdc=Decimal("10"),
             now=datetime(2026, 4, 27, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NBA",
                     "home_name": "NYK",
                     "away_name": "BOS",
@@ -3000,7 +3000,7 @@ def test_moneyline_default_permission_enters_auto_buy_path() -> None:
     assert decision.action.value == "buy"
     assert decision.token_id == "home"
     assert decision.price == Decimal("0.96")
-    assert decision.metadata["sports_execution_permission"] == "auto_execute"
+    assert decision.metadata["execution_permission"] == "auto_execute"
 
 
 def test_live_market_more_than_one_hour_from_close_is_not_tail_candidate() -> None:
@@ -3018,7 +3018,7 @@ def test_live_market_more_than_one_hour_from_close_is_not_tail_candidate() -> No
             amount_usdc=Decimal("10"),
             now=now,
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NBA",
                     "home_name": "NYK",
                     "away_name": "BOS",
@@ -3035,7 +3035,7 @@ def test_live_market_more_than_one_hour_from_close_is_not_tail_candidate() -> No
 
     assert decision.action.value == "skip"
     assert decision.reason == "market_end_too_far"
-    assert decision.metadata["sports_tail_reason"] == "market_end_too_far"
+    assert decision.metadata["tail_reason"] == "market_end_too_far"
 
 
 def test_live_mlb_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gate() -> None:
@@ -3065,7 +3065,7 @@ def test_live_mlb_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
             amount_usdc=Decimal("10"),
             now=now,
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "MLB",
                     "home_name": "Pirates",
                     "away_name": "Cardinals",
@@ -3084,7 +3084,7 @@ def test_live_mlb_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
                         "occupied_bases": (2,),
                     },
                 },
-                "sports_live_match": {
+                "live_match": {
                     "matched_home_alias": "Pittsburgh Pirates",
                     "matched_away_alias": "St. Louis Cardinals",
                 },
@@ -3094,7 +3094,7 @@ def test_live_mlb_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
 
     assert decision.action.value == "skip"
     assert decision.reason == "baseball_not_late_enough"
-    assert decision.metadata["sports_tail_reason"] == "baseball_not_late_enough"
+    assert decision.metadata["tail_reason"] == "baseball_not_late_enough"
 
 
 def test_live_kbo_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gate() -> None:
@@ -3124,7 +3124,7 @@ def test_live_kbo_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
             amount_usdc=Decimal("10"),
             now=now,
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "KBO",
                     "home_name": "NC Dinos",
                     "away_name": "Kia Tigers",
@@ -3144,7 +3144,7 @@ def test_live_kbo_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
                         "occupied_bases": (),
                     },
                 },
-                "sports_live_match": {
+                "live_match": {
                     "matched_home_alias": "NC Dinos",
                     "matched_away_alias": "Kia Tigers",
                 },
@@ -3154,7 +3154,7 @@ def test_live_kbo_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
 
     assert decision.action.value == "skip"
     assert decision.reason == "baseball_not_late_enough"
-    assert decision.metadata["sports_tail_reason"] == "baseball_not_late_enough"
+    assert decision.metadata["tail_reason"] == "baseball_not_late_enough"
 
 
 def test_mlb_structured_tail_state_allows_official_source_age_above_generic_limit() -> None:
@@ -3184,7 +3184,7 @@ def test_mlb_structured_tail_state_allows_official_source_age_above_generic_limi
             amount_usdc=Decimal("10"),
             now=now,
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "MLB",
                     "home_name": "Pirates",
                     "away_name": "Cardinals",
@@ -3204,7 +3204,7 @@ def test_mlb_structured_tail_state_allows_official_source_age_above_generic_limi
                         "occupied_bases": (),
                     },
                 },
-                "sports_live_match": {
+                "live_match": {
                     "matched_home_alias": "Pittsburgh Pirates",
                     "matched_away_alias": "St. Louis Cardinals",
                 },
@@ -3213,7 +3213,7 @@ def test_mlb_structured_tail_state_allows_official_source_age_above_generic_limi
     )
 
     assert decision.action.value == "buy"
-    assert decision.metadata["sports_tail_reason"] == "mlb_moneyline_late_lead"
+    assert decision.metadata["tail_reason"] == "mlb_moneyline_late_lead"
 
 
 def test_mlb_moneyline_eighth_inning_leader_can_enter_when_no_scoring_threat() -> None:
@@ -3235,9 +3235,9 @@ def test_mlb_moneyline_eighth_inning_leader_can_enter_when_no_scoring_threat() -
 
     decision = decide_entry(
         CurrentStrategyConfig(
-            sports_min_liquidity_usdc=Decimal("0.01"),
-            sports_min_expected_profit_usdc=Decimal("0.03"),
-            sports_min_expected_profit_per_hour_usdc=Decimal("0.10"),
+            tail_min_liquidity_usdc=Decimal("0.01"),
+            tail_min_expected_profit_usdc=Decimal("0.03"),
+            tail_min_expected_profit_per_hour_usdc=Decimal("0.10"),
         ),
         ExtensionContext(
             trace_id="trace-mlb-eighth-leader",
@@ -3247,7 +3247,7 @@ def test_mlb_moneyline_eighth_inning_leader_can_enter_when_no_scoring_threat() -
             amount_usdc=Decimal("10"),
             now=now,
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "MLB",
                     "home_name": "Brewers",
                     "away_name": "Diamondbacks",
@@ -3267,7 +3267,7 @@ def test_mlb_moneyline_eighth_inning_leader_can_enter_when_no_scoring_threat() -
                         "occupied_bases": (1,),
                     },
                 },
-                "sports_live_match": {
+                "live_match": {
                     "matched_home_alias": "Milwaukee Brewers",
                     "matched_away_alias": "Arizona Diamondbacks",
                 },
@@ -3276,7 +3276,7 @@ def test_mlb_moneyline_eighth_inning_leader_can_enter_when_no_scoring_threat() -
     )
 
     assert decision.action.value == "buy"
-    assert decision.metadata["sports_tail_reason"] == "mlb_moneyline_eighth_lead"
+    assert decision.metadata["tail_reason"] == "mlb_moneyline_eighth_lead"
 
 
 def test_mlb_moneyline_eighth_inning_rejects_scoring_position_threat() -> None:
@@ -3297,7 +3297,7 @@ def test_mlb_moneyline_eighth_inning_rejects_scoring_position_threat() -> None:
     )
 
     decision = decide_entry(
-        CurrentStrategyConfig(sports_min_liquidity_usdc=Decimal("0.01")),
+        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
             trace_id="trace-mlb-eighth-threat",
             market=market,
@@ -3306,7 +3306,7 @@ def test_mlb_moneyline_eighth_inning_rejects_scoring_position_threat() -> None:
             amount_usdc=Decimal("10"),
             now=now,
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "MLB",
                     "home_name": "Brewers",
                     "away_name": "Diamondbacks",
@@ -3326,7 +3326,7 @@ def test_mlb_moneyline_eighth_inning_rejects_scoring_position_threat() -> None:
                         "occupied_bases": (2,),
                     },
                 },
-                "sports_live_match": {
+                "live_match": {
                     "matched_home_alias": "Milwaukee Brewers",
                     "matched_away_alias": "Arizona Diamondbacks",
                 },
@@ -3353,7 +3353,7 @@ def test_totals_over_locked_bypasses_far_market_end_window() -> None:
             amount_usdc=Decimal("10"),
             now=now,
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NHL",
                     "home_name": "TB",
                     "away_name": "MON",
@@ -3369,7 +3369,7 @@ def test_totals_over_locked_bypasses_far_market_end_window() -> None:
     )
 
     assert decision.action.value == "buy"
-    assert decision.metadata["sports_tail_reason"] == "totals_over_locked"
+    assert decision.metadata["tail_reason"] == "totals_over_locked"
 
 
 def test_allocation_reports_far_close_before_missing_best_ask() -> None:
@@ -3397,7 +3397,7 @@ def test_allocation_reports_far_close_before_missing_best_ask() -> None:
         max_market_usdc=Decimal("20"),
         max_total_usdc=Decimal("20"),
         metadata={
-            "sports_tail_game": {
+            "live_game": {
                 "league": "NBA",
                 "home_name": "NYK",
                 "away_name": "BOS",
@@ -3414,7 +3414,7 @@ def test_allocation_reports_far_close_before_missing_best_ask() -> None:
     assert plan.intent is None
     assert plan.allocation is not None
     assert plan.allocation.reason == "market_end_too_far"
-    assert plan.metadata["sports_tail_reason"] == "market_end_too_far"
+    assert plan.metadata["tail_reason"] == "market_end_too_far"
 
 
 def test_spreads_default_permission_enters_auto_buy_path() -> None:
@@ -3431,7 +3431,7 @@ def test_spreads_default_permission_enters_auto_buy_path() -> None:
             amount_usdc=Decimal("10"),
             now=datetime(2026, 4, 27, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NBA",
                     "home_name": "NYK",
                     "away_name": "BOS",
@@ -3449,8 +3449,8 @@ def test_spreads_default_permission_enters_auto_buy_path() -> None:
     assert decision.action.value == "buy"
     assert decision.token_id == "home"
     assert decision.price == Decimal("0.95")
-    assert decision.metadata["sports_tail_reason"] == "spreads_late_cover"
-    assert decision.metadata["sports_execution_permission"] == "auto_execute"
+    assert decision.metadata["tail_reason"] == "spreads_late_cover"
+    assert decision.metadata["execution_permission"] == "auto_execute"
 
 
 def test_follow_up_sell_is_not_created_after_buy_fill() -> None:
@@ -3498,8 +3498,8 @@ def test_profit_take_follow_up_sell_is_created_after_tagged_buy_fill() -> None:
                     amount_usdc=Decimal("5"),
                     market_slug=market.market_slug,
                     metadata={
-                        "sports_exit_mode": "profit_take",
-                        "sports_profit_take_target_price": "0.999",
+                        "exit_mode": "profit_take",
+                        "profit_take_target_price": "0.999",
                     },
                 ),
                 market_slug=market.market_slug,
@@ -3516,7 +3516,7 @@ def test_profit_take_follow_up_sell_is_created_after_tagged_buy_fill() -> None:
     assert decisions[0].reason == "strategy_profit_take"
     assert decisions[0].price == Decimal("0.99")
     assert decisions[0].size_shares == Decimal("5.050505050505050505")
-    assert decisions[0].metadata["sports_exit_mode"] == "profit_take"
+    assert decisions[0].metadata["exit_mode"] == "profit_take"
 
 
 def test_profit_take_overlay_follow_up_sell_is_created_after_settlement_buy_fill() -> None:
@@ -3541,9 +3541,9 @@ def test_profit_take_overlay_follow_up_sell_is_created_after_settlement_buy_fill
                     amount_usdc=Decimal("5"),
                     market_slug=market.market_slug,
                     metadata={
-                        "sports_exit_mode": "settlement",
-                        "sports_profit_take_overlay_enabled": True,
-                        "sports_profit_take_target_price": "0.94",
+                        "exit_mode": "settlement",
+                        "profit_take_overlay_enabled": True,
+                        "profit_take_target_price": "0.94",
                     },
                 ),
                 market_slug=market.market_slug,
@@ -3560,8 +3560,8 @@ def test_profit_take_overlay_follow_up_sell_is_created_after_settlement_buy_fill
     assert decisions[0].reason == "strategy_profit_take"
     assert decisions[0].price == Decimal("0.94")
     assert decisions[0].size_shares == Decimal("5.376342")
-    assert decisions[0].metadata["sports_exit_mode"] == "settlement"
-    assert decisions[0].metadata["sports_profit_take_overlay_enabled"] is True
+    assert decisions[0].metadata["exit_mode"] == "settlement"
+    assert decisions[0].metadata["profit_take_overlay_enabled"] is True
 
 
 def test_position_exit_waits_for_settlement_by_default() -> None:
@@ -3598,7 +3598,7 @@ def test_recovery_keeps_ended_single_game_open_for_ended_not_closed_scan() -> No
             market=market,
             now=datetime(2026, 4, 27, 1, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NHL",
                     "home_name": "TB",
                     "away_name": "MON",
@@ -3627,7 +3627,7 @@ def test_recovery_pauses_new_entries_when_live_state_is_abnormal() -> None:
             market=market,
             now=datetime(2026, 4, 27, 1, tzinfo=timezone.utc),
             metadata={
-                "sports_tail_game": {
+                "live_game": {
                     "league": "NHL",
                     "home_name": "TB",
                     "away_name": "MON",
@@ -3730,7 +3730,7 @@ def test_recovery_places_profit_take_for_near_settlement_position_missing_overla
     assert decision.actions[0].reason == "recovery_profit_take"
     assert decision.actions[0].price == Decimal("0.94")
     assert decision.actions[0].size_shares == Decimal("5.376342")
-    assert decision.actions[0].metadata["sports_profit_take_expected_profit_usdc"] == "0.05376342"
+    assert decision.actions[0].metadata["profit_take_expected_profit_usdc"] == "0.05376342"
 
 
 def test_recovery_places_profit_take_for_high_price_uncovered_position() -> None:
@@ -3759,8 +3759,8 @@ def test_recovery_places_profit_take_for_high_price_uncovered_position() -> None
     assert decision.actions[0].token_id == "over"
     assert decision.actions[0].price == Decimal("0.99")
     assert decision.actions[0].size_shares == Decimal("5.0505")
-    assert decision.actions[0].metadata["sports_exit_mode"] == "profit_take"
-    assert decision.actions[0].metadata["sports_profit_take_expected_profit_usdc"] == "0.059995"
+    assert decision.actions[0].metadata["exit_mode"] == "profit_take"
+    assert decision.actions[0].metadata["profit_take_expected_profit_usdc"] == "0.059995"
 
 
 def test_recovery_uses_profitable_best_bid_when_one_tick_profit_is_too_small() -> None:
@@ -3800,8 +3800,8 @@ def test_recovery_uses_profitable_best_bid_when_one_tick_profit_is_too_small() -
     assert len(decision.actions) == 1
     assert decision.actions[0].reason == "recovery_profit_take"
     assert decision.actions[0].price == Decimal("0.999")
-    assert decision.actions[0].metadata["sports_profit_take_price_source"] == "best_bid"
-    assert decision.actions[0].metadata["sports_profit_take_expected_profit_usdc"] == "0.0455495"
+    assert decision.actions[0].metadata["profit_take_price_source"] == "best_bid"
+    assert decision.actions[0].metadata["profit_take_expected_profit_usdc"] == "0.0455495"
 
 
 def test_recovery_places_profit_take_for_unknown_legacy_high_price_position() -> None:
@@ -3824,7 +3824,7 @@ def test_recovery_places_profit_take_for_unknown_legacy_high_price_position() ->
     )
 
     assert decision.pause_trading is True
-    assert decision.pause_reason == "missing_sports_target"
+    assert decision.pause_reason == "missing_target"
     assert len(decision.actions) == 1
     assert decision.actions[0].action.value == "sell"
     assert decision.actions[0].reason == "recovery_profit_take"
@@ -3853,7 +3853,7 @@ def test_recovery_does_not_repeat_profit_take_for_unknown_candidate_without_orde
     )
 
     assert decision.pause_trading is True
-    assert decision.pause_reason == "missing_sports_target"
+    assert decision.pause_reason == "missing_target"
     assert decision.actions == ()
 
 
@@ -3877,7 +3877,7 @@ def test_recovery_does_not_profit_take_unknown_legacy_low_price_position() -> No
     )
 
     assert decision.pause_trading is True
-    assert decision.pause_reason == "missing_sports_target"
+    assert decision.pause_reason == "missing_target"
     assert decision.actions == ()
 
 
@@ -3957,7 +3957,7 @@ def test_recovery_keeps_fresh_open_entry_order_within_strategy_ttl() -> None:
     )
 
     decision = decide_recovery(
-        CurrentStrategyConfig(sports_entry_maker_max_resting_seconds=10),
+        CurrentStrategyConfig(tail_entry_maker_max_resting_seconds=10),
         ExtensionContext(
             trace_id="trace-fresh-open-entry",
             market=market,
@@ -4016,7 +4016,7 @@ def test_recovery_keeps_open_entry_order_when_exchange_snapshot_lacks_timestamp(
     )
 
     decision = decide_recovery(
-        CurrentStrategyConfig(sports_entry_maker_max_resting_seconds=10),
+        CurrentStrategyConfig(tail_entry_maker_max_resting_seconds=10),
         ExtensionContext(
             trace_id="trace-open-entry-without-timestamp",
             market=market,
@@ -4078,7 +4078,7 @@ def test_recovery_cancels_stale_open_entry_order_after_strategy_ttl() -> None:
     )
 
     decision = decide_recovery(
-        CurrentStrategyConfig(sports_entry_maker_max_resting_seconds=10),
+        CurrentStrategyConfig(tail_entry_maker_max_resting_seconds=10),
         ExtensionContext(
             trace_id="trace-stale-open-entry",
             market=market,
@@ -4552,7 +4552,7 @@ async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
 
     await service.upsert_live_state(
         payload={
-            "sports_tail_game": {
+            "live_game": {
                 "league": "NHL",
                 "home_name": "TB",
                 "away_name": "MON",
@@ -4592,9 +4592,9 @@ async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
         live_store.upsert(
             condition_id=market.condition_id,
             source="unit_test",
-            metadata={"sports_tail_game": _moneyline_live_game()},
+            metadata={"live_game": _moneyline_live_game()},
             live_state_signal_allowed=True,
-            live_state_payload={"sports_tail_game": _moneyline_live_game()},
+            live_state_payload={"live_game": _moneyline_live_game()},
         )
 
     market_ws = _MarketWs(snapshots)
@@ -4658,9 +4658,9 @@ async def _run_admin_live_source_gap_diagnostics_flow() -> dict[str, object]:
     live_store.upsert(
         condition_id=covered_market.condition_id,
         source="unit_test",
-        metadata={"sports_tail_game": _moneyline_live_game()},
+        metadata={"live_game": _moneyline_live_game()},
         live_state_signal_allowed=True,
-        live_state_payload={"sports_tail_game": _moneyline_live_game()},
+        live_state_payload={"live_game": _moneyline_live_game()},
     )
     live_store.upsert(
         condition_id=missing_nba_market.condition_id,
@@ -4787,7 +4787,7 @@ async def _run_worker_with_live_state_entry_signal():
         max_open_orders=10,
         order_retry_limit=2,
         entry_metadata_provider=lambda event, snapshot: {
-            "sports_tail_game": {
+            "live_game": {
                 "league": "NHL",
                 "home_name": "TB",
                 "away_name": "MON",

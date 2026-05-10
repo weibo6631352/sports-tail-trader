@@ -6,7 +6,7 @@ from pathlib import Path
 from polymarket_trader.app.extension_host import run_entry_replay
 
 
-def test_entry_replay_fixture_metadata_drives_sports_tail_plan(tmp_path: Path) -> None:
+def test_entry_replay_fixture_metadata_drives_tail_plan(tmp_path: Path) -> None:
     fixture_path = tmp_path / "sports-tail-replay.json"
     fixture_path.write_text(
         json.dumps(
@@ -51,7 +51,7 @@ def test_entry_replay_fixture_metadata_drives_sports_tail_plan(tmp_path: Path) -
                     "token_id": "over",
                 },
                 "metadata": {
-                    "sports_tail_game": {
+                    "live_game": {
                         "league": "NHL",
                         "home_name": "TB",
                         "away_name": "MON",
@@ -71,5 +71,5 @@ def test_entry_replay_fixture_metadata_drives_sports_tail_plan(tmp_path: Path) -
     result = run_entry_replay(str(fixture_path), extension_module="strategies.current")
 
     assert result["plan"]["ready_to_trade"] is True
-    assert result["plan"]["metadata"]["sports_tail_reason"] == "totals_over_locked"
-    assert result["plan"]["metadata"]["sports_execution_permission"] == "auto_execute"
+    assert result["plan"]["metadata"]["tail_reason"] == "totals_over_locked"
+    assert result["plan"]["metadata"]["execution_permission"] == "auto_execute"

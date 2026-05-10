@@ -20,7 +20,7 @@ from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.extension_api import load_mapping_file
 from polymarket_trader.infra.sports import parse_espn_scoreboard_payload
 from polymarket_trader.serialization import jsonable
-from strategies.current.live_state import best_sports_live_match, sports_tail_game_metadata
+from strategies.current.live_state import best_live_match, live_game_metadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +128,7 @@ def validate_sports_live_sample(sample: Mapping[str, Any]) -> SportsLiveSampleRe
     observed_at = _datetime_value(sample.get("observed_at")) or datetime.now(timezone.utc)
     games = parse_espn_scoreboard_payload(scoreboard, league=league or "nba", observed_at=observed_at)
     markets = tuple(_load_market(item) for item in _mapping_list(sample.get("markets")))
-    matches = tuple(_match_payload(match) for market in markets if (match := best_sports_live_match(market, games)))
+    matches = tuple(_match_payload(match) for market in markets if (match := best_live_match(market, games)))
 
     failures.extend(_validate_expected_games(sample, games))
     failures.extend(_validate_expected_matches(sample, markets=markets, games=games))
@@ -174,7 +174,7 @@ def _validate_expected_games(
                 )
             )
             continue
-        actual = sports_tail_game_metadata(game)
+        actual = live_game_metadata(game)
         for field in (
             "status",
             "period",
@@ -226,7 +226,7 @@ def _validate_expected_matches(
                 )
             )
             continue
-        match = best_sports_live_match(market, tuple(games))
+        match = best_live_match(market, tuple(games))
         if match is None:
             failures.append(_failure("match_not_found", path, "market 未匹配到任何 ESPN 比赛。"))
             continue

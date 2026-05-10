@@ -12,7 +12,7 @@ from polymarket_trader.domain.sports_live import (
 import strategies.current.live_state as live_state_module
 import strategies.current.strategy as strategy_module
 from strategies.current.config import CurrentStrategyConfig
-from strategies.current.live_state import match_sports_live_game
+from strategies.current.live_state import match_live_game
 from strategies.current.strategy import CurrentStrategy
 
 
@@ -20,14 +20,14 @@ def test_live_state_match_requires_market_date_when_both_sides_have_dates() -> N
     market = _market("nba-phi-bos-2026-05-02")
     game = _game(start_time_utc="2026-04-28T23:30:00Z")
 
-    assert match_sports_live_game(market, game) is None
+    assert match_live_game(market, game) is None
 
 
 def test_live_state_match_accepts_same_date_team_match() -> None:
     market = _market("nba-phi-bos-2026-04-28")
     game = _game(start_time_utc="2026-04-28T23:30:00Z")
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.game.source_event_id == "401869408"
@@ -65,7 +65,7 @@ def test_live_state_match_accepts_compact_soccer_team_variants() -> None:
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.matched_home_alias == "Olympique Dcheira"
@@ -104,7 +104,7 @@ def test_live_state_match_accepts_accented_basketball_team_names() -> None:
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.matched_home_alias == "Fenerbahçe"
@@ -153,7 +153,7 @@ def test_live_state_match_ignores_basketball_club_and_sponsor_tokens() -> None:
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.game.source_event_id == "16074050"
@@ -193,7 +193,7 @@ def test_live_state_match_ignores_basketball_team_suffix() -> None:
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.game.source_event_id == "15916331"
@@ -231,7 +231,7 @@ def test_live_state_match_accepts_chinese_soccer_translation_variants() -> None:
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.game.source_event_id == "15552514"
@@ -269,7 +269,7 @@ def test_live_state_match_accepts_moroccan_soccer_name_variants() -> None:
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.game.source_event_id == "16037146"
@@ -307,7 +307,7 @@ def test_live_state_match_ignores_soccer_club_prefix_variants() -> None:
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.game.source_event_id == "14090463"
@@ -345,7 +345,7 @@ def test_live_state_match_accepts_basketball_location_suffix_variants() -> None:
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.game.source_event_id == "14381848"
@@ -383,7 +383,7 @@ def test_live_state_match_accepts_russian_soccer_transliteration_variants() -> N
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.game.source_event_id == "14036734"
@@ -421,7 +421,7 @@ def test_live_state_match_ignores_latin_american_club_prefix_variants() -> None:
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.game.source_event_id == "16083435"
@@ -459,7 +459,7 @@ def test_live_state_match_accepts_french_polynesia_table_tennis_alias() -> None:
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
     assert match.game.source_event_id == "16094584"
@@ -481,7 +481,7 @@ def test_best_live_state_match_reuses_market_text_across_many_games(monkeypatch)
 
     monkeypatch.setattr(live_state_module, "_market_text", counted_market_text)
 
-    match = live_state_module.best_sports_live_match(market, games)
+    match = live_state_module.best_live_match(market, games)
 
     assert match is not None
     assert calls == 1
@@ -650,8 +650,8 @@ def test_current_strategy_matches_wtt_table_tennis_live_state() -> None:
 
     assert match is not None
     assert match.game.source_event_id == "16094559"
-    assert match.payload["sports_live_match"]["matched_home_alias"] == "Austria"
-    assert match.payload["sports_live_match"]["matched_away_alias"] == "Italy"
+    assert match.payload["live_match"]["matched_home_alias"] == "Austria"
+    assert match.payload["live_match"]["matched_away_alias"] == "Italy"
     assert match.signal_allowed is False
     assert match.signal_reason == "sports_live_state_scheduled"
 
@@ -959,7 +959,7 @@ def test_live_state_match_rejects_same_teams_on_different_start_times() -> None:
         },
     )
 
-    assert match_sports_live_game(market, previous_game) is None
+    assert match_live_game(market, previous_game) is None
 
 
 def test_live_state_match_accepts_same_teams_on_matching_start_times() -> None:
@@ -993,7 +993,7 @@ def test_live_state_match_accepts_same_teams_on_matching_start_times() -> None:
         },
     )
 
-    assert match_sports_live_game(market, scheduled_game) is not None
+    assert match_live_game(market, scheduled_game) is not None
 
 
 def test_live_state_metadata_preserves_tennis_state() -> None:
@@ -1037,11 +1037,11 @@ def test_live_state_metadata_preserves_tennis_state() -> None:
         },
     )
 
-    match = match_sports_live_game(market, game)
+    match = match_live_game(market, game)
 
     assert match is not None
-    assert match.metadata()["sports_tail_game"]["tennis_state"]["total_games"] == 10
-    assert match.metadata()["sports_tail_game"]["tennis_state"]["serving_side"] == "away"
+    assert match.metadata()["live_game"]["tennis_state"]["total_games"] == 10
+    assert match.metadata()["live_game"]["tennis_state"]["serving_side"] == "away"
 
 
 def test_live_state_match_allows_tennis_adjacent_utc_date() -> None:
@@ -1075,7 +1075,7 @@ def test_live_state_match_allows_tennis_adjacent_utc_date() -> None:
         },
     )
 
-    assert match_sports_live_game(market, game) is not None
+    assert match_live_game(market, game) is not None
 
 
 def _market(slug: str) -> Market:

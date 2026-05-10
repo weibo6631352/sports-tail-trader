@@ -54,7 +54,7 @@ _TENNIS_EVENT_START_TOLERANCE = timedelta(hours=24)
 
 
 @dataclass(frozen=True, slots=True)
-class SportsLiveMarketMatch:
+class LiveMarketMatch:
     """外部比赛与 Polymarket market 的文本匹配结果。"""
 
     market: Market
@@ -67,8 +67,8 @@ class SportsLiveMarketMatch:
         """返回当前策略读取的入场 metadata。"""
 
         return {
-            "sports_tail_game": sports_tail_game_metadata(self.game),
-            "sports_live_match": {
+            "live_game": live_game_metadata(self.game),
+            "live_match": {
                 "source": self.game.source,
                 "source_event_id": self.game.source_event_id,
                 "score": self.score,
@@ -78,7 +78,7 @@ class SportsLiveMarketMatch:
         }
 
 
-def sports_tail_game_metadata(game: SportsLiveGame) -> dict[str, Any]:
+def live_game_metadata(game: SportsLiveGame) -> dict[str, Any]:
     """把通用直播比赛状态转换成体育扫尾策略的稳定 metadata。"""
 
     return {
@@ -107,21 +107,21 @@ def sports_tail_game_metadata(game: SportsLiveGame) -> dict[str, Any]:
     }
 
 
-def match_sports_live_game(market: Market, game: SportsLiveGame) -> SportsLiveMarketMatch | None:
+def match_live_game(market: Market, game: SportsLiveGame) -> LiveMarketMatch | None:
     """按队伍别名把一个外部比赛匹配到一个本地 market。
 
     这里不判断是否值得交易，只解决“这个比分属于哪个 market”的业务语义。
     """
 
     market_text = _market_text(market)
-    return _match_sports_live_game_from_market_text(market, game, market_text)
+    return _match_live_game_from_market_text(market, game, market_text)
 
 
-def _match_sports_live_game_from_market_text(
+def _match_live_game_from_market_text(
     market: Market,
     game: SportsLiveGame,
     market_text: str,
-) -> SportsLiveMarketMatch | None:
+) -> LiveMarketMatch | None:
     """使用已归一化 market 文本匹配单场比赛，避免批量匹配重复做文本清洗。"""
 
     market_start = _market_event_start_time(market)
@@ -152,7 +152,7 @@ def _match_sports_live_game_from_market_text(
         return None
     home_score = _alias_score(home_alias)
     away_score = _alias_score(away_alias)
-    return SportsLiveMarketMatch(
+    return LiveMarketMatch(
         market=market,
         game=game,
         score=home_score + away_score,
@@ -161,17 +161,17 @@ def _match_sports_live_game_from_market_text(
     )
 
 
-def best_sports_live_match(
+def best_live_match(
     market: Market,
     games: tuple[SportsLiveGame, ...],
-) -> SportsLiveMarketMatch | None:
+) -> LiveMarketMatch | None:
     """返回 market 在当前比赛集合中的最高置信匹配。"""
 
     market_text = _market_text(market)
     matches = [
         match
         for game in games
-        if (match := _match_sports_live_game_from_market_text(market, game, market_text)) is not None
+        if (match := _match_live_game_from_market_text(market, game, market_text)) is not None
     ]
     if not matches:
         return None
@@ -187,18 +187,18 @@ def build_live_state_match(
 ) -> LiveStateMatch | None:
     """框架 hook ``match_live_state`` 的策略侧实现：返回强类型 LiveStateMatch。
 
-    ``payload`` 由 ``SportsLiveMarketMatch.metadata()`` 给出（含游戏快照 + match 信息），
+    ``payload`` 由 ``LiveMarketMatch.metadata()`` 给出（含游戏快照 + match 信息），
     framework 不解释字段语义，admin/UI 可整体透传。
-    ``signal_allowed/reason`` 由 ``sports_tail_entry_signal_gate`` 决定，可被 bypass_resolver
+    ``signal_allowed/reason`` 由 ``entry_signal_gate`` 决定，可被 bypass_resolver
     在 ``market_end_too_far`` 情况下放行。
     """
 
-    match = best_sports_live_match(market, games)
+    match = best_live_match(market, games)
     if match is None:
         return None
     matched_market = match.market
     game = match.game
-    signal_allowed, signal_reason = sports_tail_entry_signal_gate(
+    signal_allowed, signal_reason = entry_signal_gate(
         matched_market,
         game,
         market_end_horizon_seconds=market_end_horizon_seconds,
@@ -219,7 +219,7 @@ def build_live_state_match(
     )
 
 
-def sports_tail_entry_signal_gate(
+def entry_signal_gate(
     market: Market,
     game: SportsLiveGame,
     *,

@@ -525,10 +525,10 @@ def _rejection(
         "plan_ready": None if plan is None else plan.ready_to_trade,
         "plan_reason": None if plan is None else plan.reason,
         "action": None if summary is None else (summary.action or None),
-        "sports_reason": None if summary is None else (summary.reason or None),
-        "sports_risk_reason": extras.get("sports_risk_reason"),
+        "summary_reason": None if summary is None else (summary.reason or None),
+        "risk_reason": extras.get("risk_reason"),
         "execution_permission": extras.get("execution_permission"),
-        "market_family": extras.get("sports_market_family"),
+        "market_family": extras.get("market_family"),
         "market_type": None if summary is None else (summary.market_type or None),
         "game_status": extras.get("game_status"),
         "best_ask": None if summary is None or summary.best_ask is None else str(summary.best_ask),
@@ -574,7 +574,7 @@ def _record_plan(opportunity_funnel: dict[str, Any], plan: EntryPlan) -> None:
         opportunity_funnel["plan_ready_count"] += 1
     if action == "auto_execute":
         opportunity_funnel["auto_execute_count"] += 1
-    _increment_count(opportunity_funnel["market_family_counts"], extras.get("sports_market_family"))
+    _increment_count(opportunity_funnel["market_family_counts"], extras.get("market_family"))
     _increment_count(opportunity_funnel["market_type_counts"], None if summary is None else summary.market_type)
     _increment_count(opportunity_funnel["game_status_counts"], extras.get("game_status"))
     _increment_count(opportunity_funnel["action_counts"], action or None)
@@ -628,9 +628,10 @@ def _selection_is_better(candidate: _CandidateSelection, current: _CandidateSele
 
 
 def _selection_rank(selection: _CandidateSelection) -> tuple[int, int, int, str]:
-    metadata = dict(selection.plan.metadata or {}) if selection.plan is not None else {}
-    family = str(metadata.get("sports_market_family") or metadata.get("market_family") or "")
-    game_status = str(metadata.get("game_status") or "")
+    summary = None if selection.plan is None else selection.plan.summary
+    extras = dict(summary.extras) if summary is not None else {}
+    family = str(extras.get("market_family") or "")
+    game_status = str(extras.get("game_status") or "")
     reason = str(selection.reason or "")
     family_rank = 0 if family == "single_game" else (1 if family else 2)
     return (family_rank, _game_status_rank(game_status), _reason_diagnostic_rank(reason), reason)

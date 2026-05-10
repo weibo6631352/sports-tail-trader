@@ -19,6 +19,7 @@ from polymarket_trader.extension_api import (
 )
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
 from polymarket_trader.extension_api.recorder import DecisionRecorder
+from polymarket_trader.extension_api.summary import StrategySummary
 from polymarket_trader.observability.trace import ensure_trace_id
 from polymarket_trader.runtime.decision_recorder import build_decision_record
 from polymarket_trader.runtime.registry import MarketRegistry
@@ -191,6 +192,16 @@ class EntryPlanner:
                 )
                 if intent is None and decision.reason:
                     reason = decision.reason
+
+        # allocation 阶段被拒（无 allocation 或 buy_budget <= 0），decide_entry 没被调用
+        # → summary 此时为 None，但策略 size_entry 返回的 metadata（sizing.metadata）
+        # 含 market_family/market_type 等诊断信息，把它们投到 summary.extras 让
+        # admin/virtual_paper 能看到非 single_game 早期拒绝的可观测性。
+        if summary is None and (sizing.metadata or reason):
+            summary = _build_unavailable_summary(
+                reason=reason,
+                sizing_extras=sizing.metadata,
+            )
 
         return EntryPlan(
             trace_id=trace_id,
@@ -458,7 +469,9 @@ def _unavailable_entry_plan(
     portfolio_budget_usdc: Decimal,
     reason: str,
     metadata: Mapping[str, Any] | None = None,
+    sizing_extras: Mapping[str, Any] | None = None,
 ) -> EntryPlan:
+    summary = _build_unavailable_summary(reason=reason, sizing_extras=sizing_extras)
     return EntryPlan(
         trace_id=trace_id,
         market=market,
@@ -472,8 +485,29 @@ def _unavailable_entry_plan(
         intent=None,
         eligible_market_count=0,
         reason=reason,
+        summary=summary,
         metadata=metadata or {},
     )
+
+
+def _build_unavailable_summary(
+    *,
+    reason: str,
+    sizing_extras: Mapping[str, Any] | None = None,
+) -> StrategySummary | None:
+    """把 framework 已知的早期拒绝上下文投影成最小 StrategySummary。
+
+    framework 不解释字段语义——sizing_extras 是策略 size_entry hook 返回的
+    metadata，原样搬到 ``extras``，让 admin / virtual_paper 能展示 / 统计
+    非-single_game 早期拒绝的诊断信息。
+    """
+
+    extras: dict[str, Any] = {}
+    if sizing_extras:
+        extras.update(dict(sizing_extras))
+    if not extras and not reason:
+        return None
+    return StrategySummary(reason=reason, extras=extras)
 
 
 def _open_orders_for(
