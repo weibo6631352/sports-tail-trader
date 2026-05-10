@@ -106,6 +106,68 @@ class CurrentStrategy:
 
         return self
 
+    def validate_config(self, settings: Any) -> tuple[Any, ...]:
+        """在框架启动期校验策略侧配置是否足以正常运行。
+
+        与 ``Settings.validate_startup_readiness()`` 互补：框架那一侧已经检查
+        了金额、密钥、扩展模块路径等通用配置；这里集中检查“当前策略本身需要
+        的最小可执行集”，避免上线后才发现 discovery 列表被清空、permission
+        和预算之间不一致这类启动期可暴露的问题。
+        """
+
+        from polymarket_trader.config import ConfigIssue
+
+        issues: list[ConfigIssue] = []
+
+        if not self._config.discovery_title_searches and not self._config.discovery_tag_slugs:
+            issues.append(
+                ConfigIssue(
+                    field="discovery_title_searches",
+                    code="empty_strategy_discovery",
+                    message="策略未配置任何 discovery 搜索词或 tag slug，远端 discovery 将拿不到候选市场",
+                )
+            )
+
+        if not self._config.sports_enabled_market_types:
+            issues.append(
+                ConfigIssue(
+                    field="sports_enabled_market_types",
+                    code="empty_enabled_market_types",
+                    message="策略未启用任何体育盘口类型，体育扫尾入场将永远 SKIP",
+                )
+            )
+
+        auto_permissions = {
+            "totals": self._config.sports_totals_execution_permission,
+            "moneyline": self._config.sports_moneyline_execution_permission,
+            "spreads": self._config.sports_spreads_execution_permission,
+        }
+        any_auto = any(
+            permission.value == "auto_execute" for permission in auto_permissions.values()
+        )
+        if any_auto and getattr(settings, "portfolio_budget_usdc", Decimal("0")) <= Decimal("0"):
+            issues.append(
+                ConfigIssue(
+                    field="portfolio_budget_usdc",
+                    code="auto_execute_requires_portfolio_budget",
+                    message="策略至少有一类盘口为 auto_execute，但 PORTFOLIO_BUDGET_USDC 不大于 0",
+                )
+            )
+
+        if (
+            self._config.sports_scale_in_max_buy_fills > 1
+            and self._config.sports_scale_in_budget_fraction <= Decimal("0")
+        ):
+            issues.append(
+                ConfigIssue(
+                    field="sports_scale_in_budget_fraction",
+                    code="invalid_scale_in_budget",
+                    message="允许加仓但 sports_scale_in_budget_fraction <= 0，加仓预算永远为 0",
+                )
+            )
+
+        return tuple(issues)
+
     @property
     def ports(self) -> ExtensionPorts:
         """暴露框架注入的应用层端口。

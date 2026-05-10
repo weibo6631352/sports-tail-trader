@@ -25,6 +25,21 @@ class BusinessExtension(Protocol):
     def hooks(self) -> ExtensionHooks: ...
 
 
+@runtime_checkable
+class ConfigValidator(Protocol):
+    """扩展可选实现：在框架启动期对策略侧配置进行联合校验。
+
+    框架已经在 ``Settings.validate_startup_readiness()`` 中检查了金额、密钥、
+    扩展模块路径等通用配置；扩展实现该协议后，可以在 ``build_runtime`` 阶段
+    额外校验“策略本身是否能正常工作所需要的最小配置”，例如 discovery_queries
+    是否非空、scale-in 参数是否合理等。
+
+    返回的每条 ``ConfigIssue`` 都视为阻塞启动；空元组表示通过。
+    """
+
+    def validate_config(self, settings: Any) -> "tuple[Any, ...]": ...
+
+
 class ExtensionFactory(Protocol):
     def __call__(
         self,

@@ -213,6 +213,22 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
     )
 
 
+def _validate_extension_config(extension: Any, settings: Settings) -> tuple[ConfigIssue, ...]:
+    """如扩展实现了 ConfigValidator 协议，则在启动期收集其拒绝原因。
+
+    与 ``Settings.validate_startup_readiness`` 互补：把策略侧的最小可执行集
+    校验（比如 discovery 列表是否为空）也前移到启动期，避免上线后才暴露。
+    """
+
+    validate = getattr(extension, "validate_config", None)
+    if not callable(validate):
+        return ()
+    issues = validate(settings)
+    if not issues:
+        return ()
+    return tuple(issues)
+
+
 def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     settings = settings or load_settings()
     readiness = settings.validate_startup_readiness()
@@ -284,6 +300,9 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         ports=extension_ports,
         config_path=settings.extension_config_path,
     )
+    extension_issues = _validate_extension_config(extension, settings)
+    if extension_issues:
+        raise ConfigLoadError(list(extension_issues))
     execution_client = (
         PolymarketOrderExecutionClient(trading_client)
         if trading_client is not None
