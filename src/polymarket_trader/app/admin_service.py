@@ -841,6 +841,7 @@ class AdminService:
         offset: int = 0,
         prefix: str | None = None,
         include_future_schedule: bool = False,
+        now: datetime | None = None,
     ) -> dict[str, Any]:
         """诊断已跟踪市场中缺少体育直播状态的覆盖缺口。
 
@@ -874,7 +875,8 @@ class AdminService:
                 if "sports_tail_game" in record.metadata and record.condition_id in scoped_condition_ids
             )
         )
-        now = datetime.now(timezone.utc)
+        if now is None:
+            now = datetime.now(timezone.utc)
         missing_markets = []
         deferred_future_schedule_count = 0
         normalized_prefix = None if prefix is None else prefix.strip().lower()
