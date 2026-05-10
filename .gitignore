@@ -17,7 +17,6 @@ frontend/dist/
 .dev-runtime/
 .playwright-cli/
 .worktrees/
-.frontend-test-build/
 
 # Local build packages
 .dist-packages/
