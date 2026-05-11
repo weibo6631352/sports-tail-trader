@@ -95,6 +95,199 @@ def test_parser_returns_no_cricket_state_for_non_cricket_league() -> None:
     assert games[0].cricket_state is None
 
 
+def test_parser_handles_string_stat_values_and_target() -> None:
+    """ESPN 实际返回 statistics value 可能是字符串；target 也常以字符串携带。"""
+
+    payload = {
+        "events": [
+            {
+                "id": "1",
+                "status": {"type": {"state": "in"}, "period": 1},
+                "competitions": [
+                    {
+                        "competitors": [
+                            {
+                                "homeAway": "home",
+                                "score": "210",
+                                "team": {"displayName": "India"},
+                                "statistics": [
+                                    {"name": "wickets", "value": "5", "displayValue": "5"},
+                                    {"name": "overs", "value": "30", "displayValue": "30"},
+                                ],
+                            },
+                            {"homeAway": "away", "score": "0", "team": {"displayName": "England"}},
+                        ],
+                        "situation": {
+                            "batting": {"displayName": "India"},
+                            "targetRuns": "275",
+                            "requiredRuns": "65",
+                            "requiredBalls": "120",
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+    games = parse_espn_scoreboard_payload(payload, league="intl-odi")
+    state = games[0].cricket_state
+    assert state is not None
+    assert state.wickets == 5
+    assert state.overs_completed == 30
+    assert state.balls_in_over == 0  # "30" 整数形式 → balls_in_over=0
+    assert state.target == 275
+    assert state.required_runs == 65
+    assert state.required_balls == 120
+
+
+def test_parser_handles_invalid_overs_format_safely() -> None:
+    payload = {
+        "events": [
+            {
+                "id": "1",
+                "status": {"type": {"state": "in"}},
+                "competitions": [
+                    {
+                        "competitors": [
+                            {
+                                "homeAway": "home",
+                                "score": "100",
+                                "team": {"displayName": "India"},
+                                "statistics": [
+                                    {"name": "overs", "value": "garbage", "displayValue": "garbage"},
+                                    {"name": "wickets", "value": 3},
+                                ],
+                            },
+                            {"homeAway": "away", "score": "0", "team": {"displayName": "Sri Lanka"}},
+                        ],
+                        "situation": {"batting": {"displayName": "India"}},
+                    }
+                ],
+            }
+        ]
+    }
+    games = parse_espn_scoreboard_payload(payload, league="intl-test")
+    state = games[0].cricket_state
+    assert state is not None
+    assert state.wickets == 3
+    assert state.overs_completed is None
+    assert state.balls_in_over is None
+
+
+def test_parser_rejects_invalid_balls_in_over() -> None:
+    """每个 over 仅 6 个合法球，>5 视为非法 → balls_in_over=None。"""
+
+    payload = {
+        "events": [
+            {
+                "id": "1",
+                "status": {"type": {"state": "in"}},
+                "competitions": [
+                    {
+                        "competitors": [
+                            {
+                                "homeAway": "home",
+                                "score": "100",
+                                "team": {"displayName": "India"},
+                                "statistics": [
+                                    {"name": "overs", "value": "12.9", "displayValue": "12.9"},
+                                ],
+                            },
+                            {"homeAway": "away", "score": "0", "team": {"displayName": "Sri Lanka"}},
+                        ],
+                        "situation": {"batting": {"displayName": "India"}},
+                    }
+                ],
+            }
+        ]
+    }
+    games = parse_espn_scoreboard_payload(payload, league="intl-t20i")
+    state = games[0].cricket_state
+    assert state is not None
+    assert state.overs_completed == 12
+    assert state.balls_in_over is None  # 9 > 5 → 拒绝
+
+
+def test_parser_returns_none_state_when_only_innings_known() -> None:
+    """没有 situation.batting / runs / wickets / overs / target 时不能伪造 cricket
+    state；inning 数字孤立不构成可决策态，返回 None。
+    """
+
+    payload = {
+        "events": [
+            {
+                "id": "1",
+                "status": {"type": {"state": "in"}},
+                "competitions": [
+                    {
+                        "competitors": [
+                            {"homeAway": "home", "score": "100", "team": {"displayName": "India"}},
+                            {"homeAway": "away", "score": "85", "team": {"displayName": "Pakistan"}},
+                        ],
+                        "situation": {"currentInnings": 2},
+                    }
+                ],
+            }
+        ]
+    }
+    games = parse_espn_scoreboard_payload(payload, league="intl-t20i")
+    assert games[0].cricket_state is None
+
+
+def test_parser_handles_competitors_not_sequence() -> None:
+    """少见错误 payload：competitors 字段是 mapping 而非 sequence。"""
+
+    payload = {
+        "events": [
+            {
+                "id": "1",
+                "status": {"type": {"state": "in"}},
+                "competitions": [
+                    {
+                        "competitors": {"unexpected": "shape"},
+                    }
+                ],
+            }
+        ]
+    }
+    games = parse_espn_scoreboard_payload(payload, league="intl-test")
+    # 没有 home/away → _parse_event 返回 None
+    assert games == ()
+
+
+def test_parser_handles_statistics_with_missing_name_key() -> None:
+    payload = {
+        "events": [
+            {
+                "id": "1",
+                "status": {"type": {"state": "in"}},
+                "competitions": [
+                    {
+                        "competitors": [
+                            {
+                                "homeAway": "home",
+                                "score": "50",
+                                "team": {"displayName": "India"},
+                                "statistics": [
+                                    {"value": 3},  # 无 name
+                                    {"name": None, "value": 99},
+                                    {"name": "wickets", "value": 1},
+                                ],
+                            },
+                            {"homeAway": "away", "score": "0", "team": {"displayName": "Nepal"}},
+                        ],
+                        "situation": {"batting": {"displayName": "India"}},
+                    }
+                ],
+            }
+        ]
+    }
+    games = parse_espn_scoreboard_payload(payload, league="intl-test")
+    state = games[0].cricket_state
+    assert state is not None
+    # 跳过 missing-name 项，wickets=1 正确提取
+    assert state.wickets == 1
+
+
 def test_parser_omits_state_when_no_cricket_signals() -> None:
     payload = {
         "events": [

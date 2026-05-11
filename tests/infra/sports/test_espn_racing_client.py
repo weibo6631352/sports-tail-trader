@@ -77,6 +77,214 @@ def test_parser_extracts_race_with_leader_and_laps() -> None:
     assert race.source_payload["venue"] == "Circuit de Monaco"
 
 
+def test_parser_falls_back_to_lowest_position_when_no_competitor_marked_leader_1() -> None:
+    """当没有任何 competitor.status.position == 1（比如赛前数据），按最小 position
+    选 leader 兜底。"""
+
+    payload = {
+        "events": [
+            {
+                "id": "r1",
+                "name": "Bahrain GP",
+                "status": {"type": {"state": "in"}, "period": 1},
+                "competitions": [
+                    {
+                        "lapsCompleted": 5,
+                        "totalLaps": 57,
+                        "competitors": [
+                            {
+                                "athlete": {"displayName": "Lewis Hamilton"},
+                                "team": {"displayName": "Ferrari"},
+                                "status": {"position": 3},
+                            },
+                            {
+                                "athlete": {"displayName": "George Russell"},
+                                "team": {"displayName": "Mercedes"},
+                                "status": {"position": 2},
+                            },
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    races = parse_espn_race_payload(payload, league="f1")
+    assert races[0].leader_driver == "George Russell"
+    assert races[0].leader_team == "Mercedes"
+
+
+def test_parser_falls_back_to_competitor_displayname_when_no_athlete() -> None:
+    payload = {
+        "events": [
+            {
+                "id": "r1",
+                "status": {"type": {"state": "in"}},
+                "competitions": [
+                    {
+                        "competitors": [
+                            # 没有 athlete 字段，但 competitor 自带 displayName
+                            {"displayName": "Car #24", "status": {"position": 1}},
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    races = parse_espn_race_payload(payload, league="nascar")
+    assert len(races) == 1
+    driver = races[0].drivers[0]
+    assert driver.driver == "Car #24"
+    assert races[0].leader_driver == "Car #24"
+
+
+def test_parser_drops_driver_with_no_name() -> None:
+    """athlete 和 competitor 都没有名字 → 该 competitor 被跳过。"""
+
+    payload = {
+        "events": [
+            {
+                "id": "r1",
+                "status": {"type": {"state": "in"}},
+                "competitions": [
+                    {
+                        "competitors": [
+                            {"athlete": {}, "status": {"position": 1}},  # 无名
+                            {"athlete": {"displayName": "Max V."}, "status": {"position": 2}},
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    races = parse_espn_race_payload(payload, league="f1")
+    drivers = races[0].drivers
+    assert len(drivers) == 1
+    assert drivers[0].driver == "Max V."
+    # leader 兜底找最小 position 的有效 driver
+    assert races[0].leader_driver == "Max V."
+
+
+def test_parser_handles_competitions_not_sequence() -> None:
+    payload = {
+        "events": [
+            {
+                "id": "r1",
+                "competitions": {"oops": "mapping"},
+            }
+        ]
+    }
+    assert parse_espn_race_payload(payload, league="f1") == ()
+
+
+def test_parser_uses_event_status_when_competition_status_missing() -> None:
+    payload = {
+        "events": [
+            {
+                "id": "r1",
+                "status": {"type": {"state": "in"}, "flagState": "yellow"},
+                "competitions": [
+                    {
+                        "competitors": [
+                            {"athlete": {"displayName": "X"}, "status": {"position": 1}},
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    races = parse_espn_race_payload(payload, league="f1")
+    assert races[0].status == SportsLiveGameStatus.LIVE
+    assert races[0].status_flag == "yellow"
+
+
+def test_parser_falls_back_to_competition_status_when_event_status_missing() -> None:
+    payload = {
+        "events": [
+            {
+                "id": "r1",
+                "competitions": [
+                    {
+                        "status": {"type": {"state": "post"}},
+                        "competitors": [
+                            {"athlete": {"displayName": "X"}, "status": {"position": 1}},
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    races = parse_espn_race_payload(payload, league="nascar")
+    assert races[0].status == SportsLiveGameStatus.ENDED
+
+
+def test_parser_uses_league_uppercase_when_no_event_name() -> None:
+    payload = {
+        "events": [
+            {
+                "id": "r1",
+                "status": {"type": {"state": "in"}},
+                "competitions": [
+                    {"competitors": [{"athlete": {"displayName": "X"}, "status": {"position": 1}}]},
+                ],
+            }
+        ]
+    }
+    races = parse_espn_race_payload(payload, league="indycar")
+    assert races[0].event_name == "INDYCAR"
+
+
+def test_parser_handles_venue_not_mapping() -> None:
+    payload = {
+        "events": [
+            {
+                "id": "r1",
+                "status": {"type": {"state": "in"}},
+                "competitions": [
+                    {
+                        "venue": "Silverstone",  # 不是 mapping
+                        "competitors": [{"athlete": {"displayName": "X"}, "status": {"position": 1}}],
+                    }
+                ],
+            }
+        ]
+    }
+    races = parse_espn_race_payload(payload, league="f1")
+    assert races[0].source_payload["venue"] is None
+
+
+def test_parser_ignores_malformed_competitors() -> None:
+    payload = {
+        "events": [
+            {
+                "id": "r1",
+                "status": {"type": {"state": "in"}},
+                "competitions": [
+                    {
+                        "competitors": [
+                            "not-a-mapping",
+                            {"athlete": {"displayName": "Valid"}, "status": {"position": 1}},
+                            42,
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    races = parse_espn_race_payload(payload, league="f1")
+    drivers = races[0].drivers
+    assert len(drivers) == 1
+    assert drivers[0].driver == "Valid"
+
+
+def test_parser_handles_event_not_mapping_in_events_list() -> None:
+    """payload.events 内混入非 mapping 元素时跳过。"""
+
+    payload = {"events": [None, "garbage", 42, {"id": "valid", "status": {"type": {"state": "in"}}, "competitions": [{"competitors": [{"athlete": {"displayName": "V"}, "status": {"position": 1}}]}]}]}
+    races = parse_espn_race_payload(payload, league="f1")
+    assert len(races) == 1
+    assert races[0].source_event_id == "valid"
+
+
 def test_parser_returns_empty_for_no_events() -> None:
     assert parse_espn_race_payload({}, league="f1") == ()
     assert parse_espn_race_payload({"events": []}, league="nascar") == ()

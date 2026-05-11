@@ -208,6 +208,57 @@ class CurrentStrategy:
                 )
             )
 
+        # Outright 数值不变式：发现明显非法配置时启动期就拒绝，避免运行时
+        # 才暴露（默认值都合法，所以下列检查只在用户主动改 settings 后命中）。
+        if self._config.tail_outright_budget_usdc < Decimal("0"):
+            issues.append(
+                ConfigIssue(
+                    field="tail_outright_budget_usdc",
+                    code="negative_outright_budget",
+                    message="tail_outright_budget_usdc 不能为负数",
+                )
+            )
+        if self._config.tail_outright_min_edge_bps < 0 or self._config.tail_outright_min_edge_bps > 10000:
+            issues.append(
+                ConfigIssue(
+                    field="tail_outright_min_edge_bps",
+                    code="invalid_outright_min_edge",
+                    message="tail_outright_min_edge_bps 必须在 [0, 10000] 范围内（0~100%）",
+                )
+            )
+        if self._config.tail_outright_max_entry_price <= Decimal("0") or self._config.tail_outright_max_entry_price >= Decimal("1"):
+            issues.append(
+                ConfigIssue(
+                    field="tail_outright_max_entry_price",
+                    code="invalid_outright_max_entry_price",
+                    message="tail_outright_max_entry_price 必须严格落在 (0, 1) 区间",
+                )
+            )
+        if self._config.tail_outright_max_per_market_usdc <= Decimal("0"):
+            issues.append(
+                ConfigIssue(
+                    field="tail_outright_max_per_market_usdc",
+                    code="invalid_outright_per_market_cap",
+                    message="tail_outright_max_per_market_usdc 必须大于 0",
+                )
+            )
+        if self._config.tail_outright_season_odds_ttl_seconds > self._config.tail_outright_max_season_odds_age_seconds:
+            issues.append(
+                ConfigIssue(
+                    field="tail_outright_season_odds_ttl_seconds",
+                    code="ttl_exceeds_max_age",
+                    message="tail_outright_season_odds_ttl_seconds 不能大于 tail_outright_max_season_odds_age_seconds，否则缓存命中即过期",
+                )
+            )
+        if self._config.tail_outright_max_hold_horizon_days <= 0:
+            issues.append(
+                ConfigIssue(
+                    field="tail_outright_max_hold_horizon_days",
+                    code="invalid_outright_horizon",
+                    message="tail_outright_max_hold_horizon_days 必须大于 0",
+                )
+            )
+
         # Outright AUTO_EXECUTE 必须前置数据源：缺 season state 或缺 odds api key 时拒绝启动。
         outright_permission = self._config.tail_outright_execution_permission.value
         outright_budget = self._config.tail_outright_budget_usdc
@@ -232,6 +283,19 @@ class CurrentStrategy:
                         message=(
                             "tail_outright_execution_permission=AUTO_EXECUTE 且 budget>0，"
                             "必须配置 SPORTS_SEASON_ODDS_API_KEY 以提供反向定价基准"
+                        ),
+                    )
+                )
+            if outright_budget < self._config.tail_outright_max_per_market_usdc:
+                # 单市场上限大于总预算时永远凑不出第二笔 outright 入场，且首单也会被
+                # check_outright_entry_risk 的 total_budget 检查在 proposed=per_market 时拒绝。
+                issues.append(
+                    ConfigIssue(
+                        field="tail_outright_budget_usdc",
+                        code="outright_budget_below_per_market_cap",
+                        message=(
+                            "tail_outright_budget_usdc 小于 tail_outright_max_per_market_usdc，"
+                            "AUTO_EXECUTE 模式下任何入场都会被 total_budget_exhausted 拒绝"
                         ),
                     )
                 )
