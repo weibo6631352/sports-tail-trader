@@ -830,6 +830,7 @@ def _register_runtime_workers(runtime: RuntimeComponents) -> None:
     if runtime.season_odds_worker is not None:
         runtime.supervisor.register_worker("sports_season_odds_sync", priority="P2")
     runtime.supervisor.register_worker("persistence", priority="P3")
+    runtime.supervisor.register_worker("audit_retention_purge", priority="P3")
 
 
 def _seed_default_metrics(runtime: RuntimeComponents) -> None:
@@ -1045,6 +1046,18 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         priority="P3",
         interval_seconds=300.0,
         tags=("settlement", "calibration"),
+        start=True,
+        run_immediately=False,
+    )
+    # audit_events 保留期清理——每天跑一次 DELETE WHERE created_at < cutoff，
+    # 让 audit 表稳态在 retention_days 内的数据量。retention_days=0 时仍注册
+    # job，但 purge_audit_events_once 会直接 skipped 不实际删除（运维显式关闭语义）。
+    runtime.scheduler.register_job(
+        "audit_retention_purge",
+        lambda: _run_audit_retention_purge(runtime),
+        priority="P3",
+        interval_seconds=float(runtime.settings.audit_retention_interval_seconds),
+        tags=("audit", "retention", "persistence"),
         start=True,
         run_immediately=False,
     )
@@ -1319,6 +1332,29 @@ async def _record_account_snapshot(runtime: RuntimeComponents) -> None:
             "account snapshot recorder failed",
             extra={"reason": str(exc)},
         )
+
+
+async def _run_audit_retention_purge(runtime: RuntimeComponents) -> None:
+    """每天清理一次 audit_events 表中超出保留期的行。
+
+    P3 后台任务——所有 DB 异常都在 purge_audit_events_once 内部 catch + 日志。
+    """
+
+    from polymarket_trader.app.audit_retention import purge_audit_events_once
+
+    summary = await purge_audit_events_once(
+        runtime.db_session_factory,
+        retention_days=runtime.settings.audit_retention_days,
+        batch_size=runtime.settings.audit_retention_purge_batch_size,
+    )
+    runtime.supervisor.heartbeat_worker(
+        "audit_retention_purge",
+        detail=(
+            f"deleted={summary['deleted_rows']} batches={summary['batches']} "
+            f"cutoff={summary.get('cutoff') or '-'} "
+            f"skipped={summary['skipped']} err={'!' if summary['error'] else '-'}"
+        ),
+    )
 
 
 async def _run_settlement_scan(runtime: RuntimeComponents) -> None:
