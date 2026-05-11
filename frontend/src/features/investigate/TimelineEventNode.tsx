@@ -2,6 +2,7 @@ import { Badge, Group, Stack, Text } from '@mantine/core'
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
 import type { TimelineEvent } from '@core/api/types'
+import { narrowAuditEvent } from '@core/api/types'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { formatIso } from '@shared/format'
 import { formatDecimal, formatUsdc } from '@shared/format'
@@ -108,14 +109,16 @@ function renderBody(event: TimelineEvent): ReactNode {
         // 后端 sports_live_state_worker payload 结构：
         //   { source, observed_at, signal_allowed, signal_reason, phase, match_payload: {...} }
         // score / clock 等比赛细节嵌在 match_payload 内（strategy-defined）。
-        const payload = (event.full?.payload ?? {}) as Record<string, unknown>
-        const allowed = payload.signal_allowed as boolean | null | undefined
-        const phase = payload.phase as string | undefined
-        const reason = payload.signal_reason as string | undefined
-        const matchPayload = (payload.match_payload ?? {}) as Record<string, unknown>
-        const clockRaw = matchPayload.clock ?? payload.clock
+        const narrowed = event.full ? narrowAuditEvent(event.full) : null
+        const sportsPayload =
+          narrowed?.event_title === 'sports_live_state_recorded' ? narrowed.payload : null
+        const allowed = sportsPayload?.signal_allowed
+        const phase = sportsPayload?.phase ?? undefined
+        const reason = sportsPayload?.signal_reason ?? undefined
+        const matchPayload = sportsPayload?.match_payload ?? {}
+        const clockRaw = matchPayload.clock
         const clock = typeof clockRaw === 'string' ? clockRaw : null
-        const scoreRaw = matchPayload.score ?? payload.score
+        const scoreRaw = matchPayload.score
         const score =
           scoreRaw && typeof scoreRaw === 'object'
             ? JSON.stringify(scoreRaw).slice(0, 60)

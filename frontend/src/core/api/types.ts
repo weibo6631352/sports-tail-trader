@@ -808,7 +808,9 @@ export type TimelineAuditEvent = TimelineEventBase & {
   event_title?: string
   status?: string | null
   reason?: string | null
-  full?: Record<string, unknown>
+  /** 后端 trade timeline 把整条 audit_event 透传为 full；用 AuditEventRow 让 callsite
+   *  能直接走 narrowAuditEvent narrow 到具体 event_title payload schema。 */
+  full?: AuditEventRow
 }
 
 export type TimelineOutboxEvent = TimelineEventBase & {

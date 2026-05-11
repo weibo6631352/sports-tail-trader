@@ -91,8 +91,9 @@ export function SportsEventsPage() {
       header: 'score / clock',
       cell: ({ row }) => {
         // sports_live_state_worker payload: clock/score 在 match_payload 内（strategy-defined）。
-        const p = (row.original.payload ?? {}) as Record<string, unknown>
-        const matchPayload = (p.match_payload ?? {}) as Record<string, unknown>
+        // SportsLiveEvent.payload 已 typed 且带 [key: string]: unknown，p.clock / p.score 直接访问。
+        const p = row.original.payload ?? {}
+        const matchPayload = p.match_payload ?? {}
         const clockRaw = matchPayload.clock ?? p.clock
         const clock = typeof clockRaw === 'string' ? clockRaw : ''
         const scoreRaw = matchPayload.score ?? p.score
