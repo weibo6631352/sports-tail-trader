@@ -6,12 +6,13 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import re
 from typing import Any, Mapping
 
+from polymarket_trader.extension_api.lifecycle import LifecycleEvent as _LifecycleEvent
 from polymarket_trader.extension_api import (
     AccountSnapshotView,
     BusinessExtension,
@@ -29,8 +30,9 @@ from polymarket_trader.extension_api import (
     UniverseDecision,
 )
 
+from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.sports_live import SportsLiveGame
+from polymarket_trader.domain.sports_live import SportsLiveGame, TennisGameState
 
 from strategies.current.config import CurrentStrategyConfig, load_current_strategy_config
 from strategies.current.identity import STRATEGY_ID
@@ -41,10 +43,24 @@ from strategies.current.discovery import (
 from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata, exit_price_for_context
 from strategies.current.live_state import build_live_state_match
 from strategies.current.outcomes import describe_sports_market
+from strategies.current.outright import (
+    evaluate_outright_opportunity,
+    season_odds_from_metadata,
+)
 from strategies.current.recovery import decide_recovery
+from strategies.current.tail.types import ExecutionPermission as _ExecPerm
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
 from strategies.current.trading import decide_entry, decide_exit, size_entry
 from strategies.current.universe import select_market
+
+
+@dataclass(frozen=True, slots=True)
+class _MockTokenView:
+    """测试兜底 token view（生产路径 framework 注入真正的 MarketTokenView）。"""
+
+    token_id: str
+    outcome: str
+    orderbook: Any = None
 
 
 class CurrentStrategy:
@@ -82,6 +98,18 @@ class CurrentStrategy:
         self._ports = ports or ExtensionPorts()
         self._live_game_filter_cache_games_id: int | None = None
         self._live_game_filter_cache: dict[tuple[tuple[str, ...], str | None], tuple[SportsLiveGame, ...]] = {}
+        # 订阅 LIVE_STATE_NO_FEASIBLE_SOURCE：worker 一旦发现所有源都不健康，
+        # recovery 路径据此把 single_game 市场进入 sports_live_state_no_source 暂停。
+        self._live_state_no_feasible_source: bool = False
+        if self._ports.lifecycle is not None:
+            try:
+                self._ports.lifecycle.subscribe(
+                    _LifecycleEvent.LIVE_STATE_NO_FEASIBLE_SOURCE,
+                    self._on_live_state_no_feasible_source,
+                )
+            except Exception:
+                # 订阅失败不阻断 boot；缺少订阅时 recovery 退化到 stale-age 判断。
+                pass
         self._spec = ExtensionSpec(
             strategy_id=STRATEGY_ID,
             name="current",
@@ -179,6 +207,34 @@ class CurrentStrategy:
                 )
             )
 
+        # Outright AUTO_EXECUTE 必须前置数据源：缺 season state 或缺 odds api key 时拒绝启动。
+        outright_permission = self._config.tail_outright_execution_permission.value
+        outright_budget = self._config.tail_outright_budget_usdc
+        if outright_permission == "auto_execute" and outright_budget > Decimal("0"):
+            if not getattr(settings, "sports_season_state_enabled", False):
+                issues.append(
+                    ConfigIssue(
+                        field="sports_season_state_enabled",
+                        code="outright_auto_execute_requires_season_state",
+                        message=(
+                            "tail_outright_execution_permission=AUTO_EXECUTE 且 budget>0，"
+                            "必须同时启用 SPORTS_SEASON_STATE_ENABLED"
+                        ),
+                    )
+                )
+            api_key = getattr(settings, "sports_season_odds_api_key", None)
+            if api_key is None:
+                issues.append(
+                    ConfigIssue(
+                        field="sports_season_odds_api_key",
+                        code="outright_auto_execute_requires_odds_key",
+                        message=(
+                            "tail_outright_execution_permission=AUTO_EXECUTE 且 budget>0，"
+                            "必须配置 SPORTS_SEASON_ODDS_API_KEY 以提供反向定价基准"
+                        ),
+                    )
+                )
+
         return tuple(issues)
 
     @property
@@ -210,23 +266,228 @@ class CurrentStrategy:
         return build_live_game_discovery_queries(self._config, games)
 
     def size_entry(self, context: ExtensionContext) -> EntrySizing:
-        """为当前 market 生成入场预算分配结果。"""
+        """为当前 market 生成入场预算分配结果。
 
+        outright family 走独立预算包络 ``tail_outright_budget_usdc``，与 single_game
+        互不挤占。预算=0 时返回空 sizing；>0 时按 per-market 上限平分。
+        """
+
+        descriptor = describe_sports_market(context.market) if context.market else None
+        if descriptor is not None and descriptor.market_family.value == "outright":
+            return self._size_outright_entry(context)
         return size_entry(self._config, context)
 
-    def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
-        """根据盘口和预算生成 BUY 决策。"""
+    def _size_outright_entry(self, context: ExtensionContext) -> EntrySizing:
+        config = self._config
+        budget = config.tail_outright_budget_usdc
+        if budget <= Decimal("0"):
+            return EntrySizing(
+                allocation_plan=AllocationPlan(
+                    trace_id=context.trace_id,
+                    total_budget_usdc=budget,
+                    reason="outright_budget_zero",
+                ),
+                reason="outright_budget_zero",
+            )
+        return EntrySizing(
+            allocation_plan=AllocationPlan(
+                trace_id=context.trace_id,
+                total_budget_usdc=budget,
+                reason="outright_sizing",
+            ),
+            reason="outright_sizing",
+            metadata={
+                "outright_budget_usdc": str(budget),
+                "outright_per_market_usdc": str(
+                    min(budget, config.tail_outright_max_per_market_usdc)
+                ),
+            },
+        )
 
+    def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
+        """根据盘口和预算生成 BUY 决策。
+
+        按 ``descriptor.market_family`` 分派：
+        - SINGLE_GAME → 现有 tail 链路（live state + tail evaluator）
+        - OUTRIGHT → outright 子包评估（赛季隐含概率反向定价）
+
+        以上是 §9 必要的可审计建模：outright 不再静默拒绝，而是走 outright 评估器
+        输出可审计原因（缺数据、edge 不足等），或在 budget>0 + AUTO_EXECUTE 时
+        返回 BUY。
+        """
+
+        descriptor = describe_sports_market(context.market) if context.market else None
+        if descriptor is not None and descriptor.market_family.value == "outright":
+            return _enrich_decision(
+                self._decide_outright_entry(context),
+                default_kind=DecisionKind.ENTRY,
+            )
         return _enrich_decision(decide_entry(self._config, context), default_kind=DecisionKind.ENTRY)
+
+    def _decide_outright_entry(self, context: ExtensionContext) -> ExtensionDecision:
+        """outright 子包驱动的入场决策。
+
+        遍历每个 outcome 的 ``MarketTokenView``，对每个 token 跑一次评估器；
+        选 edge 最大的接受候选；都拒绝则返回最早出现的 reject 原因供审计。
+        """
+
+        market = context.market
+        if market is None:
+            return ExtensionDecision.skip(reason="outright_missing_market")
+        snapshot = season_odds_from_metadata(context.metadata or {})
+        token_views = tuple(context.market_token_views or ())
+        outcomes = tuple(getattr(market, "outcomes", ()) or ())
+        if not token_views and not outcomes:
+            return ExtensionDecision.skip(
+                reason="outright_missing_outcomes",
+                metadata={"market_family": "outright"},
+            )
+        # 框架真正驱动时 token_views 必填；测试场景下可能只给 outcomes，做兜底。
+        if not token_views:
+            token_views = tuple(
+                _MockTokenView(token_id=str(getattr(o, "token_id", "") or ""), outcome=getattr(o, "outcome", "") or "")
+                for o in outcomes
+            )
+        config = self._config
+        permission = config.tail_outright_execution_permission
+        # 双闸门：未到 AUTO_EXECUTE 或 budget=0 时，evaluator 仍跑但强制降级到 RECORD_ONLY 视图，
+        # 让管理面看到诊断但不会构造 BUY。
+        budget_unlocked = config.tail_outright_budget_usdc > Decimal("0")
+        effective_permission = (
+            permission if budget_unlocked else _ExecPerm.RECORD_ONLY
+        )
+        now = context.now or datetime.now(timezone.utc)
+        best_accept: tuple[Any, Any] | None = None  # (evaluation, token_view)
+        first_reject: Any | None = None
+        for token_view in token_views:
+            orderbook = getattr(token_view, "orderbook", None)
+            best_ask = getattr(orderbook, "best_ask", None) if orderbook is not None else None
+            buyable = (
+                orderbook.buyable_ask_depth(max_price=config.tail_outright_max_entry_price)
+                if orderbook is not None
+                else Decimal("0")
+            )
+            # buyable_ask_depth 返回的是 shares 数；按价格折算成 USDC 才能与 min_orderbook_depth_usdc 比较。
+            ask_for_calc = best_ask if best_ask is not None else Decimal("1")
+            buyable_usdc = buyable * ask_for_calc
+            evaluation = evaluate_outright_opportunity(
+                snapshot=snapshot,
+                market_slug=market.market_slug,
+                condition_id=market.condition_id,
+                outcome_label=getattr(token_view, "outcome", "") or "",
+                token_id=getattr(token_view, "token_id", ""),
+                best_ask=best_ask,
+                buyable_liquidity_usdc=buyable_usdc,
+                now=now,
+                max_season_odds_age_seconds=config.tail_outright_max_season_odds_age_seconds,
+                min_edge_bps=config.tail_outright_min_edge_bps,
+                max_entry_price=config.tail_outright_max_entry_price,
+                min_orderbook_depth_usdc=config.tail_outright_min_orderbook_depth_usdc,
+                exit_edge_target=config.tail_outright_exit_edge_target,
+                min_profit_per_share=config.tail_outright_min_profit_per_share,
+                execution_permission=effective_permission,
+            )
+            if evaluation.accepted:
+                edge = (evaluation.fair_value or Decimal(0)) - (best_ask or Decimal(0))
+                if best_accept is None or edge > best_accept[0][0]:
+                    best_accept = ((edge, evaluation), token_view)
+            elif first_reject is None:
+                first_reject = (evaluation, token_view)
+        if best_accept is None:
+            evaluation, token_view = first_reject if first_reject else (None, None)
+            if evaluation is None:
+                return ExtensionDecision.skip(
+                    reason="outright_no_candidates",
+                    metadata={"market_family": "outright"},
+                )
+            return ExtensionDecision.skip(
+                reason=evaluation.reason,
+                metadata={
+                    "market_family": "outright",
+                    "outright_action": evaluation.action.value,
+                    "outright_reject_reason": (
+                        evaluation.reject_reason.value if evaluation.reject_reason else None
+                    ),
+                    "outright_accepted": False,
+                    "outright_metadata": dict(evaluation.metadata),
+                },
+            )
+        (_edge, evaluation), token_view = best_accept
+        # 录单视图：被接受但 permission != AUTO_EXECUTE，返回 SKIP 携带 record 元数据。
+        if evaluation.action.value != "auto_execute":
+            return ExtensionDecision.skip(
+                reason=f"outright_{evaluation.action.value}",
+                metadata={
+                    "market_family": "outright",
+                    "outright_action": evaluation.action.value,
+                    "outright_accepted": True,
+                    "outright_metadata": dict(evaluation.metadata),
+                    "budget_unlocked": budget_unlocked,
+                },
+            )
+        # AUTO_EXECUTE：构造 BUY。预算/合约级 RiskManager 仍是最终门禁；本函数只生成 intent。
+        budget = config.tail_outright_budget_usdc
+        proposed_amount = min(budget, config.tail_outright_max_per_market_usdc)
+        if proposed_amount <= Decimal("0"):
+            return ExtensionDecision.skip(
+                reason="outright_budget_exhausted",
+                metadata={"market_family": "outright"},
+            )
+        return ExtensionDecision.buy(
+            reason=evaluation.reason,
+            token_id=evaluation.candidate.token_id if evaluation.candidate else None,
+            price=evaluation.entry_price_cap or Decimal("0.50"),
+            amount_usdc=proposed_amount,
+            market_slug=market.market_slug,
+            decision_kind=DecisionKind.ENTRY,
+            metadata={
+                "market_family": "outright",
+                "outright_metadata": dict(evaluation.metadata),
+                "outright_fair_value": str(evaluation.fair_value) if evaluation.fair_value else None,
+                "outright_exit_price_target": (
+                    str(evaluation.exit_price_target) if evaluation.exit_price_target else None
+                ),
+            },
+        )
+
+
 
     def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
         """根据持仓状态生成 SELL 决策。"""
 
         return _enrich_decision(decide_exit(self._config, context), default_kind=DecisionKind.EXIT)
 
-    def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:
-        """根据热状态生成恢复语义。"""
+    async def _on_live_state_no_feasible_source(self, envelope: Any) -> None:
+        """Lifecycle 回调：worker 报出"全源不可用"后，缓存为 True；后续可在重新可用
+        时由 LIVE_STATE_UPDATED 任意成功事件清回 False。"""
 
+        payload = getattr(envelope, "payload", None) or {}
+        statuses = payload.get("source_statuses") or ()
+        no_feasible = True
+        for status in statuses:
+            health = status.get("health") if isinstance(status, dict) else None
+            if health in {"success_with_live_data", "cached"}:
+                no_feasible = False
+                break
+        self._live_state_no_feasible_source = no_feasible
+
+    def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:
+        """根据热状态生成恢复语义。
+
+        额外路径：当 worker 已订阅到全源不可用信号时，对没有 live_game 但属于
+        single_game 家族的市场，主动暂停交易而不是默默放行。
+        """
+
+        if self._live_state_no_feasible_source:
+            descriptor = describe_sports_market(context.market) if context.market else None
+            family = descriptor.market_family.value if descriptor is not None else None
+            if family == "single_game":
+                return RecoveryDecision(
+                    reason="sports_live_state_no_source",
+                    actions=(),
+                    pause_trading=True,
+                    pause_reason="sports_live_state_no_source",
+                )
         recovery = decide_recovery(self._config, context)
         if not recovery.actions:
             return recovery
@@ -521,13 +782,12 @@ def _market_can_lock_before_tail_window(market: Market, game: SportsLiveGame, de
         return _totals_market_is_already_over(market, game, descriptor)
     if market_type != "moneyline" or not _is_tennis_set_winner_market(market):
         return False
-    state = game.source_payload.get("tennis_state")
-    if not isinstance(state, Mapping):
+    state = game.tennis_state
+    if state is None:
         return False
     set_number = _tennis_set_winner_number(market)
-    current_set = _int_value(state.get("current_set"))
-    set_scores = state.get("set_scores")
-    return set_number is not None and current_set is not None and current_set > set_number and bool(set_scores)
+    current_set = state.current_set
+    return set_number is not None and current_set is not None and current_set > set_number and bool(state.set_scores)
 
 
 def _market_has_live_tail_state(
@@ -542,8 +802,8 @@ def _market_has_live_tail_state(
     if status != "live":
         return False
     market_type = getattr(descriptor.market_type, "value", descriptor.market_type)
-    state = game.source_payload.get("tennis_state")
-    if isinstance(state, Mapping):
+    state = game.tennis_state
+    if state is not None:
         if market_type == "moneyline":
             if _is_tennis_set_winner_market(market):
                 return _tennis_set_winner_tail_state_reached(market, state)
@@ -572,25 +832,25 @@ def _baseball_tail_state_reached(state: Any) -> bool:
     return current_inning is not None and current_inning >= 9 and outs is not None and outs >= 2 and not occupied_bases
 
 
-def _tennis_moneyline_tail_state_reached(state: Mapping[str, Any]) -> bool:
-    home_games = _int_value(state.get("home_current_set_games"))
-    away_games = _int_value(state.get("away_current_set_games"))
-    home_sets = _int_value(state.get("home_sets_won"))
-    away_sets = _int_value(state.get("away_sets_won"))
-    if home_games is None or away_games is None or home_sets is None or away_sets is None:
+def _tennis_moneyline_tail_state_reached(state: TennisGameState) -> bool:
+    home_games = state.home_current_set_games
+    away_games = state.away_current_set_games
+    if home_games is None or away_games is None:
         return False
+    home_sets = state.home_sets_won
+    away_sets = state.away_sets_won
     if home_games >= 5 and home_games - away_games >= 2 and home_sets - away_sets >= 1:
         return True
     return away_games >= 5 and away_games - home_games >= 2 and away_sets - home_sets >= 1
 
 
-def _tennis_set_winner_tail_state_reached(market: Market, state: Mapping[str, Any]) -> bool:
+def _tennis_set_winner_tail_state_reached(market: Market, state: TennisGameState) -> bool:
     set_number = _tennis_set_winner_number(market)
-    current_set = _int_value(state.get("current_set"))
+    current_set = state.current_set
     if set_number is None or current_set != set_number:
         return False
-    home_games = _int_value(state.get("home_current_set_games"))
-    away_games = _int_value(state.get("away_current_set_games"))
+    home_games = state.home_current_set_games
+    away_games = state.away_current_set_games
     if home_games is None or away_games is None:
         return False
     return max(home_games, away_games) >= 5 and abs(home_games - away_games) >= 2
@@ -600,17 +860,12 @@ def _totals_market_is_already_over(market: Market, game: SportsLiveGame, descrip
     line = descriptor.line
     if line is None:
         return False
-    state = game.source_payload.get("tennis_state")
-    if isinstance(state, Mapping):
+    state = game.tennis_state
+    if state is not None:
         if _is_set_total_market_slug(market.market_slug):
-            current_set = _int_value(state.get("current_set"))
+            current_set = state.current_set
             return current_set is not None and current_set > line
-        total_games = _int_value(state.get("total_games"))
-        if total_games is None:
-            home_games = _int_value(state.get("home_total_games")) or 0
-            away_games = _int_value(state.get("away_total_games")) or 0
-            total_games = home_games + away_games
-        return total_games > line or _tennis_match_total_min_final_games_is_over(state, line)
+        return state.total_games > line or _tennis_match_total_min_final_games_is_over(state, line)
     return (game.home.score + game.away.score) > line
 
 
@@ -635,20 +890,18 @@ def _is_set_total_market_slug(slug: str) -> bool:
     return "set total" in text or "set totals" in text or "total sets" in text
 
 
-def _tennis_match_total_min_final_games_is_over(state: Mapping[str, Any], line: object) -> bool:
+def _tennis_match_total_min_final_games_is_over(state: TennisGameState, line: object) -> bool:
     """判断当前网球局面下，整场最低可能最终总局数是否已越过 totals 线。"""
 
-    home_total_games = _int_value(state.get("home_total_games")) or 0
-    away_total_games = _int_value(state.get("away_total_games")) or 0
-    current_home = _int_value(state.get("home_current_set_games"))
-    current_away = _int_value(state.get("away_current_set_games"))
+    current_home = state.home_current_set_games
+    current_away = state.away_current_set_games
     if current_home is None or current_away is None:
         return False
     minimum_current_set_games = _tennis_minimum_final_set_games(current_home, current_away)
     if minimum_current_set_games is None:
         return False
     current_games = current_home + current_away
-    already_counted_total = home_total_games + away_total_games
+    already_counted_total = state.home_total_games + state.away_total_games
     minimum_final_games = already_counted_total - current_games + minimum_current_set_games
     return minimum_final_games > line
 

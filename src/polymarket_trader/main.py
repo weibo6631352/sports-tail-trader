@@ -49,15 +49,19 @@ from polymarket_trader.infra.polymarket.order_executor import (
 )
 from polymarket_trader.infra.sports import (
     EspnScoreboardClient,
+    EspnStandingsClient,
     MlbStatsApiClient,
     NbaLiveScoreboardClient,
     NhlScoreApiClient,
+    PandascoreLiveClient,
     SofaScoreLiveClient,
     SportsLiveAggregateClient,
+    TheOddsApiClient,
     TheSportsDbLiveClient,
     sofascore_sports_for_leagues,
     thesportsdb_sports_for_leagues,
 )
+from polymarket_trader.storage.season_state_store import SeasonStateStore
 from polymarket_trader.logging import LoggingRuntime, configure_logging
 from polymarket_trader.observability.metrics import MetricsRegistry
 from polymarket_trader.runtime import (
@@ -91,6 +95,8 @@ from polymarket_trader.workers.market_ws import MarketWsWorker
 from polymarket_trader.workers.persistence import PersistenceWorker
 from polymarket_trader.workers.reconcile import ReconcileWorker
 from polymarket_trader.workers.sports_live_state_worker import SportsLiveStateWorker
+from polymarket_trader.workers.sports_season_odds_worker import SportsSeasonOddsWorker
+from polymarket_trader.workers.sports_season_state_worker import SportsSeasonStateWorker
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
 from polymarket_trader.workers.user_ws import UserWsWorker
 
@@ -149,6 +155,9 @@ class RuntimeComponents:
     admin_service: object | None = None
     sse_subscription_registry: SseSubscriptionRegistry | None = None
     bootstrap_summary: dict[str, Any] = field(default_factory=dict)
+    season_state_store: SeasonStateStore | None = None
+    season_state_worker: SportsSeasonStateWorker | None = None
+    season_odds_worker: SportsSeasonOddsWorker | None = None
 
 
 def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateClient:
@@ -216,6 +225,24 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
             )
             providers.append(("thesportsdb", thesportsdb_client.list_games))
             closers.append(thesportsdb_client.aclose)
+    if "pandascore" in source_codes:
+        token_secret = settings.sports_live_state_pandascore_token
+        token_value = token_secret.get_secret_value() if token_secret is not None else None
+        if token_value:
+            videogames = tuple(
+                slug.strip().lower()
+                for slug in settings.sports_live_state_pandascore_videogames.split(",")
+                if slug.strip()
+            )
+            pandascore_client = PandascoreLiveClient(
+                base_url=settings.sports_live_state_pandascore_base_url,
+                api_token=token_value,
+                videogame_slugs=videogames or None,
+                timeout_s=settings.sports_live_state_timeout_s,
+            )
+            providers.append(("pandascore", pandascore_client.list_games))
+            closers.append(pandascore_client.aclose)
+        # 缺 token 时不注册 provider；启动期校验里会有 warning，避免 source_statuses 每 5 秒重复报错。
     # 聚合器超时是“单个 provider 完整快照”的预算；像 ESPN/SofaScore 这类 provider
     # 内部会按多个 sport/league 拉取，预算需要高于单次 HTTP timeout，避免刚拿到部分
     # 实盘数据时被外层取消。各 provider 已并行隔离，放宽这里不会阻塞交易主链路。
@@ -224,6 +251,111 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
         providers=tuple(providers),
         closers=tuple(closers),
         provider_timeout_s=provider_timeout_s,
+        cooldown_base_s=settings.sports_live_state_health_cooldown_base_s,
+        eviction_s=settings.sports_live_state_health_eviction_s,
+    )
+
+
+def _build_season_state_worker(
+    settings: Settings,
+    *,
+    store: SeasonStateStore,
+    lifecycle_bus: Any,
+) -> SportsSeasonStateWorker | None:
+    """按 settings 装配 sports_season_state_worker；未启用时返回 None。"""
+
+    if not settings.sports_season_state_enabled:
+        return None
+    league_codes = tuple(
+        code.strip().lower()
+        for code in settings.sports_season_state_leagues.split(",")
+        if code.strip()
+    )
+    sources = {
+        code.strip().lower()
+        for code in settings.sports_season_state_sources.split(",")
+        if code.strip()
+    }
+    if "espn" not in sources or not league_codes:
+        return None
+    client = EspnStandingsClient(
+        leagues=league_codes,
+        timeout_s=settings.sports_season_state_timeout_s,
+    )
+    return SportsSeasonStateWorker(
+        snapshot_provider=client.fetch_snapshot,
+        store=store,
+        lifecycle_bus=lifecycle_bus,
+        enabled=True,
+        source="espn",
+        leagues=league_codes,
+    )
+
+
+def _build_season_odds_worker(
+    settings: Settings,
+    *,
+    registry: MarketRegistry,
+    entry_metadata_store: EntryMetadataStore,
+    extension: Any,
+) -> SportsSeasonOddsWorker | None:
+    """按 settings 装配 sports_season_odds_worker；缺 api_key 或未启用 outright 时返回 None。"""
+
+    token_secret = settings.sports_season_odds_api_key
+    api_key = token_secret.get_secret_value() if token_secret is not None else None
+    if not api_key or settings.sports_season_odds_provider != "theoddsapi":
+        return None
+    client = TheOddsApiClient(
+        api_key=api_key,
+        base_url=settings.sports_season_odds_base_url,
+        regions=tuple(
+            r.strip().lower()
+            for r in settings.sports_season_odds_regions.split(",")
+            if r.strip()
+        ),
+    )
+    hooks = getattr(extension, "hooks", extension)
+    select_market = getattr(hooks, "select_market", None)
+
+    def _is_outright(market: Any) -> bool:
+        if select_market is None:
+            return False
+        try:
+            decision = select_market(market)
+        except Exception:
+            return False
+        return bool(decision.selected) and decision.metadata.get("market_family") == "outright"
+
+    def _sport_key(market: Any) -> str | None:
+        # 简单映射：从 tags / category 推断。NBA/NHL/NFL/MLB 等明确 league 直接转 TheOddsAPI sport_key。
+        text = " ".join(filter(None, (
+            getattr(market, "category", None) or "",
+            *(getattr(market, "tags", ()) or ()),
+        ))).lower()
+        if "nba" in text or "basketball" in text:
+            return "basketball_nba"
+        if "nhl" in text or "hockey" in text:
+            return "icehockey_nhl"
+        if "nfl" in text or "american football" in text:
+            return "americanfootball_nfl"
+        if "mlb" in text or "baseball" in text:
+            return "baseball_mlb"
+        if "epl" in text or "premier league" in text:
+            return "soccer_epl"
+        return None
+
+    def _market_key(market: Any) -> str:
+        return getattr(market, "event_slug", None) or getattr(market, "market_slug", None) or ""
+
+    return SportsSeasonOddsWorker(
+        odds_client=client,
+        registry=registry,
+        entry_metadata_store=entry_metadata_store,
+        sport_key_for=_sport_key,
+        is_outright_market=_is_outright,
+        market_key_for=_market_key,
+        ttl_seconds=settings.sports_season_odds_ttl_seconds,
+        enabled=True,
     )
 
 
@@ -455,6 +587,18 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 leagues=settings.sports_live_state_league_codes,
                 publish_entry_signals=settings.sports_live_state_publish_entry_signals,
             )
+    season_state_store = SeasonStateStore()
+    season_state_worker = _build_season_state_worker(
+        settings,
+        store=season_state_store,
+        lifecycle_bus=lifecycle_bus,
+    )
+    season_odds_worker = _build_season_odds_worker(
+        settings,
+        registry=registry,
+        entry_metadata_store=entry_metadata_store,
+        extension=extension,
+    )
     scheduler = Scheduler()
     supervisor = Supervisor(
         event_bus=event_bus,
@@ -498,6 +642,9 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         market_discovery_scan=market_discovery_scan,
         sports_live_state_client=sports_live_state_client,
         sports_live_state_worker=sports_live_state_worker,
+        season_state_store=season_state_store,
+        season_state_worker=season_state_worker,
+        season_odds_worker=season_odds_worker,
         trading_decision_service=trading_decision_service,
         trading_service=trading_service,
         trading_decision_worker=trading_decision_worker,
@@ -638,6 +785,10 @@ def _register_runtime_workers(runtime: RuntimeComponents) -> None:
     runtime.supervisor.register_worker("reconcile", priority="P2")
     if runtime.sports_live_state_worker is not None:
         runtime.supervisor.register_worker("sports_live_state_sync", priority="P2")
+    if runtime.season_state_worker is not None:
+        runtime.supervisor.register_worker("sports_season_state_sync", priority="P2")
+    if runtime.season_odds_worker is not None:
+        runtime.supervisor.register_worker("sports_season_odds_sync", priority="P2")
     runtime.supervisor.register_worker("persistence", priority="P3")
 
 
@@ -803,6 +954,26 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
             priority="P2",
             interval_seconds=float(runtime.settings.sports_live_state_interval_seconds),
             tags=("sports_live_state",),
+            start=True,
+            run_immediately=True,
+        )
+    if runtime.season_state_worker is not None:
+        runtime.scheduler.register_job(
+            "sports_season_state_sync",
+            lambda: _run_sports_season_state_sync(runtime),
+            priority="P2",
+            interval_seconds=float(runtime.settings.sports_season_state_interval_seconds),
+            tags=("sports_season_state",),
+            start=True,
+            run_immediately=True,
+        )
+    if runtime.season_odds_worker is not None:
+        runtime.scheduler.register_job(
+            "sports_season_odds_sync",
+            lambda: _run_sports_season_odds_sync(runtime),
+            priority="P2",
+            interval_seconds=float(runtime.settings.sports_season_odds_interval_seconds),
+            tags=("sports_season_odds",),
             start=True,
             run_immediately=True,
         )
@@ -1029,6 +1200,53 @@ async def _run_sports_live_state_sync(runtime: RuntimeComponents) -> None:
             ),
         )
     _sync_runtime_metrics(runtime)
+
+
+async def _run_sports_season_state_sync(runtime: RuntimeComponents) -> None:
+    worker = runtime.season_state_worker
+    if worker is None:
+        return
+    runtime.supervisor.heartbeat_worker("sports_season_state_sync", detail="syncing")
+    try:
+        snapshot = await worker.sync_once()
+    except Exception as exc:
+        runtime.supervisor.mark_worker_error(
+            "sports_season_state_sync",
+            detail="sync_failed",
+            last_error=str(exc),
+        )
+        raise
+    if snapshot is None:
+        runtime.supervisor.heartbeat_worker(
+            "sports_season_state_sync",
+            state=WorkerLifecycleState.PAUSED,
+            detail="disabled",
+        )
+    else:
+        runtime.supervisor.heartbeat_worker(
+            "sports_season_state_sync",
+            detail=f"standings={len(snapshot.standings)} series={len(snapshot.series)}",
+        )
+
+
+async def _run_sports_season_odds_sync(runtime: RuntimeComponents) -> None:
+    worker = runtime.season_odds_worker
+    if worker is None:
+        return
+    runtime.supervisor.heartbeat_worker("sports_season_odds_sync", detail="syncing")
+    try:
+        refreshed = await worker.sync_once()
+    except Exception as exc:
+        runtime.supervisor.mark_worker_error(
+            "sports_season_odds_sync",
+            detail="sync_failed",
+            last_error=str(exc),
+        )
+        raise
+    runtime.supervisor.heartbeat_worker(
+        "sports_season_odds_sync",
+        detail=f"refreshed={refreshed}",
+    )
 
 
 async def _record_account_snapshot(runtime: RuntimeComponents) -> None:

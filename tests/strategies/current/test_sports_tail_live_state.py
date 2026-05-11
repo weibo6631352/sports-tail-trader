@@ -8,6 +8,7 @@ from polymarket_trader.domain.sports_live import (
     SportsLiveGame,
     SportsLiveGameStatus,
     SportsLiveTeam,
+    TennisGameState,
 )
 import strategies.current.live_state as live_state_module
 import strategies.current.strategy as strategy_module
@@ -741,19 +742,19 @@ def test_current_strategy_allows_far_tennis_set_winner_signal_after_set_complete
         status=SportsLiveGameStatus.LIVE,
         period="S2",
         observed_at=datetime(2026, 4, 28, tzinfo=timezone.utc),
+        tennis_state=TennisGameState(
+            home_sets_won=1,
+            away_sets_won=0,
+            current_set=2,
+            home_current_set_games=4,
+            away_current_set_games=4,
+            home_total_games=11,
+            away_total_games=10,
+            set_scores=((7, 6), (4, 4)),
+        ),
         source_payload={
             "sport": "tennis",
             "start_time_utc": "2026-04-28T00:00:00Z",
-            "tennis_state": {
-                "home_sets_won": 1,
-                "away_sets_won": 0,
-                "current_set": 2,
-                "home_current_set_games": 4,
-                "away_current_set_games": 4,
-                "home_total_games": 11,
-                "away_total_games": 10,
-                "set_scores": ((7, 6), (4, 4)),
-            },
         },
     )
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
@@ -790,20 +791,19 @@ def test_current_strategy_allows_far_tennis_match_total_when_minimum_final_games
         status=SportsLiveGameStatus.LIVE,
         period="S3",
         observed_at=datetime(2026, 4, 29, 8, 25, tzinfo=timezone.utc),
+        tennis_state=TennisGameState(
+            home_sets_won=1,
+            away_sets_won=1,
+            current_set=3,
+            home_current_set_games=0,
+            away_current_set_games=1,
+            home_total_games=10,
+            away_total_games=9,
+            set_scores=((4, 6), (6, 2), (0, 1)),
+        ),
         source_payload={
             "sport": "tennis",
             "start_time_utc": "2026-04-29T07:00:00Z",
-            "tennis_state": {
-                "home_sets_won": 1,
-                "away_sets_won": 1,
-                "current_set": 3,
-                "home_current_set_games": 0,
-                "away_current_set_games": 1,
-                "home_total_games": 10,
-                "away_total_games": 9,
-                "total_games": 19,
-                "set_scores": ((4, 6), (6, 2), (0, 1)),
-            },
         },
     )
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
@@ -840,19 +840,19 @@ def test_current_strategy_allows_far_tennis_moneyline_signal_when_tail_state_rea
         status=SportsLiveGameStatus.LIVE,
         period="S2",
         observed_at=datetime(2026, 4, 28, tzinfo=timezone.utc),
+        tennis_state=TennisGameState(
+            home_sets_won=1,
+            away_sets_won=0,
+            current_set=2,
+            home_current_set_games=5,
+            away_current_set_games=3,
+            home_total_games=11,
+            away_total_games=6,
+            set_scores=((6, 3), (5, 3)),
+        ),
         source_payload={
             "sport": "tennis",
             "start_time_utc": "2026-04-28T00:00:00Z",
-            "tennis_state": {
-                "home_sets_won": 1,
-                "away_sets_won": 0,
-                "current_set": 2,
-                "home_current_set_games": 5,
-                "away_current_set_games": 3,
-                "home_total_games": 11,
-                "away_total_games": 6,
-                "set_scores": ((6, 3), (5, 3)),
-            },
         },
     )
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
@@ -1020,20 +1020,19 @@ def test_live_state_metadata_preserves_tennis_state() -> None:
         status=SportsLiveGameStatus.LIVE,
         period="S2",
         observed_at=datetime(2026, 4, 28, 7, 0, tzinfo=timezone.utc),
+        tennis_state=TennisGameState(
+            home_sets_won=0,
+            away_sets_won=1,
+            current_set=2,
+            home_current_set_games=0,
+            away_current_set_games=0,
+            home_total_games=4,
+            away_total_games=6,
+            first_to_serve="away",
+            serving_side="away",
+        ),
         source_payload={
             "start_time_utc": "2026-04-28T06:25:00Z",
-            "tennis_state": {
-                "home_sets_won": 0,
-                "away_sets_won": 1,
-                "current_set": 2,
-                "home_current_set_games": 0,
-                "away_current_set_games": 0,
-                "home_total_games": 4,
-                "away_total_games": 6,
-                "total_games": 10,
-                "first_to_serve": "away",
-                "serving_side": "away",
-            },
         },
     )
 
@@ -1068,10 +1067,10 @@ def test_live_state_match_allows_tennis_adjacent_utc_date() -> None:
         status=SportsLiveGameStatus.LIVE,
         period="S2",
         observed_at=datetime(2026, 4, 28, 7, 0, tzinfo=timezone.utc),
+        tennis_state=TennisGameState(home_total_games=4, away_total_games=6),
         source_payload={
             "sport": "tennis",
             "start_time_utc": "2026-04-28T06:25:00Z",
-            "tennis_state": {"home_total_games": 4, "away_total_games": 6, "total_games": 10},
         },
     )
 

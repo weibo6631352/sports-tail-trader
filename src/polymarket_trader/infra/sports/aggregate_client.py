@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import replace
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 import re
 from typing import Any
 
 from polymarket_trader.domain.sports_live import (
     SportsLiveGame,
     SportsLiveGameStatus,
+    SportsLiveRaceEvent,
     SportsLiveSnapshot,
     SportsLiveSourceHealth,
     SportsLiveSourceStatus,
@@ -37,12 +38,29 @@ _SOURCE_PRIORITY = {
     "nba": 50,
     "nhl": 50,
     "mlb": 50,
+    "pandascore": 50,
     "espn": 40,
     "sofascore": 30,
     "thesportsdb": 20,
 }
 
-_OFFICIAL_SOURCES = frozenset({"nba", "nhl", "mlb", "espn"})
+_OFFICIAL_SOURCES = frozenset({"nba", "nhl", "mlb", "espn", "pandascore"})
+
+
+@dataclass
+class _ProviderCooldown:
+    """单个 provider 的连续失败累计与冷却时间窗。
+
+    指数退避：第 N 次连续失败后冷却 ``base * 2^(N-1)``，上限 ``cap``；
+    冷却累计超过 eviction_s 进入 EVICTED 状态，由 worker 上报生命周期。
+    """
+
+    consecutive_failures: int = 0
+    cooldown_until: datetime | None = None
+    first_failure_at: datetime | None = None
+    last_error: str | None = None
+    last_observed_at: datetime | None = None
+    evicted: bool = False
 
 
 class SportsLiveAggregateClient:
@@ -55,12 +73,21 @@ class SportsLiveAggregateClient:
         closers: Sequence[SportsLiveCloser] = (),
         now_provider: Callable[[], datetime] | None = None,
         provider_timeout_s: float = 8.0,
+        cooldown_base_s: float = 60.0,
+        cooldown_cap_s: float = 600.0,
+        eviction_s: float = 1800.0,
+        cooldown_failure_threshold: int = 3,
     ) -> None:
         self._providers = tuple((str(source).strip().lower(), provider) for source, provider in providers)
         self._closers = tuple(closers)
         self._now_provider = now_provider
         self._provider_timeout_s = max(0.1, float(provider_timeout_s))
+        self._cooldown_base_s = max(1.0, float(cooldown_base_s))
+        self._cooldown_cap_s = max(self._cooldown_base_s, float(cooldown_cap_s))
+        self._eviction_s = max(self._cooldown_cap_s, float(eviction_s))
+        self._cooldown_failure_threshold = max(1, int(cooldown_failure_threshold))
         self._provider_cache: dict[str, SportsLiveSnapshot] = {}
+        self._cooldowns: dict[str, _ProviderCooldown] = {}
 
     async def aclose(self) -> None:
         """关闭聚合器持有的所有底层 client。"""
@@ -70,25 +97,42 @@ class SportsLiveAggregateClient:
         await asyncio.gather(*(closer() for closer in self._closers), return_exceptions=True)
 
     async def list_games(self) -> SportsLiveSnapshot:
-        """拉取所有来源，失败来源只进入 source_statuses，不阻断健康来源。"""
+        """拉取所有来源，失败来源只进入 source_statuses，不阻断健康来源。
+
+        Provider 失败累计超过阈值进入冷却，冷却期内被跳过并在 source_statuses
+        上以 ``COOLDOWN`` 报出；冷却累计超过 ``eviction_s`` 则进入 ``EVICTED``。
+        Worker 应根据 EVICTED 状态发出 ``LIVE_STATE_SOURCE_EVICTED`` 生命周期。
+        """
 
         observed_at = utc_now(self._now_provider)
+        active: list[tuple[str, SportsLiveSnapshotProvider]] = []
+        cooldown_statuses: list[SportsLiveSourceStatus] = []
+        for source, provider in self._providers:
+            cooldown = self._cooldowns.get(source)
+            if cooldown and cooldown.cooldown_until is not None and cooldown.cooldown_until > observed_at:
+                cooldown_statuses.append(self._cooldown_status(source, cooldown, observed_at))
+                continue
+            active.append((source, provider))
         tasks = [
             asyncio.create_task(
                 _provider_snapshot_with_timeout(provider, timeout_s=self._provider_timeout_s),
                 name=f"sports-live-source:{source}",
             )
-            for source, provider in self._providers
+            for source, provider in active
         ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        source_statuses: list[SportsLiveSourceStatus] = []
+        results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else ()
+        source_statuses: list[SportsLiveSourceStatus] = list(cooldown_statuses)
         games: list[SportsLiveGame] = []
-        for (source, _provider), result in zip(self._providers, results, strict=True):
+        race_events: list[SportsLiveRaceEvent] = []
+        for (source, _provider), result in zip(active, results, strict=True):
             if isinstance(result, Exception):
+                self._record_failure(source, error=str(result), observed_at=observed_at)
+                cooldown = self._cooldowns.get(source)
                 cached = self._provider_cache.get(source)
                 if cached is not None:
                     source_statuses.append(_cached_source_status(source, cached, last_error=str(result)))
                     games.extend(cached.games)
+                    race_events.extend(cached.race_events)
                 else:
                     source_statuses.append(
                         SportsLiveSourceStatus(
@@ -98,19 +142,78 @@ class SportsLiveAggregateClient:
                             games_seen=0,
                             observed_at=observed_at,
                             last_error=str(result),
+                            cooldown_until=cooldown.cooldown_until if cooldown else None,
+                            consecutive_failures=cooldown.consecutive_failures if cooldown else 1,
                         )
                     )
                 continue
+            self._record_success(source)
             status = _source_status_from_snapshot(source, result)
             source_statuses.append(status)
             if status.success:
                 self._provider_cache[source] = result
             games.extend(result.games)
+            race_events.extend(result.race_events)
+        # cooldown 期内复用 cached 数据：让上游 worker 仍能感知历史比赛，
+        # 但不再发起对应 provider 的网络请求。
+        for status in cooldown_statuses:
+            cached = self._provider_cache.get(status.source)
+            if cached is not None and status.health == SportsLiveSourceHealth.COOLDOWN:
+                games.extend(cached.games)
+                race_events.extend(cached.race_events)
         return SportsLiveSnapshot(
             source="sports_live_aggregate",
             observed_at=observed_at,
             games=_dedupe_games(tuple(games)),
             source_statuses=tuple(source_statuses),
+            race_events=_dedupe_race_events(tuple(race_events)),
+        )
+
+    def _record_failure(self, source: str, *, error: str, observed_at: datetime) -> None:
+        cooldown = self._cooldowns.setdefault(source, _ProviderCooldown())
+        cooldown.consecutive_failures += 1
+        cooldown.last_error = error
+        cooldown.last_observed_at = observed_at
+        if cooldown.first_failure_at is None:
+            cooldown.first_failure_at = observed_at
+        if cooldown.consecutive_failures < self._cooldown_failure_threshold:
+            cooldown.cooldown_until = None
+            return
+        backoff_index = cooldown.consecutive_failures - self._cooldown_failure_threshold
+        delay = min(self._cooldown_base_s * (2 ** backoff_index), self._cooldown_cap_s)
+        cooldown.cooldown_until = observed_at + timedelta(seconds=delay)
+        # 累计冷却时长超过 eviction 阈值则标记驱逐；状态会在下一轮 cooldown_status
+        # 中报出 EVICTED，由 worker 发出生命周期事件。
+        elapsed = (observed_at - (cooldown.first_failure_at or observed_at)).total_seconds()
+        if elapsed >= self._eviction_s:
+            cooldown.evicted = True
+
+    def _record_success(self, source: str) -> None:
+        cooldown = self._cooldowns.get(source)
+        if cooldown is None:
+            return
+        cooldown.consecutive_failures = 0
+        cooldown.cooldown_until = None
+        cooldown.first_failure_at = None
+        cooldown.last_error = None
+        cooldown.evicted = False
+
+    def _cooldown_status(
+        self,
+        source: str,
+        cooldown: _ProviderCooldown,
+        observed_at: datetime,
+    ) -> SportsLiveSourceStatus:
+        health = SportsLiveSourceHealth.EVICTED if cooldown.evicted else SportsLiveSourceHealth.COOLDOWN
+        return SportsLiveSourceStatus(
+            source=source,
+            success=False,
+            health=health,
+            games_seen=0,
+            observed_at=observed_at,
+            last_error=cooldown.last_error,
+            cooldown_until=cooldown.cooldown_until,
+            consecutive_failures=cooldown.consecutive_failures,
         )
 
 
@@ -143,6 +246,25 @@ def _cached_source_status(
         observed_at=snapshot.observed_at,
         last_error=last_error,
     )
+
+
+def _dedupe_race_events(events: tuple[SportsLiveRaceEvent, ...]) -> tuple[SportsLiveRaceEvent, ...]:
+    """赛车事件按 (league, source_event_id) 去重；不同 source 的同一场比赛
+    取观测时间最新的一份。赛车没有 team-pair 概念，无需 status 优先级合并。
+    """
+
+    selected: dict[tuple[str, str], SportsLiveRaceEvent] = {}
+    for event in events:
+        key = (event.league.strip().upper(), event.source_event_id)
+        existing = selected.get(key)
+        if existing is None:
+            selected[key] = event
+            continue
+        if event.observed_at is None or existing.observed_at is None:
+            continue
+        if event.observed_at > existing.observed_at:
+            selected[key] = event
+    return tuple(selected.values())
 
 
 def _dedupe_games(games: tuple[SportsLiveGame, ...]) -> tuple[SportsLiveGame, ...]:

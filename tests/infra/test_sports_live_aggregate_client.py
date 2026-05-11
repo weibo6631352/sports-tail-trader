@@ -410,6 +410,126 @@ def test_aggregate_client_keeps_same_teams_on_different_start_dates() -> None:
     assert [game.source for game in snapshot.games] == ["mlb", "sofascore"]
 
 
+def test_aggregate_client_cooldown_grows_exponentially_with_repeated_failures() -> None:
+    """连续失败超过阈值后，每次失败的 cooldown 时长按 2^N 增长直到 cap。"""
+
+    base = datetime(2026, 5, 11, 0, 0, tzinfo=timezone.utc)
+    # 每次失败 +1ms 推进，模拟连续轮询；threshold=2 表示第 2 次失败开始进入冷却。
+    times_iter = iter(base + timedelta(milliseconds=i) for i in range(20))
+
+    async def failing_provider() -> SportsLiveSnapshot:
+        raise RuntimeError("network blip")
+
+    async def run() -> SportsLiveAggregateClient:
+        client = SportsLiveAggregateClient(
+            providers=(("espn", failing_provider),),
+            now_provider=lambda: next(times_iter),
+            cooldown_base_s=10.0,
+            cooldown_cap_s=40.0,
+            eviction_s=10_000.0,
+            cooldown_failure_threshold=2,
+        )
+        # 调用足够多次以让 cooldown_until 一直处于过期状态后再次触发失败。
+        # 由于每次模拟时间只推进 1ms，cooldown_until 永远不会过期；
+        # 所以从第 2 次失败之后，后续 list_games 都进入 cooldown 分支。
+        await client.list_games()  # failure #1, no cooldown yet
+        return client
+
+    client = asyncio.run(run())
+    cooldown = client._cooldowns["espn"]
+
+    # 第 1 次失败：未进入冷却（threshold=2）。
+    assert cooldown.consecutive_failures == 1
+    assert cooldown.cooldown_until is None
+
+    # 模拟更多次失败，时间不前进（仍在第 1 次失败之后的几毫秒），
+    # 让冷却长度从 base*2^0 一直涨到 cap。
+    async def push_failure(client: SportsLiveAggregateClient) -> None:
+        # 推到 active 列表前手动清零 cooldown_until，以模拟 cooldown 到期可重试。
+        client._cooldowns["espn"].cooldown_until = None
+        await client.list_games()
+
+    expected_delays = [10.0, 20.0, 40.0, 40.0]  # base=10 → 10, 20, 40, capped at 40
+    for expected_delay in expected_delays:
+        asyncio.run(push_failure(client))
+        cooldown = client._cooldowns["espn"]
+        assert cooldown.cooldown_until is not None
+        delta = (cooldown.cooldown_until - cooldown.last_observed_at).total_seconds()
+        assert delta == expected_delay
+
+
+def test_aggregate_client_resets_cooldown_state_after_recovery() -> None:
+    """成功一次后清空连续失败计数、cooldown_until、first_failure_at。"""
+
+    base = datetime(2026, 5, 11, 0, 0, tzinfo=timezone.utc)
+    call_count = 0
+
+    async def flaky_provider() -> SportsLiveSnapshot:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("first failure")
+        return SportsLiveSnapshot(source="espn", observed_at=base, games=())
+
+    times = iter([base, base + timedelta(seconds=5)])
+
+    async def run() -> SportsLiveAggregateClient:
+        client = SportsLiveAggregateClient(
+            providers=(("espn", flaky_provider),),
+            now_provider=lambda: next(times),
+            cooldown_base_s=60.0,
+            cooldown_failure_threshold=1,
+        )
+        await client.list_games()  # failure → cooldown_until set
+        # 强制清掉 cooldown_until 让下一轮真正调用 provider 而不是跳过。
+        client._cooldowns["espn"].cooldown_until = None
+        await client.list_games()  # success → state should reset
+        return client
+
+    client = asyncio.run(run())
+    cooldown = client._cooldowns["espn"]
+    assert cooldown.consecutive_failures == 0
+    assert cooldown.cooldown_until is None
+    assert cooldown.first_failure_at is None
+    assert cooldown.evicted is False
+
+
+def test_aggregate_client_skips_provider_during_active_cooldown() -> None:
+    base = datetime(2026, 5, 11, 0, 0, tzinfo=timezone.utc)
+    call_count = 0
+
+    async def failing_provider() -> SportsLiveSnapshot:
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("flaky")
+
+    async def healthy_provider() -> SportsLiveSnapshot:
+        return SportsLiveSnapshot(source="nhl", observed_at=base, games=(_game("nhl", SportsLiveGameStatus.LIVE, base),))
+
+    times = iter([base, base + timedelta(seconds=1), base + timedelta(seconds=2)])
+
+    async def run() -> list[SportsLiveSnapshot]:
+        client = SportsLiveAggregateClient(
+            providers=(
+                ("espn", failing_provider),
+                ("nhl", healthy_provider),
+            ),
+            now_provider=lambda: next(times),
+            cooldown_base_s=300.0,
+            cooldown_failure_threshold=1,
+        )
+        return [await client.list_games() for _ in range(3)]
+
+    snapshots = asyncio.run(run())
+
+    # 第 1 轮失败触发立即冷却（threshold=1）；第 2、3 轮处于冷却期不再调用。
+    assert call_count == 1
+    cooldown_status = next(s for s in snapshots[1].source_statuses if s.source == "espn")
+    assert cooldown_status.health == SportsLiveSourceHealth.COOLDOWN
+    assert cooldown_status.cooldown_until is not None
+    assert cooldown_status.success is False
+
+
 async def _snapshot(source: str, game: SportsLiveGame) -> SportsLiveSnapshot:
     return SportsLiveSnapshot(source=source, observed_at=game.observed_at or datetime.now(timezone.utc), games=(game,))
 

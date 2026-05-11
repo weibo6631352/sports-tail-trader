@@ -239,8 +239,8 @@ def test_player_next_team_yes_no_is_outright_not_single_game_binary_prop() -> No
     assert descriptor.accepted is True
     assert descriptor.market_type == SportsMarketType.BINARY_PROP
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
-    assert decision.selected is False
-    assert decision.reason == "outright_market_not_auto_tradable"
+    assert decision.selected is True
+    assert decision.metadata.get("market_family") == "outright"
 
 
 def test_league_winner_yes_no_is_outright_not_single_game_binary_prop() -> None:
@@ -252,8 +252,8 @@ def test_league_winner_yes_no_is_outright_not_single_game_binary_prop() -> None:
     assert descriptor.accepted is True
     assert descriptor.market_type == SportsMarketType.BINARY_PROP
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
-    assert decision.selected is False
-    assert decision.reason == "outright_market_not_auto_tradable"
+    assert decision.selected is True
+    assert decision.metadata.get("market_family") == "outright"
 
 
 def test_league_winner_with_team_outcomes_is_outright_market() -> None:
@@ -277,8 +277,8 @@ def test_league_winner_with_team_outcomes_is_outright_market() -> None:
 
     assert descriptor.accepted is True
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
-    assert decision.selected is False
-    assert decision.reason == "outright_market_not_auto_tradable"
+    assert decision.selected is True
+    assert decision.metadata.get("market_family") == "outright"
 
 
 def test_award_draft_trade_and_cba_props_are_outright_binary_props() -> None:
@@ -348,7 +348,9 @@ def test_award_draft_trade_and_cba_props_are_outright_binary_props() -> None:
 
     assert [descriptor.market_type for descriptor in descriptors] == [SportsMarketType.BINARY_PROP] * 5
     assert [descriptor.market_family for descriptor in descriptors] == [SportsMarketFamily.OUTRIGHT] * 5
-    assert [decision.selected for decision in decisions] == [False] * 5
+    # Outright 现在进入策略候选并由 outright 子包评估，不再静默排除。
+    assert [decision.selected for decision in decisions] == [True] * 5
+    assert all(decision.metadata.get("market_family") == "outright" for decision in decisions)
 
 
 def test_hyphenated_draft_prop_with_placeholder_v_is_not_single_game() -> None:
@@ -371,8 +373,8 @@ def test_hyphenated_draft_prop_with_placeholder_v_is_not_single_game() -> None:
     decision = select_market(CurrentStrategyConfig(), market)
 
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
-    assert decision.selected is False
-    assert decision.reason == "outright_market_not_auto_tradable"
+    assert decision.selected is True
+    assert decision.metadata.get("market_family") == "outright"
 
 
 def test_playoff_advance_props_are_not_single_game_live_markets() -> None:
@@ -395,8 +397,8 @@ def test_playoff_advance_props_are_not_single_game_live_markets() -> None:
     decision = select_market(CurrentStrategyConfig(), market)
 
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
-    assert decision.selected is False
-    assert decision.reason == "outright_market_not_auto_tradable"
+    assert decision.selected is True
+    assert decision.metadata.get("market_family") == "outright"
 
 
 def test_universe_accepts_tennis_market_when_gamma_tags_are_missing_but_slug_has_league() -> None:
@@ -504,8 +506,9 @@ def test_universe_excludes_non_single_game_markets_from_auto_strategy_scope() ->
     assert decisions["series_winner"].reason == "series_market_not_auto_tradable"
     assert decisions["series_totals"].selected is False
     assert decisions["series_totals"].reason == "series_market_not_auto_tradable"
-    assert decisions["outright"].selected is False
-    assert decisions["outright"].reason == "outright_market_not_auto_tradable"
+    # Outright 不再静默排除：纳入候选 + 标记 market_family=outright，进入 outright 子包评估。
+    assert decisions["outright"].selected is True
+    assert decisions["outright"].metadata.get("market_family") == "outright"
     assert decisions["esports"].selected is False
     assert decisions["esports"].reason == "esports_market_not_auto_tradable"
 
@@ -523,8 +526,8 @@ def test_real_polymarket_top_goalscorer_yes_no_is_classified_as_outright_binary_
         (SportsMarketSide.YES, "Yes"),
         (SportsMarketSide.NO, "No"),
     ]
-    assert decision.selected is False
-    assert decision.reason == "outright_market_not_auto_tradable"
+    assert decision.selected is True
+    assert decision.metadata.get("market_family") == "outright"
 
 
 def test_real_polymarket_ucl_winner_yes_no_is_classified_as_outright_binary_prop() -> None:
@@ -537,8 +540,8 @@ def test_real_polymarket_ucl_winner_yes_no_is_classified_as_outright_binary_prop
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
     assert descriptor.market_type == SportsMarketType.BINARY_PROP
     assert [target.side for target in descriptor.targets] == [SportsMarketSide.YES, SportsMarketSide.NO]
-    assert decision.selected is False
-    assert decision.reason == "outright_market_not_auto_tradable"
+    assert decision.selected is True
+    assert decision.metadata.get("market_family") == "outright"
 
 
 def test_real_polymarket_homepage_nba_champion_yes_no_is_classified_as_outright_binary_prop() -> None:
@@ -551,8 +554,8 @@ def test_real_polymarket_homepage_nba_champion_yes_no_is_classified_as_outright_
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
     assert descriptor.market_type == SportsMarketType.BINARY_PROP
     assert [target.side for target in descriptor.targets] == [SportsMarketSide.YES, SportsMarketSide.NO]
-    assert decision.selected is False
-    assert decision.reason == "outright_market_not_auto_tradable"
+    assert decision.selected is True
+    assert decision.metadata.get("market_family") == "outright"
 
 
 def test_real_polymarket_season_award_and_leader_props_are_outright_binary_props() -> None:
@@ -874,8 +877,8 @@ def test_real_polymarket_season_award_and_leader_props_are_outright_binary_props
         assert descriptor.accepted is True
         assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
         assert descriptor.market_type == SportsMarketType.BINARY_PROP
-        assert decision.selected is False
-        assert decision.reason == "outright_market_not_auto_tradable"
+        assert decision.selected is True
+        assert decision.metadata.get("market_family") == "outright"
 
 
 def test_real_polymarket_grand_slam_comparison_prop_is_outright_moneyline() -> None:
@@ -900,8 +903,8 @@ def test_real_polymarket_grand_slam_comparison_prop_is_outright_moneyline() -> N
     assert descriptor.accepted is True
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
     assert descriptor.market_type == SportsMarketType.MONEYLINE
-    assert decision.selected is False
-    assert decision.reason == "outright_market_not_auto_tradable"
+    assert decision.selected is True
+    assert decision.metadata.get("market_family") == "outright"
 
 
 def test_entry_rejects_series_market_before_single_game_live_score_can_create_buy() -> None:

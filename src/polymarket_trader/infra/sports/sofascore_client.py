@@ -17,12 +17,14 @@ import httpx
 
 from polymarket_trader.domain.sports_live import (
     BaseballGameState,
+    SoccerGameState,
     SportsLiveGame,
     SportsLiveGameStatus,
     SportsLiveSnapshot,
     SportsLiveSourceHealth,
     SportsLiveSourceStatus,
     SportsLiveTeam,
+    TennisGameState,
 )
 from polymarket_trader.infra.sports.common import (
     SportsDataRateLimitError,
@@ -329,6 +331,7 @@ def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datet
     tournament = _tournament_payload(raw_event)
     tennis_state = _tennis_state_from_payload(raw_event, raw_status=raw_status) if sport == "tennis" else None
     baseball_state = _baseball_state_from_payload(raw_event, raw_status=raw_status) if sport == "baseball" else None
+    soccer_state = _soccer_state_from_payload(raw_event, raw_status=raw_status) if sport == "football" else None
     return SportsLiveGame(
         source="sofascore",
         source_event_id=str(raw_event.get("id") or raw_event.get("customId") or ""),
@@ -345,13 +348,14 @@ def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datet
         observed_at=observed_at,
         raw_status=raw_status,
         baseball_state=baseball_state,
+        tennis_state=tennis_state,
+        soccer_state=soccer_state,
         source_payload={
             "sport": sport,
             "slug": raw_event.get("slug"),
             "start_timestamp": raw_event.get("startTimestamp"),
             "tournament": tournament.get("name"),
             "tournament_slug": tournament.get("slug"),
-            "tennis_state": tennis_state,
         },
     )
 
@@ -382,7 +386,7 @@ def _score_value(payload: Mapping[str, Any]) -> int:
     return value or 0
 
 
-def _tennis_state_from_payload(raw_event: Mapping[str, Any], *, raw_status: str) -> dict[str, Any]:
+def _tennis_state_from_payload(raw_event: Mapping[str, Any], *, raw_status: str) -> TennisGameState | None:
     """提取网球当前盘分和总局数，供策略层做尾盘判断。
 
     SofaScore 的 ``current`` 表示已赢盘数，``periodN`` 表示每盘局数，
@@ -399,21 +403,62 @@ def _tennis_state_from_payload(raw_event: Mapping[str, Any], *, raw_status: str)
     home_total_games = _period_total(home_mapping)
     away_total_games = _period_total(away_mapping)
     first_to_serve = _tennis_serving_side(raw_event.get("firstToServe"))
-    return {
-        "home_sets_won": _score_value(home_mapping),
-        "away_sets_won": _score_value(away_mapping),
-        "current_set": current_set,
-        "home_current_set_games": home_current_games,
-        "away_current_set_games": away_current_games,
-        "home_total_games": home_total_games,
-        "away_total_games": away_total_games,
-        "total_games": home_total_games + away_total_games,
-        "set_scores": _tennis_set_scores(home_mapping, away_mapping),
-        "home_point": first_text(home_mapping, "point"),
-        "away_point": first_text(away_mapping, "point"),
-        "first_to_serve": first_to_serve,
-        "serving_side": _tennis_current_server(first_to_serve, home_total_games + away_total_games),
-    }
+    return TennisGameState(
+        home_sets_won=_score_value(home_mapping),
+        away_sets_won=_score_value(away_mapping),
+        current_set=current_set,
+        home_current_set_games=home_current_games,
+        away_current_set_games=away_current_games,
+        home_total_games=home_total_games,
+        away_total_games=away_total_games,
+        set_scores=_tennis_set_scores(home_mapping, away_mapping),
+        home_point=first_text(home_mapping, "point"),
+        away_point=first_text(away_mapping, "point"),
+        first_to_serve=first_to_serve,
+        serving_side=_tennis_current_server(first_to_serve, home_total_games + away_total_games),
+    )
+
+
+def _soccer_state_from_payload(raw_event: Mapping[str, Any], *, raw_status: str) -> SoccerGameState | None:
+    """提取 SofaScore 足球比赛节奏与卡牌状态。
+
+    现阶段只稳定提取 period / clock_minutes / 卡牌；伤停补时若 payload 提供则带上。
+    """
+
+    time_payload = raw_event.get("time")
+    time_mapping = time_payload if isinstance(time_payload, Mapping) else {}
+    status_payload = raw_event.get("status")
+    status_mapping = status_payload if isinstance(status_payload, Mapping) else {}
+    period_code = str(status_mapping.get("code") or "").strip().lower()
+    description = str(status_mapping.get("description") or "").strip().lower()
+    period = _soccer_period_from(description, period_code, raw_status=raw_status)
+    played_seconds = int_value(time_mapping.get("played"))
+    clock_minutes = played_seconds // 60 if played_seconds is not None and played_seconds >= 0 else None
+    added = int_value(time_mapping.get("injuryTime1")) or int_value(time_mapping.get("injuryTime2"))
+    home_cards = raw_event.get("homeRedCards")
+    away_cards = raw_event.get("awayRedCards")
+    return SoccerGameState(
+        period=period,
+        clock_minutes=clock_minutes,
+        added_minutes=added,
+        home_red_cards=int_value(home_cards) or 0,
+        away_red_cards=int_value(away_cards) or 0,
+    )
+
+
+def _soccer_period_from(description: str, period_code: str, *, raw_status: str) -> str | None:
+    text = f"{description} {period_code} {raw_status}".lower()
+    if "1st half" in text or "first half" in text or period_code == "1h":
+        return "first_half"
+    if "2nd half" in text or "second half" in text or period_code == "2h":
+        return "second_half"
+    if "extra time" in text or "et" in period_code:
+        return "extra_time"
+    if "penalt" in text:
+        return "penalties"
+    if "half time" in text or "halftime" in text:
+        return "halftime"
+    return None
 
 
 def _baseball_state_from_payload(raw_event: Mapping[str, Any], *, raw_status: str) -> BaseballGameState:

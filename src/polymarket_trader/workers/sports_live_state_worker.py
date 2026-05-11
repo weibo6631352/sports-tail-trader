@@ -18,6 +18,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import (
     SportsLiveGame,
     SportsLiveSnapshot,
+    SportsLiveSourceHealth,
     SportsLiveSourceStatus,
     SportsLiveSyncStatus,
 )
@@ -110,6 +111,11 @@ class SportsLiveStateWorker:
         self._last_entry_signals_published = 0
         self._last_source_statuses: tuple[SportsLiveSourceStatus, ...] = ()
         self._last_games: tuple[SportsLiveGame, ...] = ()
+        # 上轮各 source 的健康度，用于检测 evicted 状态转换；只在新 EVICTED 时
+        # 发出 LIVE_STATE_SOURCE_EVICTED 一次，避免每轮重复刷生命周期。
+        self._previous_source_health: dict[str, SportsLiveSourceHealth] = {}
+        self._last_no_feasible_source_published: bool = False
+        self._no_feasible_source: bool = False
 
     async def sync_once(self) -> SportsLiveSyncResult | None:
         """执行一次同步；供 scheduler 和测试直接驱动。"""
@@ -200,6 +206,7 @@ class SportsLiveStateWorker:
 
         completed_at = _utc_now()
         self._last_games = snapshot.games
+        self._publish_source_health_lifecycle(snapshot.source_statuses, observed_at=snapshot.observed_at)
         return SportsLiveSyncResult(
             source=snapshot.source,
             started_at=started_at,
@@ -212,6 +219,62 @@ class SportsLiveStateWorker:
             entry_signals_published=entry_signals,
             source_statuses=snapshot.source_statuses,
         )
+
+    def _publish_source_health_lifecycle(
+        self,
+        statuses: tuple[SportsLiveSourceStatus, ...],
+        *,
+        observed_at: datetime,
+    ) -> None:
+        """发出 source eviction 与全源不可用的生命周期事件。
+
+        - 只在某 source 由非 EVICTED 状态转入 EVICTED 时发一次 LIVE_STATE_SOURCE_EVICTED，
+          避免每轮重复刷。
+        - 若 statuses 全部为非 success（含 EVICTED/COOLDOWN/RATE_LIMITED/FAILED），
+          视为 ``no_feasible_source``；只在状态变化时发一次 LIVE_STATE_NO_FEASIBLE_SOURCE。
+        """
+
+        if self._lifecycle_bus is None:
+            self._no_feasible_source = self._compute_no_feasible_source(statuses)
+            return
+        for status in statuses:
+            previous = self._previous_source_health.get(status.source)
+            if status.health == SportsLiveSourceHealth.EVICTED and previous != SportsLiveSourceHealth.EVICTED:
+                self._lifecycle_bus.publish(
+                    LifecycleEvent.LIVE_STATE_SOURCE_EVICTED,
+                    payload={
+                        "source": status.source,
+                        "last_error": status.last_error,
+                        "consecutive_failures": status.consecutive_failures,
+                        "cooldown_until": (
+                            status.cooldown_until.isoformat() if status.cooldown_until is not None else None
+                        ),
+                    },
+                )
+            self._previous_source_health[status.source] = status.health
+        no_feasible = self._compute_no_feasible_source(statuses)
+        if no_feasible and not self._last_no_feasible_source_published:
+            self._lifecycle_bus.publish(
+                LifecycleEvent.LIVE_STATE_NO_FEASIBLE_SOURCE,
+                payload={
+                    "observed_at": observed_at.isoformat(),
+                    "source_statuses": [jsonable(status) for status in statuses],
+                },
+            )
+        self._last_no_feasible_source_published = no_feasible
+        self._no_feasible_source = no_feasible
+
+    @staticmethod
+    def _compute_no_feasible_source(statuses: tuple[SportsLiveSourceStatus, ...]) -> bool:
+        if not statuses:
+            return False
+        return all(not status.success for status in statuses)
+
+    @property
+    def no_feasible_source(self) -> bool:
+        """所有 source 都不健康时为 True，供策略 recovery 路径查询。"""
+
+        return self._no_feasible_source
 
     async def _match_markets(
         self,

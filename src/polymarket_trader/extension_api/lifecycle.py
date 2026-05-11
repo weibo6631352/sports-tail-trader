@@ -19,6 +19,12 @@ class LifecycleEvent(StrEnum):
       ``{operation, status, order_id, trade_id, matched_shares, spent_usdc, reason, retryable, intent_tags}``
     - LIVE_STATE_UPDATED:
       ``{source, source_event_id, signal_allowed, signal_reason, phase, payload}``
+    - LIVE_STATE_SOURCE_EVICTED:
+      ``{source, last_error, consecutive_failures, cooldown_until}``
+    - LIVE_STATE_NO_FEASIBLE_SOURCE:
+      ``{observed_at, source_statuses}``
+    - SEASON_STATE_UPDATED:
+      ``{league, season_id, observed_at, payload}``
     - RECONCILE_PASSED:
       ``{trace_id, condition_ids_count, started_at, completed_at, outcome}``
     """
@@ -28,6 +34,9 @@ class LifecycleEvent(StrEnum):
     ORDER_REJECTED = "order_rejected"
     ORDER_CANCELLED = "order_cancelled"
     LIVE_STATE_UPDATED = "live_state_updated"
+    LIVE_STATE_SOURCE_EVICTED = "live_state_source_evicted"
+    LIVE_STATE_NO_FEASIBLE_SOURCE = "live_state_no_feasible_source"
+    SEASON_STATE_UPDATED = "season_state_updated"
     RECONCILE_PASSED = "reconcile_passed"
 
 

@@ -12,7 +12,13 @@
 
 from __future__ import annotations
 
-from polymarket_trader.domain.sports_live import BaseballGameState
+from polymarket_trader.domain.sports_live import (
+    BaseballGameState,
+    CricketGameState,
+    EsportsGameState,
+    SoccerGameState,
+    TennisGameState,
+)
 
 from .leagues import is_mlb_game, is_nfl_game, is_tennis_game
 from .parsing import live_game_state_from_metadata
@@ -32,13 +38,15 @@ from .types import (
     SportsMarketSide,
     SportsMarketSnapshot,
     SportsMarketType,
-    TennisGameState,
 )
 
 __all__ = [
     "BaseballGameState",
+    "CricketGameState",
+    "EsportsGameState",
     "LiveGameState",
     "LiveGameStatus",
+    "SoccerGameState",
     "SportsMarketFamily",
     "SportsMarketScope",
     "SportsMarketScopeType",

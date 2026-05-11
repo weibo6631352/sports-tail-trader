@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 import re
 import unicodedata
-from typing import Any, Mapping
+from typing import Any
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import SportsLiveGame, SportsLiveGameStatus
@@ -103,7 +103,32 @@ def live_game_metadata(game: SportsLiveGame) -> dict[str, Any]:
             "defense_team": game.baseball_state.defense_team,
             "occupied_bases": game.baseball_state.occupied_bases,
         },
-        "tennis_state": _tennis_state_metadata(game.source_payload.get("tennis_state")),
+        "tennis_state": _tennis_state_metadata(game.tennis_state),
+        "soccer_state": None if game.soccer_state is None else {
+            "period": game.soccer_state.period,
+            "clock_minutes": game.soccer_state.clock_minutes,
+            "added_minutes": game.soccer_state.added_minutes,
+            "home_red_cards": game.soccer_state.home_red_cards,
+            "away_red_cards": game.soccer_state.away_red_cards,
+        },
+        "esports_state": None if game.esports_state is None else {
+            "best_of": game.esports_state.best_of,
+            "current_map_index": game.esports_state.current_map_index,
+            "home_maps_won": game.esports_state.home_maps_won,
+            "away_maps_won": game.esports_state.away_maps_won,
+            "home_current_map_score": game.esports_state.home_current_map_score,
+            "away_current_map_score": game.esports_state.away_current_map_score,
+        },
+        "cricket_state": None if game.cricket_state is None else {
+            "current_innings": game.cricket_state.current_innings,
+            "batting_side": game.cricket_state.batting_side,
+            "runs": game.cricket_state.runs,
+            "wickets": game.cricket_state.wickets,
+            "overs_completed": game.cricket_state.overs_completed,
+            "target": game.cricket_state.target,
+            "required_runs": game.cricket_state.required_runs,
+            "required_balls": game.cricket_state.required_balls,
+        },
     }
 
 
@@ -266,25 +291,25 @@ def _market_text(market: Market) -> str:
     )
 
 
-def _tennis_state_metadata(value: Any) -> dict[str, Any] | None:
-    """透传 SofaScore 网球结构化局面，保持策略层和源适配层解耦。"""
+def _tennis_state_metadata(state: Any) -> dict[str, Any] | None:
+    """把强类型 TennisGameState 投影成策略稳定 metadata。"""
 
-    if not isinstance(value, Mapping):
+    if state is None:
         return None
     return {
-        "home_sets_won": value.get("home_sets_won"),
-        "away_sets_won": value.get("away_sets_won"),
-        "current_set": value.get("current_set"),
-        "home_current_set_games": value.get("home_current_set_games"),
-        "away_current_set_games": value.get("away_current_set_games"),
-        "home_total_games": value.get("home_total_games"),
-        "away_total_games": value.get("away_total_games"),
-        "total_games": value.get("total_games"),
-        "set_scores": value.get("set_scores"),
-        "home_point": value.get("home_point"),
-        "away_point": value.get("away_point"),
-        "first_to_serve": value.get("first_to_serve"),
-        "serving_side": value.get("serving_side"),
+        "home_sets_won": state.home_sets_won,
+        "away_sets_won": state.away_sets_won,
+        "current_set": state.current_set,
+        "home_current_set_games": state.home_current_set_games,
+        "away_current_set_games": state.away_current_set_games,
+        "home_total_games": state.home_total_games,
+        "away_total_games": state.away_total_games,
+        "total_games": state.total_games,
+        "set_scores": state.set_scores,
+        "home_point": state.home_point,
+        "away_point": state.away_point,
+        "first_to_serve": state.first_to_serve,
+        "serving_side": state.serving_side,
     }
 
 

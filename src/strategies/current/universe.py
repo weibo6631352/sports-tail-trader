@@ -40,18 +40,29 @@ def select_market(config: CurrentStrategyConfig, market: Market) -> UniverseDeci
     descriptor = describe_sports_market(market)
     if not descriptor.accepted or descriptor.market_type is None:
         return UniverseDecision.exclude(reason=descriptor.reason or "market_parse_failed")
-    if descriptor.market_family.value != "single_game":
-        return UniverseDecision.exclude(reason=descriptor.reason)
+    family = descriptor.market_family.value
+    # 接受 single_game ∪ outright；series/esports 仍可审计拒绝（§9：所有盘口至少建模）。
+    if family not in {"single_game", "outright"}:
+        return UniverseDecision.exclude(
+            reason=descriptor.reason or f"{family}_family_excluded",
+        )
 
     category_tokens = _normalized_tokens(_universe_text(market))
-    if not set(config.tail_category_tokens) & category_tokens:
-        return UniverseDecision.exclude(reason="category_not_matched")
-    if descriptor.market_type not in config.tail_enabled_market_types:
-        return UniverseDecision.exclude(reason="market_type_disabled")
+    if family == "single_game":
+        # single_game 必须命中体育 token 才进入策略 universe，避免泛体育候选噪音。
+        if not set(config.tail_category_tokens) & category_tokens:
+            return UniverseDecision.exclude(reason="category_not_matched")
+        if descriptor.market_type not in config.tail_enabled_market_types:
+            return UniverseDecision.exclude(reason="market_type_disabled")
+    else:
+        # outright：枚举的 market_type 是 binary_prop/moneyline；按 outright 自己的
+        # 白名单过滤，避免和 single_game 共用 tail_enabled_market_types。
+        if descriptor.market_type not in config.tail_outright_enabled_market_types:
+            return UniverseDecision.exclude(reason="outright_market_type_disabled")
     return UniverseDecision.include(
         reason="market_selected",
         metadata={
-            "market_family": descriptor.market_family.value,
+            "market_family": family,
             "market_type_label": descriptor.market_type.value,
             "market_line": str(descriptor.line) if descriptor.line is not None else None,
             "target_count": len(descriptor.targets),

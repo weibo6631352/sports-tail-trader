@@ -107,10 +107,28 @@ class Settings(BaseSettings):
     sports_live_state_sofascore_lookback_days: int = Field(default=1, ge=0, le=3)
     sports_live_state_sofascore_lookahead_days: int = Field(default=3, ge=0, le=3)
     sports_live_state_thesportsdb_base_url: str = "https://www.thesportsdb.com/api/v1/json/3"
+    sports_live_state_pandascore_base_url: str = "https://api.pandascore.co"
+    sports_live_state_pandascore_token: SecretStr | None = None
+    sports_live_state_pandascore_videogames: str = ""
     sports_live_state_leagues: str = "nba,nhl,nfl,mlb,tennis,sports"
     sports_live_state_interval_seconds: int = Field(default=5, ge=5)
     sports_live_state_timeout_s: float = Field(default=5.0, ge=0.1)
     sports_live_state_publish_entry_signals: bool = True
+    sports_live_state_health_cooldown_base_s: float = Field(default=60.0, ge=1.0)
+    sports_live_state_health_eviction_s: float = Field(default=1800.0, ge=60.0)
+
+    # 赛季级状态子系统：服务于 outright 反向定价。cadence 小时级。
+    sports_season_state_enabled: bool = False
+    sports_season_state_sources: str = "espn"
+    sports_season_state_leagues: str = "nba,nhl,nfl,mlb"
+    sports_season_state_interval_seconds: int = Field(default=1800, ge=300)
+    sports_season_state_timeout_s: float = Field(default=10.0, ge=0.5)
+    sports_season_odds_provider: str = "theoddsapi"
+    sports_season_odds_api_key: SecretStr | None = None
+    sports_season_odds_base_url: str = "https://api.the-odds-api.com"
+    sports_season_odds_regions: str = "us,eu"
+    sports_season_odds_interval_seconds: int = Field(default=1800, ge=300)
+    sports_season_odds_ttl_seconds: int = Field(default=1800, ge=60)
 
     # 性能与优先级字段必须始终有限制，避免无界队列、无界等待和热路径阻塞。
     enable_uvloop: bool = True
@@ -161,6 +179,7 @@ class Settings(BaseSettings):
         "mlb",
         "sofascore",
         "thesportsdb",
+        "pandascore",
     )
     _ESPN_SUPPORTED_LEAGUES: ClassVar[tuple[str, ...]] = (
         "nba",
@@ -171,6 +190,19 @@ class Settings(BaseSettings):
         "ncaaf",
         "nhl",
         "mlb",
+        "atp",
+        "wta",
+        "ufc",
+        "mma",
+        "rugby",
+        "intl-test",
+        "intl-t20i",
+        "intl-odi",
+        "ipl",
+        "bbl",
+        "f1",
+        "nascar",
+        "indycar",
     )
     _SOFASCORE_SUPPORTED_LEAGUES: ClassVar[tuple[str, ...]] = (
         "sports",

@@ -349,7 +349,7 @@ def test_sofascore_parser_normalizes_table_tennis_event_for_whole_sports_market(
     assert game.away.name == "Italy"
     assert game.status == SportsLiveGameStatus.SCHEDULED
     assert game.source_payload["sport"] == "table-tennis"
-    assert game.source_payload["tennis_state"] is None
+    assert game.tennis_state is None
 
 
 def test_sofascore_parser_normalizes_finished_baseball_game_without_clock() -> None:
@@ -438,17 +438,18 @@ def test_sofascore_parser_preserves_tennis_live_state() -> None:
     assert game.seconds_remaining is None
     assert game.home.score == 0
     assert game.away.score == 1
-    tennis_state = game.source_payload["tennis_state"]
-    assert tennis_state["current_set"] == 2
-    assert tennis_state["home_sets_won"] == 0
-    assert tennis_state["away_sets_won"] == 1
-    assert tennis_state["home_total_games"] == 4
-    assert tennis_state["away_total_games"] == 6
-    assert tennis_state["total_games"] == 10
-    assert tennis_state["set_scores"] == ((4, 6), (0, 0))
-    assert tennis_state["home_point"] == "15"
-    assert tennis_state["first_to_serve"] == "away"
-    assert tennis_state["serving_side"] == "away"
+    tennis_state = game.tennis_state
+    assert tennis_state is not None
+    assert tennis_state.current_set == 2
+    assert tennis_state.home_sets_won == 0
+    assert tennis_state.away_sets_won == 1
+    assert tennis_state.home_total_games == 4
+    assert tennis_state.away_total_games == 6
+    assert tennis_state.total_games == 10
+    assert tennis_state.set_scores == ((4, 6), (0, 0))
+    assert tennis_state.home_point == "15"
+    assert tennis_state.first_to_serve == "away"
+    assert tennis_state.serving_side == "away"
 
 
 def test_thesportsdb_parser_normalizes_filtered_nhl_live_game() -> None:

@@ -177,8 +177,10 @@ def _live_source_gap_scope_markets(runtime: Any, markets: Sequence[Market]) -> t
     """返回适用于单场直播源覆盖诊断的市场集合。
 
     直播比分源只适合直接匹配单场市场。系列赛、冠军、奖项、转会/下家等长期
-    市场也属于体育策略目标，但需要专用数据源和定价模型；这里不把它们计入
-    live-source gap，避免把诊断噪声误当成单场直播源缺口。
+    市场也属于体育策略目标，但需要专用数据源（赛季状态、隐含概率）和定价
+    模型；它们不应被计入 live-source gap，避免把诊断噪声误当成单场直播源缺口。
+    universe 现在接受 single_game ∪ outright，因此这里再用 metadata 过滤出
+    family == single_game 的子集。
     """
 
     hooks = _runtime_extension_hooks(runtime)
@@ -190,8 +192,12 @@ def _live_source_gap_scope_markets(runtime: Any, markets: Sequence[Market]) -> t
             decision = hooks.select_market(market)
         except Exception:
             continue
-        if decision.selected:
-            scoped.append(market)
+        if not decision.selected:
+            continue
+        if decision.metadata.get("market_family") not in (None, "single_game"):
+            # outright / series / esports 不依赖单场直播源，本诊断不覆盖。
+            continue
+        scoped.append(market)
     return tuple(scoped)
 
 

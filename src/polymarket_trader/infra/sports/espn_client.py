@@ -13,8 +13,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 
 from polymarket_trader.domain.sports_live import (
+    CricketGameState,
+    SportsLiveDriverPosition,
     SportsLiveGame,
     SportsLiveGameStatus,
+    SportsLiveRaceEvent,
     SportsLiveSnapshot,
     SportsLiveTeam,
 )
@@ -34,7 +37,30 @@ _DEFAULT_LEAGUE_PATHS: dict[str, str] = {
     "ncaaf": "/apis/site/v2/sports/football/college-football/scoreboard",
     "nhl": "/apis/site/v2/sports/hockey/nhl/scoreboard",
     "mlb": "/apis/site/v2/sports/baseball/mlb/scoreboard",
+    "atp": "/apis/site/v2/sports/tennis/atp/scoreboard",
+    "wta": "/apis/site/v2/sports/tennis/wta/scoreboard",
+    # MMA / 拳击：ESPN scoreboard 把 fighter 当 home/away 二人对位，沿用 team-pair 解析。
+    "ufc": "/apis/site/v2/sports/mma/ufc/scoreboard",
+    "mma": "/apis/site/v2/sports/mma/ufc/scoreboard",
+    # 橄榄球：英式/澳式都按 team-pair 输出，复用现有解析。
+    "rugby": "/apis/site/v2/sports/rugby/scoreboard",
+    # 板球：team-pair 形态，但需要 CricketGameState 解析（innings / runs / wickets / overs）。
+    "intl-test": "/apis/site/v2/sports/cricket/intl-test/scoreboard",
+    "intl-t20i": "/apis/site/v2/sports/cricket/intl-t20i/scoreboard",
+    "intl-odi": "/apis/site/v2/sports/cricket/intl-odi/scoreboard",
+    "ipl": "/apis/site/v2/sports/cricket/ipl/scoreboard",
+    "bbl": "/apis/site/v2/sports/cricket/bbl/scoreboard",
+    # 赛车：field event 形态，不能映射 team-pair；走 SportsLiveRaceEvent 单独通路。
+    "f1": "/apis/site/v2/sports/racing/f1/scoreboard",
+    "nascar": "/apis/site/v2/sports/racing/nascar-premier/scoreboard",
+    "indycar": "/apis/site/v2/sports/racing/irl/scoreboard",
 }
+
+_CRICKET_LEAGUES: frozenset[str] = frozenset(
+    {"intl-test", "intl-t20i", "intl-odi", "ipl", "bbl", "cricket"}
+)
+
+_RACE_LEAGUES: frozenset[str] = frozenset({"f1", "nascar", "indycar"})
 
 _DEFAULT_SCOREBOARD_TIMEZONE = "America/New_York"
 
@@ -89,7 +115,12 @@ class EspnScoreboardClient:
             await self._client.aclose()
 
     async def list_games(self) -> SportsLiveSnapshot:
-        """拉取所有配置联赛的当前 scoreboard。"""
+        """拉取所有配置联赛的当前 scoreboard。
+
+        team-pair 类联赛产出 ``SportsLiveGame``；赛车类联赛产出
+        ``SportsLiveRaceEvent``（不能映射 home/away）。两类在同一 snapshot 里
+        分别放在 ``games`` 与 ``race_events`` 字段。
+        """
 
         observed_at = self._now()
         scoreboard_dates = _scoreboard_dates(
@@ -99,7 +130,9 @@ class EspnScoreboardClient:
             days_after=self._date_window_days_after,
         )
         games: list[SportsLiveGame] = []
+        race_events: list[SportsLiveRaceEvent] = []
         seen_event_keys: set[tuple[str, str]] = set()
+        seen_race_keys: set[tuple[str, str]] = set()
         failures: list[SportsDataClientError] = []
         successful_requests = 0
         for league in self._leagues:
@@ -110,6 +143,18 @@ class EspnScoreboardClient:
                     failures.append(exc)
                     continue
                 successful_requests += 1
+                if league in _RACE_LEAGUES:
+                    for race in parse_espn_race_payload(
+                        payload,
+                        league=league,
+                        observed_at=observed_at,
+                    ):
+                        race_key = (race.league, race.source_event_id)
+                        if race.source_event_id and race_key in seen_race_keys:
+                            continue
+                        seen_race_keys.add(race_key)
+                        race_events.append(race)
+                    continue
                 for game in parse_espn_scoreboard_payload(
                     payload,
                     league=league,
@@ -122,7 +167,12 @@ class EspnScoreboardClient:
                     games.append(game)
         if successful_requests <= 0 and failures:
             raise failures[0]
-        return SportsLiveSnapshot(source="espn", observed_at=observed_at, games=tuple(games))
+        return SportsLiveSnapshot(
+            source="espn",
+            observed_at=observed_at,
+            games=tuple(games),
+            race_events=tuple(race_events),
+        )
 
     async def _get_scoreboard(self, league: str, *, scoreboard_date: str) -> Mapping[str, Any]:
         path = _path_for_league(league)
@@ -209,12 +259,19 @@ def _parse_event(
         normalized_status=status,
     )
 
+    cricket_state = (
+        _cricket_state_from_competition(competition, competitors)
+        if league in _CRICKET_LEAGUES
+        else None
+    )
+
     return SportsLiveGame(
         source="espn",
         source_event_id=str(event.get("id") or competition.get("id") or ""),
         league=league.upper(),
         home=home,
         away=away,
+        cricket_state=cricket_state,
         status=status,
         period=period,
         seconds_remaining=seconds_remaining,
@@ -227,6 +284,231 @@ def _parse_event(
             "start_time_utc": event.get("date") or competition.get("date"),
         },
     )
+
+
+def parse_espn_race_payload(
+    payload: Mapping[str, Any],
+    *,
+    league: str,
+    observed_at: datetime | None = None,
+) -> tuple[SportsLiveRaceEvent, ...]:
+    """把 ESPN 赛车 scoreboard 转成 ``SportsLiveRaceEvent`` 序列。
+
+    赛车类 scoreboard 与 team-pair 类不同：
+    - 每个 event 含 ``competitions[0].competitors`` 数组，但每个 competitor 是
+      "车手 + 车队"（athlete + team），并且没有 home/away 标记；
+    - linescore / score 字段是位次而非比分；
+    - 圈数 / 总圈数在 ``competitions[0].status.{period,detail}`` 或
+      ``competitions[0].laps``。
+    """
+
+    observed_at = observed_at or datetime.now(timezone.utc)
+    league = _normalize_league_code(league)
+    events = payload.get("events")
+    if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
+        return ()
+    races: list[SportsLiveRaceEvent] = []
+    for event in events:
+        if not isinstance(event, Mapping):
+            continue
+        race = _parse_race_event(event, league=league, observed_at=observed_at)
+        if race is not None:
+            races.append(race)
+    return tuple(races)
+
+
+def _parse_race_event(
+    event: Mapping[str, Any],
+    *,
+    league: str,
+    observed_at: datetime,
+) -> SportsLiveRaceEvent | None:
+    competitions = event.get("competitions")
+    if not isinstance(competitions, Sequence) or not competitions:
+        return None
+    competition = competitions[0]
+    if not isinstance(competition, Mapping):
+        return None
+    status_payload = event.get("status")
+    if not isinstance(status_payload, Mapping):
+        status_payload = competition.get("status")
+    if not isinstance(status_payload, Mapping):
+        status_payload = {}
+    status = _map_status(status_payload)
+    raw_status = _status_name(status_payload)
+    laps_completed = _int_value(competition.get("lapsCompleted") or competition.get("currentLap"))
+    total_laps = _int_value(competition.get("totalLaps") or competition.get("scheduledLaps"))
+    competitors = competition.get("competitors")
+    competitors_seq = competitors if isinstance(competitors, Sequence) else ()
+    drivers: list[SportsLiveDriverPosition] = []
+    leader_driver: str | None = None
+    leader_team: str | None = None
+    for competitor in competitors_seq:
+        position = _driver_position_from(competitor)
+        if position is None:
+            continue
+        drivers.append(position)
+        if leader_driver is None and position.position == 1:
+            leader_driver = position.driver
+            leader_team = position.team
+    if leader_driver is None and drivers:
+        # 按 position 排序后取第一个非空 position 作为 leader 兜底
+        ordered = sorted(drivers, key=lambda d: d.position or 10**6)
+        leader_driver = ordered[0].driver
+        leader_team = ordered[0].team
+    event_name = _first_text(event, "name", "shortName") or league.upper()
+    return SportsLiveRaceEvent(
+        source="espn",
+        source_event_id=str(event.get("id") or competition.get("id") or ""),
+        league=league.upper(),
+        event_name=event_name,
+        status=status,
+        leader_driver=leader_driver,
+        leader_team=leader_team,
+        laps_completed=laps_completed,
+        total_laps=total_laps,
+        status_flag=_first_text(status_payload, "flagState", "detail"),
+        observed_at=observed_at,
+        raw_status=raw_status,
+        drivers=tuple(drivers),
+        source_payload={
+            "start_time_utc": event.get("date") or competition.get("date"),
+            "venue": _first_text(competition.get("venue") or {}, "fullName", "displayName") if isinstance(competition.get("venue"), Mapping) else None,
+        },
+    )
+
+
+def _driver_position_from(competitor: Any) -> SportsLiveDriverPosition | None:
+    if not isinstance(competitor, Mapping):
+        return None
+    athlete = competitor.get("athlete")
+    athlete_mapping = athlete if isinstance(athlete, Mapping) else {}
+    driver_name = _first_text(athlete_mapping, "displayName", "shortName", "fullName")
+    if driver_name is None:
+        driver_name = _first_text(competitor, "displayName", "name")
+    if driver_name is None:
+        return None
+    team_payload = competitor.get("team")
+    team_mapping = team_payload if isinstance(team_payload, Mapping) else {}
+    team_name = _first_text(team_mapping, "displayName", "name", "shortDisplayName")
+    position = _int_value(competitor.get("status", {}).get("position") if isinstance(competitor.get("status"), Mapping) else None)
+    if position is None:
+        position = _int_value(competitor.get("position"))
+    laps_completed = _int_value(
+        competitor.get("lapsCompleted")
+        or (competitor.get("status", {}).get("laps") if isinstance(competitor.get("status"), Mapping) else None)
+    )
+    gap_to_leader = _first_text(competitor, "behindBy", "gap")
+    status_label = (
+        _first_text(competitor.get("status") or {}, "displayName", "shortName")
+        if isinstance(competitor.get("status"), Mapping)
+        else None
+    )
+    return SportsLiveDriverPosition(
+        driver=driver_name,
+        position=position,
+        team=team_name,
+        laps_completed=laps_completed,
+        gap_to_leader=gap_to_leader,
+        status=status_label,
+    )
+
+
+def _cricket_state_from_competition(
+    competition: Mapping[str, Any],
+    competitors: Sequence[Any],
+) -> CricketGameState | None:
+    """从 ESPN 板球 scoreboard 提取局/分/wickets/overs。
+
+    ESPN 板球 ``situation`` 字段不稳定，但 ``competitors[i].statistics`` 在 live
+    比赛中通常含 wickets / overs 数据；``competitors[i].score`` 是总分。
+    这里只填能稳定提取的字段，缺数据时返回 None 表示该 game 没有结构化板球态。
+    """
+
+    batting_side: str | None = None
+    runs: int | None = None
+    wickets: int | None = None
+    overs_completed: int | None = None
+    balls_in_over: int | None = None
+    target: int | None = None
+    required_runs: int | None = None
+    required_balls: int | None = None
+    situation = competition.get("situation")
+    situation_mapping = situation if isinstance(situation, Mapping) else {}
+    batting = situation_mapping.get("batting")
+    batting_mapping = batting if isinstance(batting, Mapping) else {}
+    batting_name = _first_text(batting_mapping, "displayName", "name", "shortName")
+    for competitor in competitors:
+        if not isinstance(competitor, Mapping):
+            continue
+        team_payload = competitor.get("team")
+        team_mapping = team_payload if isinstance(team_payload, Mapping) else {}
+        team_name = _first_text(team_mapping, "displayName", "name", "shortDisplayName")
+        if batting_name and team_name and batting_name == team_name:
+            batting_side = (str(competitor.get("homeAway") or "").lower() or None)
+            runs = _int_value(competitor.get("score"))
+            stats = competitor.get("statistics") if isinstance(competitor.get("statistics"), Sequence) else ()
+            for stat in stats:
+                if not isinstance(stat, Mapping):
+                    continue
+                name = str(stat.get("name") or "").lower()
+                value = _int_value(stat.get("value")) if stat.get("value") is not None else None
+                if name in {"wickets", "wicketstotal"} and value is not None:
+                    wickets = value
+                elif name in {"oversbowled", "overs"}:
+                    raw = stat.get("displayValue") or stat.get("value")
+                    overs_completed, balls_in_over = _cricket_overs_parts(raw)
+    target = _int_value(situation_mapping.get("targetRuns") or situation_mapping.get("target"))
+    required_runs = _int_value(situation_mapping.get("requiredRuns"))
+    required_balls = _int_value(situation_mapping.get("requiredBalls"))
+    if all(
+        value is None
+        for value in (batting_side, runs, wickets, overs_completed, target)
+    ):
+        return None
+    current_innings = _int_value(situation_mapping.get("currentInnings") or situation_mapping.get("inning"))
+    return CricketGameState(
+        current_innings=current_innings,
+        batting_side=batting_side,
+        runs=runs,
+        wickets=wickets,
+        overs_completed=overs_completed,
+        balls_in_over=balls_in_over,
+        target=target,
+        required_runs=required_runs,
+        required_balls=required_balls,
+    )
+
+
+def _cricket_overs_parts(raw: Any) -> tuple[int | None, int | None]:
+    """把 "12.3" / "12" / 12.3 拆成 ``(overs:int, balls_in_over:int)``。
+
+    板球 overs 是非十进制：``12.3`` 表示 12 完整 overs + 3 球（每 over 6 球），
+    所以不能简单按浮点解释。
+    """
+
+    if raw is None:
+        return None, None
+    text = str(raw).strip()
+    if not text:
+        return None, None
+    if "." in text:
+        parts = text.split(".", 1)
+        try:
+            overs = int(float(parts[0]))
+        except ValueError:
+            return None, None
+        try:
+            balls = int(float(parts[1]))
+        except ValueError:
+            return overs, None
+        if 0 <= balls <= 5:
+            return overs, balls
+        return overs, None
+    try:
+        return int(float(text)), 0
+    except ValueError:
+        return None, None
 
 
 def _team_from_competitors(

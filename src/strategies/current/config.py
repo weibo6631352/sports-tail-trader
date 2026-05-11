@@ -169,6 +169,30 @@ class CurrentStrategyConfig:
     tail_recovery_profit_take_enabled: bool = True
     tail_recovery_profit_take_min_avg_price: Decimal = Decimal("0.90")
 
+    # Outright family 配置。默认 budget=0 + RECORD_ONLY；必须两个 flip 才真实下单。
+    tail_outright_enabled_market_types: tuple[SportsMarketType, ...] = (
+        SportsMarketType.MONEYLINE,
+        SportsMarketType.BINARY_PROP,
+    )
+    tail_outright_execution_permission: ExecutionPermission = ExecutionPermission.RECORD_ONLY
+    tail_outright_min_edge_bps: int = 500  # 5%
+    tail_outright_max_entry_price: Decimal = Decimal("0.85")
+    tail_outright_budget_usdc: Decimal = Decimal("0")
+    tail_outright_max_per_market_usdc: Decimal = Decimal("25")
+    tail_outright_max_event_correlation_usdc: Decimal = Decimal("40")
+    tail_outright_max_hold_horizon_days: int = 180
+    tail_outright_max_season_odds_age_seconds: int = 14400
+    tail_outright_season_odds_ttl_seconds: int = 1800
+    tail_outright_reassessment_interval_seconds: int = 3600
+    tail_outright_exit_edge_target: Decimal = Decimal("0.03")
+    tail_outright_min_profit_per_share: Decimal = Decimal("0.02")
+    tail_outright_stop_loss_pct: Decimal = Decimal("0.30")
+    tail_outright_fair_value_drift_pct: Decimal = Decimal("0.15")
+    tail_outright_min_remaining_days: int = 7
+    tail_outright_late_min_pnl_pct: Decimal = Decimal("0.05")
+    tail_outright_entry_maker_max_resting_seconds: int = 86400
+    tail_outright_min_orderbook_depth_usdc: Decimal = Decimal("100")
+
 
 def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
     """把当前策略配置转换成体育扫尾纯业务策略参数。"""

@@ -11,7 +11,13 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Mapping
 
-from polymarket_trader.domain.sports_live import BaseballGameState
+from polymarket_trader.domain.sports_live import (
+    BaseballGameState,
+    EsportsGameState,
+    SoccerGameState,
+    TennisGameState,
+    CricketGameState,
+)
 
 
 class SportsMarketType(StrEnum):
@@ -69,48 +75,12 @@ class LiveGameStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class TennisGameState:
-    """策略评估网球扫尾所需的盘分、局分和即时分状态。"""
-
-    home_sets_won: int = 0
-    away_sets_won: int = 0
-    current_set: int | None = None
-    home_current_set_games: int | None = None
-    away_current_set_games: int | None = None
-    home_total_games: int = 0
-    away_total_games: int = 0
-    set_scores: tuple[tuple[int, int], ...] = ()
-    home_point: str | None = None
-    away_point: str | None = None
-    first_to_serve: str | None = None
-    serving_side: str | None = None
-
-    @property
-    def total_games(self) -> int:
-        return self.home_total_games + self.away_total_games
-
-    def sets_won_for(self, side: SportsMarketSide) -> int:
-        if side == SportsMarketSide.HOME:
-            return self.home_sets_won
-        if side == SportsMarketSide.AWAY:
-            return self.away_sets_won
-        return 0
-
-    def current_set_games_for(self, side: SportsMarketSide) -> int | None:
-        if side == SportsMarketSide.HOME:
-            return self.home_current_set_games
-        if side == SportsMarketSide.AWAY:
-            return self.away_current_set_games
-        return None
-
-
-@dataclass(frozen=True, slots=True)
 class LiveGameState:
     """策略评估所需的直播比赛状态。
 
-    ``baseball_state`` 复用 ``polymarket_trader.domain.sports_live.BaseballGameState``，
-    与 infra 直播源归一化保持单一类型源；``tennis_state`` 暂未被 infra 归一化，
-    保留在策略通用层。
+    所有 sport-specific state（baseball/tennis/soccer/esports/cricket）均复用
+    ``polymarket_trader.domain.sports_live`` 中的单一定义，与 infra 归一化保持
+    类型同源。
     """
 
     league: str
@@ -125,6 +95,9 @@ class LiveGameState:
     source_conflicts: tuple[Mapping[str, Any], ...] = ()
     baseball_state: BaseballGameState | None = None
     tennis_state: TennisGameState | None = None
+    soccer_state: SoccerGameState | None = None
+    esports_state: EsportsGameState | None = None
+    cricket_state: CricketGameState | None = None
 
     @property
     def total_score(self) -> int:
