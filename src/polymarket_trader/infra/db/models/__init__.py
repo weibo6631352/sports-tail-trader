@@ -20,12 +20,12 @@ from polymarket_trader.infra.db.models._legacy import (
     AuditEventModel,
     DecisionRecordModel,
     FillModel,
-    MarketModel,
     OrderModel,
     OrderbookSnapshotModel,
     OutboxEventModel,
     PositionModel,
 )
+from polymarket_trader.infra.db.models.market import MarketModel
 
 __all__ = [
     "AccountSnapshotModel",
