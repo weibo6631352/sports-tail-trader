@@ -1779,6 +1779,13 @@ class AdminQueryMixin:
         )
         if now is None:
             now = datetime.now(timezone.utc)
+        settings = getattr(self.runtime, "settings", None)
+        league_codes = (
+            getattr(settings, "sports_live_state_league_codes", ()) if settings is not None else ()
+        )
+        supported_league_prefixes: frozenset[str] | None = (
+            frozenset(code.lower() for code in league_codes if code) or None
+        )
         missing_markets = []
         deferred_future_schedule_count = 0
         normalized_prefix = None if prefix is None else prefix.strip().lower()
@@ -1793,7 +1800,11 @@ class AdminQueryMixin:
             market_prefix = _market_slug_prefix(market)
             if normalized_prefix and market_prefix != normalized_prefix:
                 continue
-            urgency = _live_source_gap_urgency(market, now=now)
+            urgency = _live_source_gap_urgency(
+                market,
+                now=now,
+                supported_league_prefixes=supported_league_prefixes,
+            )
             if _live_source_gap_outside_diagnostic_window(market, now=now):
                 continue
             if urgency == "future_schedule" and not include_future_schedule:
@@ -1804,7 +1815,13 @@ class AdminQueryMixin:
         missing_markets = sorted(
             missing_markets,
             key=lambda market: (
-                _live_source_gap_urgency_rank(_live_source_gap_urgency(market, now=now)),
+                _live_source_gap_urgency_rank(
+                    _live_source_gap_urgency(
+                        market,
+                        now=now,
+                        supported_league_prefixes=supported_league_prefixes,
+                    ),
+                ),
                 market.game_start_time or datetime.max.replace(tzinfo=timezone.utc),
                 market.market_slug or market.condition_id,
             ),
@@ -1814,7 +1831,11 @@ class AdminQueryMixin:
         for market in missing_markets:
             market_prefix = _market_slug_prefix(market)
             by_prefix_counts[market_prefix] = by_prefix_counts.get(market_prefix, 0) + 1
-            urgency = _live_source_gap_urgency(market, now=now)
+            urgency = _live_source_gap_urgency(
+                market,
+                now=now,
+                supported_league_prefixes=supported_league_prefixes,
+            )
             by_urgency_counts[urgency] = by_urgency_counts.get(urgency, 0) + 1
         by_prefix = [
             {"prefix": item_prefix, "count": count}
@@ -1834,7 +1855,11 @@ class AdminQueryMixin:
         page = self._slice_sequence(tuple(missing_markets), limit=limit, offset=offset)
         payload = page_payload(
             page,
-            serializer=lambda market: _live_source_gap_market_payload(market, now=now),
+            serializer=lambda market: _live_source_gap_market_payload(
+                market,
+                now=now,
+                supported_league_prefixes=supported_league_prefixes,
+            ),
         )
         payload.update(
             {

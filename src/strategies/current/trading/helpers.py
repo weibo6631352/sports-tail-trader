@@ -3,8 +3,34 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any
 
 from polymarket_trader.extension_api import ExtensionContext
+
+
+def bid_plus_tick_fallback_ask(
+    orderbook: Any,
+    tick_size: Decimal | None,
+) -> Decimal | None:
+    """missing_best_ask 时用 ``best_bid + tick_size`` 估算 fallback ask。
+
+    返回 None 表示 fallback 不可用（无 bid / 无 tick / 估算价越界）。返回估算价时
+    调用方应把执行权限降级为 RECORD_ONLY——估算价只让 evaluator 跑出 fair_value
+    与"理论可成交价"的对比，下单仍需要真实 ask 流动性。
+
+    覆盖 outright + tail 两条评估路径——missing_best_ask 是单场盘口最大占比
+    拒绝原因（实测 single_game 96%+），让两条路径都能用同一份 fallback 语义。
+    """
+
+    if orderbook is None or tick_size is None or tick_size <= Decimal("0"):
+        return None
+    best_bid = getattr(orderbook, "best_bid", None)
+    if best_bid is None or best_bid <= Decimal("0"):
+        return None
+    fallback_ask = best_bid + tick_size
+    if fallback_ask <= Decimal("0") or fallback_ask >= Decimal("1"):
+        return None
+    return fallback_ask
 
 
 def _metadata_decimal(context: ExtensionContext, *keys: str) -> Decimal | None:

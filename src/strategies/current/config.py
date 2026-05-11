@@ -110,6 +110,11 @@ class CurrentStrategyConfig:
     discovery_tag_slugs: tuple[str, ...] = ("sports",)
     tail_live_discovery_max_games: int = 40
     tail_live_discovery_max_queries: int = 120
+    # CLAUDE.md §9：所有目标盘口必须纳入诊断，不得 silent 忽略。所以 universe
+    # 仍接受 KBO / WTT / table-tennis 等无默认源支持的联赛——它们进 record-only
+    # 通道，由 live-source-gaps 把 `slug_prefix` 标 unsupported_league 让运维侧
+    # 区分"暂时缺直播 vs 联赛根本不被覆盖"。运维启用 sofascore/pandascore 等
+    # 额外源后这些 token 自然产生有效信号。
     tail_category_tokens: tuple[str, ...] = (
         "nba",
         "nfl",

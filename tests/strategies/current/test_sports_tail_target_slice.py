@@ -2426,8 +2426,11 @@ def test_tennis_completed_set_winner_rejects_missing_best_ask() -> None:
         ),
     )
 
+    # gates.py 启用 bid+tick fallback 后，best_ask 缺失但 best_bid+tick 可用时
+    # evaluator 用估算价（0.001+0.001=0.002）继续评估，下一个 gate 拒绝。该 token
+    # asks 数组为空所以 buyable_liquidity_usdc=0，触发 liquidity_below_min。
     assert decision.action.value == "skip"
-    assert decision.reason == "missing_best_ask"
+    assert decision.reason == "liquidity_below_min"
 
 
 def test_ended_moneyline_rejects_missing_best_ask() -> None:

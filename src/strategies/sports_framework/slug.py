@@ -22,9 +22,17 @@ def normalized_market_slug(market: SportsMarketSnapshot) -> str:
 
 
 def is_unsupported_period_total(text: str) -> bool:
-    """识别当前没有独立直播字段支撑的分段 totals。"""
+    """识别当前没有独立直播字段支撑的分段 totals。
+
+    Polymarket slug 会出现两类写法：完整词（"first quarter total"）和简写
+    （"1q total" / "1h total"），后者来自实际 slug 形如
+    ``nba-det-cle-2026-05-11-1h-total-109pt5``。两类都要覆盖，否则简写写法
+    会被识别为 FULL_GAME，错误进入 ``market_end_too_far`` 假阳性拒绝
+    （实测 NBA 1H total 因 endDate 是整场比赛结束被假阳性拒绝）。
+    """
 
     period_markers = (
+        # 完整词
         "first quarter total",
         "1st quarter total",
         "second quarter total",
@@ -41,6 +49,16 @@ def is_unsupported_period_total(text: str) -> bool:
         "1st inning total",
         "first 5 innings total",
         "first five innings total",
+        # 简写（NBA / NFL slug 常用）
+        "1h total",
+        "2h total",
+        "1q total",
+        "2q total",
+        "3q total",
+        "4q total",
+        "1p total",
+        "2p total",
+        "3p total",
     )
     return any(marker in text for marker in period_markers)
 

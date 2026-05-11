@@ -30,7 +30,7 @@ from strategies.current.tail import (
     live_game_state_from_metadata,
 )
 
-from .helpers import _metadata_decimal
+from .helpers import _metadata_decimal, bid_plus_tick_fallback_ask
 from .matching import _target_for_live_game
 from .pricing import _tail_locked_outcome_signal, _tail_price_cap
 from .risk_limits import _buy_fill_summary, _covered_exit_shares
@@ -85,12 +85,32 @@ def _tail_entry_gate(
 
     policy = tail_policy_from_config(config)
     locked_outcome_signal = _tail_locked_outcome_signal(context)
+    # missing_best_ask fallback：盘口缺 best_ask 但有 best_bid + tick_size 时用
+    # bid+tick 估算。让 evaluator 仍跑出 fair_value 对比并产生 RECORD_ONLY 决策
+    # ——下单不允许，但避免 single_game 上 96%+ token 在 evaluator 入口 silent
+    # drop（§10 拒绝原因可审计 + §9 不静默忽略目标盘口）。fallback metadata 透传
+    # 到 decision_records 供 calibration 使用。
+    best_ask = context.orderbook.best_ask
+    snapshot_metadata: dict[str, str] = {}
+    if best_ask is None:
+        fallback_ask = bid_plus_tick_fallback_ask(
+            context.orderbook,
+            context.market.tick_size,
+        )
+        if fallback_ask is not None:
+            best_ask = fallback_ask
+            snapshot_metadata = {
+                "best_ask_fallback": "bid_plus_tick",
+                "best_bid": str(context.orderbook.best_bid),
+                "tick_size": str(context.market.tick_size),
+                "fallback_ask": str(fallback_ask),
+            }
     market_snapshot = SportsMarketSnapshot(
         market_type=descriptor.market_type,
         side=target.side,
         token_id=target.token_id,
         line=descriptor.line,
-        best_ask=context.orderbook.best_ask,
+        best_ask=best_ask,
         buyable_liquidity_usdc=_ask_depth_notional(
             context.orderbook,
             price_cap=_tail_price_cap(
@@ -103,6 +123,7 @@ def _tail_entry_gate(
         market_family=descriptor.market_family,
         market_slug=context.market.market_slug,
         market_end_date=context.market.end_date,
+        metadata=snapshot_metadata,
     )
     evaluation = evaluate_tail_opportunity(
         game,

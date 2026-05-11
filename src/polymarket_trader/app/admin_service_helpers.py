@@ -221,9 +221,24 @@ def _runtime_extension_hooks(runtime: Any) -> Any | None:
     return getattr(market_service, "_extension_hooks", None)
 
 
-def _live_source_gap_urgency(market: Market, *, now: datetime) -> str:
-    """按开赛时间给直播源缺口分配实盘排查优先级。"""
+def _live_source_gap_urgency(
+    market: Market,
+    *,
+    now: datetime,
+    supported_league_prefixes: frozenset[str] | None = None,
+) -> str:
+    """按开赛时间给直播源缺口分配实盘排查优先级。
 
+    ``supported_league_prefixes``：已配置的 sports_live_state_leagues 中能覆盖的
+    联赛 slug prefix 集合。若 market slug 前缀（如 ``kbo``、``wtt``）不在该集合中，
+    意味着即便等再久也不可能拉到直播状态——标 ``unsupported_league`` 区分"暂时
+    缺直播 vs 联赛根本不被任何 source 覆盖"，让 oncall 不被永久 noise 淹没。
+    """
+
+    if supported_league_prefixes is not None:
+        prefix = _market_slug_prefix(market)
+        if prefix and prefix != "unknown" and prefix not in supported_league_prefixes:
+            return "unsupported_league"
     start_time = _ensure_utc(market.game_start_time)
     if start_time is None:
         return "unknown_time"
@@ -251,6 +266,8 @@ def _live_source_gap_urgency_rank(urgency: str) -> int:
         "starts_within_24h": 1,
         "future_schedule": 2,
         "unknown_time": 3,
+        # unsupported_league 不可解决，排到最后避免污染 oncall 视图首屏。
+        "unsupported_league": 98,
     }
     return ranks.get(urgency, 99)
 
@@ -265,7 +282,12 @@ def _ensure_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
-def _live_source_gap_market_payload(market: Market, *, now: datetime) -> dict[str, Any]:
+def _live_source_gap_market_payload(
+    market: Market,
+    *,
+    now: datetime,
+    supported_league_prefixes: frozenset[str] | None = None,
+) -> dict[str, Any]:
     """把缺少直播状态的 market 转成诊断样本。"""
 
     start_time = _ensure_utc(market.game_start_time)
@@ -275,7 +297,11 @@ def _live_source_gap_market_payload(market: Market, *, now: datetime) -> dict[st
         "market_slug": market.market_slug,
         "event_slug": market.event_slug,
         "slug_prefix": _market_slug_prefix(market),
-        "gap_urgency": _live_source_gap_urgency(market, now=now),
+        "gap_urgency": _live_source_gap_urgency(
+            market,
+            now=now,
+            supported_league_prefixes=supported_league_prefixes,
+        ),
         "game_start_time": None if start_time is None else start_time.isoformat(),
         "end_date": None if end_date is None else end_date.isoformat(),
         "market_question": market.market_question,

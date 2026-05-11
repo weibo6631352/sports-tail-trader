@@ -32,6 +32,11 @@ from polymarket_trader.workers.trading_decision import TradingDecisionWorker
 from polymarket_trader.workers.trading_decision import TradingDecisionWorkerResult
 
 _REJECTION_SAMPLE_LIMIT = 12
+# virtual-paper-trade 单次允许的 REST orderbook fallback 上限。
+# WS 订阅只覆盖已有 exposure / live_state ELIGIBLE 的 token；其他 token 评估时
+# 走 REST 兜底但需限速避免爆 CLOB API。30 个足以覆盖当前 live event 关联市场
+# （实测 metadata-linked candidate 约 105 个，但常态下只对 missing-ask 的子集兜底）。
+_REST_ORDERBOOK_FALLBACK_BUDGET = 30
 
 
 async def run_virtual_paper_trade(
@@ -212,6 +217,8 @@ async def _select_candidate(
     )
     all_rejections: list[dict[str, Any]] = []
     first_selection: _CandidateSelection | None = None
+    rest_budget = _REST_ORDERBOOK_FALLBACK_BUDGET
+    rest_used = 0
     for index, market in enumerate(source_markets, start=1):
         if market is None:
             continue
@@ -221,7 +228,14 @@ async def _select_candidate(
         for outcome in market.outcomes:
             if token_id is not None and outcome.token_id != token_id:
                 continue
-            orderbook = _orderbook(runtime, outcome.token_id)
+            orderbook, rest_budget, used_rest = await _orderbook_with_rest_fallback(
+                runtime,
+                outcome.token_id,
+                rest_budget_remaining=rest_budget,
+            )
+            if used_rest:
+                rest_used += 1
+                opportunity_funnel["rest_orderbook_fallback_used"] = rest_used
             if orderbook is None:
                 rejection = _rejection(
                     market,
@@ -562,6 +576,7 @@ def _empty_opportunity_funnel(
         "evaluated_token_count": 0,
         "orderbook_available_count": 0,
         "metadata_available_count": 0,
+        "rest_orderbook_fallback_used": 0,
         "plan_built_count": 0,
         "plan_ready_count": 0,
         "auto_execute_count": 0,
@@ -854,11 +869,51 @@ def _resolve_market(
 
 
 def _orderbook(runtime: Any, token_id: str) -> OrderbookSnapshot | None:
+    """同步取 market_ws snapshot；REST fallback 走 ``_orderbook_with_rest_fallback``。"""
+
     worker = getattr(runtime, "market_ws_worker", None)
     snapshot = None if worker is None else getattr(worker, "snapshot", None)
     if not callable(snapshot):
         return None
     return snapshot(token_id)
+
+
+async def _orderbook_with_rest_fallback(
+    runtime: Any,
+    token_id: str,
+    *,
+    rest_budget_remaining: int,
+) -> tuple[OrderbookSnapshot | None, int, bool]:
+    """虚拟盘 candidate 取盘口：WS snapshot 优先，缺 ask 时 REST 兜底。
+
+    返回 ``(snapshot, remaining_budget, used_rest)``。
+    - WS snapshot 已存在且 best_ask 健康 → 直接返回，不消耗 REST 预算
+    - WS snapshot 缺失或 best_ask=None 且 budget 仍有余 → 拉一次 REST 兜底
+    - REST 失败或预算耗尽 → 退回原 WS snapshot（即便缺 ask）
+
+    REST 兜底是为了让 candidate 评估时不被 WS 订阅子集遗漏（market_ws 只订阅
+    已有 exposure / live_state ELIGIBLE 的 token）。budget 限制单次 virtual-
+    paper-trade 不爆 CLOB API。
+    """
+
+    ws_snapshot = _orderbook(runtime, token_id)
+    if ws_snapshot is not None and getattr(ws_snapshot, "best_ask", None) is not None:
+        return ws_snapshot, rest_budget_remaining, False
+    if rest_budget_remaining <= 0:
+        return ws_snapshot, rest_budget_remaining, False
+    clob_client = getattr(runtime, "clob_client", None)
+    if clob_client is None or not callable(getattr(clob_client, "get_orderbook", None)):
+        return ws_snapshot, rest_budget_remaining, False
+    try:
+        rest_orderbook = await clob_client.get_orderbook(token_id)
+    except Exception:  # pragma: no cover - depends on external clob
+        return ws_snapshot, rest_budget_remaining - 1, False
+    rest_snapshot = rest_orderbook.to_snapshot() if rest_orderbook is not None else None
+    return (
+        rest_snapshot or ws_snapshot,
+        rest_budget_remaining - 1,
+        rest_snapshot is not None,
+    )
 
 
 def _resolve_market_by_token(runtime: Any, token_id: str) -> Market | None:
