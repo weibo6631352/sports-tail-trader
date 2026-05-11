@@ -20,6 +20,9 @@ build/
 # Frontend artifacts
 frontend/node_modules/
 frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/node_modules/.playwright-browser*
 
 # Local dev runtime
 .dev-runtime/
