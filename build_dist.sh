@@ -109,6 +109,7 @@ FDV Runtime Bundle
 - config/.env.example: 最小配置模板
 - config/.env.full.example: 完整配置模板
 - frontend/dist: 已构建前端静态资源
+- support/serve_frontend.py: 前端静态服务 + /api 反向代理脚本，被 start_all.sh 调用
 - wheels: 后端本地安装包
 - .runtime: 首次启动后生成的运行环境、日志和 PID 文件
 EOF
