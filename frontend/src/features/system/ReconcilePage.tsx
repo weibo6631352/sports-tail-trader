@@ -10,6 +10,7 @@ import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { StatusPill } from '@shared/ui/StatusPill'
+import { MonoCell } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { confirmAction } from '@shared/forms/confirmAction'
 import { formatDecimal, formatIso, formatUsdc } from '@shared/format'
@@ -64,7 +65,7 @@ export function ReconcilePage() {
     {
       header: 'pause_reason',
       cell: ({ row }) =>
-        row.original.pause_reason ? <code style={{ fontSize: 11 }}>{row.original.pause_reason}</code> : '—',
+        row.original.pause_reason ? <MonoCell>{row.original.pause_reason}</MonoCell> : '—',
     },
     {
       header: 'status',

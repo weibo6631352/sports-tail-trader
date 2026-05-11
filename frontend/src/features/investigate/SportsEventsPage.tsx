@@ -15,6 +15,7 @@ import { CopyableId } from '@shared/ui/CopyableId'
 import { StatusPill } from '@shared/ui/StatusPill'
 import { InlineActionButton } from '@shared/ui/InlineActionButton'
 import { JsonPanel } from '@shared/ui/JsonPanel'
+import { MonoCell, MonoText, DimText } from '@shared/ui/MonoCell'
 import { TimeWindowPicker } from '@shared/time/TimeWindowPicker'
 import { formatIso } from '@shared/format'
 import { useTimeWindowStore } from '@core/time/store'
@@ -57,7 +58,7 @@ export function SportsEventsPage() {
       header: 'source',
       cell: ({ row }) => {
         const p = row.original.payload ?? {}
-        return <code style={{ fontSize: 11 }}>{p.source ?? '—'}</code>
+        return <MonoCell>{p.source ?? '—'}</MonoCell>
       },
     },
     {
@@ -71,7 +72,7 @@ export function SportsEventsPage() {
       header: 'signal_allowed',
       cell: ({ row }) => {
         const allowed = row.original.payload?.signal_allowed
-        if (allowed === null || allowed === undefined) return <span style={{ color: 'var(--color-text-dim)' }}>—</span>
+        if (allowed === null || allowed === undefined) return <DimText>—</DimText>
         return (
           <StatusPill tone={allowed ? 'success' : 'danger'} size="xs">
             {String(allowed)}
@@ -83,7 +84,7 @@ export function SportsEventsPage() {
       header: 'reason',
       cell: ({ row }) => {
         const p = row.original.payload ?? {}
-        return p.signal_reason ? <code style={{ fontSize: 11 }}>{p.signal_reason}</code> : '—'
+        return p.signal_reason ? <MonoCell>{p.signal_reason}</MonoCell> : '—'
       },
     },
     {
@@ -102,10 +103,10 @@ export function SportsEventsPage() {
               ? scoreRaw
               : ''
         return (
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+          <MonoText>
             {clock ? `${clock} · ` : ''}
             {score}
-          </span>
+          </MonoText>
         )
       },
     },

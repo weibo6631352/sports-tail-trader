@@ -21,6 +21,7 @@ import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
 import { InlineActionButton } from '@shared/ui/InlineActionButton'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { StatusPill } from '@shared/ui/StatusPill'
+import { DimMonoCell } from '@shared/ui/MonoCell'
 import { TimeWindowPicker } from '@shared/time/TimeWindowPicker'
 import { formatIso } from '@shared/format'
 import { useTimeWindowStore } from '@core/time/store'
@@ -252,9 +253,7 @@ function RiskRejectionCard({
             </Text>
             <CopyableId value={event.condition_id ?? ''} dense />
             <CopyableId value={event.trace_id ?? ''} dense label="trace" />
-            <code style={{ fontSize: 11, color: 'var(--color-text-dim)' }}>
-              {event.reason ?? '—'}
-            </code>
+            <DimMonoCell>{event.reason ?? '—'}</DimMonoCell>
           </Group>
           <Group gap={4} wrap="wrap">
             {failed.length === 0 ? (

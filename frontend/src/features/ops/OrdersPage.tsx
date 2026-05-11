@@ -8,6 +8,7 @@ import type { OrderRow } from '@core/api/types'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { StatusPill } from '@shared/ui/StatusPill'
+import { MonoText } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { formatDecimal, formatIso } from '@shared/format'
 
@@ -37,9 +38,7 @@ export function OrdersPage() {
     {
       header: 'when',
       cell: ({ row }) => (
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-          {formatIso(row.original.created_at, 'MM-DD HH:mm:ss')}
-        </span>
+        <MonoText>{formatIso(row.original.created_at, 'MM-DD HH:mm:ss')}</MonoText>
       ),
     },
     { header: 'market', accessorKey: 'market_slug' },

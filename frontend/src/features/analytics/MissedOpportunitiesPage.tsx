@@ -12,6 +12,7 @@ import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
 import { StatusPill } from '@shared/ui/StatusPill'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { InlineActionButton } from '@shared/ui/InlineActionButton'
+import { MonoCell } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { TimeWindowPicker } from '@shared/time/TimeWindowPicker'
 import { formatDecimal, formatIso, formatUsdc, pnlTone, pnlToneColor, toDecimal } from '@shared/format'
@@ -81,7 +82,7 @@ export function MissedOpportunitiesPage() {
     },
     {
       header: 'reason',
-      cell: ({ row }) => <code style={{ fontSize: 11 }}>{row.original.reason ?? '—'}</code>,
+      cell: ({ row }) => <MonoCell>{row.original.reason ?? '—'}</MonoCell>,
     },
     {
       header: 'entry / fair',
@@ -107,7 +108,7 @@ export function MissedOpportunitiesPage() {
   ]
 
   const reasonColumns: ColumnDef<MissedOpportunityReasonBucket, unknown>[] = [
-    { header: 'reason', cell: ({ row }) => <code style={{ fontSize: 11 }}>{row.original.reason}</code> },
+    { header: 'reason', cell: ({ row }) => <MonoCell>{row.original.reason}</MonoCell> },
     { header: '决策', accessorKey: 'decision_count' },
     { header: '已结算', accessorKey: 'settled_count' },
     {

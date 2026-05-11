@@ -11,6 +11,7 @@ import { DataTable } from '@shared/tables/DataTable'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { InlineActionButton } from '@shared/ui/InlineActionButton'
 import { JsonPanel } from '@shared/ui/JsonPanel'
+import { MonoCell, DimMonoCell } from '@shared/ui/MonoCell'
 import { formatIso } from '@shared/format'
 
 const PAGE_SIZE = 100
@@ -66,7 +67,7 @@ export function AllocationDecisionsPage() {
         if (p.budget === null || p.budget === undefined) return '—'
         if (typeof p.budget === 'string' || typeof p.budget === 'number') return String(p.budget)
         try {
-          return <code style={{ fontSize: 11 }}>{JSON.stringify(p.budget).slice(0, 40)}</code>
+          return <MonoCell>{JSON.stringify(p.budget).slice(0, 40)}</MonoCell>
         } catch {
           return '—'
         }
@@ -75,7 +76,7 @@ export function AllocationDecisionsPage() {
     {
       header: 'reason',
       cell: ({ row }) => (
-        <code style={{ fontSize: 11, color: 'var(--color-text-dim)' }}>{row.original.reason ?? '—'}</code>
+        <DimMonoCell>{row.original.reason ?? '—'}</DimMonoCell>
       ),
     },
     {

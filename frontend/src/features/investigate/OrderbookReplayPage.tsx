@@ -19,6 +19,7 @@ import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { EmptyState } from '@shared/ui/EmptyState'
 import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
+import { MonoCell } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { TimeWindowPicker } from '@shared/time/TimeWindowPicker'
 import { formatDecimal, formatIso, isoToEpochMs, toDecimal } from '@shared/format'
@@ -229,7 +230,7 @@ export function OrderbookReplayPage() {
             <SectionCard title="当前快照摘要">
               <Stack gap={4}>
                 <KV k="received_at" v={formatIso(current.received_at)} />
-                <KV k="snapshot_id" v={<code style={{ fontSize: 11 }}>{current.snapshot_id}</code>} />
+                <KV k="snapshot_id" v={<MonoCell>{current.snapshot_id}</MonoCell>} />
                 <KV k="midpoint" v={formatDecimal(current.midpoint, { dp: 4 })} />
                 <KV k="best_bid / best_ask" v={`${formatDecimal(current.best_bid, { dp: 4 })} / ${formatDecimal(current.best_ask, { dp: 4 })}`} />
                 <KV k="bids levels" v={String(bids.length)} />

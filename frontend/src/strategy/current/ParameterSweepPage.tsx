@@ -27,6 +27,7 @@ import { SectionCard } from '@shared/ui/SectionCard'
 import { EmptyState } from '@shared/ui/EmptyState'
 import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
 import { InlineActionButton } from '@shared/ui/InlineActionButton'
+import { MonoCell } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { TimeWindowPicker } from '@shared/time/TimeWindowPicker'
 import { confirmAction } from '@shared/forms/confirmAction'
@@ -425,7 +426,7 @@ function ResultsTable({
         const isBestWin = key === bestWinKey
         return (
           <Stack gap={2}>
-            <code style={{ fontSize: 11 }}>{key}</code>
+            <MonoCell>{key}</MonoCell>
             {(isBestPnl || isBestWin) && (
               <Group gap={4}>
                 {isBestPnl ? (

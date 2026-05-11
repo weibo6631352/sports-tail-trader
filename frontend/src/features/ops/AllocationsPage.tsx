@@ -7,6 +7,7 @@ import { allocationsApi } from '@core/api/resources'
 import type { AllocationRow } from '@core/api/types'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { CopyableId } from '@shared/ui/CopyableId'
+import { MonoCell, DimMonoCell } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { formatIso, formatUsdc } from '@shared/format'
 
@@ -34,12 +35,12 @@ export function AllocationsPage() {
     },
     {
       header: 'reason',
-      cell: ({ row }) => <code style={{ fontSize: 11 }}>{row.original.reason ?? '—'}</code>,
+      cell: ({ row }) => <MonoCell>{row.original.reason ?? '—'}</MonoCell>,
     },
     {
       header: 'release',
       cell: ({ row }) => (
-        <code style={{ fontSize: 11, color: 'var(--color-text-dim)' }}>{row.original.release_reason ?? '—'}</code>
+        <DimMonoCell>{row.original.release_reason ?? '—'}</DimMonoCell>
       ),
     },
     { header: 'trace', cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} dense /> },

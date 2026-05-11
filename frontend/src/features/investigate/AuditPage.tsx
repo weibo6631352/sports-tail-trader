@@ -23,6 +23,7 @@ import { SectionCard } from '@shared/ui/SectionCard'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { StatusPill } from '@shared/ui/StatusPill'
 import { InlineActionButton } from '@shared/ui/InlineActionButton'
+import { MonoCell, DimMonoCell } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { EmptyState } from '@shared/ui/EmptyState'
 import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
@@ -75,7 +76,7 @@ function ListTab() {
   const columns: ColumnDef<AuditEventRow, unknown>[] = useMemo(
     () => [
       { header: 'when', cell: ({ row }) => formatIso(row.original.created_at, 'MM-DD HH:mm:ss') },
-      { header: 'title', cell: ({ row }) => <code style={{ fontSize: 11 }}>{row.original.event_title}</code> },
+      { header: 'title', cell: ({ row }) => <MonoCell>{row.original.event_title}</MonoCell> },
       {
         header: 'status',
         cell: ({ row }) =>
@@ -85,7 +86,7 @@ function ListTab() {
       {
         header: 'reason',
         cell: ({ row }) => (
-          <code style={{ fontSize: 11, color: 'var(--color-text-dim)' }}>{row.original.reason ?? '—'}</code>
+          <DimMonoCell>{row.original.reason ?? '—'}</DimMonoCell>
         ),
       },
       {
@@ -188,12 +189,12 @@ function OperatorTab() {
 
   const eventColumns: ColumnDef<OperatorAggregateEvent, unknown>[] = [
     { header: 'when', cell: ({ row }) => formatIso(row.original.created_at, 'MM-DD HH:mm:ss') },
-    { header: 'event_title', cell: ({ row }) => <code style={{ fontSize: 11 }}>{row.original.event_title}</code> },
+    { header: 'event_title', cell: ({ row }) => <MonoCell>{row.original.event_title}</MonoCell> },
     { header: 'operator', accessorKey: 'operator' },
     {
       header: 'reason',
       cell: ({ row }) => (
-        <code style={{ fontSize: 11, color: 'var(--color-text-dim)' }}>{row.original.reason ?? '—'}</code>
+        <DimMonoCell>{row.original.reason ?? '—'}</DimMonoCell>
       ),
     },
     {

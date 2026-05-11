@@ -11,6 +11,7 @@ import { resolveStrategyBundle } from '@strategy/registry'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { StatusPill } from '@shared/ui/StatusPill'
 import { CopyableId } from '@shared/ui/CopyableId'
+import { DimText } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { formatIso } from '@shared/format'
 
@@ -96,7 +97,7 @@ export function MarketsListPage() {
             cell: ({ row }: { row: { original: MarketView } }) => {
               const badges = renderBadges(row.original)
               return badges.length === 0 ? (
-                <span style={{ color: 'var(--color-text-dim)' }}>—</span>
+                <DimText>—</DimText>
               ) : (
                 <Group gap={4} wrap="wrap">
                   {badges}

@@ -8,6 +8,7 @@ import type { LiveSourceGapRow } from '@core/api/types'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { StatusPill } from '@shared/ui/StatusPill'
+import { MonoCell } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { formatIso } from '@shared/format'
 
@@ -65,7 +66,7 @@ export function StrategyDiagnosticsPage() {
     {
       header: 'reason',
       cell: ({ row }) =>
-        row.original.reason ? <code style={{ fontSize: 11 }}>{row.original.reason}</code> : '—',
+        row.original.reason ? <MonoCell>{row.original.reason}</MonoCell> : '—',
     },
   ]
 

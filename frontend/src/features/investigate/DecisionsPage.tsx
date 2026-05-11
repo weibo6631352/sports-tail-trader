@@ -10,6 +10,7 @@ import { PageHeader } from '@shared/ui/PageHeader'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { StatusPill } from '@shared/ui/StatusPill'
 import { InlineActionButton } from '@shared/ui/InlineActionButton'
+import { MonoCell, DimMonoCell, MonoText } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { formatIso } from '@shared/format'
 import { DecisionDetailDrawer } from './DecisionDetailDrawer'
@@ -46,14 +47,12 @@ export function DecisionsPage() {
       {
         header: 'when',
         cell: ({ row }) => (
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-            {formatIso(row.original.created_at, 'MM-DD HH:mm:ss')}
-          </span>
+          <MonoText>{formatIso(row.original.created_at, 'MM-DD HH:mm:ss')}</MonoText>
         ),
       },
       {
         header: 'hook',
-        cell: ({ row }) => <code style={{ fontSize: 11 }}>{row.original.hook_name ?? '—'}</code>,
+        cell: ({ row }) => <MonoCell>{row.original.hook_name ?? '—'}</MonoCell>,
       },
       {
         header: 'condition / token',
@@ -80,7 +79,7 @@ export function DecisionsPage() {
       {
         header: 'reason',
         cell: ({ row }) => (
-          <code style={{ fontSize: 11, color: 'var(--color-text-dim)' }}>{row.original.reason ?? '—'}</code>
+          <DimMonoCell>{row.original.reason ?? '—'}</DimMonoCell>
         ),
       },
       {

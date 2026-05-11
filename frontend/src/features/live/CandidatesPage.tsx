@@ -10,6 +10,7 @@ import { PageHeader } from '@shared/ui/PageHeader'
 import { StatusPill } from '@shared/ui/StatusPill'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { InlineActionButton } from '@shared/ui/InlineActionButton'
+import { MonoCell, DimText } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { confirmAction } from '@shared/forms/confirmAction'
 import { describeError } from '@core/api/errors'
@@ -113,13 +114,13 @@ export function CandidatesPage() {
       {
         header: 'reason',
         cell: ({ row }) =>
-          row.original.reason ? <code style={{ fontSize: 11 }}>{row.original.reason}</code> : '—',
+          row.original.reason ? <MonoCell>{row.original.reason}</MonoCell> : '—',
       },
       {
         header: '操作',
         cell: ({ row }) => {
           const c = row.original
-          if (!c.confirmable || !c.token_id) return <span style={{ color: 'var(--color-text-dim)' }}>—</span>
+          if (!c.confirmable || !c.token_id) return <DimText>—</DimText>
           return (
             <InlineActionButton
               variant="link"

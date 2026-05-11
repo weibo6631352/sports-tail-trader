@@ -24,6 +24,7 @@ import { SectionCard } from '@shared/ui/SectionCard'
 import { StatusPill } from '@shared/ui/StatusPill'
 import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
 import { CopyableId } from '@shared/ui/CopyableId'
+import { MonoCell, DimMonoCell, DimText } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { confirmAction } from '@shared/forms/confirmAction'
 import { type DiffRow } from '@shared/forms/DiffPreview'
@@ -384,9 +385,9 @@ function HistoryTable({
       cell: ({ row }) => {
         const p = (row.original.payload ?? {}) as Record<string, unknown>
         return (
-          <code style={{ fontSize: 11 }}>
+          <MonoCell>
             {String(p.scope ?? '?')}.{String(p.key ?? '?')}
-          </code>
+          </MonoCell>
         )
       },
     },
@@ -416,9 +417,7 @@ function HistoryTable({
     {
       header: 'reason',
       cell: ({ row }) => (
-        <code style={{ fontSize: 11, color: 'var(--color-text-dim)' }}>
-          {row.original.reason ?? '—'}
-        </code>
+        <DimMonoCell>{row.original.reason ?? '—'}</DimMonoCell>
       ),
     },
     {
@@ -430,7 +429,7 @@ function HistoryTable({
             yes
           </StatusPill>
         ) : (
-          <span style={{ color: 'var(--color-text-dim)' }}>no</span>
+          <DimText>no</DimText>
         )
       },
     },

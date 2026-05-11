@@ -24,6 +24,7 @@ import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
 import { DataTable } from '@shared/tables/DataTable'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { JsonPanel } from '@shared/ui/JsonPanel'
+import { MonoCell } from '@shared/ui/MonoCell'
 import { OperatorReasonFields } from '@shared/forms/OperatorReasonFields'
 import { useOperatorStore } from '@core/identity/store'
 import { formatDecimal, formatIso, pnlTone } from '@shared/format'
@@ -91,14 +92,14 @@ function SettlementsList() {
       header: 'outcome',
       cell: ({ row }) => {
         const p = (row.original.payload ?? {}) as Record<string, unknown>
-        return p.winning_outcome ? <code style={{ fontSize: 11 }}>{String(p.winning_outcome)}</code> : '—'
+        return p.winning_outcome ? <MonoCell>{String(p.winning_outcome)}</MonoCell> : '—'
       },
     },
     {
       header: 'source',
       cell: ({ row }) => {
         const p = (row.original.payload ?? {}) as Record<string, unknown>
-        return p.source ? <code style={{ fontSize: 11 }}>{String(p.source)}</code> : '—'
+        return p.source ? <MonoCell>{String(p.source)}</MonoCell> : '—'
       },
     },
     { header: 'operator', accessorKey: 'operator' },

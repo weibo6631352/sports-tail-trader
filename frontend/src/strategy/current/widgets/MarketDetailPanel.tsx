@@ -7,6 +7,7 @@ import type { MarketView } from '@core/api/types'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { CopyableId } from '@shared/ui/CopyableId'
 import { InlineActionButton } from '@shared/ui/InlineActionButton'
+import { MonoCell } from '@shared/ui/MonoCell'
 import { formatDecimal, formatIso } from '@shared/format'
 
 // 通用市场详情页 / 抽屉给策略私有信息——展示该 condition_id 最近 3 条决策摘要 +
@@ -61,7 +62,7 @@ export function MarketDetailPanel({ market }: { market: MarketView }) {
               <Group key={d.record_id} justify="space-between" wrap="nowrap" align="flex-start">
                 <Stack gap={0}>
                   <Group gap={6}>
-                    <code style={{ fontSize: 11 }}>{d.hook_name ?? '—'}</code>
+                    <MonoCell>{d.hook_name ?? '—'}</MonoCell>
                     <Badge size="xs" color={d.accepted ? 'teal' : 'red'} variant="light">
                       {d.accepted ? 'accepted' : 'rejected'}
                     </Badge>
