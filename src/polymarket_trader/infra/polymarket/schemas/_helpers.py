@@ -15,7 +15,7 @@ from typing import Any
 
 from polymarket_trader.domain.market import MarketOutcome
 from polymarket_trader.domain.orderbook import PriceLevel
-from polymarket_trader.serialization import utc_now as _utc_now
+from polymarket_trader.serialization import utc_now as _utc_now  # noqa: F401  # 包私有 re-export 给 schemas 子模块
 
 _FEE_RATE_DENOMINATOR = Decimal("1000")
 _USDC_BASE_UNITS = Decimal("1000000")

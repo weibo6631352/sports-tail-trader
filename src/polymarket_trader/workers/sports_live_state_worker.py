@@ -7,6 +7,9 @@ EntryMetadataStore 供策略入场评估读取。它不直接判断交易机会�
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -29,6 +32,11 @@ from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.lifecycle_bus import LifecyclePublisher
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.serialization import jsonable
+
+# audit dedupe LRU 容量：同一场比赛只在"状态字段"真实变化时落 audit_events，避免
+# 5s 心跳级噪音淹没 audit 表（实测 sports_live_state_recorded 占 audit 99%+）。
+# 8k 远超并发直播场数；触顶意味着异常多 game 突然同时直播或 hash 冲突。
+_LIVE_STATE_AUDIT_DEDUPE_CAPACITY = 8_192
 
 SportsLiveSnapshotProvider = Callable[[], Awaitable[SportsLiveSnapshot]]
 SportsLiveStateMatcher = Callable[
@@ -116,6 +124,9 @@ class SportsLiveStateWorker:
         self._previous_source_health: dict[str, SportsLiveSourceHealth] = {}
         self._last_no_feasible_source_published: bool = False
         self._no_feasible_source: bool = False
+        # audit dedupe：condition_id → 上次发布的 state-hash。仅在 hash 变化时
+        # emit sports_live_state_recorded，让审计反映"真实状态变化"而不是 5s 心跳。
+        self._last_audit_state_hash: OrderedDict[str, str] = OrderedDict()
 
     async def sync_once(self) -> SportsLiveSyncResult | None:
         """执行一次同步；供 scheduler 和测试直接驱动。"""
@@ -341,6 +352,18 @@ class SportsLiveStateWorker:
         if self._event_bus is None:
             return
         market = match.market
+        # dedupe by "稳态字段 hash" — observed_at 每次都变（5s 心跳），不能算进 hash；
+        # 只对 signal_allowed/signal_reason/phase + match.payload 内的 game-state
+        # 字段（score/period/status 等）哈希。相同 hash 跳过 audit。
+        state_hash = _audit_state_hash(match)
+        previous_hash = self._last_audit_state_hash.get(market.condition_id)
+        if previous_hash == state_hash:
+            self._last_audit_state_hash.move_to_end(market.condition_id)
+            return
+        self._last_audit_state_hash[market.condition_id] = state_hash
+        self._last_audit_state_hash.move_to_end(market.condition_id)
+        while len(self._last_audit_state_hash) > _LIVE_STATE_AUDIT_DEDUPE_CAPACITY:
+            self._last_audit_state_hash.popitem(last=False)
         try:
             await self._event_bus.publish(
                 OutboxPriority.P3,
@@ -398,3 +421,29 @@ class SportsLiveStateWorker:
             )
             count += 1
         return count
+
+
+def _audit_state_hash(match: LiveStateMatch) -> str:
+    """对一次匹配的"稳态字段"产生哈希，用于 audit dedupe。
+
+    observed_at / 5s 心跳无关字段（如 raw_status 文本时间戳）刻意排除——它们每次
+    都变，不能作为去重 key。signal_allowed / signal_reason / phase 是状态层面的
+    变更，必须计入。game-state 字段（home_score/away_score/period/status/
+    seconds_remaining 等）通过 match.payload["live_game"] 透传，整体序列化为
+    JSON 后哈希足够稳定。
+    """
+
+    game = (match.payload.get("live_game") if isinstance(match.payload, dict) else None) or {}
+    # 拷贝并裁掉每次都变的时间字段，让 hash 反映"非心跳变化"。
+    if isinstance(game, dict):
+        game_for_hash = {k: v for k, v in game.items() if k != "observed_at"}
+    else:
+        game_for_hash = game
+    key_payload = {
+        "signal_allowed": match.signal_allowed,
+        "signal_reason": match.signal_reason,
+        "phase": match.phase,
+        "game": game_for_hash,
+    }
+    blob = json.dumps(key_payload, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
