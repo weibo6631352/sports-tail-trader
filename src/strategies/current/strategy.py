@@ -33,6 +33,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import SportsLiveGame
 
 from strategies.current.config import CurrentStrategyConfig, load_current_strategy_config
+from strategies.current.identity import STRATEGY_ID
 from strategies.current.discovery import (
     build_configured_discovery_queries,
     build_live_game_discovery_queries,
@@ -82,6 +83,7 @@ class CurrentStrategy:
         self._live_game_filter_cache_games_id: int | None = None
         self._live_game_filter_cache: dict[tuple[tuple[str, ...], str | None], tuple[SportsLiveGame, ...]] = {}
         self._spec = ExtensionSpec(
+            strategy_id=STRATEGY_ID,
             name="current",
             version="1",
             description="Current runtime strategy implementation",

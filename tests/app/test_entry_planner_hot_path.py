@@ -28,6 +28,7 @@ def test_entry_plan_hot_path_does_not_read_orderbooks_for_entire_registry() -> N
         raise AssertionError(f"hot path read non-focus token {token_id}")
 
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
         registry=registry,
         orderbook_reader=orderbook_reader,

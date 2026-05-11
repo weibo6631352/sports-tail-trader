@@ -288,10 +288,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     event_bus.add_broadcast_listener(sse_subscription_registry.broadcast)
     db_session_factory = build_session_factory(settings.database_url)
     persistence_repository = DatabasePersistenceRepository(db_session_factory)
-    persistence_worker = PersistenceWorker(
-        outbox=outbox,
-        repository=persistence_repository,
-    )
     account_state_store = AccountStateStore()
     account_state_store.update_balances(
         balance_usdc=settings.portfolio_budget_usdc,
@@ -321,6 +317,15 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     extension_issues = _validate_extension_config(extension, settings)
     if extension_issues:
         raise ConfigLoadError(list(extension_issues))
+    # strategy_id 来自策略 spec，单进程内只装配一次；所有 framework worker / service
+    # （persistence、decision recorder、trading_decision_service、user_ws_worker ...）
+    # 都绑定同一个值，作为 SCOPE 表的归属键。
+    strategy_id = extension.spec.strategy_id
+    persistence_worker = PersistenceWorker(
+        strategy_id=strategy_id,
+        outbox=outbox,
+        repository=persistence_repository,
+    )
     execution_client = (
         PolymarketOrderExecutionClient(trading_client)
         if trading_client is not None
@@ -351,9 +356,10 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         market_tracker=market_ws_worker,
         account_snapshot_provider=account_state_store.snapshot,
     )
-    decision_recorder = DecisionEventRecorder(outbox=outbox)
+    decision_recorder = DecisionEventRecorder(outbox=outbox, strategy_id=strategy_id)
     trading_decision_service = TradingDecisionService(
         extension_hooks=extension.hooks,
+        strategy_id=strategy_id,
         registry=registry,
         orderbook_reader=market_ws_worker.snapshot,
         decision_recorder=decision_recorder,
@@ -363,6 +369,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         lifecycle_bus=lifecycle_bus,
     )
     user_ws_worker = UserWsWorker(
+        strategy_id=strategy_id,
         event_bus=event_bus,
         account_state_store=account_state_store,
     )
@@ -399,6 +406,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     )
     reconcile_service = ReconcileService(
         extension_hooks=extension.hooks,
+        strategy_id=strategy_id,
         entry_metadata_provider=entry_metadata_for_market,
         orderbook_reader=trading_decision_service.lookup_orderbook,
     )

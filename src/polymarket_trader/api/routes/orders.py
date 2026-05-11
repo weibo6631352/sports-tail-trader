@@ -45,6 +45,7 @@ async def list_orders(
     trade_id: str | None = Query(default=None),
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
+    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
     return await service.list_orders(
@@ -57,6 +58,7 @@ async def list_orders(
         order_id=order_id,
         trade_id=trade_id,
         time_range=build_time_range(since=since, until=until),
+        strategy_id=strategy_id,
     )
 
 

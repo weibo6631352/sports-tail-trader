@@ -22,11 +22,15 @@ from polymarket_trader.workers.trading_decision import TradingDecisionWorker
 
 
 class _FailingDecisionService:
+    strategy_id = "sports_tail"
+
     def build_entry_plan(self, **_: Any) -> Any:
         raise AssertionError("entry plan should not be built while entry gate is closed")
 
 
 class _CountingDecisionService:
+    strategy_id = "sports_tail"
+
     def __init__(self) -> None:
         self.calls = 0
 
@@ -45,6 +49,8 @@ class _CountingDecisionService:
 
 
 class _ExitDecisionService:
+    strategy_id = "sports_tail"
+
     def __init__(self, market: Market, orderbook: OrderbookSnapshot) -> None:
         self.market = market
         self.orderbook = orderbook
@@ -104,6 +110,7 @@ class _ExitDecisionService:
     ) -> ManagedOrderIntent | None:
         return decision_to_managed_intent(
             trace_id=trace_id,
+            strategy_id="sports_tail",
             condition_id=condition_id,
             market_slug=market_slug,
             default_token_id=default_token_id,
@@ -112,6 +119,8 @@ class _ExitDecisionService:
 
 
 class _ScaleInDecisionService:
+    strategy_id = "sports_tail"
+
     def __init__(self, market: Market, orderbook: OrderbookSnapshot) -> None:
         self.market = market
         self.orderbook = orderbook
@@ -119,6 +128,7 @@ class _ScaleInDecisionService:
     def build_entry_plan(self, **kwargs: Any) -> EntryPlan:
         trace_id = str(kwargs.get("trace_id") or "trace-scale")
         allocation = Allocation(
+            strategy_id="sports_tail",
             condition_id=self.market.condition_id,
             token_id=self.orderbook.token_id,
             market_slug=self.market.market_slug,
@@ -131,6 +141,7 @@ class _ScaleInDecisionService:
             allocations=(allocation,),
         )
         intent = BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id=trace_id,
             condition_id=self.market.condition_id,
             token_id=self.orderbook.token_id,
@@ -164,6 +175,8 @@ class _ScaleInDecisionService:
 
 
 class _RetryableEntryDecisionService:
+    strategy_id = "sports_tail"
+
     def __init__(self, market: Market, orderbooks: tuple[OrderbookSnapshot, ...]) -> None:
         self.market = market
         self.orderbooks = orderbooks
@@ -175,6 +188,7 @@ class _RetryableEntryDecisionService:
         orderbook = self.orderbooks[index]
         trace_id = str(kwargs.get("trace_id") or f"trace-retry-{self.calls}")
         allocation = Allocation(
+            strategy_id="sports_tail",
             condition_id=self.market.condition_id,
             token_id=orderbook.token_id,
             market_slug=self.market.market_slug,
@@ -187,6 +201,7 @@ class _RetryableEntryDecisionService:
             allocations=(allocation,),
         )
         intent = BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id=trace_id,
             condition_id=self.market.condition_id,
             token_id=orderbook.token_id,
@@ -226,6 +241,7 @@ class _LiveSellExecutor:
     async def submit(self, intent: ManagedOrderIntent) -> OrderResult:
         self.intents.append(intent)
         return OrderResult(
+            strategy_id="sports_tail",
             trace_id=intent.trace_id,
             condition_id=intent.condition_id,
             token_id=intent.token_id,
@@ -250,6 +266,7 @@ class _NoFillBuyExecutor:
     async def submit(self, intent: ManagedOrderIntent) -> OrderResult:
         self.intents.append(intent)
         return OrderResult(
+            strategy_id="sports_tail",
             trace_id=intent.trace_id,
             condition_id=intent.condition_id,
             token_id=intent.token_id,
@@ -549,6 +566,7 @@ def _orderbook_with_ask_size(*, size: Decimal) -> OrderbookSnapshot:
 
 def _position(*, shares: Decimal, open_sell_shares: Decimal) -> Position:
     return Position(
+        strategy_id="sports_tail",
         condition_id="condition-1",
         token_id="token-1",
         market_slug="wta-player-a-player-b-2026-04-28",
@@ -589,7 +607,9 @@ def _projected_user_ws_buy_fill_event() -> DomainEvent:
         reason="matched",
         payload={
             "position_projected": True,
+            "strategy_id": "sports_tail",
             "order": {
+                "strategy_id": "sports_tail",
                 "trace_id": "trace-fill",
                 "condition_id": "condition-1",
                 "token_id": "token-1",

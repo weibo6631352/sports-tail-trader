@@ -8,6 +8,7 @@ from polymarket_trader.domain.position import Position
 
 def test_settled_zero_value_position_does_not_consume_exposure() -> None:
     position = Position(
+        strategy_id="sports_tail",
         condition_id="condition-1",
         token_id="token-1",
         shares=Decimal("5000"),

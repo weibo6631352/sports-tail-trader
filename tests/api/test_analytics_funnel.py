@@ -70,7 +70,7 @@ async def test_funnel_returns_all_stages_with_zero_default() -> None:
     assert counts["order_submitted"] == 5
     assert counts["market_filtered_in"] == 0
     assert result["window_ms"] == DEFAULT_WINDOW_MS
-    assert result["filters"] == {"league": None, "market_type": None}
+    assert result["filters"] == {"league": None, "market_type": None, "strategy_id": None}
 
 
 async def test_funnel_passes_league_filter_to_dao() -> None:
@@ -118,7 +118,23 @@ def test_funnel_route_returns_default_window_and_filters() -> None:
             "order_submitted",
             "fill_recorded",
         }
-        assert body["filters"] == {"league": None, "market_type": None}
+        assert body["filters"] == {"league": None, "market_type": None, "strategy_id": None}
+
+
+def test_funnel_route_propagates_strategy_id() -> None:
+    """``?strategy_id=foo`` 应一路透传到 DAO 调用的 strategy_id 入参。"""
+
+    dao = FakeAnalyticsDAO(funnel_response={"market_discovered": 1})
+    service = AnalyticsService(dao=dao, now_provider=_fixed_now)
+    app = _build_app(service)
+    with TestClient(app) as client:
+        response = client.get(
+            "/analytics/funnel",
+            params={"strategy_id": "sports_tail"},
+        )
+        assert response.status_code == 200
+        assert response.json()["filters"]["strategy_id"] == "sports_tail"
+    assert dao.calls[0]["strategy_id"] == "sports_tail"
 
 
 def test_funnel_route_propagates_league_and_market_type() -> None:
@@ -131,7 +147,7 @@ def test_funnel_route_propagates_league_and_market_type() -> None:
             params={"league": "NBA", "market_type": "moneyline", "window_ms": 60_000},
         )
         assert response.status_code == 200
-        assert response.json()["filters"] == {"league": "NBA", "market_type": "moneyline"}
+        assert response.json()["filters"] == {"league": "NBA", "market_type": "moneyline", "strategy_id": None}
         assert dao.calls[0]["league"] == "NBA"
         assert dao.calls[0]["market_type"] == "moneyline"
 

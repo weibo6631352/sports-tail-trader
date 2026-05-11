@@ -9,6 +9,11 @@ from polymarket_trader.extension_api.ports import ExtensionPorts
 
 @dataclass(frozen=True, slots=True)
 class ExtensionSpec:
+    # strategy_id 是策略身份的强字段：单一策略实例 = 单一 strategy_id。
+    # 框架使用该字段作为所有 SCOPE 表（orders/fills/positions/allocations/
+    # audit_events/decision_records/candidates）写入和查询过滤的归属键，
+    # 因此该值一旦确定就不允许在运行时变更。
+    strategy_id: str
     name: str
     version: str = "1"
     description: str = ""

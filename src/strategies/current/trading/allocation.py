@@ -15,6 +15,7 @@ from polymarket_trader.extension_api import EntryCandidate, ExtensionContext
 
 from strategies.current.allocation import AllocationMarketSnapshot
 from strategies.current.config import CurrentStrategyConfig
+from strategies.current.identity import STRATEGY_ID
 from strategies.current.outcomes import describe_sports_market, is_primary_token
 from strategies.current.universe import select_market
 
@@ -221,6 +222,7 @@ def _skipped_allocation(
     reason: str,
 ) -> Allocation:
     return Allocation(
+        strategy_id=STRATEGY_ID,
         condition_id=snapshot.condition_id,
         target_budget_usdc=Decimal("0"),
         buy_budget_usdc=Decimal("0"),

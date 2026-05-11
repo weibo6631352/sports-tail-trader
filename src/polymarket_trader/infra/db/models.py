@@ -553,6 +553,8 @@ class AllocationModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     allocation_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    # strategy_id NOT NULL，无 server_default。策略归属由调用侧显式提供。
+    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     condition_id: Mapped[str] = mapped_column(String(128), index=True)
     market_slug: Mapped[str | None] = mapped_column(String(255), index=True)
@@ -581,6 +583,7 @@ class AllocationModel(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_allocations_trace_condition", "trace_id", "condition_id"),
+        Index("ix_allocations_strategy_created", "strategy_id", "created_at"),
     )
 
     @classmethod
@@ -593,6 +596,7 @@ class AllocationModel(Base, TimestampMixin):
     ) -> "AllocationModel":
         allocation_key = allocation.idempotency_key or "|".join([trace_id, allocation.condition_id])
         payload = _json_mapping(raw_payload) if raw_payload is not None else {
+            "strategy_id": allocation.strategy_id,
             "trace_id": trace_id,
             "condition_id": allocation.condition_id,
             "market_slug": allocation.market_slug,
@@ -607,6 +611,7 @@ class AllocationModel(Base, TimestampMixin):
         }
         return cls(
             allocation_key=allocation_key,
+            strategy_id=allocation.strategy_id,
             trace_id=trace_id,
             condition_id=allocation.condition_id,
             market_slug=allocation.market_slug,
@@ -623,6 +628,7 @@ class AllocationModel(Base, TimestampMixin):
 
     def to_domain(self) -> Allocation:
         return Allocation(
+            strategy_id=self.strategy_id,
             condition_id=self.condition_id,
             target_budget_usdc=_decimal(self.target_budget_usdc) or Decimal("0"),
             buy_budget_usdc=_decimal(self.buy_budget_usdc) or Decimal("0"),
@@ -646,6 +652,7 @@ class OrderModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     order_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     condition_id: Mapped[str] = mapped_column(String(128), index=True)
     token_id: Mapped[str] = mapped_column(String(128), index=True)
@@ -674,6 +681,7 @@ class OrderModel(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_orders_trace_order_trade", "trace_id", "order_id", "trade_id"),
         Index("ix_orders_condition_token_status", "condition_id", "token_id", "status"),
+        Index("ix_orders_strategy_created", "strategy_id", "created_at"),
     )
 
     @classmethod
@@ -688,6 +696,7 @@ class OrderModel(Base, TimestampMixin):
             order_type = order.order_type
             order_key = _order_key(order)
             payload = _json_mapping(raw_payload) if raw_payload is not None else {
+                "strategy_id": order.strategy_id,
                 "trace_id": order.trace_id,
                 "condition_id": order.condition_id,
                 "token_id": order.token_id,
@@ -709,6 +718,7 @@ class OrderModel(Base, TimestampMixin):
             }
             return cls(
                 order_key=order_key,
+                strategy_id=order.strategy_id,
                 trace_id=order.trace_id,
                 condition_id=order.condition_id,
                 token_id=order.token_id,
@@ -735,6 +745,7 @@ class OrderModel(Base, TimestampMixin):
 
         order_key = _order_key(order)
         payload = _json_mapping(raw_payload) if raw_payload is not None else {
+            "strategy_id": order.strategy_id,
             "trace_id": order.trace_id,
             "condition_id": order.condition_id,
             "token_id": order.token_id,
@@ -762,6 +773,7 @@ class OrderModel(Base, TimestampMixin):
         }
         return cls(
             order_key=order_key,
+            strategy_id=order.strategy_id,
             trace_id=order.trace_id,
             condition_id=order.condition_id,
             token_id=order.token_id,
@@ -793,6 +805,7 @@ class OrderModel(Base, TimestampMixin):
 
     def to_domain(self) -> Order:
         return Order(
+            strategy_id=self.strategy_id,
             trace_id=self.trace_id,
             condition_id=self.condition_id,
             token_id=self.token_id,
@@ -821,6 +834,7 @@ class FillModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     event_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     event_type: Mapped[str] = mapped_column(String(128), index=True)
     condition_id: Mapped[str | None] = mapped_column(String(128), index=True)
@@ -843,6 +857,7 @@ class FillModel(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_fills_trace_trade_order", "trace_id", "trade_id", "order_id"),
+        Index("ix_fills_strategy_created", "strategy_id", "created_at"),
     )
 
     @classmethod
@@ -853,6 +868,7 @@ class FillModel(Base, TimestampMixin):
         raw_payload: JsonMapping | None = None,
     ) -> "FillModel":
         payload = _json_mapping(raw_payload) if raw_payload is not None else {
+            "strategy_id": fill.strategy_id,
             "trace_id": fill.trace_id,
             "event_type": str(fill.event_type),
             "event_id": fill.event_id,
@@ -870,6 +886,7 @@ class FillModel(Base, TimestampMixin):
         }
         return cls(
             event_id=fill.event_id,
+            strategy_id=fill.strategy_id,
             trace_id=fill.trace_id,
             event_type=str(fill.event_type),
             condition_id=fill.condition_id,
@@ -888,6 +905,7 @@ class FillModel(Base, TimestampMixin):
 
     def to_domain(self) -> Fill:
         return Fill(
+            strategy_id=self.strategy_id,
             trace_id=self.trace_id,
             event_type=self.event_type,
             event_id=self.event_id,
@@ -912,6 +930,7 @@ class PositionModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     position_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
     condition_id: Mapped[str] = mapped_column(String(128), index=True)
     token_id: Mapped[str] = mapped_column(String(128), index=True)
@@ -943,6 +962,7 @@ class PositionModel(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_positions_trace_condition_token", "trace_id", "condition_id", "token_id"),
+        Index("ix_positions_strategy_created", "strategy_id", "created_at"),
     )
 
     @classmethod
@@ -955,6 +975,7 @@ class PositionModel(Base, TimestampMixin):
     ) -> "PositionModel":
         position_key = "|".join([position.condition_id, position.token_id])
         payload = _json_mapping(raw_payload) if raw_payload is not None else {
+            "strategy_id": position.strategy_id,
             "trace_id": trace_id,
             "condition_id": position.condition_id,
             "token_id": position.token_id,
@@ -981,6 +1002,7 @@ class PositionModel(Base, TimestampMixin):
         }
         return cls(
             position_key=position_key,
+            strategy_id=position.strategy_id,
             trace_id=trace_id,
             condition_id=position.condition_id,
             token_id=position.token_id,
@@ -1008,6 +1030,7 @@ class PositionModel(Base, TimestampMixin):
 
     def to_domain(self) -> Position:
         return Position(
+            strategy_id=self.strategy_id,
             condition_id=self.condition_id,
             token_id=self.token_id,
             shares=_decimal(self.shares) or Decimal("0"),
@@ -1160,6 +1183,7 @@ class AuditEventModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     event_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     event_title: Mapped[str] = mapped_column(String(128), index=True)
     market_slug: Mapped[str | None] = mapped_column(String(255), index=True)
@@ -1188,6 +1212,7 @@ class AuditEventModel(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_audit_events_trace_event", "trace_id", "event_title"),
         Index("ix_audit_events_trace_order_trade", "trace_id", "order_id", "trade_id"),
+        Index("ix_audit_events_strategy_created", "strategy_id", "created_at"),
     )
 
     @classmethod
@@ -1200,6 +1225,7 @@ class AuditEventModel(Base, TimestampMixin):
         payload = _json_mapping(raw_payload) if raw_payload is not None else audit_event.to_payload()
         return cls(
             event_id=audit_event.event_id,
+            strategy_id=audit_event.strategy_id,
             trace_id=audit_event.trace_id,
             event_title=audit_event.event_title,
             market_slug=audit_event.market_slug,
@@ -1228,6 +1254,7 @@ class AuditEventModel(Base, TimestampMixin):
             payload=dict(self.payload),
             trace_id=self.trace_id,
             created_at=self.created_at,
+            strategy_id=self.strategy_id,
         )
 
 
@@ -1320,6 +1347,7 @@ class DecisionRecordModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     record_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     hook_name: Mapped[str | None] = mapped_column(String(64), index=True)
     condition_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
@@ -1344,12 +1372,14 @@ class DecisionRecordModel(Base, TimestampMixin):
         Index("ix_decision_records_trace_created", "trace_id", "created_at"),
         Index("ix_decision_records_condition_created", "condition_id", "created_at"),
         Index("ix_decision_records_accepted_created", "accepted", "created_at"),
+        Index("ix_decision_records_strategy_created", "strategy_id", "created_at"),
     )
 
     @classmethod
     def from_domain(cls, record: DecisionRecord) -> "DecisionRecordModel":
         return cls(
             record_id=record.record_id,
+            strategy_id=record.strategy_id,
             trace_id=record.trace_id,
             hook_name=record.hook_name or None,
             condition_id=record.condition_id,
@@ -1365,6 +1395,7 @@ class DecisionRecordModel(Base, TimestampMixin):
     def to_domain(self) -> DecisionRecord:
         return DecisionRecord(
             record_id=self.record_id,
+            strategy_id=self.strategy_id,
             trace_id=self.trace_id,
             hook_name=self.hook_name or "",
             condition_id=self.condition_id,

@@ -93,6 +93,9 @@ class ExtensionContext:
     """
 
     trace_id: str
+    # strategy_id 是框架/策略契约的强字段——所有 hook 调用必须显式提供。
+    # 框架内部禁止填默认值；策略 manifest/spec 提供单一来源（CLAUDE.md §10）。
+    strategy_id: str
     market: Market | None = None
     token_id: str | None = None
     orderbook: OrderbookSnapshot | None = None

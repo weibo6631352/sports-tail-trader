@@ -38,6 +38,7 @@ async def get_funnel(
     end_ms: int | None = Query(default=None, ge=0),
     league: str | None = Query(default=None, min_length=1, max_length=64),
     market_type: str | None = Query(default=None, min_length=1, max_length=64),
+    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     service: AnalyticsService = Depends(get_analytics_service),
 ) -> dict[str, Any]:
     return await service.funnel(
@@ -45,6 +46,7 @@ async def get_funnel(
         end_ms=end_ms,
         league=league,
         market_type=market_type,
+        strategy_id=strategy_id,
     )
 
 
@@ -54,6 +56,7 @@ async def get_rejections(
     end_ms: int | None = Query(default=None, ge=0),
     league: str | None = Query(default=None, min_length=1, max_length=64),
     market_type: str | None = Query(default=None, min_length=1, max_length=64),
+    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     service: AnalyticsService = Depends(get_analytics_service),
 ) -> dict[str, Any]:
     return await service.rejections(
@@ -62,6 +65,7 @@ async def get_rejections(
         league=league,
         market_type=market_type,
         limit=20,
+        strategy_id=strategy_id,
     )
 
 
@@ -71,6 +75,7 @@ async def get_execution_quality(
     end_ms: int | None = Query(default=None, ge=0),
     league: str | None = Query(default=None, min_length=1, max_length=64),
     market_type: str | None = Query(default=None, min_length=1, max_length=64),
+    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     service: AnalyticsService = Depends(get_analytics_service),
 ) -> dict[str, Any]:
     return await service.execution_quality(
@@ -78,6 +83,7 @@ async def get_execution_quality(
         end_ms=end_ms,
         league=league,
         market_type=market_type,
+        strategy_id=strategy_id,
     )
 
 

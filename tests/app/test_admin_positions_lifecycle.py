@@ -19,6 +19,7 @@ def _build_position(
     token_id: str = "0xtoken",
 ) -> Position:
     return Position(
+        strategy_id="sports_tail",
         condition_id="0xcondition",
         token_id=token_id,
         shares=shares,

@@ -13,6 +13,7 @@ from polymarket_trader.domain.risk import RiskManager
 def test_buy_entry_respects_budget_exposure_limits() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-buy-budget",
             condition_id="condition",
             token_id="yes",
@@ -34,6 +35,7 @@ def test_buy_entry_respects_budget_exposure_limits() -> None:
 def test_sell_exit_does_not_consume_buy_budget_or_balance() -> None:
     decision = RiskManager().check_order_intent(
         SellOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-sell-exit",
             condition_id="condition",
             token_id="yes",
@@ -42,6 +44,7 @@ def test_sell_exit_does_not_consume_buy_budget_or_balance() -> None:
         ),
         market=_market(),
         position=Position(
+            strategy_id="sports_tail",
             condition_id="condition",
             token_id="yes",
             shares=Decimal("3"),
@@ -60,6 +63,7 @@ def test_sell_exit_does_not_consume_buy_budget_or_balance() -> None:
 def test_sell_exit_can_reduce_position_when_local_market_is_only_candidate() -> None:
     decision = RiskManager().check_order_intent(
         SellOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-candidate-sell-exit",
             condition_id="condition",
             token_id="yes",
@@ -68,6 +72,7 @@ def test_sell_exit_can_reduce_position_when_local_market_is_only_candidate() -> 
         ),
         market=_market().with_trading_status(TradingStatus.CANDIDATE),
         position=Position(
+            strategy_id="sports_tail",
             condition_id="condition",
             token_id="yes",
             shares=Decimal("3"),
@@ -84,6 +89,7 @@ def test_sell_exit_can_reduce_position_when_local_market_is_only_candidate() -> 
 def test_sell_exit_allows_exchange_endpoint_price_on_market_tick_grid() -> None:
     decision = RiskManager().check_order_intent(
         SellOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-sell-endpoint-price",
             condition_id="condition",
             token_id="yes",
@@ -92,6 +98,7 @@ def test_sell_exit_allows_exchange_endpoint_price_on_market_tick_grid() -> None:
         ),
         market=_market().with_tick_size(Decimal("0.01")),
         position=Position(
+            strategy_id="sports_tail",
             condition_id="condition",
             token_id="yes",
             shares=Decimal("3"),
@@ -105,6 +112,7 @@ def test_sell_exit_allows_exchange_endpoint_price_on_market_tick_grid() -> None:
 def test_sell_exit_rejects_price_above_exchange_tick_limit() -> None:
     decision = RiskManager().check_order_intent(
         SellOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-sell-above-endpoint-price",
             condition_id="condition",
             token_id="yes",
@@ -113,6 +121,7 @@ def test_sell_exit_rejects_price_above_exchange_tick_limit() -> None:
         ),
         market=_market().with_tick_size(Decimal("0.01")),
         position=Position(
+            strategy_id="sports_tail",
             condition_id="condition",
             token_id="yes",
             shares=Decimal("3"),
@@ -127,6 +136,7 @@ def test_sell_exit_rejects_price_above_exchange_tick_limit() -> None:
 def test_buy_entry_still_rejects_when_local_market_is_only_candidate() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-candidate-buy-entry",
             condition_id="condition",
             token_id="yes",
@@ -148,6 +158,7 @@ def test_buy_entry_still_rejects_when_local_market_is_only_candidate() -> None:
 def test_buy_min_order_uses_share_size_not_usdc_amount() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-buy-below-five-usdc",
             condition_id="condition",
             token_id="yes",
@@ -170,6 +181,7 @@ def test_buy_min_order_uses_share_size_not_usdc_amount() -> None:
 def test_buy_min_order_rejects_when_converted_share_size_is_too_small() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-buy-small-share-size",
             condition_id="condition",
             token_id="yes",
@@ -193,6 +205,7 @@ def test_buy_min_order_rejects_when_converted_share_size_is_too_small() -> None:
 def test_buy_gtc_post_only_maker_bid_does_not_require_taker_ask_depth() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-maker-bid-liquidity",
             condition_id="condition",
             token_id="yes",
@@ -225,6 +238,7 @@ def test_buy_gtc_post_only_maker_bid_does_not_require_taker_ask_depth() -> None:
 def test_buy_taker_rejects_when_balance_cannot_cover_fee_estimate() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-buy-fee-balance",
             condition_id="condition",
             token_id="yes",
@@ -257,6 +271,7 @@ def test_buy_taker_rejects_when_balance_cannot_cover_fee_estimate() -> None:
 def test_buy_rejects_dust_notional_below_clob_floor() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-buy-dust",
             condition_id="condition",
             token_id="yes",
@@ -279,6 +294,7 @@ def test_buy_rejects_dust_notional_below_clob_floor() -> None:
 def test_buy_entry_rejects_when_exit_order_is_already_open_for_same_token() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-buy-while-exit-open",
             condition_id="condition",
             token_id="yes",
@@ -288,6 +304,7 @@ def test_buy_entry_rejects_when_exit_order_is_already_open_for_same_token() -> N
         market=_market(),
         open_orders=(
             Order(
+                strategy_id="sports_tail",
                 trace_id="trace-exit",
                 condition_id="condition",
                 token_id="yes",
@@ -314,6 +331,7 @@ def test_buy_entry_rejects_when_exit_order_is_already_open_for_same_token() -> N
 def test_buy_entry_allows_unrelated_open_buy_order() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-buy-with-unrelated-open-buy",
             condition_id="new-condition",
             token_id="new-token",
@@ -323,6 +341,7 @@ def test_buy_entry_allows_unrelated_open_buy_order() -> None:
         market=_market(condition_id="new-condition", yes_token_id="new-token"),
         open_orders=(
             Order(
+                strategy_id="sports_tail",
                 trace_id="trace-old-buy",
                 condition_id="old-condition",
                 token_id="old-token",
@@ -349,6 +368,7 @@ def test_buy_entry_allows_unrelated_open_buy_order() -> None:
 def test_controlled_scale_in_buy_can_pass_open_exit_gate_when_explicitly_allowed() -> None:
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
+            strategy_id="sports_tail",
             trace_id="trace-scale-in",
             condition_id="condition",
             token_id="yes",
@@ -358,6 +378,7 @@ def test_controlled_scale_in_buy_can_pass_open_exit_gate_when_explicitly_allowed
         ),
         market=_market(),
         position=Position(
+            strategy_id="sports_tail",
             condition_id="condition",
             token_id="yes",
             shares=Decimal("4"),
@@ -366,6 +387,7 @@ def test_controlled_scale_in_buy_can_pass_open_exit_gate_when_explicitly_allowed
         ),
         open_orders=(
             Order(
+                strategy_id="sports_tail",
                 trace_id="trace-exit",
                 condition_id="condition",
                 token_id="yes",

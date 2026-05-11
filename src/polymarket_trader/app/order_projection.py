@@ -120,9 +120,16 @@ def find_open_order(
     return None
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=False)
 class AccountStateProjector:
     store: AccountStateStore
+    # strategy_id 没有默认，但 dataclass 字段定义顺序要求非默认字段全在前——为此把
+    # store 设成位置参数，strategy_id 设成 kw-only 后再写校验。
+    strategy_id: str
+
+    def __post_init__(self) -> None:
+        if not self.strategy_id:
+            raise ValueError("AccountStateProjector requires non-empty strategy_id")
 
     def apply_buy_result(self, result: OrderResult, *, snapshot: AccountSnapshot | None) -> None:
         if result.status not in {
@@ -138,6 +145,7 @@ class AccountStateProjector:
             return
         if position is None:
             position = Position(
+                strategy_id=self.strategy_id,
                 condition_id=result.condition_id,
                 token_id=result.token_id,
                 shares=fill_size,
@@ -152,6 +160,7 @@ class AccountStateProjector:
             )
         else:
             position = Position(
+                strategy_id=position.strategy_id or self.strategy_id,
                 condition_id=position.condition_id,
                 token_id=position.token_id,
                 shares=position.shares + fill_size,
@@ -209,6 +218,7 @@ class AccountStateProjector:
         if result.status in {OrderResultStatus.LIVE, OrderResultStatus.PARTIAL_FILL}:
             self.store.upsert_order(
                 Order(
+                    strategy_id=result.strategy_id or self.strategy_id,
                     trace_id=result.trace_id,
                     condition_id=result.condition_id,
                     token_id=result.token_id,
@@ -235,6 +245,7 @@ class AccountStateProjector:
 
         self.store.upsert_position(
             Position(
+                strategy_id=position.strategy_id or self.strategy_id,
                 condition_id=position.condition_id,
                 token_id=position.token_id,
                 shares=position.shares,
@@ -286,6 +297,7 @@ class AccountStateProjector:
         current_position = snapshot.get_position(intent.condition_id, intent.token_id)
         if current_position is None:
             current_position = Position(
+                strategy_id=intent.strategy_id or self.strategy_id,
                 condition_id=intent.condition_id,
                 token_id=intent.token_id,
                 shares=Decimal("0"),
@@ -308,6 +320,7 @@ class AccountStateProjector:
 
         self.store.upsert_order(
             OrderRecord(
+                strategy_id=intent.strategy_id,
                 trace_id=intent.trace_id,
                 condition_id=intent.condition_id,
                 token_id=intent.token_id,
@@ -368,6 +381,7 @@ class AccountStateProjector:
                 notional_usdc = replacement_price * replacement_size_shares
             self.store.upsert_order(
                 Order(
+                    strategy_id=result.strategy_id or source_order.strategy_id or self.strategy_id,
                     trace_id=result.trace_id,
                     condition_id=result.condition_id,
                     token_id=result.token_id,
@@ -423,6 +437,7 @@ class AccountStateProjector:
         if position is None and open_buy_shares <= Decimal("0") and open_sell_shares <= Decimal("0"):
             return
         current_position = position or Position(
+            strategy_id=self.strategy_id,
             condition_id=condition_id,
             token_id=token_id,
             shares=Decimal("0"),
@@ -431,6 +446,7 @@ class AccountStateProjector:
         )
         self.store.upsert_position(
             Position(
+                strategy_id=current_position.strategy_id or self.strategy_id,
                 condition_id=current_position.condition_id,
                 token_id=current_position.token_id,
                 shares=current_position.shares,

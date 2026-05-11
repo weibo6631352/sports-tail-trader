@@ -17,6 +17,7 @@ from polymarket_trader.infra.db.models import OrderModel, OutboxEventModel
 
 def test_order_result_persistence_key_prefers_exchange_order_id_over_intent_key() -> None:
     intent = BuyOrderIntent(
+        strategy_id="sports_tail",
         trace_id="trace-1",
         condition_id="condition-1",
         token_id="token-1",
@@ -25,6 +26,7 @@ def test_order_result_persistence_key_prefers_exchange_order_id_over_intent_key(
         idempotency_key="local-idempotency-key",
     )
     result = OrderResult(
+        strategy_id="sports_tail",
         trace_id="trace-1",
         condition_id="condition-1",
         token_id="token-1",
@@ -48,6 +50,7 @@ def test_order_result_persistence_key_prefers_exchange_order_id_over_intent_key(
 
 def test_order_persistence_key_prefers_exchange_order_id_over_local_key() -> None:
     order = Order(
+        strategy_id="sports_tail",
         trace_id="trace-1",
         condition_id="condition-1",
         token_id="token-1",
@@ -68,6 +71,7 @@ def test_order_persistence_key_prefers_exchange_order_id_over_local_key() -> Non
 def test_long_local_order_keys_are_shortened_for_database_columns() -> None:
     long_key = "order:submit:" + "x" * 320
     order = Order(
+        strategy_id="sports_tail",
         trace_id="trace-1",
         condition_id="condition-1",
         token_id="token-1",

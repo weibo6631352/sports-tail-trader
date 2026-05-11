@@ -30,6 +30,7 @@ def test_trade_replay_uses_data_position_pnl_and_audit_context() -> None:
     )
     fills = (
         Fill(
+            strategy_id="sports_tail",
             trace_id="trace-1",
             event_id="fill-buy",
             condition_id="condition-1",
@@ -41,6 +42,7 @@ def test_trade_replay_uses_data_position_pnl_and_audit_context() -> None:
             confirmed_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
         ),
         Fill(
+            strategy_id="sports_tail",
             trace_id="trace-1",
             event_id="fill-sell",
             condition_id="condition-1",
@@ -53,6 +55,7 @@ def test_trade_replay_uses_data_position_pnl_and_audit_context() -> None:
         ),
     )
     position = Position(
+        strategy_id="sports_tail",
         condition_id="condition-1",
         token_id="home",
         shares=Decimal("5"),
@@ -63,6 +66,7 @@ def test_trade_replay_uses_data_position_pnl_and_audit_context() -> None:
         redeemable=True,
     )
     audit = AuditEvent(
+        strategy_id="sports_tail",
         event_title="entry_candidate",
         trace_id="trace-1",
         condition_id="condition-1",

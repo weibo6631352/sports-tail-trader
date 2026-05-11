@@ -32,6 +32,7 @@ def test_keeps_paused_filtered_market_with_exposure() -> None:
     account = AccountSnapshot(
         positions=(
             Position(
+                strategy_id="sports_tail",
                 condition_id=market.condition_id,
                 token_id="token-1-yes",
                 shares=1,

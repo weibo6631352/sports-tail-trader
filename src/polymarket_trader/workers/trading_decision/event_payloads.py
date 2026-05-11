@@ -131,6 +131,7 @@ def serialize_intent(intent: ManagedOrderIntent) -> dict[str, object]:
     amount_usdc = getattr(intent, "amount_usdc", None)
     size_shares = getattr(intent, "size_shares", None)
     return {
+        "strategy_id": intent.strategy_id,
         "trace_id": intent.trace_id,
         "condition_id": intent.condition_id,
         "token_id": intent.token_id,
@@ -169,6 +170,7 @@ def serialize_review(review: TradingReviewResult) -> dict[str, object]:
 
 def serialize_control_intent(intent: CancelOrderIntent) -> dict[str, object]:
     return {
+        "strategy_id": intent.strategy_id,
         "trace_id": intent.trace_id,
         "condition_id": intent.condition_id,
         "token_id": intent.token_id,
@@ -182,6 +184,7 @@ def serialize_order_result(order_result: OrderResult | None) -> dict[str, object
     if order_result is None:
         return None
     return {
+        "strategy_id": order_result.strategy_id,
         "trace_id": order_result.trace_id,
         "condition_id": order_result.condition_id,
         "token_id": order_result.token_id,
@@ -232,7 +235,12 @@ def coerce_order_result_from_event(event: DomainEvent) -> OrderResult | None:
     }:
         return None
     status = coerce_status(status_value, event.event_type)
+    strategy_id_value = payload.get("strategy_id")
+    if strategy_id_value is None:
+        # 兼容旧 payload：framework 内部所有事件必须带 strategy_id；缺失时无法构造 OrderResult。
+        return None
     return OrderResult(
+        strategy_id=str(strategy_id_value),
         trace_id=str(payload.get("trace_id", event.trace_id)),
         condition_id=str(payload.get("condition_id", event.condition_id or "")),
         token_id=str(payload.get("token_id", event.token_id or "")),

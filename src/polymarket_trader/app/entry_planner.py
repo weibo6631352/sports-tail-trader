@@ -34,14 +34,22 @@ class EntryPlanner:
         self,
         *,
         extension_hooks: ExtensionHooks,
+        strategy_id: str,
         registry: MarketRegistry | None = None,
         orderbook_reader: OrderbookReader | None = None,
         decision_recorder: DecisionEventRecorder | None = None,
     ) -> None:
+        if not strategy_id:
+            raise ValueError("EntryPlanner requires non-empty strategy_id")
         self._extension_hooks = extension_hooks
+        self._strategy_id = strategy_id
         self._registry = registry
         self._orderbook_reader = orderbook_reader
         self._decision_recorder = decision_recorder
+
+    @property
+    def strategy_id(self) -> str:
+        return self._strategy_id
 
     def build_entry_plan(
         self,
@@ -188,6 +196,7 @@ class EntryPlanner:
                 summary = decision.summary
                 intent = decision_to_trade_intent(
                     trace_id=trace_id,
+                    strategy_id=self._strategy_id,
                     market=resolved_market,
                     default_token_id=focus_token_id,
                     decision=decision,
@@ -251,6 +260,7 @@ class EntryPlanner:
         )
         return ExtensionContext(
             trace_id=trace_id,
+            strategy_id=self._strategy_id,
             market=market,
             token_id=token_id,
             orderbook=orderbook,
@@ -309,6 +319,7 @@ class EntryPlanner:
         )
         return ExtensionContext(
             trace_id=trace_id,
+            strategy_id=self._strategy_id,
             market=market,
             token_id=token_id,
             orderbook=orderbook,
@@ -435,6 +446,7 @@ class EntryPlanner:
         record = build_decision_record_from_hook(
             hook_name=hook_name,
             trace_id=context.trace_id,
+            strategy_id=context.strategy_id,
             context=context,
             decision=decision,
             condition_id=context.market.condition_id if context.market is not None else None,

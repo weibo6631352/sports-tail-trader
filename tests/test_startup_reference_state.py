@@ -49,6 +49,7 @@ def test_startup_reference_restore_keeps_stale_unselected_market_with_exposure()
     account_state_store.replace_positions(
         (
             Position(
+                strategy_id="sports_tail",
                 condition_id="condition-1",
                 token_id="token-1-yes",
                 shares=Decimal("1"),

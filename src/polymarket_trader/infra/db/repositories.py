@@ -483,6 +483,7 @@ class AllocationRepository(BaseRepository):
             rows,
             conflict_columns=("allocation_key",),
             update_columns=(
+                "strategy_id",
                 "trace_id",
                 "condition_id",
                 "market_slug",
@@ -508,6 +509,7 @@ class AllocationRepository(BaseRepository):
         condition_id: str | None = None,
         token_id: str | None = None,
         market_slug: str | None = None,
+        strategy_id: str | None = None,
     ) -> RepositoryPage[Allocation]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(AllocationModel).order_by(AllocationModel.updated_at.desc(), AllocationModel.id.desc())
@@ -519,6 +521,8 @@ class AllocationRepository(BaseRepository):
             stmt = stmt.where(AllocationModel.token_id == token_id)
         if market_slug is not None:
             stmt = stmt.where(AllocationModel.market_slug == market_slug)
+        if strategy_id is not None:
+            stmt = stmt.where(AllocationModel.strategy_id == strategy_id)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
@@ -548,6 +552,7 @@ class OrderRepository(BaseRepository):
         local_rows = tuple(row for row in rows if not row.get("order_id"))
         update_columns = (
             "order_key",
+            "strategy_id",
             "trace_id",
             "condition_id",
             "token_id",
@@ -595,6 +600,7 @@ class OrderRepository(BaseRepository):
         offset: int = 0,
         condition_id: str | None = None,
         token_id: str | None = None,
+        strategy_id: str | None = None,
     ) -> RepositoryPage[Order]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(OrderModel).where(
@@ -614,6 +620,8 @@ class OrderRepository(BaseRepository):
             stmt = stmt.where(OrderModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(OrderModel.token_id == token_id)
+        if strategy_id is not None:
+            stmt = stmt.where(OrderModel.strategy_id == strategy_id)
         stmt = stmt.order_by(OrderModel.updated_at.desc(), OrderModel.id.desc())
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
@@ -629,6 +637,7 @@ class OrderRepository(BaseRepository):
         condition_id: str | None = None,
         token_id: str | None = None,
         time_range: TimeRange | None = None,
+        strategy_id: str | None = None,
     ) -> RepositoryPage[Order]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(OrderModel).order_by(OrderModel.updated_at.desc(), OrderModel.id.desc())
@@ -642,6 +651,8 @@ class OrderRepository(BaseRepository):
             stmt = stmt.where(OrderModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(OrderModel.token_id == token_id)
+        if strategy_id is not None:
+            stmt = stmt.where(OrderModel.strategy_id == strategy_id)
         if time_range is not None and not time_range.is_empty:
             since_dt, until_dt = time_range.to_datetime_range()
             if since_dt is not None:
@@ -699,6 +710,7 @@ class FillRepository(BaseRepository):
             rows,
             conflict_columns=("event_id",),
             update_columns=(
+                "strategy_id",
                 "trace_id",
                 "event_type",
                 "condition_id",
@@ -728,6 +740,7 @@ class FillRepository(BaseRepository):
         condition_id: str | None = None,
         token_id: str | None = None,
         time_range: TimeRange | None = None,
+        strategy_id: str | None = None,
     ) -> RepositoryPage[Fill]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(FillModel).order_by(FillModel.confirmed_at.desc(), FillModel.id.desc())
@@ -741,6 +754,8 @@ class FillRepository(BaseRepository):
             stmt = stmt.where(FillModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(FillModel.token_id == token_id)
+        if strategy_id is not None:
+            stmt = stmt.where(FillModel.strategy_id == strategy_id)
         if time_range is not None and not time_range.is_empty:
             since_dt, until_dt = time_range.to_datetime_range()
             if since_dt is not None:
@@ -807,6 +822,7 @@ class PositionRepository(BaseRepository):
             rows,
             conflict_columns=("position_key",),
             update_columns=(
+                "strategy_id",
                 "trace_id",
                 "condition_id",
                 "token_id",
@@ -841,6 +857,7 @@ class PositionRepository(BaseRepository):
         offset: int = 0,
         condition_id: str | None = None,
         token_id: str | None = None,
+        strategy_id: str | None = None,
     ) -> RepositoryPage[Position]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(PositionModel).order_by(PositionModel.updated_at.desc(), PositionModel.id.desc())
@@ -848,6 +865,8 @@ class PositionRepository(BaseRepository):
             stmt = stmt.where(PositionModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(PositionModel.token_id == token_id)
+        if strategy_id is not None:
+            stmt = stmt.where(PositionModel.strategy_id == strategy_id)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
@@ -1011,6 +1030,7 @@ class AuditEventRepository(BaseRepository):
             rows,
             conflict_columns=("event_id",),
             update_columns=(
+                "strategy_id",
                 "trace_id",
                 "event_title",
                 "market_slug",
@@ -1044,6 +1064,7 @@ class AuditEventRepository(BaseRepository):
         condition_id: str | None = None,
         token_id: str | None = None,
         time_range: TimeRange | None = None,
+        strategy_id: str | None = None,
     ) -> RepositoryPage[AuditEvent]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(AuditEventModel).order_by(AuditEventModel.created_at.desc(), AuditEventModel.id.desc())
@@ -1055,6 +1076,8 @@ class AuditEventRepository(BaseRepository):
             stmt = stmt.where(AuditEventModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(AuditEventModel.token_id == token_id)
+        if strategy_id is not None:
+            stmt = stmt.where(AuditEventModel.strategy_id == strategy_id)
         if time_range is not None and not time_range.is_empty:
             since_dt, until_dt = time_range.to_datetime_range()
             if since_dt is not None:
@@ -1120,6 +1143,7 @@ class DecisionRecordRepository(BaseRepository):
         condition_id: str | None = None,
         accepted: bool | None = None,
         time_range: TimeRange | None = None,
+        strategy_id: str | None = None,
     ) -> RepositoryPage[DecisionRecord]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(DecisionRecordModel).order_by(
@@ -1131,6 +1155,8 @@ class DecisionRecordRepository(BaseRepository):
             stmt = stmt.where(DecisionRecordModel.condition_id == condition_id)
         if accepted is not None:
             stmt = stmt.where(DecisionRecordModel.accepted == accepted)
+        if strategy_id is not None:
+            stmt = stmt.where(DecisionRecordModel.strategy_id == strategy_id)
         if time_range is not None and not time_range.is_empty:
             since_dt, until_dt = time_range.to_datetime_range()
             if since_dt is not None:

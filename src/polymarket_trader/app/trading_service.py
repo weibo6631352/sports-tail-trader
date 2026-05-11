@@ -407,6 +407,7 @@ def _coerce_order_result(
         }
 
     return OrderResult(
+        strategy_id=str(data.get("strategy_id", intent.strategy_id)),
         trace_id=str(data.get("trace_id", intent.trace_id)),
         condition_id=str(data.get("condition_id", intent.condition_id)),
         token_id=str(data.get("token_id", intent.token_id)),
@@ -451,6 +452,7 @@ def _synthetic_order_result(
     retryable: bool,
 ) -> OrderResult:
     return OrderResult(
+        strategy_id=intent.strategy_id,
         trace_id=intent.trace_id,
         condition_id=intent.condition_id,
         token_id=intent.token_id,

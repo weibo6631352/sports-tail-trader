@@ -84,6 +84,7 @@ def _run(events: tuple[ShadowEvent, ...], *, ledger: PaperVirtualLedger | None =
         run_shadow_session(
             SyntheticEventStream(events),
             extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+            strategy_id="sports_tail",
             ledger=ledger,
             starting_balance_usdc=Decimal("10"),
             portfolio_budget_usdc=Decimal("10"),

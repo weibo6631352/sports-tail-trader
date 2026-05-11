@@ -20,6 +20,7 @@ from polymarket_trader.infra.db.models import DecisionRecordModel
 
 def _make_record(**overrides: Any) -> DecisionRecord:
     base: dict[str, Any] = {
+        "strategy_id": "sports_tail",
         "trace_id": "trace-1",
         "condition_id": "cond-1",
         "hook_name": "decide_entry",

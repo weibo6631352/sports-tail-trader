@@ -48,8 +48,9 @@ def test_legacy_in_memory_recorder_is_gone() -> None:
 
 def test_record_only_calls_put_nowait_no_db_await() -> None:
     outbox = _SyncOnlyOutbox()
-    recorder = DecisionEventRecorder(outbox=outbox)
+    recorder = DecisionEventRecorder(strategy_id="sports_tail", outbox=outbox)
     record = build_decision_record_from_hook(
+        strategy_id="sports_tail",
         hook_name="decide_entry",
         trace_id="trace-1",
         context={"market": "m1"},
@@ -81,8 +82,9 @@ def test_record_swallows_outbox_failure_to_protect_hot_path() -> None:
         def put_nowait(self, _event: OutboxEvent) -> bool:
             raise RuntimeError("outbox queue full")
 
-    recorder = DecisionEventRecorder(outbox=_BrokenOutbox())
+    recorder = DecisionEventRecorder(strategy_id="sports_tail", outbox=_BrokenOutbox())
     record = build_decision_record_from_hook(
+        strategy_id="sports_tail",
         hook_name="decide_exit",
         trace_id="trace-2",
         context={"market": "m2"},
@@ -96,8 +98,9 @@ def test_record_swallows_outbox_failure_to_protect_hot_path() -> None:
 
 def test_record_accepts_action_buy_as_accepted_true() -> None:
     outbox = _SyncOnlyOutbox()
-    recorder = DecisionEventRecorder(outbox=outbox)
+    recorder = DecisionEventRecorder(strategy_id="sports_tail", outbox=outbox)
     record = build_decision_record_from_hook(
+        strategy_id="sports_tail",
         hook_name="decide_entry",
         trace_id="trace-3",
         context={"market": "m3"},
@@ -113,6 +116,7 @@ def test_record_accepts_action_buy_as_accepted_true() -> None:
 def test_build_decision_record_returns_none_without_condition_id() -> None:
     # condition_id 是 DB 强字段——拿不到时不能落表，跳过录制以避免脏数据。
     record = build_decision_record_from_hook(
+        strategy_id="sports_tail",
         hook_name="decide_entry",
         trace_id="trace-no-cond",
         context={"x": 1},

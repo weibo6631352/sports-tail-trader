@@ -226,8 +226,11 @@ class ClobOrderDTO:
             summary = _summary(self.raw) or ""
         object.__setattr__(self, "raw_summary", summary)
 
-    def to_order_record(self) -> OrderRecord:
+    def to_order_record(self, *, strategy_id: str) -> OrderRecord:
+        if not strategy_id:
+            raise ValueError("to_order_record requires non-empty strategy_id")
         return OrderRecord(
+            strategy_id=strategy_id,
             trace_id=_first_text(self.raw, "trace_id", "traceId") or "",
             condition_id=self.condition_id or "",
             token_id=self.token_id,
@@ -301,8 +304,11 @@ class ClobFillDTO:
             summary = _summary(self.raw) or ""
         object.__setattr__(self, "raw_summary", summary)
 
-    def to_fill(self) -> Fill:
+    def to_fill(self, *, strategy_id: str) -> Fill:
+        if not strategy_id:
+            raise ValueError("to_fill requires non-empty strategy_id")
         return Fill(
+            strategy_id=strategy_id,
             trace_id=_first_text(self.raw, "trace_id", "traceId") or "",
             order_id=self.order_id,
             trade_id=self.trade_id,

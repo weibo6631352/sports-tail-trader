@@ -11,6 +11,7 @@ def test_replace_positions_preserves_authoritative_settlement_fields_from_sparse
     store.replace_positions(
         (
             Position(
+                strategy_id="sports_tail",
                 condition_id="condition-1",
                 token_id="token-1",
                 market_slug="match-total",
@@ -30,6 +31,7 @@ def test_replace_positions_preserves_authoritative_settlement_fields_from_sparse
     store.replace_positions(
         (
             Position(
+                strategy_id="sports_tail",
                 condition_id="condition-1",
                 token_id="token-1",
                 shares=Decimal("5000"),

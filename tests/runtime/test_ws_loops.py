@@ -87,7 +87,7 @@ def test_stream_user_ws_messages_triggers_reconcile_after_connect(monkeypatch) -
         polymarket_ws_client=_FakePolymarketWsClient(),
         scheduler=scheduler,
         supervisor=_FakeSupervisor(),
-        user_ws_worker=UserWsWorker(),
+        user_ws_worker=UserWsWorker(strategy_id="sports_tail", ),
     )
 
     async def run() -> None:

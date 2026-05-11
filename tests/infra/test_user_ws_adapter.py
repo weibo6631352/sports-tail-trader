@@ -36,7 +36,7 @@ def test_maker_trade_uses_owned_maker_leg_instead_of_top_level_taker_trade() -> 
                     }
                 ],
             }
-        )
+        , strategy_id="sports_tail")
     )
 
     assert len(fills) == 1
@@ -76,7 +76,7 @@ def test_taker_trade_keeps_top_level_user_leg() -> None:
                     }
                 ],
             }
-        )
+        , strategy_id="sports_tail")
     )
 
     assert len(fills) == 1
@@ -119,7 +119,7 @@ def test_clob_fill_payload_uses_owned_maker_leg_for_historical_trade() -> None:
             ],
         },
         user_address="0x78de3c8264c546fffed8d9a1396cddef7c8686be",
-    ).to_fill()
+    ).to_fill(strategy_id="sports_tail")
 
     assert fill.order_id == "our-exit-order"
     assert fill.trade_id == "trade-maker"

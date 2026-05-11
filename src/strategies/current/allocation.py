@@ -15,6 +15,8 @@ from polymarket_trader.domain.order import Order, OrderSide
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 
+from strategies.current.identity import STRATEGY_ID
+
 _MIN_CLOB_NOTIONAL_USDC = Decimal("0.01")
 
 
@@ -96,6 +98,7 @@ def equal_weight_plan(
         if skip_reason:
             allocations.append(
                 Allocation(
+                    strategy_id=STRATEGY_ID,
                     condition_id=snapshot.condition_id,
                     target_budget_usdc=Decimal("0"),
                     buy_budget_usdc=Decimal("0"),
@@ -436,6 +439,7 @@ def _finalize_candidate_allocations(
             released_budget_usdc = Decimal("0")
         finalized.append(
             Allocation(
+                strategy_id=STRATEGY_ID,
                 condition_id=snapshot.condition_id,
                 target_budget_usdc=target_budget_usdc,
                 buy_budget_usdc=buy_budget_usdc,

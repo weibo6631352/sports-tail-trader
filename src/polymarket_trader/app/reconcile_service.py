@@ -130,12 +130,20 @@ class ReconcileService:
         self,
         *,
         extension_hooks: ExtensionHooks,
+        strategy_id: str,
         entry_metadata_provider: Callable[[Market], Mapping[str, Any]] | None = None,
         orderbook_reader: Callable[[str], OrderbookSnapshot | None] | None = None,
     ) -> None:
+        if not strategy_id:
+            raise ValueError("ReconcileService requires non-empty strategy_id")
         self._extension_hooks = extension_hooks
+        self._strategy_id = strategy_id
         self._entry_metadata_provider = entry_metadata_provider
         self._orderbook_reader = orderbook_reader
+
+    @property
+    def strategy_id(self) -> str:
+        return self._strategy_id
 
     def build_reconcile_plan(
         self,
@@ -216,6 +224,7 @@ class ReconcileService:
         recovery = self._extension_hooks.decide_recovery(
             ExtensionContext(
                 trace_id=trace_id,
+                strategy_id=self._strategy_id,
                 market=market,
                 market_token_views=market_token_views,
                 account_snapshot=recovery_account_snapshot,
@@ -277,6 +286,7 @@ class ReconcileService:
         for decision in recovery_decisions:
             intent = decision_to_managed_intent(
                 trace_id=trace_id,
+                strategy_id=self._strategy_id,
                 condition_id=market.condition_id,
                 market_slug=market.market_slug,
                 default_token_id=None,
@@ -354,6 +364,7 @@ class ReconcileService:
             decision = self._extension_hooks.decide_exit(
                 ExtensionContext(
                     trace_id=trace_id,
+                    strategy_id=self._strategy_id,
                     market=market,
                     token_id=outcome.token_id,
                     market_token_views=market_token_views,

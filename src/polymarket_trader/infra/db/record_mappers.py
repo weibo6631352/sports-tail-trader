@@ -262,8 +262,9 @@ def _log_skip(kind: str, record: Mapping[str, Any], reason: str) -> None:
 def audit_event_from_record(record: Mapping[str, Any]) -> AuditEvent | None:
     trace_id = _text(record.get("trace_id"))
     event_title = _text(record.get("event_title"))
-    if trace_id is None or event_title is None:
-        _log_skip("audit", record, "missing trace_id or event_title")
+    strategy_id = _text(record.get("strategy_id"))
+    if trace_id is None or event_title is None or strategy_id is None:
+        _log_skip("audit", record, "missing trace_id/event_title/strategy_id")
         return None
     created_at = _datetime(record.get("created_at"), _utc_now())
     payload = dict(record)
@@ -272,6 +273,7 @@ def audit_event_from_record(record: Mapping[str, Any]) -> AuditEvent | None:
     return AuditEvent(
         event_title=event_title,
         trace_id=trace_id,
+        strategy_id=strategy_id,
         created_at=created_at,
         raw_response=record.get("raw_response"),
         event_slug=_text(record.get("event_slug")),
@@ -399,10 +401,12 @@ def order_from_record(record: Mapping[str, Any]) -> Order | None:
     side = _order_side(record.get("side"))
     order_type = _order_type(record.get("order_type"))
     price = _decimal(record.get("price"))
-    if condition_id is None or token_id is None or side is None or order_type is None or price is None:
-        _log_skip("order", record, "missing condition_id/token_id/side/order_type/price")
+    strategy_id = _text(record.get("strategy_id"))
+    if condition_id is None or token_id is None or side is None or order_type is None or price is None or strategy_id is None:
+        _log_skip("order", record, "missing condition_id/token_id/side/order_type/price/strategy_id")
         return None
     return Order(
+        strategy_id=strategy_id,
         trace_id=_text(record.get("trace_id")) or "",
         condition_id=condition_id,
         token_id=token_id,
@@ -429,10 +433,12 @@ def order_from_record(record: Mapping[str, Any]) -> Order | None:
 def fill_from_record(record: Mapping[str, Any]) -> Fill | None:
     trace_id = _text(record.get("trace_id"))
     event_type = _text(record.get("event_type"))
-    if trace_id is None or event_type is None:
-        _log_skip("fill", record, "missing trace_id or event_type")
+    strategy_id = _text(record.get("strategy_id"))
+    if trace_id is None or event_type is None or strategy_id is None:
+        _log_skip("fill", record, "missing trace_id/event_type/strategy_id")
         return None
     return Fill(
+        strategy_id=strategy_id,
         trace_id=trace_id,
         event_type=event_type,
         event_id=_text(record.get("event_id")) or "",
@@ -454,10 +460,12 @@ def fill_from_record(record: Mapping[str, Any]) -> Fill | None:
 def position_from_record(record: Mapping[str, Any]) -> Position | None:
     condition_id = _text(record.get("condition_id"))
     token_id = _text(record.get("token_id"))
-    if condition_id is None or token_id is None:
-        _log_skip("position", record, "missing condition_id/token_id")
+    strategy_id = _text(record.get("strategy_id"))
+    if condition_id is None or token_id is None or strategy_id is None:
+        _log_skip("position", record, "missing condition_id/token_id/strategy_id")
         return None
     return Position(
+        strategy_id=strategy_id,
         condition_id=condition_id,
         token_id=token_id,
         shares=_decimal(record.get("shares"), Decimal("0")) or Decimal("0"),
@@ -501,10 +509,12 @@ def account_snapshot_from_record(record: Mapping[str, Any]) -> AccountSnapshot |
 
 def allocation_from_record(record: Mapping[str, Any]) -> Allocation | None:
     condition_id = _text(record.get("condition_id"))
-    if condition_id is None:
-        _log_skip("allocation", record, "missing condition_id")
+    strategy_id = _text(record.get("strategy_id"))
+    if condition_id is None or strategy_id is None:
+        _log_skip("allocation", record, "missing condition_id/strategy_id")
         return None
     return Allocation(
+        strategy_id=strategy_id,
         condition_id=condition_id,
         target_budget_usdc=_decimal(record.get("target_budget_usdc"), Decimal("0")) or Decimal("0"),
         buy_budget_usdc=_decimal(record.get("buy_budget_usdc"), Decimal("0")) or Decimal("0"),
@@ -522,14 +532,16 @@ def decision_record_from_record(record: Mapping[str, Any]) -> DecisionRecord | N
     trace_id = _text(record.get("trace_id"))
     condition_id = _text(record.get("condition_id"))
     record_id = _text(record.get("record_id"))
-    if trace_id is None or condition_id is None or record_id is None:
-        _log_skip("decision", record, "missing trace_id/condition_id/record_id")
+    strategy_id = _text(record.get("strategy_id"))
+    if trace_id is None or condition_id is None or record_id is None or strategy_id is None:
+        _log_skip("decision", record, "missing trace_id/condition_id/record_id/strategy_id")
         return None
     decision_input = _mapping(record.get("decision_input")) or {}
     decision_output = _mapping(record.get("decision_output")) or {}
     accepted = bool(record.get("accepted") or False)
     return DecisionRecord(
         record_id=record_id,
+        strategy_id=strategy_id,
         trace_id=trace_id,
         condition_id=condition_id,
         hook_name=_text(record.get("hook_name")) or "",

@@ -15,6 +15,7 @@ async def list_trade_replays(
     condition_id: str | None = Query(default=None),
     token_id: str | None = Query(default=None),
     trace_id: str | None = Query(default=None),
+    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
     return await service.list_trade_replays(
@@ -23,4 +24,5 @@ async def list_trade_replays(
         condition_id=condition_id,
         token_id=token_id,
         trace_id=trace_id,
+        strategy_id=strategy_id,
     )

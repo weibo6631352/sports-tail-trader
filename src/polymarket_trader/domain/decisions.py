@@ -31,12 +31,14 @@ def _normalize_datetime(value: datetime | None) -> datetime:
 class DecisionRecord:
     """单次 hook 调用录制条目。
 
+    - ``strategy_id``：决策归属策略实例标识，必填；框架/策略边界处提供。
     - ``decision_input``：构造决策时的关键上下文摘要（市场、token、入参 metadata）。
     - ``decision_output``：策略 hook 返回的 decision 对象 jsonable 投影。
     - ``accepted``：是否产生了可执行 intent（用于 dump 端点 accepted=true/false 过滤）。
     - ``reason``：策略返回的拒绝/状态原因（必须复用已存在原因字符串，不创造新值）。
     """
 
+    strategy_id: str
     trace_id: str
     condition_id: str
     decision_input: Mapping[str, Any]

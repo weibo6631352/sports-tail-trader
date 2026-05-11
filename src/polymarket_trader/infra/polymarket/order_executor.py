@@ -242,6 +242,7 @@ class PolymarketOrderExecutor:
     def _build_submit_request(self, intent: BuyOrderIntent | SellOrderIntent) -> OrderExecutionRequest:
         return OrderExecutionRequest(
             action="submit",
+            strategy_id=intent.strategy_id,
             trace_id=intent.trace_id,
             idempotency_key=_request_idempotency_key(
                 action="submit",
@@ -273,6 +274,7 @@ class PolymarketOrderExecutor:
     def _build_cancel_request(self, intent: CancelOrderIntent) -> OrderExecutionRequest:
         return OrderExecutionRequest(
             action="cancel",
+            strategy_id=intent.strategy_id,
             trace_id=intent.trace_id,
             idempotency_key=_request_idempotency_key(
                 action="cancel",
@@ -294,6 +296,7 @@ class PolymarketOrderExecutor:
     def _build_replace_request(self, intent: ReplaceOrderIntent) -> OrderExecutionRequest:
         return OrderExecutionRequest(
             action="replace",
+            strategy_id=intent.strategy_id,
             trace_id=intent.trace_id,
             idempotency_key=_request_idempotency_key(
                 action="replace",
@@ -544,6 +547,7 @@ class PolymarketOrderExecutor:
     ) -> OrderResult:
         final_reason = reason if outbox_warning is None else f"{reason}; outbox={outbox_warning}"
         result = OrderResult(
+            strategy_id=request.strategy_id,
             trace_id=request.trace_id,
             condition_id=request.condition_id,
             token_id=request.token_id,
@@ -594,6 +598,7 @@ class PolymarketOrderExecutor:
         reason: str | None = None,
     ) -> OrderResult:
         return OrderResult(
+            strategy_id=request.strategy_id,
             trace_id=request.trace_id,
             condition_id=request.condition_id,
             token_id=request.token_id,
@@ -721,6 +726,7 @@ class PolymarketOrderExecutor:
         intent: ManagedOrderIntent,
     ) -> OrderResult:
         return OrderResult(
+            strategy_id=request.strategy_id,
             trace_id=request.trace_id,
             condition_id=request.condition_id,
             token_id=request.token_id,

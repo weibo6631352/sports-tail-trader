@@ -167,8 +167,11 @@ class DataPositionDTO:
             summary = _summary(self.raw) or ""
         object.__setattr__(self, "raw_summary", summary)
 
-    def to_position(self) -> Position:
+    def to_position(self, *, strategy_id: str) -> Position:
+        if not strategy_id:
+            raise ValueError("to_position requires non-empty strategy_id")
         return Position(
+            strategy_id=strategy_id,
             condition_id=self.condition_id,
             token_id=self.token_id,
             shares=self.shares,
@@ -243,5 +246,5 @@ def normalize_balance_allowance_payload(payload: Mapping[str, Any]) -> BalanceAl
     )
 
 
-def data_position_to_domain_position(payload: Mapping[str, Any]) -> Position:
-    return normalize_position_payload(payload).to_position()
+def data_position_to_domain_position(payload: Mapping[str, Any], *, strategy_id: str) -> Position:
+    return normalize_position_payload(payload).to_position(strategy_id=strategy_id)

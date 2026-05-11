@@ -40,13 +40,17 @@ class AdminOrderController:
         self,
         *,
         runtime: Any | None,
+        strategy_id: str,
         serializer: AdminSerializer,
         account_snapshot: Callable[[], AccountSnapshot],
         resolve_market: MarketResolver,
         trading_service: Callable[[], TradingService],
         find_open_order: OpenOrderFinder,
     ) -> None:
+        if not strategy_id:
+            raise ValueError("AdminOrderController requires non-empty strategy_id")
         self._runtime = runtime
+        self._strategy_id = strategy_id
         self._serializer = serializer
         self._account_snapshot = account_snapshot
         self._resolve_market = resolve_market
@@ -118,6 +122,7 @@ class AdminOrderController:
             )
 
         replace_intent = ReplaceOrderIntent(
+            strategy_id=self._strategy_id,
             trace_id=trace_id,
             condition_id=source_order.condition_id,
             token_id=source_order.token_id,
@@ -144,7 +149,7 @@ class AdminOrderController:
 
         account_state = getattr(self._runtime, "account_state_store", None)
         if account_state is not None:
-            AccountStateProjector(account_state).apply_replace_result(
+            AccountStateProjector(account_state, strategy_id=self._strategy_id).apply_replace_result(
                 market,
                 source_order=source_order,
                 result=replace_result,

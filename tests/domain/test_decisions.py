@@ -10,6 +10,7 @@ from polymarket_trader.domain.decisions import DecisionRecord
 def test_decision_record_normalizes_created_at_to_utc() -> None:
     naive = datetime(2026, 5, 11, 12, 0, 0)
     record = DecisionRecord(
+        strategy_id="sports_tail",
         trace_id="trace-x",
         condition_id="cond-x",
         decision_input={"market": "m1"},
@@ -22,6 +23,7 @@ def test_decision_record_normalizes_created_at_to_utc() -> None:
 
 def test_decision_record_assigns_record_id_default() -> None:
     record = DecisionRecord(
+        strategy_id="sports_tail",
         trace_id="trace-y",
         condition_id="cond-y",
         decision_input={},
@@ -34,6 +36,7 @@ def test_decision_record_assigns_record_id_default() -> None:
 
 def test_decision_record_preserves_explicit_record_id_and_reason() -> None:
     record = DecisionRecord(
+        strategy_id="sports_tail",
         record_id="rid-1",
         trace_id="trace-z",
         condition_id="cond-z",

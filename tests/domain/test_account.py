@@ -12,6 +12,7 @@ def test_available_usdc_subtracts_open_buy_order_reserve() -> None:
         allowance_usdc=Decimal("100"),
         open_orders=(
             Order(
+                strategy_id="sports_tail",
                 condition_id="old-condition",
                 token_id="old-token",
                 side=OrderSide.BUY,
@@ -34,6 +35,7 @@ def test_available_usdc_ignores_closed_and_sell_orders() -> None:
         allowance_usdc=Decimal("10"),
         open_orders=(
             Order(
+                strategy_id="sports_tail",
                 condition_id="condition",
                 token_id="yes",
                 side=OrderSide.BUY,
@@ -43,6 +45,7 @@ def test_available_usdc_ignores_closed_and_sell_orders() -> None:
                 status=OrderStatus.CANCELLED,
             ),
             Order(
+                strategy_id="sports_tail",
                 condition_id="condition",
                 token_id="yes",
                 side=OrderSide.SELL,

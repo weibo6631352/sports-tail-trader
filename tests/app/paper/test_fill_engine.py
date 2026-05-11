@@ -22,6 +22,7 @@ def _request(
     price: Decimal | None = None,
 ) -> OrderExecutionRequest:
     return OrderExecutionRequest(
+        strategy_id="sports_tail",
         action="submit",
         trace_id="trace1",
         idempotency_key="idem",

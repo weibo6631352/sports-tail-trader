@@ -166,6 +166,7 @@ def _runtime_with_real_like_candidate() -> SimpleNamespace:
         account_state_store=account_state,
         entry_metadata_store=metadata_store,
         trading_decision_service=TradingDecisionService(
+            strategy_id="sports_tail",
             extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
             registry=registry,
             orderbook_reader=market_ws.snapshot,
@@ -258,6 +259,7 @@ def _runtime_with_mixed_esports_and_scheduled_single_game() -> SimpleNamespace:
         }
     )
     runtime.trading_decision_service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
         registry=registry,
         orderbook_reader=runtime.market_ws_worker.snapshot,

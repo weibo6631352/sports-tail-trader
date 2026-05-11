@@ -158,6 +158,7 @@ def _seeded_records() -> tuple[DecisionRecord, ...]:
     base = datetime(2026, 5, 11, 12, 0, 0, tzinfo=timezone.utc)
     return (
         DecisionRecord(
+            strategy_id="sports_tail",
             record_id="rid-1",
             trace_id="trace-A",
             condition_id="cond-A",
@@ -168,6 +169,7 @@ def _seeded_records() -> tuple[DecisionRecord, ...]:
             created_at=base,
         ),
         DecisionRecord(
+            strategy_id="sports_tail",
             record_id="rid-2",
             trace_id="trace-B",
             condition_id="cond-A",
@@ -178,6 +180,7 @@ def _seeded_records() -> tuple[DecisionRecord, ...]:
             created_at=base,
         ),
         DecisionRecord(
+            strategy_id="sports_tail",
             record_id="rid-3",
             trace_id="trace-C",
             condition_id="cond-B",

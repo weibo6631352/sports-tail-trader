@@ -28,8 +28,11 @@ apply_fill_to_position = user_ws_adapter.apply_fill_to_position
 
 
 class UserWsAccountProjector:
-    def __init__(self, account_state: AccountStateStore) -> None:
+    def __init__(self, account_state: AccountStateStore, *, strategy_id: str) -> None:
+        if not strategy_id:
+            raise ValueError("UserWsAccountProjector requires non-empty strategy_id")
         self._account_state = account_state
+        self._strategy_id = strategy_id
 
     async def handle_balance(
         self,
@@ -81,7 +84,7 @@ class UserWsAccountProjector:
         *,
         trace_id: str,
     ) -> list[DomainEvent]:
-        positions = tuple(iter_position_snapshots(payload))
+        positions = tuple(iter_position_snapshots(payload, strategy_id=self._strategy_id))
         if not positions:
             return []
         if is_snapshot_message(payload):
@@ -112,7 +115,7 @@ class UserWsAccountProjector:
         *,
         trace_id: str,
     ) -> list[DomainEvent]:
-        orders = tuple(iter_order_snapshots(payload))
+        orders = tuple(iter_order_snapshots(payload, strategy_id=self._strategy_id))
         if not orders:
             return []
         snapshot = self._account_state.snapshot()
@@ -156,7 +159,7 @@ class UserWsAccountProjector:
         *,
         trace_id: str,
     ) -> list[DomainEvent]:
-        fills = tuple(iter_fill_snapshots(payload))
+        fills = tuple(iter_fill_snapshots(payload, strategy_id=self._strategy_id))
         if not fills:
             return []
 

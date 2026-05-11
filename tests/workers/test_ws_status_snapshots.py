@@ -33,7 +33,7 @@ def test_market_ws_status_can_return_lightweight_summary() -> None:
 
 
 def test_user_ws_status_can_return_lightweight_summary() -> None:
-    worker = UserWsWorker()
+    worker = UserWsWorker(strategy_id="sports_tail", )
     worker.build_subscription_request(
         ("condition-1", "condition-2"),
         auth={"apiKey": "key", "secret": "secret", "passphrase": "passphrase"},
@@ -108,6 +108,7 @@ def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None
     account_store.replace_positions(
         (
             Position(
+                strategy_id="sports_tail",
                 condition_id="condition-3",
                 token_id="token-3-yes",
                 shares=Decimal("5"),

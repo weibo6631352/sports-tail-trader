@@ -30,8 +30,6 @@ def run_entry_replay(
     markets = tuple(_load_market(item) for item in _list(fixture, "markets"))
     for market in markets:
         registry.upsert(market)
-    positions = tuple(_load_position(item) for item in _list(fixture, "positions"))
-    open_orders = tuple(_load_order(item) for item in _list(fixture, "open_orders"))
     orderbooks = {
         orderbook.token_id: orderbook
         for orderbook in (_load_orderbook(item) for item in _list(fixture, "orderbooks"))
@@ -47,10 +45,6 @@ def run_entry_replay(
         balance_usdc=available_usdc,
         allowance_usdc=available_usdc,
     )
-    account_state_store.replace_positions(positions)
-    account_state_store.replace_open_orders(open_orders)
-    account_state_store.mark_user_ws_connected(True)
-    account_state_store.mark_reconciled()
     extension = load_extension(
         module_path=extension_module,
         ports=build_extension_ports(
@@ -60,8 +54,16 @@ def run_entry_replay(
         ),
         config_path=extension_config_path,
     )
+    strategy_id = extension.spec.strategy_id
+    positions = tuple(_load_position(item, strategy_id=strategy_id) for item in _list(fixture, "positions"))
+    open_orders = tuple(_load_order(item, strategy_id=strategy_id) for item in _list(fixture, "open_orders"))
+    account_state_store.replace_positions(positions)
+    account_state_store.replace_open_orders(open_orders)
+    account_state_store.mark_user_ws_connected(True)
+    account_state_store.mark_reconciled()
     plan = TradingDecisionService(
         extension_hooks=extension.hooks,
+        strategy_id=strategy_id,
         registry=registry,
         orderbook_reader=orderbooks.get,
     ).build_entry_plan(
@@ -135,8 +137,9 @@ def _load_level(item: Mapping[str, Any]) -> PriceLevel:
     return PriceLevel(price=_decimal(item, "price"), size=_decimal(item, "size"))
 
 
-def _load_position(item: Mapping[str, Any]) -> Position:
+def _load_position(item: Mapping[str, Any], *, strategy_id: str) -> Position:
     return Position(
+        strategy_id=strategy_id,
         condition_id=_text(item, "condition_id"),
         token_id=_text(item, "token_id"),
         shares=_decimal(item, "shares"),
@@ -147,8 +150,9 @@ def _load_position(item: Mapping[str, Any]) -> Position:
     )
 
 
-def _load_order(item: Mapping[str, Any]) -> Order:
+def _load_order(item: Mapping[str, Any], *, strategy_id: str) -> Order:
     return Order(
+        strategy_id=strategy_id,
         condition_id=_text(item, "condition_id"),
         token_id=_text(item, "token_id"),
         side=OrderSide(_text(item, "side")),

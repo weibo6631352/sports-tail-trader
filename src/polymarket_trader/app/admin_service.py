@@ -68,8 +68,12 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         return AdminRuntimeView(runtime=self.runtime)
 
     def _order_controller(self) -> AdminOrderController:
+        strategy_id = self._runtime_strategy_id()
+        if not strategy_id:
+            raise RuntimeError("runtime extension missing strategy_id")
         return AdminOrderController(
             runtime=self.runtime,
+            strategy_id=strategy_id,
             serializer=self._serializer(),
             account_snapshot=self._account_snapshot,
             resolve_market=self._resolve_market,
@@ -134,6 +138,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         )
         return {
             "candidate_id": f"{plan.trace_id}:{market.condition_id}:{token_id}",
+            "strategy_id": self._runtime_strategy_id(),
             "trace_id": plan.trace_id,
             "condition_id": market.condition_id,
             "market_slug": market.market_slug,
@@ -171,6 +176,13 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             "intent": None if plan.intent is None else serialize_intent(plan.intent),
             "payload": jsonable(plan.metadata or {}),
         }
+
+    def _runtime_strategy_id(self) -> str | None:
+        """读取当前运行时加载的扩展策略 id，供候选过滤等内存视图使用。"""
+
+        extension = getattr(self.runtime, "extension", None) if self.runtime is not None else None
+        spec = getattr(extension, "spec", None) if extension is not None else None
+        return getattr(spec, "strategy_id", None) if spec is not None else None
 
     def _entry_metadata_for_market(self, market: Market) -> dict[str, Any]:
         store = self._entry_metadata_store()
@@ -224,7 +236,10 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         account_state = getattr(self.runtime, "account_state_store", None)
         if account_state is None or review.order_result is None:
             return
-        projector = AccountStateProjector(account_state)
+        strategy_id = self._runtime_strategy_id()
+        if not strategy_id:
+            raise RuntimeError("runtime extension missing strategy_id")
+        projector = AccountStateProjector(account_state, strategy_id=strategy_id)
         projector.apply_buy_result(review.order_result, snapshot=snapshot)
         projector.apply_result_flags(review.order_result, snapshot=snapshot)
 

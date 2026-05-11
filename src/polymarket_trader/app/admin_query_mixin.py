@@ -169,6 +169,7 @@ class AdminQueryMixin:
         order_id: str | None = None,
         trade_id: str | None = None,
         time_range: TimeRange | None = None,
+        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         if open_only:
             snapshot = self._account_snapshot()
@@ -180,6 +181,7 @@ class AdminQueryMixin:
                 and (trace_id is None or order.trace_id == trace_id)
                 and (order_id is None or order.order_id == order_id)
                 and (trade_id is None or order.trade_id == trade_id)
+                and (strategy_id is None or order.strategy_id == strategy_id)
                 and (time_range is None or time_range.contains(order.created_at))
             ]
             page = self._slice_sequence(orders, limit=limit, offset=offset)
@@ -195,6 +197,7 @@ class AdminQueryMixin:
                 and (trace_id is None or order.trace_id == trace_id)
                 and (order_id is None or order.order_id == order_id)
                 and (trade_id is None or order.trade_id == trade_id)
+                and (strategy_id is None or order.strategy_id == strategy_id)
                 and (time_range is None or time_range.contains(order.created_at))
             ]
             page = self._slice_sequence(orders, limit=limit, offset=offset)
@@ -210,6 +213,7 @@ class AdminQueryMixin:
                 condition_id=condition_id,
                 token_id=token_id,
                 time_range=time_range,
+                strategy_id=strategy_id,
             )
 
         page = await self._with_repositories(_query)
@@ -226,6 +230,7 @@ class AdminQueryMixin:
         condition_id: str | None = None,
         token_id: str | None = None,
         time_range: TimeRange | None = None,
+        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         if not self._has_db_session_factory():
             snapshot = self._account_snapshot()
@@ -237,6 +242,7 @@ class AdminQueryMixin:
                 and (trade_id is None or fill.trade_id == trade_id)
                 and (condition_id is None or fill.condition_id == condition_id)
                 and (token_id is None or fill.token_id == token_id)
+                and (strategy_id is None or fill.strategy_id == strategy_id)
                 and (time_range is None or time_range.contains(fill.created_at))
             ]
             page = self._slice_sequence(fills, limit=limit, offset=offset)
@@ -252,6 +258,7 @@ class AdminQueryMixin:
                 condition_id=condition_id,
                 token_id=token_id,
                 time_range=time_range,
+                strategy_id=strategy_id,
             )
 
         page = await self._with_repositories(_query)
@@ -264,6 +271,7 @@ class AdminQueryMixin:
         offset: int = 0,
         condition_id: str | None = None,
         token_id: str | None = None,
+        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         snapshot = self._account_snapshot()
         # 已完成权威账户同步后，空持仓本身就是当前交易事实；DB 只保留审计/恢复参考，
@@ -274,6 +282,7 @@ class AdminQueryMixin:
                 for position in snapshot.positions
                 if (condition_id is None or position.condition_id == condition_id)
                 and (token_id is None or position.token_id == token_id)
+                and (strategy_id is None or position.strategy_id == strategy_id)
             ]
             page = self._slice_sequence(positions, limit=limit, offset=offset)
             return page_payload(page, serializer=self._serializer().position)
@@ -284,6 +293,7 @@ class AdminQueryMixin:
                 offset=offset,
                 condition_id=condition_id,
                 token_id=token_id,
+                strategy_id=strategy_id,
             )
 
         page = await self._with_repositories(_query)
@@ -428,6 +438,7 @@ class AdminQueryMixin:
         condition_id: str | None = None,
         token_id: str | None = None,
         time_range: TimeRange | None = None,
+        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         if not self._has_db_session_factory():
             page: RepositoryPage[Any] = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
@@ -442,6 +453,7 @@ class AdminQueryMixin:
                 condition_id=condition_id,
                 token_id=token_id,
                 time_range=time_range,
+                strategy_id=strategy_id,
             )
 
         page = await self._with_repositories(_query)
@@ -455,6 +467,7 @@ class AdminQueryMixin:
         condition_id: str | None = None,
         token_id: str | None = None,
         trace_id: str | None = None,
+        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         """聚合成交、持仓、审计和策略 metadata，返回只读复盘视图。"""
 
@@ -462,6 +475,7 @@ class AdminQueryMixin:
             condition_id=condition_id,
             token_id=token_id,
             trace_id=trace_id,
+            strategy_id=strategy_id,
         )
         if not self._has_db_session_factory():
             account = self._account_snapshot()
@@ -491,6 +505,7 @@ class AdminQueryMixin:
                 trace_id=trace_id,
                 condition_id=condition_id,
                 token_id=token_id,
+                strategy_id=strategy_id,
             )
             fill_page = await repos.fill.list_fills_snapshot(
                 limit=query_limit,
@@ -498,12 +513,14 @@ class AdminQueryMixin:
                 trace_id=trace_id,
                 condition_id=condition_id,
                 token_id=token_id,
+                strategy_id=strategy_id,
             )
             position_page = await repos.position.list_positions_snapshot(
                 limit=query_limit,
                 offset=0,
                 condition_id=condition_id,
                 token_id=token_id,
+                strategy_id=strategy_id,
             )
             audit_page = await repos.audit.list_audit_events_snapshot(
                 limit=query_limit,
@@ -511,6 +528,7 @@ class AdminQueryMixin:
                 trace_id=trace_id,
                 condition_id=condition_id,
                 token_id=token_id,
+                strategy_id=strategy_id,
             )
             records = build_trade_replay_records(
                 markets=markets,
@@ -535,6 +553,7 @@ class AdminQueryMixin:
         condition_id: str | None = None,
         token_id: str | None = None,
         market_slug: str | None = None,
+        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         if not self._has_db_session_factory():
             page: RepositoryPage[Any] = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
@@ -548,6 +567,7 @@ class AdminQueryMixin:
                 condition_id=condition_id,
                 token_id=token_id,
                 market_slug=market_slug,
+                strategy_id=strategy_id,
             )
 
         page = await self._with_repositories(_query)
@@ -673,6 +693,7 @@ class AdminQueryMixin:
         condition_id: str | None = None,
         accepted: bool | None = None,
         time_range: TimeRange | None = None,
+        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         """暴露 ``decision_records`` 表（策略 hook 决策录制）。
 
@@ -692,6 +713,7 @@ class AdminQueryMixin:
                 condition_id=condition_id,
                 accepted=accepted,
                 time_range=time_range,
+                strategy_id=strategy_id,
             )
 
         page = await self._with_repositories(_query)
@@ -845,11 +867,21 @@ class AdminQueryMixin:
         accepted: bool | None = None,
         confirmable: bool | None = None,
         league: str | None = None,
+        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         """从热态 market、orderbook 与直播 metadata 投影体育扫尾候选。"""
 
         candidates: list[dict[str, Any]] = []
         account = self._account_snapshot()
+        # candidates 在运行时纯内存投影，归属由 runtime.extension.spec.strategy_id 决定。
+        # 入参 strategy_id 与运行时不一致时直接返回空集——避免不同策略 id 之间漂移。
+        runtime_strategy_id = self._runtime_strategy_id()
+        if strategy_id is not None and runtime_strategy_id is not None and strategy_id != runtime_strategy_id:
+            empty_page = self._slice_sequence((), limit=limit, offset=offset)
+            payload = page_payload(empty_page, serializer=lambda item: item)
+            payload["has_more"] = False
+            payload["source_markets"] = 0
+            return payload
         source_markets = self._candidate_source_markets(
             condition_id=condition_id,
             token_id=token_id,

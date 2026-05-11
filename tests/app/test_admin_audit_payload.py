@@ -14,6 +14,7 @@ def test_admin_audit_event_serialization_exposes_payload_for_candidate_replay() 
         market_ws_snapshot=lambda token_id: None,
     )
     event = AuditEvent(
+        strategy_id="sports_tail",
         event_title="skipped",
         trace_id="trace-audit",
         payload={
@@ -45,7 +46,7 @@ def test_persistence_audit_record_keeps_outbox_payload_for_candidate_replay() ->
         },
     )
 
-    records = PersistenceRecordBuilder().route_event(event)
+    records = PersistenceRecordBuilder(strategy_id="sports_tail", ).route_event(event)
     audit_record = next(record for kind, record in records if kind == "audit")
 
     assert audit_record["plan_metadata"] == {

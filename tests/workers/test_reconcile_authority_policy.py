@@ -131,7 +131,8 @@ class _PositionDTO:
     def __init__(self, position: Position) -> None:
         self._position = position
 
-    def to_position(self) -> Position:
+    def to_position(self, *, strategy_id: str) -> Position:
+        # 测试 mock 保持与生产 DTO 同签名：strategy_id 由调用方传入。
         return self._position
 
 
@@ -149,7 +150,7 @@ class _OrderDTO:
     def __init__(self, order: Order) -> None:
         self._order = order
 
-    def to_order_record(self) -> Order:
+    def to_order_record(self, *, strategy_id: str) -> Order:
         return self._order
 
 
@@ -235,6 +236,7 @@ def test_reconcile_recovery_context_includes_orderbook_snapshot() -> None:
     )
     hooks = _CaptureRecoveryHooks()
     service = ReconcileService(
+        strategy_id="sports_tail",
         extension_hooks=hooks,
         orderbook_reader=lambda token_id: orderbook if token_id == "token-1-yes" else None,
     )
@@ -244,6 +246,7 @@ def test_reconcile_recovery_context_includes_orderbook_snapshot() -> None:
         account_snapshot=AccountSnapshot(
             positions=(
                 Position(
+                    strategy_id="sports_tail",
                     condition_id="condition-1",
                     token_id="token-1-yes",
                     shares=Decimal("5"),
@@ -269,7 +272,7 @@ async def test_discovery_reconcile_event_does_not_refresh_market_authority() -> 
     gamma = _CountingGammaClient()
     worker = ReconcileWorker(
         event_bus=event_bus,
-        reconcile_service=ReconcileService(extension_hooks=_NoopHooks()),
+        reconcile_service=ReconcileService(strategy_id="sports_tail", extension_hooks=_NoopHooks()),
         registry_snapshot_provider=registry.snapshot,
         gamma_client=gamma,
     )
@@ -296,6 +299,7 @@ async def test_refresher_skips_market_authority_when_disabled() -> None:
     market = _market(1)
     gamma = _CountingGammaClient()
     refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
         registry_snapshot_provider=lambda: MarketRegistrySnapshot((market,)),
         gamma_client=gamma,
     )
@@ -315,6 +319,7 @@ async def test_refresher_recovers_missing_registry_market_from_account_position_
     registry = MarketRegistry()
     gamma = _MarketBySlugGammaClient(market)
     refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
         registry_snapshot_provider=lambda: MarketRegistrySnapshot(()),
         account_state_store=account_state,
         registry=registry,
@@ -322,6 +327,7 @@ async def test_refresher_recovers_missing_registry_market_from_account_position_
         data_client=_PositionDataClient(
             (
                 Position(
+                    strategy_id="sports_tail",
                     condition_id=market.condition_id,
                     token_id=market.token_ids[0],
                     shares=Decimal("1"),
@@ -343,6 +349,7 @@ async def test_refresher_recovers_missing_registry_market_from_account_position_
 @pytest.mark.asyncio
 async def test_refresher_tracks_missing_open_order_market_without_slug_for_recovery() -> None:
     open_buy = Order(
+        strategy_id="sports_tail",
         trace_id="trace-buy",
         condition_id="orphan-condition",
         token_id="orphan-token",
@@ -358,6 +365,7 @@ async def test_refresher_tracks_missing_open_order_market_without_slug_for_recov
     account_state = AccountStateStore()
     registry = MarketRegistry()
     refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
         registry_snapshot_provider=lambda: MarketRegistrySnapshot(()),
         account_state_store=account_state,
         registry=registry,
@@ -377,6 +385,7 @@ async def test_refresher_tracks_missing_open_order_market_without_slug_for_recov
 async def test_refresher_refreshes_position_coverage_from_authoritative_open_orders() -> None:
     market = _market(4)
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id=market.token_ids[0],
         shares=Decimal("7"),
@@ -384,6 +393,7 @@ async def test_refresher_refreshes_position_coverage_from_authoritative_open_ord
         market_slug=market.market_slug,
     )
     sell_order = Order(
+        strategy_id="sports_tail",
         trace_id="trace-sell",
         condition_id=market.condition_id,
         token_id=market.token_ids[0],
@@ -398,6 +408,7 @@ async def test_refresher_refreshes_position_coverage_from_authoritative_open_ord
     )
     account_state = AccountStateStore()
     refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
         registry_snapshot_provider=lambda: MarketRegistrySnapshot((market,)),
         account_state_store=account_state,
         data_client=_PositionDataClient((position,)),
@@ -418,6 +429,7 @@ async def test_unscoped_refresher_only_refreshes_markets_with_exposure() -> None
     account_state = AccountStateStore()
     account_state.upsert_position(
         Position(
+            strategy_id="sports_tail",
             condition_id=exposed_market.condition_id,
             token_id=exposed_market.token_ids[0],
             shares=Decimal("1"),
@@ -426,6 +438,7 @@ async def test_unscoped_refresher_only_refreshes_markets_with_exposure() -> None
     )
     gamma = _CountingGammaClient()
     refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
         registry_snapshot_provider=lambda: MarketRegistrySnapshot((idle_market, exposed_market)),
         account_state_store=account_state,
         gamma_client=gamma,
@@ -452,7 +465,7 @@ async def test_reconcile_prunes_expired_idle_market_from_registry_and_market_ws(
     market_ws_worker.track_market(active_market)
     account_state = AccountStateStore()
     worker = ReconcileWorker(
-        reconcile_service=ReconcileService(extension_hooks=_NoopHooks()),
+        reconcile_service=ReconcileService(strategy_id="sports_tail", extension_hooks=_NoopHooks()),
         registry_snapshot_provider=registry.snapshot,
         account_state_store=account_state,
         registry=registry,
@@ -480,6 +493,7 @@ async def test_reconcile_keeps_expired_market_with_position_subscribed() -> None
     account_state = AccountStateStore()
     account_state.upsert_position(
         Position(
+            strategy_id="sports_tail",
             condition_id=expired_market.condition_id,
             token_id=expired_market.token_ids[0],
             shares=Decimal("1"),
@@ -487,7 +501,7 @@ async def test_reconcile_keeps_expired_market_with_position_subscribed() -> None
         )
     )
     worker = ReconcileWorker(
-        reconcile_service=ReconcileService(extension_hooks=_NoopHooks()),
+        reconcile_service=ReconcileService(strategy_id="sports_tail", extension_hooks=_NoopHooks()),
         registry_snapshot_provider=registry.snapshot,
         account_state_store=account_state,
         registry=registry,
@@ -512,7 +526,7 @@ async def test_reconcile_prunes_idle_market_after_terminal_live_state_pause() ->
     market_ws_worker.track_market(market)
     account_state = AccountStateStore()
     worker = ReconcileWorker(
-        reconcile_service=ReconcileService(extension_hooks=_TerminalLiveStateHooks()),
+        reconcile_service=ReconcileService(strategy_id="sports_tail", extension_hooks=_TerminalLiveStateHooks()),
         registry_snapshot_provider=registry.snapshot,
         account_state_store=account_state,
         registry=registry,
@@ -529,12 +543,13 @@ async def test_reconcile_prunes_idle_market_after_terminal_live_state_pause() ->
 def test_terminal_live_state_pause_keeps_existing_position_exit_in_plan() -> None:
     market = _market(1)
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id=market.token_ids[0],
         shares=Decimal("7"),
         cost_usdc=Decimal("5"),
     )
-    service = ReconcileService(extension_hooks=_TerminalLiveStateExitHooks())
+    service = ReconcileService(strategy_id="sports_tail", extension_hooks=_TerminalLiveStateExitHooks())
 
     plan = service.build_market_plan(
         market=market,

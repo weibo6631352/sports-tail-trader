@@ -25,6 +25,7 @@ class _StubExecutor:
 
     async def submit(self, intent: BuyOrderIntent) -> OrderResult:
         return OrderResult(
+            strategy_id="sports_tail",
             trace_id=intent.trace_id,
             condition_id=intent.condition_id,
             token_id=intent.token_id,
@@ -48,6 +49,7 @@ class _AlwaysPassRisk(RiskManager):
 
 def _build_intent() -> BuyOrderIntent:
     return BuyOrderIntent(
+        strategy_id="sports_tail",
         trace_id="trace-lifecycle",
         condition_id="cond-1",
         token_id="tok-1",

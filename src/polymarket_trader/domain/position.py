@@ -7,6 +7,8 @@ from decimal import Decimal
 
 @dataclass(frozen=True, slots=True)
 class Position:
+    # strategy_id 必填，无默认值。框架/策略边界处必须显式提供；缺失直接抛错。
+    strategy_id: str
     condition_id: str
     token_id: str
     shares: Decimal

@@ -116,6 +116,7 @@ def test_account_snapshot_model_computes_net_value_from_positions() -> None:
         balance_usdc=Decimal("250.00"),
         positions=(
             Position(
+                strategy_id="sports_tail",
                 condition_id="c1",
                 token_id="t1",
                 shares=Decimal("100"),
@@ -123,6 +124,7 @@ def test_account_snapshot_model_computes_net_value_from_positions() -> None:
                 current_value=Decimal("90.50"),
             ),
             Position(
+                strategy_id="sports_tail",
                 condition_id="c2",
                 token_id="t2",
                 shares=Decimal("50"),
@@ -131,6 +133,7 @@ def test_account_snapshot_model_computes_net_value_from_positions() -> None:
             ),
             # 缺少 current_value 的仓位按 0 计——无法在事后插值，避免污染历史。
             Position(
+                strategy_id="sports_tail",
                 condition_id="c3",
                 token_id="t3",
                 shares=Decimal("10"),

@@ -38,23 +38,23 @@ def test_pct_of_handles_zero_denominator() -> None:
 
 def test_avg_cost_returns_none_for_empty_position() -> None:
     assert avg_cost(None) is None
-    pos = Position(condition_id="c", token_id="t", shares=Decimal("0"), cost_usdc=Decimal("0"))
+    pos = Position(strategy_id="sports_tail", condition_id="c", token_id="t", shares=Decimal("0"), cost_usdc=Decimal("0"))
     assert avg_cost(pos) is None
 
 
 def test_avg_cost_computes_average() -> None:
-    pos = Position(condition_id="c", token_id="t", shares=Decimal("10"), cost_usdc=Decimal("4.5"))
+    pos = Position(strategy_id="sports_tail", condition_id="c", token_id="t", shares=Decimal("10"), cost_usdc=Decimal("4.5"))
     assert avg_cost(pos) == Decimal("0.45")
 
 
 def test_unrealized_pnl_uses_mark_price() -> None:
-    pos = Position(condition_id="c", token_id="t", shares=Decimal("10"), cost_usdc=Decimal("4.5"))
+    pos = Position(strategy_id="sports_tail", condition_id="c", token_id="t", shares=Decimal("10"), cost_usdc=Decimal("4.5"))
     assert unrealized_pnl(pos, mark_price=Decimal("0.6")) == Decimal("1.5")
 
 
 def test_unrealized_pnl_none_when_missing_inputs() -> None:
     assert unrealized_pnl(None, mark_price=Decimal("0.6")) is None
-    pos = Position(condition_id="c", token_id="t", shares=Decimal("10"), cost_usdc=Decimal("4.5"))
+    pos = Position(strategy_id="sports_tail", condition_id="c", token_id="t", shares=Decimal("10"), cost_usdc=Decimal("4.5"))
     assert unrealized_pnl(pos, mark_price=None) is None
 
 

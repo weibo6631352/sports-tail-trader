@@ -60,6 +60,7 @@ class _RecordingTradingService:
             risk_decision=None,
             submitted=True,
             order_result=OrderResult(
+                strategy_id="sports_tail",
                 trace_id=intent.trace_id,
                 condition_id=intent.condition_id,
                 token_id=intent.token_id,
@@ -77,6 +78,7 @@ class _RecordingTradingService:
             risk_decision=None,
             submitted=True,
             order_result=OrderResult(
+                strategy_id="sports_tail",
                 trace_id=intent.trace_id,
                 condition_id=intent.condition_id,
                 token_id=intent.token_id,
@@ -141,6 +143,7 @@ def test_cancel_order_routes_through_trading_service() -> None:
     account_state = AccountStateStore()
     account_state.upsert_order(
         OrderRecord(
+            strategy_id="sports_tail",
             condition_id=market.condition_id,
             token_id="tok-yes",
             side=OrderSide.SELL,
@@ -156,6 +159,7 @@ def test_cancel_order_routes_through_trading_service() -> None:
     trading_service = _RecordingTradingService()
     service = AdminService(
         runtime=SimpleNamespace(
+            extension=SimpleNamespace(spec=SimpleNamespace(strategy_id="sports_tail")),
             registry=registry,
             account_state_store=account_state,
             trading_service=trading_service,
@@ -180,6 +184,7 @@ def test_cancel_order_returns_order_not_found_when_open_order_absent() -> None:
     account_state = AccountStateStore()
     service = AdminService(
         runtime=SimpleNamespace(
+            extension=SimpleNamespace(spec=SimpleNamespace(strategy_id="sports_tail")),
             registry=registry,
             account_state_store=account_state,
             trading_service=_RecordingTradingService(),
@@ -197,6 +202,7 @@ def test_force_exit_position_uses_best_bid_and_calls_trading_service_sell() -> N
     account_state = AccountStateStore()
     account_state.upsert_position(
         Position(
+            strategy_id="sports_tail",
             condition_id=market.condition_id,
             token_id="tok-yes",
             market_slug=market.market_slug,
@@ -221,6 +227,7 @@ def test_force_exit_position_uses_best_bid_and_calls_trading_service_sell() -> N
 
     service = AdminService(
         runtime=SimpleNamespace(
+            extension=SimpleNamespace(spec=SimpleNamespace(strategy_id="sports_tail")),
             registry=registry,
             account_state_store=account_state,
             trading_service=trading_service,
@@ -260,6 +267,7 @@ def test_force_exit_returns_position_not_found_for_zero_shares() -> None:
     account_state = AccountStateStore()
     service = AdminService(
         runtime=SimpleNamespace(
+            extension=SimpleNamespace(spec=SimpleNamespace(strategy_id="sports_tail")),
             registry=registry,
             account_state_store=account_state,
             trading_service=_RecordingTradingService(),
@@ -278,6 +286,7 @@ def test_force_exit_returns_best_bid_unavailable_when_orderbook_missing() -> Non
     account_state = AccountStateStore()
     account_state.upsert_position(
         Position(
+            strategy_id="sports_tail",
             condition_id=market.condition_id,
             token_id="tok-yes",
             shares=Decimal("4"),
@@ -291,6 +300,7 @@ def test_force_exit_returns_best_bid_unavailable_when_orderbook_missing() -> Non
 
     service = AdminService(
         runtime=SimpleNamespace(
+            extension=SimpleNamespace(spec=SimpleNamespace(strategy_id="sports_tail")),
             registry=registry,
             account_state_store=account_state,
             trading_service=_RecordingTradingService(),

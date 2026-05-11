@@ -374,6 +374,7 @@ class TradingDecisionWorker:
         decision = self._trading_decision_service.decide_exit(
             ExtensionContext(
                 trace_id=event.trace_id,
+                strategy_id=self._trading_decision_service.strategy_id,
                 market=market,
                 token_id=position.token_id,
                 orderbook=self._trading_decision_service.lookup_orderbook(position.token_id),
@@ -694,7 +695,10 @@ class TradingDecisionWorker:
     def _account_projector(self) -> AccountStateProjector | None:
         if self._account_state_store is None:
             return None
-        return AccountStateProjector(self._account_state_store)
+        return AccountStateProjector(
+            self._account_state_store,
+            strategy_id=self._trading_decision_service.strategy_id,
+        )
 
 
 def _match_position(

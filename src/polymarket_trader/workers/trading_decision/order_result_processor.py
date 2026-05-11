@@ -293,6 +293,7 @@ class TradingOrderResultProcessor:
             },
         )
         cancel_intent = CancelOrderIntent(
+            strategy_id=order_result.strategy_id or self._trading_decision_service.strategy_id,
             trace_id=order_result.trace_id,
             condition_id=order_result.condition_id,
             token_id=order_result.token_id,
@@ -356,6 +357,7 @@ class TradingOrderResultProcessor:
         follow_up_decisions = self._trading_decision_service.decide_follow_up(
             ExtensionContext(
                 trace_id=order_result.trace_id,
+                strategy_id=self._trading_decision_service.strategy_id,
                 market=resolved_market,
                 token_id=order_result.token_id,
                 market_token_views=tuple(

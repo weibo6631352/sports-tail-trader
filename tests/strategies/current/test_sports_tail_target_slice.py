@@ -877,6 +877,7 @@ def test_entry_rejects_series_market_before_single_game_live_score_can_create_bu
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-series",
             market=market,
             token_id="series-home",
@@ -948,6 +949,7 @@ def test_entry_rejects_sports_market_without_live_game_state_before_creating_buy
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-1",
             market=market,
             token_id="over",
@@ -967,6 +969,7 @@ def test_totals_over_locked_can_create_buy_only_after_full_tail_gate_passes() ->
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-2",
             market=market,
             token_id="over",
@@ -1006,6 +1009,7 @@ def test_ended_moneyline_can_create_buy_before_polymarket_closes_market() -> Non
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-ended-moneyline",
             market=market,
             token_id="home",
@@ -1041,6 +1045,7 @@ def test_ended_totals_under_can_create_buy_when_final_score_is_below_line() -> N
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-ended-under",
             market=market,
             token_id="under",
@@ -1088,6 +1093,7 @@ def test_ended_tennis_first_set_total_is_not_treated_as_total_sets_under() -> No
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-ended-first-set-total-under",
             market=market,
             token_id="first-set-under",
@@ -1128,6 +1134,7 @@ def test_ended_tennis_first_set_total_under_uses_first_set_score() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-ended-first-set-total-under-supported",
             market=market,
             token_id="first-set-under",
@@ -1169,6 +1176,7 @@ def test_ended_tennis_first_set_total_under_rejects_when_first_set_went_over() -
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-ended-first-set-total-under-over-score",
             market=market,
             token_id="first-set-under",
@@ -1209,6 +1217,7 @@ def test_live_tennis_first_set_total_over_uses_current_set_score() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-live-first-set-total-over-supported",
             market=market,
             token_id="first-set-over",
@@ -1252,6 +1261,7 @@ def test_live_tennis_first_set_total_under_uses_completed_first_set_score() -> N
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-live-first-set-total-under-supported",
             market=market,
             token_id="first-set-under",
@@ -1297,6 +1307,7 @@ def test_live_tennis_current_set_total_under_waits_until_set_completed() -> None
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-live-first-set-total-under-not-locked",
             market=market,
             token_id="first-set-under",
@@ -1350,6 +1361,7 @@ def test_period_total_market_is_not_treated_as_full_game_total() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-period-total-unsupported",
             market=market,
             token_id="first-quarter-over",
@@ -1383,6 +1395,7 @@ def test_ended_moneyline_tie_is_not_traded_as_deterministic_result() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-ended-tie",
             market=market,
             token_id="home",
@@ -1446,6 +1459,7 @@ def test_moneyline_uses_live_home_away_names_instead_of_outcome_order() -> None:
     losing_token = decide_entry(
         config,
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-kbo-loser",
             market=market,
             token_id="kia",
@@ -1458,6 +1472,7 @@ def test_moneyline_uses_live_home_away_names_instead_of_outcome_order() -> None:
     winning_token = decide_entry(
         config,
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-kbo-winner",
             market=market,
             token_id="nc",
@@ -1479,6 +1494,7 @@ def test_entry_plan_preserves_event_metadata_through_application_entry_path() ->
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
         orderbook_reader=lambda token_id: _orderbook(token_id=token_id, best_ask=Decimal("0.02"))
         if token_id == "under"
@@ -1529,10 +1545,12 @@ def test_follow_up_waits_for_settlement_by_default() -> None:
 
     decisions = strategy.decide_follow_up(
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-follow-up-tick",
             market=market,
             token_id="over",
             order_result=OrderResult(
+                strategy_id="sports_tail",
                 trace_id="trace-follow-up-tick",
                 condition_id=market.condition_id,
                 token_id="over",
@@ -1555,6 +1573,7 @@ def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(config=_manual_moneyline_config()).hooks,
     )
 
@@ -1601,6 +1620,7 @@ def test_tennis_allocation_filters_opposite_side_before_equal_weight_budget() ->
         "tennis-away": _orderbook(token_id="tennis-away", best_ask=Decimal("0.77")),
     }
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
         registry=registry,
         orderbook_reader=lambda token_id: orderbooks.get(token_id),
@@ -1654,6 +1674,7 @@ def test_tennis_moneyline_first_set_lead_is_not_tail_enough() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-tennis-first-set",
             market=market,
             token_id="tennis-home",
@@ -1691,6 +1712,7 @@ def test_tennis_moneyline_requires_current_set_tail_after_set_lead() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-tennis-too-early-second-set",
             market=market,
             token_id="tennis-home",
@@ -1728,6 +1750,7 @@ def test_tennis_moneyline_tail_bypasses_far_gamma_end_date() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-tennis-tail-far-gamma-end",
             market=market,
             token_id="tennis-home",
@@ -1754,6 +1777,7 @@ def test_low_settlement_efficiency_entry_uses_profit_take_exit_plan_when_viable(
             tail_profit_take_min_profit_usdc=Decimal("0.03"),
         ),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-profit-take-entry",
             market=market,
             token_id="over",
@@ -1807,6 +1831,7 @@ def test_settlement_efficient_entry_adds_profit_take_overlay_when_viable() -> No
             tail_profit_take_min_profit_usdc=Decimal("0.02"),
         ),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-settlement-profit-take-overlay",
             market=market,
             token_id="diamondbacks",
@@ -1857,6 +1882,7 @@ def test_low_settlement_efficiency_entry_rejects_when_profit_take_is_not_viable(
             tail_profit_take_min_profit_usdc=Decimal("0.06"),
         ),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-profit-take-reject",
             market=market,
             token_id="over",
@@ -1897,6 +1923,7 @@ def test_low_profit_entry_uses_profit_take_when_hourly_capital_efficiency_is_hig
             tail_profit_take_hold_minutes=2,
         ),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-profit-take-hourly-efficiency",
             market=market,
             token_id="over",
@@ -1948,6 +1975,7 @@ def test_tennis_match_total_over_uses_minimum_possible_final_games_in_deciding_s
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-tennis-min-final-games-total",
             market=market,
             token_id="tennis-total-over",
@@ -2006,6 +2034,7 @@ def test_tennis_first_set_winner_current_set_near_locked_can_enter_before_set_en
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-tennis-first-set-current-tail",
             market=market,
             token_id="gaston-first-set",
@@ -2066,6 +2095,7 @@ def test_tennis_first_set_winner_current_set_near_locked_requires_service_point_
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-tennis-first-set-current-tail-no-pressure",
             market=market,
             token_id="gaston-first-set",
@@ -2125,6 +2155,7 @@ def test_tennis_first_set_winner_current_set_near_locked_rejects_ask_above_price
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-tennis-first-set-near-lock-maker",
             market=market,
             token_id="sharipov-first-set",
@@ -2185,6 +2216,7 @@ def test_tennis_completed_set_winner_rejects_market_ask_above_locked_price_cap()
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-tennis-first-set-locked-wide-spread",
             market=market,
             token_id="pieri-first-set",
@@ -2250,6 +2282,7 @@ def test_tennis_completed_set_winner_rejects_ask_above_locked_price_cap() -> Non
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-tennis-first-set-ask-one",
             market=market,
             token_id="gaston-first-set",
@@ -2315,6 +2348,7 @@ def test_tennis_completed_set_winner_rejects_missing_best_ask() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-tennis-first-set-missing-ask",
             market=market,
             token_id="gaston-first-set",
@@ -2366,6 +2400,7 @@ def test_ended_moneyline_rejects_missing_best_ask() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-ended-moneyline-missing-ask",
             market=market,
             token_id="home",
@@ -2419,6 +2454,7 @@ def test_entry_plan_rejects_locked_set_winner_when_only_limit_bid_would_work() -
         trading_status=TradingStatus.ELIGIBLE,
     ).with_tick_size(Decimal("0.001"))
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(
             config=CurrentStrategyConfig(
                 tail_min_liquidity_usdc=Decimal("0.01"),
@@ -2480,6 +2516,7 @@ def test_entry_plan_rejects_ended_moneyline_when_best_ask_is_missing() -> None:
     market = _moneyline_market().with_tick_size(Decimal("0.001"))
     now = datetime(2026, 4, 27, tzinfo=timezone.utc)
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(
             config=CurrentStrategyConfig(
                 tail_min_liquidity_usdc=Decimal("0.01"),
@@ -2535,6 +2572,7 @@ def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(config=_manual_moneyline_config()).hooks,
     )
 
@@ -2569,6 +2607,7 @@ def test_strategy_risk_blocks_event_exposure_before_buy_intent() -> None:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
         orderbook_reader=lambda token_id: _orderbook(token_id=token_id, best_ask=Decimal("0.02"))
         if token_id == "under"
@@ -2587,6 +2626,7 @@ def test_strategy_risk_blocks_event_exposure_before_buy_intent() -> None:
         max_total_usdc=Decimal("100"),
         positions=(
             Position(
+                strategy_id="sports_tail",
                 condition_id=market.condition_id,
                 token_id="under",
                 shares=Decimal("24"),
@@ -2609,6 +2649,7 @@ def test_strategy_risk_uses_account_fills_for_daily_entry_limit() -> None:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(
             config=CurrentStrategyConfig(tail_max_daily_entry_usdc=Decimal("15"))
         ).hooks,
@@ -2623,6 +2664,7 @@ def test_strategy_risk_uses_account_fills_for_daily_entry_limit() -> None:
             allow_new_entries=True,
             fills=(
                 Fill(
+                    strategy_id="sports_tail",
                     trace_id="old-buy",
                     condition_id=market.condition_id,
                     token_id="over",
@@ -2654,6 +2696,7 @@ def test_strategy_risk_blocks_consecutive_loss_pause() -> None:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
     )
 
@@ -2683,6 +2726,7 @@ def test_strategy_risk_blocks_consecutive_loss_pause() -> None:
 def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_order() -> None:
     market = _tennis_moneyline_market()
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="tennis-home",
         shares=Decimal("8"),
@@ -2691,6 +2735,7 @@ def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_orde
         open_sell_shares=Decimal("8"),
     )
     exit_order = Order(
+        strategy_id="sports_tail",
         trace_id="trace-exit",
         condition_id=market.condition_id,
         token_id="tennis-home",
@@ -2704,6 +2749,7 @@ def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_orde
         order_id="exit-order",
     )
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
     )
 
@@ -2732,6 +2778,7 @@ def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_orde
 def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_advantage_strengthens() -> None:
     market = _moneyline_market()
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="home",
         shares=Decimal("12"),
@@ -2745,6 +2792,7 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
         positions=(position,),
         fills=(
             Fill(
+                strategy_id="sports_tail",
                 trace_id="trace-initial-buy",
                 condition_id=market.condition_id,
                 token_id="home",
@@ -2755,6 +2803,7 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
         ),
     )
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(
             config=CurrentStrategyConfig(tail_max_event_exposure_usdc=Decimal("40"))
         ).hooks,
@@ -2799,6 +2848,7 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
 def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
     market = _tennis_totals_market()
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="tennis-over",
         shares=Decimal("12"),
@@ -2807,6 +2857,7 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
         open_sell_shares=Decimal("12"),
     )
     exit_order = Order(
+        strategy_id="sports_tail",
         trace_id="trace-tennis-exit-scale",
         condition_id=market.condition_id,
         token_id="tennis-over",
@@ -2827,6 +2878,7 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
         open_orders=(exit_order,),
         fills=(
             Fill(
+                strategy_id="sports_tail",
                 trace_id="trace-tennis-initial-buy",
                 condition_id=market.condition_id,
                 token_id="tennis-over",
@@ -2837,6 +2889,7 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
         ),
     )
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(
             config=CurrentStrategyConfig(tail_max_event_exposure_usdc=Decimal("40"))
         ).hooks,
@@ -2975,6 +3028,7 @@ def test_moneyline_default_permission_enters_auto_buy_path() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-3",
             market=market,
             token_id="home",
@@ -3011,6 +3065,7 @@ def test_live_market_more_than_one_hour_from_close_is_not_tail_candidate() -> No
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-live-far-close",
             market=market,
             token_id="home",
@@ -3058,6 +3113,7 @@ def test_live_mlb_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-live-mlb-settlement-end-date",
             market=market,
             token_id="cardinals",
@@ -3117,6 +3173,7 @@ def test_live_kbo_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-live-kbo-settlement-end-date",
             market=market,
             token_id="nc",
@@ -3177,6 +3234,7 @@ def test_mlb_structured_tail_state_allows_official_source_age_above_generic_limi
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-mlb-official-source-age",
             market=market,
             token_id="cardinals",
@@ -3240,6 +3298,7 @@ def test_mlb_moneyline_eighth_inning_leader_can_enter_when_no_scoring_threat() -
             tail_min_expected_profit_per_hour_usdc=Decimal("0.10"),
         ),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-mlb-eighth-leader",
             market=market,
             token_id="diamondbacks",
@@ -3299,6 +3358,7 @@ def test_mlb_moneyline_eighth_inning_rejects_scoring_position_threat() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-mlb-eighth-threat",
             market=market,
             token_id="diamondbacks",
@@ -3346,6 +3406,7 @@ def test_totals_over_locked_bypasses_far_market_end_window() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-live-far-close-locked-over",
             market=market,
             token_id="over",
@@ -3375,7 +3436,7 @@ def test_totals_over_locked_bypasses_far_market_end_window() -> None:
 def test_allocation_reports_far_close_before_missing_best_ask() -> None:
     now = datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc)
     market = _moneyline_market().with_metadata(end_date=datetime(2026, 4, 27, 2, 1, tzinfo=timezone.utc))
-    service = TradingDecisionService(extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks)
+    service = TradingDecisionService(strategy_id="sports_tail", extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks)
 
     plan = service.build_entry_plan(
         market=market,
@@ -3424,6 +3485,7 @@ def test_spreads_default_permission_enters_auto_buy_path() -> None:
     decision = decide_entry(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-spread-alert",
             market=market,
             token_id="home",
@@ -3459,9 +3521,11 @@ def test_follow_up_sell_is_not_created_after_buy_fill() -> None:
 
     decisions = strategy.decide_follow_up(
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-follow-up",
             market=market,
             order_result=OrderResult(
+                strategy_id="sports_tail",
                 trace_id="trace-follow-up",
                 condition_id=market.condition_id,
                 token_id="over",
@@ -3482,15 +3546,18 @@ def test_profit_take_follow_up_sell_is_created_after_tagged_buy_fill() -> None:
 
     decisions = strategy.decide_follow_up(
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-profit-take-follow-up",
             market=market,
             token_id="over",
             order_result=OrderResult(
+                strategy_id="sports_tail",
                 trace_id="trace-profit-take-follow-up",
                 condition_id=market.condition_id,
                 token_id="over",
                 status=OrderResultStatus.FULL_FILL,
                 intent=BuyOrderIntent(
+                    strategy_id="sports_tail",
                     trace_id="trace-profit-take-follow-up",
                     condition_id=market.condition_id,
                     token_id="over",
@@ -3525,15 +3592,18 @@ def test_profit_take_overlay_follow_up_sell_is_created_after_settlement_buy_fill
 
     decisions = strategy.decide_follow_up(
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-overlay-follow-up",
             market=market,
             token_id="home",
             order_result=OrderResult(
+                strategy_id="sports_tail",
                 trace_id="trace-overlay-follow-up",
                 condition_id=market.condition_id,
                 token_id="home",
                 status=OrderResultStatus.FULL_FILL,
                 intent=BuyOrderIntent(
+                    strategy_id="sports_tail",
                     trace_id="trace-overlay-follow-up",
                     condition_id=market.condition_id,
                     token_id="home",
@@ -3570,10 +3640,12 @@ def test_position_exit_waits_for_settlement_by_default() -> None:
 
     decision = strategy.decide_exit(
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-position-exit",
             market=market,
             token_id="over",
             position=Position(
+                strategy_id="sports_tail",
                 condition_id=market.condition_id,
                 token_id="over",
                 shares=Decimal("3"),
@@ -3594,6 +3666,7 @@ def test_recovery_keeps_ended_single_game_open_for_ended_not_closed_scan() -> No
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-abnormal-recovery",
             market=market,
             now=datetime(2026, 4, 27, 1, tzinfo=timezone.utc),
@@ -3623,6 +3696,7 @@ def test_recovery_pauses_new_entries_when_live_state_is_abnormal() -> None:
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-abnormal-recovery",
             market=market,
             now=datetime(2026, 4, 27, 1, tzinfo=timezone.utc),
@@ -3649,6 +3723,7 @@ def test_recovery_pauses_new_entries_when_live_state_is_abnormal() -> None:
 def test_recovery_manages_all_sports_target_tokens_instead_of_fixed_primary_token() -> None:
     market = _moneyline_market()
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="away",
         shares=Decimal("4"),
@@ -3656,6 +3731,7 @@ def test_recovery_manages_all_sports_target_tokens_instead_of_fixed_primary_toke
         market_slug=market.market_slug,
     )
     open_buy = Order(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="home",
         side=OrderSide.BUY,
@@ -3669,6 +3745,7 @@ def test_recovery_manages_all_sports_target_tokens_instead_of_fixed_primary_toke
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-4",
             market=market,
             position=position,
@@ -3685,6 +3762,7 @@ def test_recovery_manages_all_sports_target_tokens_instead_of_fixed_primary_toke
 def test_recovery_does_not_create_exit_order_in_settlement_only_mode() -> None:
     market = _moneyline_market()
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="away",
         shares=Decimal("4"),
@@ -3695,6 +3773,7 @@ def test_recovery_does_not_create_exit_order_in_settlement_only_mode() -> None:
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-settlement-only-recovery",
             market=market,
             position=position,
@@ -3708,6 +3787,7 @@ def test_recovery_does_not_create_exit_order_in_settlement_only_mode() -> None:
 def test_recovery_places_profit_take_for_near_settlement_position_missing_overlay() -> None:
     market = _moneyline_market().with_tick_size(Decimal("0.01"))
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="home",
         shares=Decimal("5.376342"),
@@ -3718,6 +3798,7 @@ def test_recovery_places_profit_take_for_near_settlement_position_missing_overla
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-near-settlement-overlay-recovery",
             market=market,
             position=position,
@@ -3736,6 +3817,7 @@ def test_recovery_places_profit_take_for_near_settlement_position_missing_overla
 def test_recovery_places_profit_take_for_high_price_uncovered_position() -> None:
     market = _totals_market().with_tick_size(Decimal("0.01"))
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="over",
         shares=Decimal("5.0505"),
@@ -3746,6 +3828,7 @@ def test_recovery_places_profit_take_for_high_price_uncovered_position() -> None
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-recovery-profit-take",
             market=market,
             position=position,
@@ -3766,6 +3849,7 @@ def test_recovery_places_profit_take_for_high_price_uncovered_position() -> None
 def test_recovery_uses_profitable_best_bid_when_one_tick_profit_is_too_small() -> None:
     market = _totals_market().with_tick_size(Decimal("0.001"))
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="over",
         shares=Decimal("5.0505"),
@@ -3787,6 +3871,7 @@ def test_recovery_uses_profitable_best_bid_when_one_tick_profit_is_too_small() -
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-recovery-profit-take-best-bid",
             market=market,
             position=position,
@@ -3807,6 +3892,7 @@ def test_recovery_uses_profitable_best_bid_when_one_tick_profit_is_too_small() -
 def test_recovery_places_profit_take_for_unknown_legacy_high_price_position() -> None:
     market = _unknown_legacy_market().with_tick_size(Decimal("0.01"))
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="legacy",
         shares=Decimal("5.0505"),
@@ -3817,6 +3903,7 @@ def test_recovery_places_profit_take_for_unknown_legacy_high_price_position() ->
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-legacy-recovery-profit-take",
             market=market,
             position=position,
@@ -3836,6 +3923,7 @@ def test_recovery_places_profit_take_for_unknown_legacy_high_price_position() ->
 def test_recovery_does_not_repeat_profit_take_for_unknown_candidate_without_orderbook() -> None:
     market = _unknown_legacy_market().with_trading_status(TradingStatus.CANDIDATE).with_tick_size(Decimal("0.01"))
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="legacy",
         shares=Decimal("5.0505"),
@@ -3846,6 +3934,7 @@ def test_recovery_does_not_repeat_profit_take_for_unknown_candidate_without_orde
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-legacy-candidate-no-orderbook",
             market=market,
             position=position,
@@ -3860,6 +3949,7 @@ def test_recovery_does_not_repeat_profit_take_for_unknown_candidate_without_orde
 def test_recovery_does_not_profit_take_unknown_legacy_low_price_position() -> None:
     market = _unknown_legacy_market().with_tick_size(Decimal("0.01"))
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="legacy",
         shares=Decimal("103"),
@@ -3870,6 +3960,7 @@ def test_recovery_does_not_profit_take_unknown_legacy_low_price_position() -> No
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-legacy-low-price-recovery",
             market=market,
             position=position,
@@ -3884,6 +3975,7 @@ def test_recovery_does_not_profit_take_unknown_legacy_low_price_position() -> No
 def test_recovery_keeps_existing_profit_take_exit_order_in_settlement_only_mode() -> None:
     market = _totals_market().with_tick_size(Decimal("0.01"))
     open_sell = Order(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="over",
         side=OrderSide.SELL,
@@ -3900,6 +3992,7 @@ def test_recovery_keeps_existing_profit_take_exit_order_in_settlement_only_mode(
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-keep-profit-take-open-exit",
             market=market,
             open_orders=(open_sell,),
@@ -3913,6 +4006,7 @@ def test_recovery_keeps_existing_profit_take_exit_order_in_settlement_only_mode(
 def test_recovery_cancels_historical_open_exit_order_in_settlement_only_mode() -> None:
     market = _moneyline_market()
     open_sell = Order(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="away",
         side=OrderSide.SELL,
@@ -3928,6 +4022,7 @@ def test_recovery_cancels_historical_open_exit_order_in_settlement_only_mode() -
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-settlement-only-open-exit",
             market=market,
             open_orders=(open_sell,),
@@ -3943,6 +4038,7 @@ def test_recovery_keeps_fresh_open_entry_order_within_strategy_ttl() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
     open_buy = Order(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="away",
         side=OrderSide.BUY,
@@ -3959,6 +4055,7 @@ def test_recovery_keeps_fresh_open_entry_order_within_strategy_ttl() -> None:
     decision = decide_recovery(
         CurrentStrategyConfig(tail_entry_maker_max_resting_seconds=10),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-fresh-open-entry",
             market=market,
             open_orders=(open_buy,),
@@ -3973,6 +4070,7 @@ def test_recovery_default_keeps_profit_take_entry_order_for_one_minute_window() 
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
     open_buy = Order(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="away",
         side=OrderSide.BUY,
@@ -3989,6 +4087,7 @@ def test_recovery_default_keeps_profit_take_entry_order_for_one_minute_window() 
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-default-profit-take-entry-window",
             market=market,
             open_orders=(open_buy,),
@@ -4003,6 +4102,7 @@ def test_recovery_keeps_open_entry_order_when_exchange_snapshot_lacks_timestamp(
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
     open_buy = Order(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="away",
         side=OrderSide.BUY,
@@ -4018,6 +4118,7 @@ def test_recovery_keeps_open_entry_order_when_exchange_snapshot_lacks_timestamp(
     decision = decide_recovery(
         CurrentStrategyConfig(tail_entry_maker_max_resting_seconds=10),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-open-entry-without-timestamp",
             market=market,
             open_orders=(open_buy,),
@@ -4032,6 +4133,7 @@ def test_recovery_default_cancels_open_entry_order_after_one_minute_window() -> 
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
     open_buy = Order(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="away",
         side=OrderSide.BUY,
@@ -4048,6 +4150,7 @@ def test_recovery_default_cancels_open_entry_order_after_one_minute_window() -> 
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-default-stale-open-entry",
             market=market,
             open_orders=(open_buy,),
@@ -4064,6 +4167,7 @@ def test_recovery_cancels_stale_open_entry_order_after_strategy_ttl() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
     open_buy = Order(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="away",
         side=OrderSide.BUY,
@@ -4080,6 +4184,7 @@ def test_recovery_cancels_stale_open_entry_order_after_strategy_ttl() -> None:
     decision = decide_recovery(
         CurrentStrategyConfig(tail_entry_maker_max_resting_seconds=10),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-stale-open-entry",
             market=market,
             open_orders=(open_buy,),
@@ -4101,6 +4206,7 @@ def test_recovery_cancels_stale_open_entry_order_even_when_market_has_no_strateg
         trading_status=TradingStatus.CANDIDATE,
     )
     open_buy = Order(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="orphan-token",
         side=OrderSide.BUY,
@@ -4116,6 +4222,7 @@ def test_recovery_cancels_stale_open_entry_order_even_when_market_has_no_strateg
     decision = decide_recovery(
         CurrentStrategyConfig(),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-orphan-open-entry",
             market=market,
             open_orders=(open_buy,),
@@ -4131,6 +4238,7 @@ def test_recovery_cancels_stale_open_entry_order_even_when_market_has_no_strateg
 def test_recovery_can_cover_position_when_auto_exit_is_explicitly_enabled() -> None:
     market = _moneyline_market()
     position = Position(
+        strategy_id="sports_tail",
         condition_id=market.condition_id,
         token_id="away",
         shares=Decimal("4"),
@@ -4141,6 +4249,7 @@ def test_recovery_can_cover_position_when_auto_exit_is_explicitly_enabled() -> N
     decision = decide_recovery(
         CurrentStrategyConfig(auto_exit_enabled=True),
         ExtensionContext(
+            strategy_id="sports_tail",
             trace_id="trace-auto-exit-recovery",
             market=market,
             position=position,
@@ -4504,6 +4613,7 @@ class _MarketWs:
 class _NoFillExecutor:
     async def submit(self, intent) -> OrderResult:
         return OrderResult(
+            strategy_id="sports_tail",
             trace_id=intent.trace_id,
             condition_id=intent.condition_id,
             token_id=intent.token_id,
@@ -4541,6 +4651,7 @@ async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
             account_state_store=account_state,
             entry_metadata_store=EntryMetadataStore(),
             trading_decision_service=TradingDecisionService(
+                strategy_id="sports_tail",
                 extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
                 registry=registry,
                 orderbook_reader=market_ws.snapshot,
@@ -4615,6 +4726,7 @@ async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
             account_state_store=account_state,
             entry_metadata_store=live_store,
             trading_decision_service=TradingDecisionService(
+                strategy_id="sports_tail",
                 extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
                 registry=registry,
                 orderbook_reader=market_ws.snapshot,
@@ -4736,6 +4848,7 @@ async def _run_worker_without_live_game_state():
     registry = MarketRegistry()
     registry.upsert(market)
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
         registry=registry,
         orderbook_reader=lambda token_id: orderbook if token_id == "over" else None,
@@ -4770,6 +4883,7 @@ async def _run_worker_with_live_state_entry_signal():
     registry = MarketRegistry()
     registry.upsert(market)
     service = TradingDecisionService(
+        strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
         registry=registry,
         orderbook_reader=lambda token_id: orderbook if token_id == "over" else None,
