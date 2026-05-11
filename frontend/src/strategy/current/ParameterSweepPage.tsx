@@ -31,7 +31,6 @@ import { DataTable } from '@shared/tables/DataTable'
 import { TimeWindowPicker } from '@shared/time/TimeWindowPicker'
 import { confirmAction } from '@shared/forms/confirmAction'
 import { type DiffRow } from '@shared/forms/DiffPreview'
-import { appendTraceToReason } from '@shared/forms/manualTraceId'
 import { formatUsdc, pnlTone } from '@shared/format'
 import { useTimeWindowStore } from '@core/time/store'
 
@@ -574,9 +573,7 @@ function promptApplyToParameters(result: SweepCandidateResult) {
     tone: 'danger',
     diff,
     onConfirm: async ({ operator, reason, trace_id }) => {
-      // /parameters PUT body 暂未支持 trace_id 字段 → 拼到 reason 末尾让 audit 能 grep 回；
       // 一组里所有 PUT 共用同一 trace_id，整组 apply 在审计上是一条意图。
-      const reasonWithTrace = appendTraceToReason(reason, trace_id)
       const applied: string[] = []
       const failed: Array<{ key: string; err: string }> = []
       for (const [key, value] of entries) {
@@ -584,7 +581,8 @@ function promptApplyToParameters(result: SweepCandidateResult) {
           await parametersApi.set('strategy', key, {
             value: typeof value === 'number' ? value : String(value),
             operator,
-            reason: reasonWithTrace,
+            reason,
+            trace_id,
           })
           applied.push(key)
         } catch (err) {

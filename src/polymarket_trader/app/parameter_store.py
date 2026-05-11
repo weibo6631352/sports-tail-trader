@@ -246,6 +246,7 @@ class ParameterStore:
         operator: str = "agent",
         reason: str | None = None,
         expires_at: str | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         spec = get_spec(scope, key)
         if spec is None:
@@ -271,6 +272,7 @@ class ParameterStore:
             applied_at=entry.applied_at,
             expires_at=expires_at,
             cleared=False,
+            trace_id=trace_id,
         )
         return self._as_payload(scope, key, entry, spec)
 
@@ -281,6 +283,7 @@ class ParameterStore:
         key: str,
         operator: str = "agent",
         reason: str | None = None,
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         spec = get_spec(scope, key)
         if spec is None:
@@ -296,6 +299,7 @@ class ParameterStore:
             applied_at=applied_at,
             expires_at=None,
             cleared=True,
+            trace_id=trace_id,
         )
         return {
             "scope": scope,
@@ -362,6 +366,7 @@ class ParameterStore:
         applied_at: str,
         expires_at: str | None,
         cleared: bool,
+        trace_id: str | None = None,
     ) -> None:
         if self._event_bus is None:
             return
@@ -375,7 +380,9 @@ class ParameterStore:
             await self._event_bus.publish(
                 OutboxPriority.P3,
                 DomainEvent(
-                    trace_id=f"param-override-{uuid4().hex}",
+                    # 前端 confirmAction 在 modal mount 时生成 trace_id；提供则用它
+                    # 让"操作意图 + 审计事件"串成一条；缺失时本地生成兜底。
+                    trace_id=trace_id or f"param-override-{uuid4().hex}",
                     event_type=DomainEventType.PARAMETER_OVERRIDE_APPLIED,
                     event_id=uuid4().hex,
                     reason=f"{scope}.{key}={'<cleared>' if cleared else _stringify(new_value)}",

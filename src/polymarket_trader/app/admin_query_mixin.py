@@ -1786,7 +1786,10 @@ class AdminQueryMixin:
         supported_league_prefixes: frozenset[str] | None = (
             frozenset(code.lower() for code in league_codes if code) or None
         )
-        missing_markets = []
+        # urgency 只算一次：filter → sort → counts 共用 (Market, urgency) 元组列表。
+        # 之前 3 处分别重算 _live_source_gap_urgency(market, now, supported_league_prefixes)，
+        # 每条 missing market 3 次同语义运算，热路径无意义浪费。
+        missing_with_urgency: list[tuple[Market, str]] = []
         deferred_future_schedule_count = 0
         normalized_prefix = None if prefix is None else prefix.strip().lower()
         for market in markets:
@@ -1810,32 +1813,21 @@ class AdminQueryMixin:
             if urgency == "future_schedule" and not include_future_schedule:
                 deferred_future_schedule_count += 1
                 continue
-            missing_markets.append(market)
+            missing_with_urgency.append((market, urgency))
 
-        missing_markets = sorted(
-            missing_markets,
-            key=lambda market: (
-                _live_source_gap_urgency_rank(
-                    _live_source_gap_urgency(
-                        market,
-                        now=now,
-                        supported_league_prefixes=supported_league_prefixes,
-                    ),
-                ),
-                market.game_start_time or datetime.max.replace(tzinfo=timezone.utc),
-                market.market_slug or market.condition_id,
+        missing_with_urgency.sort(
+            key=lambda entry: (
+                _live_source_gap_urgency_rank(entry[1]),
+                entry[0].game_start_time or datetime.max.replace(tzinfo=timezone.utc),
+                entry[0].market_slug or entry[0].condition_id,
             ),
         )
+        missing_markets = [market for market, _ in missing_with_urgency]
         by_prefix_counts: dict[str, int] = {}
         by_urgency_counts: dict[str, int] = {}
-        for market in missing_markets:
+        for market, urgency in missing_with_urgency:
             market_prefix = _market_slug_prefix(market)
             by_prefix_counts[market_prefix] = by_prefix_counts.get(market_prefix, 0) + 1
-            urgency = _live_source_gap_urgency(
-                market,
-                now=now,
-                supported_league_prefixes=supported_league_prefixes,
-            )
             by_urgency_counts[urgency] = by_urgency_counts.get(urgency, 0) + 1
         by_prefix = [
             {"prefix": item_prefix, "count": count}

@@ -27,7 +27,6 @@ import { CopyableId } from '@shared/ui/CopyableId'
 import { DataTable } from '@shared/tables/DataTable'
 import { confirmAction } from '@shared/forms/confirmAction'
 import { type DiffRow } from '@shared/forms/DiffPreview'
-import { appendTraceToReason } from '@shared/forms/manualTraceId'
 import { formatIso } from '@shared/format'
 import { getParamMetadata, type ParamMetadata } from './paramMetadata'
 
@@ -79,11 +78,13 @@ export function StrategyConfigPage() {
       value: unknown
       operator: string
       reason: string
+      trace_id: string
     }) =>
       parametersApi.set(params.scope, params.key, {
         value: params.value,
         operator: params.operator,
         reason: params.reason,
+        trace_id: params.trace_id,
       }),
     onSuccess: (data) => {
       notifications.show({
@@ -98,10 +99,11 @@ export function StrategyConfigPage() {
   })
 
   const clearMutation = useMutation({
-    mutationFn: (params: { scope: string; key: string; operator: string; reason: string }) =>
+    mutationFn: (params: { scope: string; key: string; operator: string; reason: string; trace_id: string }) =>
       parametersApi.clear(params.scope, params.key, {
         operator: params.operator,
         reason: params.reason,
+        trace_id: params.trace_id,
       }),
     onSuccess: (data) => {
       notifications.show({
@@ -308,6 +310,7 @@ function promptSet(
     value: unknown
     operator: string
     reason: string
+    trace_id: string
   }) => Promise<unknown>,
 ) {
   const meta = getParamMetadata(entry.scope, entry.key)
@@ -326,22 +329,21 @@ function promptSet(
     description: '生效后立即影响策略 / 风控，重启即丢；高风险变更请明确 reason。',
     tone: meta.risk === 'high' ? 'danger' : 'warning',
     diff,
-    // /parameters PUT body 暂未支持 trace_id 字段 → 把 trace_id 拼到 reason 末尾，
-    // 后端 audit_events 仍能 grep 回这条意图。后端补字段后再切到正式字段。
     onConfirm: async ({ operator, reason, trace_id }) =>
       submit({
         scope: entry.scope,
         key: entry.key,
         value: newValue,
         operator,
-        reason: appendTraceToReason(reason, trace_id),
+        reason,
+        trace_id,
       }),
   })
 }
 
 function promptClear(
   entry: ParameterRegistryEntry,
-  submit: (params: { scope: string; key: string; operator: string; reason: string }) => Promise<unknown>,
+  submit: (params: { scope: string; key: string; operator: string; reason: string; trace_id: string }) => Promise<unknown>,
 ) {
   const meta = getParamMetadata(entry.scope, entry.key)
   confirmAction({
@@ -361,7 +363,8 @@ function promptClear(
         scope: entry.scope,
         key: entry.key,
         operator,
-        reason: appendTraceToReason(reason, trace_id),
+        reason,
+        trace_id,
       }),
   })
 }

@@ -66,10 +66,13 @@ class PauseTradingRequest(BaseModel):
     # reason 进审计日志，限长防 DoS / 存储溢出。
     reason: str = Field(default="manual_pause", min_length=1, max_length=200)
     operator: str = Field(default="manual", min_length=1, max_length=64)
+    # 前端 confirmAction 生成；后端 audit_events 用它串"操作意图 + 审计事件"。
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class ResumeTradingRequest(BaseModel):
     operator: str = Field(default="manual", min_length=1, max_length=64)
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 @router.post("/reconcile")
@@ -179,7 +182,11 @@ async def pause_trading(
     request: PauseTradingRequest,
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
-    return await service.pause_trading(reason=request.reason, operator=request.operator)
+    return await service.pause_trading(
+        reason=request.reason,
+        operator=request.operator,
+        trace_id=request.trace_id,
+    )
 
 
 @router.post("/resume-trading")
@@ -187,4 +194,7 @@ async def resume_trading(
     request: ResumeTradingRequest,
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
-    return await service.resume_trading(operator=request.operator)
+    return await service.resume_trading(
+        operator=request.operator,
+        trace_id=request.trace_id,
+    )

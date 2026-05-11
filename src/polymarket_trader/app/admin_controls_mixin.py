@@ -286,8 +286,12 @@ class AdminControlsMixin:
         *,
         reason: str = "manual_pause",
         operator: str = "manual",
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """人工触发暂停自动交易。phase 立即切到 PAUSED，等用户 resume 才恢复。"""
+        """人工触发暂停自动交易。phase 立即切到 PAUSED，等用户 resume 才恢复。
+
+        trace_id 由前端 confirmAction 在 modal mount 时生成，让"操作意图 + 审计事件"串成一条链；
+        缺失时本地生成兜底，避免老调用方破。"""
 
         from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 
@@ -301,7 +305,7 @@ class AdminControlsMixin:
 
         # 主交易开关变更是高敏操作，必须落审计——CLAUDE.md §3 / §10
         # 要求拒绝、降级、恢复动作可审计；event_bus 不可用时不应静默失败。
-        trace_id = uuid4().hex
+        trace_id = trace_id or uuid4().hex
         event_bus = getattr(self.runtime, "event_bus", None)
         if event_bus is not None:
             await event_bus.publish(
@@ -331,7 +335,12 @@ class AdminControlsMixin:
             "audit_published": event_bus is not None,
         }
 
-    async def resume_trading(self, *, operator: str = "manual") -> dict[str, Any]:
+    async def resume_trading(
+        self,
+        *,
+        operator: str = "manual",
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
         """人工恢复自动交易。仅清除 manual_pause_reason 并回到 TRADING_ENABLED；其他降级原因仍生效。"""
 
         from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
@@ -345,7 +354,7 @@ class AdminControlsMixin:
         snapshot = supervisor.snapshot()
         phase_after = getattr(snapshot.phase, "value", "unknown")
 
-        trace_id = uuid4().hex
+        trace_id = trace_id or uuid4().hex
         event_bus = getattr(self.runtime, "event_bus", None)
         if event_bus is not None:
             await event_bus.publish(
@@ -661,8 +670,13 @@ class AdminControlsMixin:
         condition_id: str,
         reason: str = "manual_pause",
         operator: str = "manual",
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """人工暂停某市场。account_state.market_pauses 写入 source=MANUAL，阻止入场。"""
+        """人工暂停某市场。account_state.market_pauses 写入 source=MANUAL，阻止入场。
+
+        trace_id 透传到返回 dict 让前端串审计；当前未在此处显式发 audit event
+        (依赖 account_state 内部变更通道)，未来补独立 trading_paused_for_market
+        事件时直接消费此参数。"""
 
         account_state = getattr(self.runtime, "account_state_store", None)
         if account_state is None:
@@ -677,6 +691,7 @@ class AdminControlsMixin:
         pause = snapshot.pause_for_market(condition_id)
         return {
             "status": "ok",
+            "trace_id": trace_id or uuid4().hex,
             "operator": operator,
             "condition_id": condition_id,
             "reason": normalized_reason,
@@ -688,6 +703,7 @@ class AdminControlsMixin:
         *,
         condition_id: str,
         operator: str = "manual",
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         """人工恢复某市场。仅清除 market_pauses 中对应条目。"""
 
@@ -695,6 +711,7 @@ class AdminControlsMixin:
         if account_state is None:
             return {"status": "failed", "reason": "account_state_store_unavailable"}
         account_state.resume_market(condition_id)
+        _ = trace_id  # 透传字段：当前未参与持久化，未来 trading_resumed_for_market 事件直接消费
         return {
             "status": "ok",
             "operator": operator,

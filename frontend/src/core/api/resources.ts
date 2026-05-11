@@ -165,9 +165,9 @@ export const marketsApi = {
       params: params as QueryParams,
       signal,
     }),
-  pause: (body: { condition_id: string; reason?: string; operator: string }) =>
+  pause: (body: { condition_id: string; reason?: string; operator: string; trace_id?: string }) =>
     apiClient.post<WriteOperationResult>('/markets/pause', { body }),
-  resume: (body: { condition_id: string; operator: string }) =>
+  resume: (body: { condition_id: string; operator: string; trace_id?: string }) =>
     apiClient.post<WriteOperationResult>('/markets/resume', { body }),
   settlement: (conditionId: string, signal?: AbortSignal) =>
     apiClient.get<MarketSettlement>(`/markets/${encodeURIComponent(conditionId)}/settlement`, {
@@ -606,9 +606,9 @@ export const operationsApi = {
     market_slug?: string
   }) =>
     apiClient.post<VirtualPaperTradeResult>('/operations/virtual-paper-trade', { body }),
-  pauseTrading: (body: { reason: string; operator: string }) =>
+  pauseTrading: (body: { reason: string; operator: string; trace_id?: string }) =>
     apiClient.post<WriteOperationResult>('/operations/pause-trading', { body }),
-  resumeTrading: (body: { operator: string }) =>
+  resumeTrading: (body: { operator: string; trace_id?: string }) =>
     apiClient.post<WriteOperationResult>('/operations/resume-trading', { body }),
   parameterSweep: (body: ParameterSweepRequest) =>
     apiClient.post<ParameterSweepResponse>('/operations/parameter-sweep', { body }),

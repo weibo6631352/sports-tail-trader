@@ -473,3 +473,175 @@ class _MarketTracker:
 
     def track_market(self, market: Market) -> None:
         self.tracked_condition_ids.append(market.condition_id)
+
+
+# ============================================================
+# audit dedupe（commit 1752416 引入的"稳态字段 hash"路径）
+# ============================================================
+
+def _audit_match_for(market: Market, *, score: int, signal_allowed: bool = True) -> LiveStateMatch:
+    """生成可控 game-state payload 的 LiveStateMatch，让测试能针对单字段切换验证 hash 不变性。"""
+    return LiveStateMatch(
+        market=market,
+        game=_game(),
+        signal_allowed=signal_allowed,
+        signal_reason="late_game_certainty" if signal_allowed else "market_end_too_far",
+        phase="late_4q",
+        payload={
+            "live_game": {
+                "league": "NBA",
+                "home_name": "Knicks",
+                "away_name": "Celtics",
+                "home_score": score,
+                "away_score": 94,
+                "period": "Q4",
+                "seconds_remaining": 90,
+                "status": "live",
+                "observed_at": "2026-04-27T00:00:00Z",  # 每次都变的心跳字段——不该进 hash
+            },
+        },
+    )
+
+
+def _drain_persistence_events(event_bus: EventBus) -> list:
+    """非阻塞抽干 persistence queue 的所有 P3 事件，避免测试卡在 await。
+    队列存 (sequence, event) tuple——只取 event 部分。"""
+    drained = []
+    while True:
+        try:
+            _, event = event_bus._persistence_queue.get_nowait()  # type: ignore[attr-defined]
+            drained.append(event)
+        except Exception:
+            break
+    return drained
+
+
+def test_audit_dedupe_skips_unchanged_state() -> None:
+    """同一 condition_id 连续两次相同稳态 → 只发一次 sports_live_state_recorded。
+    observed_at 字段每次心跳都变，但被 _audit_state_hash 主动排除——所以不能触发新一条 audit。"""
+    async def run() -> list:
+        registry = MarketRegistry()
+        market = _market()
+        registry.upsert(market)
+        event_bus = EventBus(trading_capacity=10, maintenance_capacity=10, persistence_capacity=20)
+        match = _audit_match_for(market, score=102)
+
+        def matcher(_m, _g):
+            return match
+
+        worker = SportsLiveStateWorker(
+            snapshot_provider=lambda: _snapshot(_game()),
+            match_live_state=matcher,
+            registry=registry,
+            entry_metadata_store=EntryMetadataStore(),
+            event_bus=event_bus,
+            enabled=True,
+            source="espn",
+            leagues=("nba",),
+            publish_entry_signals=False,
+        )
+        await worker.sync_once()
+        await worker.sync_once()  # 完全相同 state；observed_at 一致也 OK
+        return _drain_persistence_events(event_bus)
+
+    events = asyncio.run(run())
+    audit_events = [e for e in events if getattr(e, "event_type", None) == DomainEventType.SPORTS_LIVE_STATE_RECORDED]
+    assert len(audit_events) == 1, f"expected 1 dedupe-collapsed audit but got {len(audit_events)}"
+
+
+def test_audit_dedupe_emits_on_score_change() -> None:
+    """home_score 变了 → 第二次 sync 必须发新 audit。"""
+    async def run() -> list:
+        registry = MarketRegistry()
+        market = _market()
+        registry.upsert(market)
+        event_bus = EventBus(trading_capacity=10, maintenance_capacity=10, persistence_capacity=20)
+        scores = iter([102, 105])
+
+        def matcher(_m, _g):
+            return _audit_match_for(market, score=next(scores))
+
+        worker = SportsLiveStateWorker(
+            snapshot_provider=lambda: _snapshot(_game()),
+            match_live_state=matcher,
+            registry=registry,
+            entry_metadata_store=EntryMetadataStore(),
+            event_bus=event_bus,
+            enabled=True,
+            source="espn",
+            leagues=("nba",),
+            publish_entry_signals=False,
+        )
+        await worker.sync_once()
+        await worker.sync_once()
+        return _drain_persistence_events(event_bus)
+
+    events = asyncio.run(run())
+    audit_events = [e for e in events if getattr(e, "event_type", None) == DomainEventType.SPORTS_LIVE_STATE_RECORDED]
+    assert len(audit_events) == 2
+
+
+def test_audit_dedupe_emits_on_signal_allowed_change() -> None:
+    """signal_allowed True→False 切换是核心状态变更，必须发新 audit。"""
+    async def run() -> list:
+        registry = MarketRegistry()
+        market = _market()
+        registry.upsert(market)
+        event_bus = EventBus(trading_capacity=10, maintenance_capacity=10, persistence_capacity=20)
+        signal_states = iter([True, False])
+
+        def matcher(_m, _g):
+            return _audit_match_for(market, score=102, signal_allowed=next(signal_states))
+
+        worker = SportsLiveStateWorker(
+            snapshot_provider=lambda: _snapshot(_game()),
+            match_live_state=matcher,
+            registry=registry,
+            entry_metadata_store=EntryMetadataStore(),
+            event_bus=event_bus,
+            enabled=True,
+            source="espn",
+            leagues=("nba",),
+            publish_entry_signals=False,
+        )
+        await worker.sync_once()
+        await worker.sync_once()
+        return _drain_persistence_events(event_bus)
+
+    events = asyncio.run(run())
+    audit_events = [e for e in events if getattr(e, "event_type", None) == DomainEventType.SPORTS_LIVE_STATE_RECORDED]
+    assert len(audit_events) == 2
+
+
+def test_audit_dedupe_lru_evicts_oldest_beyond_capacity() -> None:
+    """超出 _LIVE_STATE_AUDIT_DEDUPE_CAPACITY 时最老的 condition_id 被淘汰，下次相同 hash 视为"首次"重发。
+    用直接操作 _last_audit_state_hash 验证 LRU 行为（不真跑 8192 个 condition 太重）。"""
+    from polymarket_trader.workers.sports_live_state_worker import (
+        _LIVE_STATE_AUDIT_DEDUPE_CAPACITY,
+    )
+    registry = MarketRegistry()
+    worker = SportsLiveStateWorker(
+        snapshot_provider=lambda: _snapshot(_game()),
+        match_live_state=lambda _m, _g: None,
+        registry=registry,
+        entry_metadata_store=EntryMetadataStore(),
+        enabled=True,
+        source="espn",
+        leagues=("nba",),
+        publish_entry_signals=False,
+    )
+    # 填到 capacity 上限
+    for i in range(_LIVE_STATE_AUDIT_DEDUPE_CAPACITY):
+        worker._last_audit_state_hash[f"cond-{i}"] = f"hash-{i}"
+    assert len(worker._last_audit_state_hash) == _LIVE_STATE_AUDIT_DEDUPE_CAPACITY
+
+    # 模拟 _publish_sports_live_state_recorded 的写入逻辑：超过容量时 popitem(last=False)
+    worker._last_audit_state_hash["cond-new"] = "hash-new"
+    worker._last_audit_state_hash.move_to_end("cond-new")
+    while len(worker._last_audit_state_hash) > _LIVE_STATE_AUDIT_DEDUPE_CAPACITY:
+        worker._last_audit_state_hash.popitem(last=False)
+
+    # cond-0（最老）应被淘汰；cond-new 仍在
+    assert "cond-0" not in worker._last_audit_state_hash
+    assert "cond-new" in worker._last_audit_state_hash
+    assert len(worker._last_audit_state_hash) == _LIVE_STATE_AUDIT_DEDUPE_CAPACITY

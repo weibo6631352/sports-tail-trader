@@ -718,11 +718,13 @@ export type ParameterSetRequest = {
   operator: string
   reason?: string | null
   expires_at?: string | null
+  trace_id?: string | null
 }
 
 export type ParameterClearRequest = {
   operator: string
   reason?: string | null
+  trace_id?: string | null
 }
 
 export type ParameterClearResult = {

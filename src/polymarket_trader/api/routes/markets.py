@@ -17,11 +17,14 @@ class PauseMarketRequest(BaseModel):
     condition_id: str = Field(min_length=1)
     reason: str = Field(default="manual_pause", min_length=1)
     operator: str = "manual"
+    # 前端 confirmAction 生成；后端 audit chain 串"操作意图 + 持久事件"。
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class ResumeMarketRequest(BaseModel):
     condition_id: str = Field(min_length=1)
     operator: str = "manual"
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 @router.get("/detail")
@@ -198,6 +201,7 @@ async def pause_market(
         condition_id=request.condition_id,
         reason=request.reason,
         operator=request.operator,
+        trace_id=request.trace_id,
     )
 
 
@@ -209,6 +213,7 @@ async def resume_market(
     return await service.resume_market_manual(
         condition_id=request.condition_id,
         operator=request.operator,
+        trace_id=request.trace_id,
     )
 
 

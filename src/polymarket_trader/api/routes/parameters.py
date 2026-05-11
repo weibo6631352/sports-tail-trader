@@ -22,11 +22,15 @@ class SetParameterRequest(BaseModel):
     operator: str = Field(default="agent", min_length=1, max_length=64)
     reason: str | None = Field(default=None, max_length=512)
     expires_at: str | None = Field(default=None, description="ISO-8601；仅记录，调用侧不强制清除")
+    # 前端 confirmAction 生成；PARAMETER_OVERRIDE_APPLIED 事件的 trace_id 用它
+    # 让前端审计回看能精准匹配"操作意图 + 持久事件"。
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class ClearParameterRequest(BaseModel):
     operator: str = Field(default="agent", min_length=1, max_length=64)
     reason: str | None = Field(default=None, max_length=512)
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 def _get_param_store(request: Request) -> Any:
@@ -81,6 +85,7 @@ async def set_parameter(
             operator=body.operator,
             reason=body.reason,
             expires_at=body.expires_at,
+            trace_id=body.trace_id,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -106,6 +111,7 @@ async def clear_parameter(
             key=key,
             operator=body.operator,
             reason=body.reason,
+            trace_id=body.trace_id,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
