@@ -187,7 +187,11 @@ class MarketDiscoveryWorker:
         else:
             self._last_failure = None
         if not outcome.should_publish_event:
-            return None
+            # 首次看到的目标盘口必须落审计——CLAUDE.md §10「拒绝原因必须可审计」。
+            # subsequent 同样市场再次发现时走原有 dedup 路径不发噪音；非目标盘口
+            # （parse_result.accepted=False）依旧静默，避免审计被无关市场淹没。
+            if previous is not None or not parse_result.accepted:
+                return None
         previous_market = outcome.existing_market
         current_market = outcome.tracked_market or outcome.market
         if unchanged_payload and previous_market == current_market:
