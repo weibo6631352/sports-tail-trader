@@ -22,6 +22,7 @@ from __future__ import annotations
 import itertools
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from enum import StrEnum
 from typing import Any, Mapping, Sequence
 
 from polymarket_trader.app.admin_serialization import decimal_text
@@ -30,6 +31,21 @@ from polymarket_trader.domain.events import AuditEvent
 
 
 MAX_GRID_COMBINATIONS = 1_000
+
+
+class SweepSampleQuality(StrEnum):
+    """entry_price 抽取来源的质量等级——决定该样本是否进 PnL 偏差告警。
+
+    - ``REAL_BEST_ASK``：从 decision_output / metadata（含 outright 嵌套元数据）
+      抽到了 evaluator 当时记录的真实 best_ask；PnL 数学口径正确。
+    - ``ENTRY_PRICE_CAP_FALLBACK``：仅有策略目标价 ``entry_price_cap``
+      （= fair * (1 - min_edge_bps/10000)），用它当作 entry_price 算 PnL
+      会系统性偏高（cap < 实际 best_ask）。fallback count 在响应里暴露，
+      非零时调用侧应当审视样本来源是否缺写 best_ask。
+    """
+
+    REAL_BEST_ASK = "real_best_ask"
+    ENTRY_PRICE_CAP_FALLBACK = "entry_price_cap_fallback"
 
 @dataclass(frozen=True, slots=True)
 class _ParameterSpec:
@@ -80,7 +96,7 @@ class _Resolved:
     entry_price: Decimal
     liquidity_usdc: Decimal | None
     predicted_edge_bps: Decimal
-    entry_price_source: str  # 'real_best_ask' | 'entry_price_cap_fallback'
+    entry_price_source: SweepSampleQuality
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,7 +178,9 @@ def build_parameter_sweep(
         resolved_decisions.append((record, resolved))
 
     fallback_count = sum(
-        1 for _record, info in resolved_decisions if info.entry_price_source == "entry_price_cap_fallback"
+        1
+        for _record, info in resolved_decisions
+        if info.entry_price_source is SweepSampleQuality.ENTRY_PRICE_CAP_FALLBACK
     )
 
     results: list[SweepCandidateResult] = []
@@ -193,8 +211,10 @@ def build_parameter_sweep(
         "decision_sample_count": len(decisions),
         "scorable_decision_count": len(resolved_decisions),
         "unscorable_decision_count": unscorable,
-        # 警告 caller：entry_price_cap fallback 的样本数；非零时 PnL 数字偏高，
-        # 应让 evaluator 在 decision_output.metadata 里写真实 best_ask 后再跑。
+        # 警告 caller：entry_price_cap fallback 的样本数；非零时这部分 PnL 数字
+        # 偏高（cap 比真实 best_ask 系统性更低）。reader 已经会从 outright 嵌套
+        # metadata、tail price 字段抽真实 best_ask，剩余 fallback 通常意味着
+        # evaluator 没写 best_ask（数据残缺）或老格式 record。
         "entry_price_cap_fallback_count": fallback_count,
         "per_decision_usdc": str(per_decision_usdc),
         "supported_parameter_keys": list(supported_parameter_keys()),
@@ -272,39 +292,75 @@ def _check_range(key: str, value: Any, spec: _ParameterSpec) -> None:
 def _resolve_decision(record: DecisionRecord) -> _Resolved | None:
     """从 ``decision_output`` 抽 fair_value / entry_price / liquidity。
 
-    entry_price 优先用 metadata 里记录的 best_ask；缺失时退回 entry_price_cap
-    （= fair_value * (1 - min_edge/10000) 的策略目标价）；都缺则不可评分。
+    实际生产 decision_output 有三种来源 shape：
+    1. tail entry (non-outright)：``decision_output["price"]`` 就是 best_ask，
+       evaluator 直接把盘口价当 entry_price 写入 ``ExtensionDecision.buy``。
+    2. outright accepted/skip：evaluator 写 ``decision_output["metadata"]
+       ["outright_metadata"]["best_ask"]``（嵌套），同时把 ``fair_value`` 也放
+       在嵌套里；顶层 ``decision_output["price"]`` 是 entry_price_cap，不是
+       盘口价。
+    3. 简化测试 / 历史 record：直接顶层 ``fair_value`` + ``entry_price``。
+
+    抽取顺序：
+    - fair_value：顶层 → ``metadata.outright_metadata.fair_value`` →
+      ``metadata.outright_fair_value``。
+    - entry_price（按真实 best_ask 优先级）：顶层 ``entry_price`` →
+      ``metadata.outright_metadata.best_ask`` → ``metadata.best_ask`` →
+      ``decision_output["price"]``（仅当不是 outright，避免把 cap 误当 ask）。
+    - 全部缺失才退到 ``entry_price_cap`` 并标 fallback——cap < 实际 best_ask 会
+      让 PnL 系统性偏高。
     """
 
     if not isinstance(record.decision_output, Mapping):
         return None
-    fair_value = _decimal(record.decision_output, "fair_value")
+    metadata = record.decision_output.get("metadata")
+    metadata_map: Mapping[str, Any] = metadata if isinstance(metadata, Mapping) else {}
+    outright_meta = metadata_map.get("outright_metadata")
+    outright_meta_map: Mapping[str, Any] = (
+        outright_meta if isinstance(outright_meta, Mapping) else {}
+    )
+    is_outright = bool(outright_meta_map) or metadata_map.get("market_family") == "outright"
+
+    fair_value = (
+        _decimal(record.decision_output, "fair_value")
+        or _decimal(outright_meta_map, "fair_value")
+        or _decimal(metadata_map, "outright_fair_value")
+    )
     if fair_value is None or fair_value <= Decimal("0"):
         return None
-    entry_price_source = "real_best_ask"
-    entry_price = _decimal(record.decision_output, "entry_price")
-    if entry_price is None:
-        # outright 评估时 metadata 里通常带 best_ask
-        metadata = record.decision_output.get("metadata")
-        if isinstance(metadata, Mapping):
-            entry_price = _decimal(metadata, "best_ask")
+
+    entry_price_source = SweepSampleQuality.REAL_BEST_ASK
+    entry_price = (
+        _decimal(record.decision_output, "entry_price")
+        or _decimal(outright_meta_map, "best_ask")
+        or _decimal(metadata_map, "best_ask")
+    )
+    if entry_price is None and not is_outright:
+        # tail (非 outright) 决策的 price 字段就是 best_ask（hooks.decide_entry
+        # 把 best_ask 直接写进 ExtensionDecision.price）；outright 不能这样退，
+        # 否则会把 entry_price_cap 误当成 best_ask 抽出来。
+        entry_price = _decimal(record.decision_output, "price")
     if entry_price is None:
         # 退回到 entry_price_cap 是有偏的——cap 是策略目标价
         # (fair * (1 - min_edge_bps/10000))，比实际 best_ask 系统性更低，会
         # 让 hypothetical PnL 偏高。生产环境跑 sweep 前应让 evaluator 把
-        # best_ask 真实值写到 metadata。
-        cap = _decimal(record.decision_output, "entry_price_cap")
+        # best_ask 真实值写到 metadata；这里只是 last-resort 保底。
+        cap = (
+            _decimal(record.decision_output, "entry_price_cap")
+            or _decimal(outright_meta_map, "entry_price_cap")
+        )
         if cap is not None and cap > Decimal("0"):
             entry_price = cap
-            entry_price_source = "entry_price_cap_fallback"
+            entry_price_source = SweepSampleQuality.ENTRY_PRICE_CAP_FALLBACK
     if entry_price is None or entry_price <= Decimal("0"):
         return None
-    liquidity_usdc: Decimal | None = None
-    metadata = record.decision_output.get("metadata")
-    if isinstance(metadata, Mapping):
-        liquidity_usdc = _decimal(metadata, "buyable_liquidity_usdc") or _decimal(
-            metadata, "liquidity_usdc"
-        )
+
+    liquidity_usdc: Decimal | None = (
+        _decimal(outright_meta_map, "buyable_liquidity_usdc")
+        or _decimal(outright_meta_map, "liquidity_usdc")
+        or _decimal(metadata_map, "buyable_liquidity_usdc")
+        or _decimal(metadata_map, "liquidity_usdc")
+    )
     predicted_edge_bps = (fair_value - entry_price) / fair_value * Decimal("10000")
     return _Resolved(
         fair_value=fair_value,

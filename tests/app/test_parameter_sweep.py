@@ -424,3 +424,176 @@ def test_entry_price_cap_fallback_zero_when_metadata_has_best_ask() -> None:
     )
     assert result["entry_price_cap_fallback_count"] == 0
     assert result["scorable_decision_count"] == 1
+
+
+def test_outright_nested_metadata_resolves_real_best_ask() -> None:
+    """outright evaluator 写的 shape：fair_value / best_ask 都嵌在
+    ``metadata.outright_metadata`` 里，price 字段是 entry_price_cap。
+    reader 必须取 outright_metadata.best_ask 当 entry_price，避免假 fallback。"""
+
+    decisions = (
+        DecisionRecord(
+            strategy_id="sports_tail",
+            record_id="r1",
+            trace_id="trace-r1",
+            condition_id="c1",
+            token_id="t1",
+            decision_input={},
+            decision_output={
+                "action": "buy",
+                "price": "0.40",  # = entry_price_cap，故意写顶层
+                "metadata": {
+                    "market_family": "outright",
+                    "outright_metadata": {
+                        "fair_value": "0.50",
+                        "entry_price_cap": "0.40",
+                        "best_ask": "0.45",
+                        "buyable_liquidity_usdc": "200",
+                    },
+                    "outright_fair_value": "0.50",
+                },
+            },
+            accepted=True,
+            reason="outright_entry_accepted",
+            created_at=BASE,
+        ),
+    )
+    result = build_parameter_sweep(
+        decisions=decisions,
+        settlements=(),
+        candidates={"tail_outright_min_edge_bps": [100]},
+    )
+    assert result["entry_price_cap_fallback_count"] == 0
+    assert result["scorable_decision_count"] == 1
+    # predicted_edge_bps 应基于真实 best_ask=0.45（edge=(0.50-0.45)/0.50=1000bps）
+    # 而不是 cap=0.40（edge=2000bps）；100bps 门槛下都过，但用更严格门槛验证
+    strict = build_parameter_sweep(
+        decisions=decisions,
+        settlements=(),
+        candidates={"tail_outright_min_edge_bps": [1500]},
+    )
+    assert strict["results"][0]["would_have_entered_count"] == 0
+
+
+def test_outright_skip_only_outright_metadata_resolves_real_best_ask() -> None:
+    """outright SKIP/record-only：顶层无 price/fair_value/entry_price_cap，
+    全部信息都在 metadata.outright_metadata 里。reader 不应判 unscorable。"""
+
+    decisions = (
+        DecisionRecord(
+            strategy_id="sports_tail",
+            record_id="r1",
+            trace_id="trace-r1",
+            condition_id="c1",
+            token_id="t1",
+            decision_input={},
+            decision_output={
+                "action": "skip",
+                "reason": "outright_record_only",
+                "metadata": {
+                    "market_family": "outright",
+                    "outright_metadata": {
+                        "fair_value": "0.60",
+                        "entry_price_cap": "0.48",
+                        "best_ask": "0.50",
+                    },
+                },
+            },
+            accepted=False,
+            reason="outright_record_only",
+            created_at=BASE,
+        ),
+    )
+    result = build_parameter_sweep(
+        decisions=decisions,
+        settlements=(),
+        candidates={"tail_outright_min_edge_bps": [100]},
+    )
+    assert result["scorable_decision_count"] == 1
+    assert result["unscorable_decision_count"] == 0
+    assert result["entry_price_cap_fallback_count"] == 0
+
+
+def test_tail_flat_price_field_used_as_best_ask() -> None:
+    """tail (非 outright) entry 决策：decision_output["price"] 就是 best_ask
+    （hooks.decide_entry 把盘口 best_ask 直接写到 ExtensionDecision.price）。
+    缺顶层 entry_price 时不应判 unscorable 也不应走 cap fallback。"""
+
+    decisions = (
+        DecisionRecord(
+            strategy_id="sports_tail",
+            record_id="r1",
+            trace_id="trace-r1",
+            condition_id="c1",
+            token_id="t1",
+            decision_input={},
+            decision_output={
+                "action": "buy",
+                "price": "0.42",
+                "fair_value": "0.50",
+                # 无 outright_metadata、market_family != outright
+                "metadata": {},
+            },
+            accepted=True,
+            reason="strategy_entry",
+            created_at=BASE,
+        ),
+    )
+    result = build_parameter_sweep(
+        decisions=decisions,
+        settlements=(),
+        candidates={"tail_outright_min_edge_bps": [100]},
+    )
+    assert result["entry_price_cap_fallback_count"] == 0
+    assert result["scorable_decision_count"] == 1
+
+
+def test_outright_does_not_misuse_price_field_as_best_ask() -> None:
+    """关键反例：outright BUY 的 ``price`` 字段是 entry_price_cap，不是 best_ask。
+    若 outright 嵌套元数据缺 best_ask，reader 不应退到顶层 price，避免把 cap
+    当作 best_ask 算 PnL 导致偏高。应走显式 fallback。"""
+
+    decisions = (
+        DecisionRecord(
+            strategy_id="sports_tail",
+            record_id="r1",
+            trace_id="trace-r1",
+            condition_id="c1",
+            token_id="t1",
+            decision_input={},
+            decision_output={
+                "action": "buy",
+                "price": "0.40",  # = entry_price_cap
+                "metadata": {
+                    "market_family": "outright",
+                    "outright_metadata": {
+                        "fair_value": "0.50",
+                        "entry_price_cap": "0.40",
+                        # 故意不写 best_ask
+                    },
+                },
+            },
+            accepted=True,
+            reason="outright_entry_accepted",
+            created_at=BASE,
+        ),
+    )
+    result = build_parameter_sweep(
+        decisions=decisions,
+        settlements=(),
+        candidates={"tail_outright_min_edge_bps": [100]},
+    )
+    # 必须 fallback 而不是把 price=0.40 当 best_ask
+    assert result["entry_price_cap_fallback_count"] == 1
+    assert result["scorable_decision_count"] == 1
+
+
+def test_sweep_sample_quality_enum_values_are_stable() -> None:
+    """fallback count 串到前端 + 历史 record 同义比较，enum 值不能漂。"""
+
+    from polymarket_trader.app.parameter_sweep import SweepSampleQuality
+
+    assert SweepSampleQuality.REAL_BEST_ASK.value == "real_best_ask"
+    assert SweepSampleQuality.ENTRY_PRICE_CAP_FALLBACK.value == "entry_price_cap_fallback"
+    # StrEnum 行为：member 与字符串相等，便于历史日志/字符串比较
+    assert SweepSampleQuality.REAL_BEST_ASK == "real_best_ask"
