@@ -1,10 +1,18 @@
 # Python cache and test artifacts
 __pycache__/
 .pytest_cache/
+.ruff_cache/
+.venv/
 output/
 *.py[cod]
 *.egg-info/
 build/
+
+# macOS
+.DS_Store
+
+# Claude Code local tooling (worktrees, task transcripts)
+.claude/
 
 # Local runtime configuration
 .env
