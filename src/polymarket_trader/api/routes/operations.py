@@ -21,6 +21,15 @@ class VirtualPaperTradeRequest(BaseModel):
     market_slug: str | None = None
 
 
+class PauseTradingRequest(BaseModel):
+    reason: str = Field(default="manual_pause", min_length=1)
+    operator: str = "manual"
+
+
+class ResumeTradingRequest(BaseModel):
+    operator: str = "manual"
+
+
 @router.post("/reconcile")
 async def reconcile(
     request: ReconcileRequest,
@@ -51,3 +60,19 @@ async def virtual_paper_trade(
         token_id=request.token_id,
         market_slug=request.market_slug,
     )
+
+
+@router.post("/pause-trading")
+async def pause_trading(
+    request: PauseTradingRequest,
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    return await service.pause_trading(reason=request.reason, operator=request.operator)
+
+
+@router.post("/resume-trading")
+async def resume_trading(
+    request: ResumeTradingRequest,
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    return await service.resume_trading(operator=request.operator)

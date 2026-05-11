@@ -23,6 +23,16 @@ class ReplaceOrderRequest(BaseModel):
     trace_id: str | None = None
 
 
+class CancelOrderRequest(BaseModel):
+    order_id: str = Field(min_length=1)
+    market_slug: str | None = None
+    condition_id: str | None = None
+    token_id: str | None = None
+    operator: str = "manual"
+    reason: str = "admin_cancel_order"
+    trace_id: str | None = None
+
+
 @router.get("")
 async def list_orders(
     limit: int = Query(default=100, ge=1, le=500),
@@ -59,6 +69,22 @@ async def replace_order(
         token_id=request.token_id,
         new_price=request.new_price,
         size_shares=request.size_shares,
+        operator=request.operator,
+        reason=request.reason,
+        trace_id=request.trace_id,
+    )
+
+
+@router.post("/cancel")
+async def cancel_order(
+    request: CancelOrderRequest,
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    return await service.cancel_order(
+        order_id=request.order_id,
+        market_slug=request.market_slug,
+        condition_id=request.condition_id,
+        token_id=request.token_id,
         operator=request.operator,
         reason=request.reason,
         trace_id=request.trace_id,

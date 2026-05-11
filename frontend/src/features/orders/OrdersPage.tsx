@@ -41,8 +41,6 @@ export const OrdersPage = () => {
   const [traceId, setTraceId] = useState('')
   const [offset, setOffset] = useState(0)
   const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null)
-  const [marketSlug, setMarketSlug] = useState('')
-  const [manualTokenId, setManualTokenId] = useState('')
   const [newPrice, setNewPrice] = useState('0.62')
   const [operator, setOperator] = useState('人工')
   const [formError, setFormError] = useState<string | null>(null)
@@ -61,9 +59,15 @@ export const OrdersPage = () => {
     refetchInterval: openOnly ? 10_000 : 20_000,
   })
 
-  const cancelReplaceMutation = useMutation({
-    mutationFn: (payload: { market_slug?: string; token_id?: string; new_price: string; operator: string }) =>
-      adminApi.cancelReplaceSell(payload),
+  const replaceOrderMutation = useMutation({
+    mutationFn: (payload: {
+      order_id: string
+      market_slug?: string
+      condition_id?: string
+      token_id?: string
+      new_price: string
+      operator: string
+    }) => adminApi.replaceOrder(payload),
     onSuccess: async () => {
       setFormError(null)
       await Promise.all([
@@ -73,6 +77,32 @@ export const OrdersPage = () => {
       ])
     },
   })
+  const cancelOrderMutation = useMutation({
+    mutationFn: (payload: { order_id: string; market_slug?: string; condition_id?: string; token_id?: string; operator: string }) =>
+      adminApi.cancelOrder(payload),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+      ])
+    },
+  })
+  const handleCancelOrder = (row: OrderRecord) => {
+    if (!row.order_id) {
+      window.alert('该订单缺少 order_id，无法撤单。')
+      return
+    }
+    const normalizedOperator = operator.trim() || 'manual'
+    if (!window.confirm(`确认撤销订单 ${row.order_id}（${row.market_slug ?? row.condition_id}）？`)) return
+    cancelOrderMutation.mutate({
+      order_id: row.order_id,
+      market_slug: row.market_slug ?? undefined,
+      condition_id: row.condition_id ?? undefined,
+      token_id: row.token_id ?? undefined,
+      operator: normalizedOperator,
+    })
+  }
+  const cancelError = cancelOrderMutation.error ? formatApiError(cancelOrderMutation.error) : null
 
   const columns: Array<DataColumn<OrderRecord>> = useMemo(
     () => [
@@ -128,23 +158,39 @@ export const OrdersPage = () => {
         header: '更新时间',
         cell: (row) => formatDateTime(row.updated_at),
       },
+      {
+        key: 'actions',
+        header: '操作',
+        cell: (row) => (
+          <button
+            type="button"
+            disabled={!row.order_id || cancelOrderMutation.isPending}
+            onClick={(event) => {
+              event.stopPropagation()
+              handleCancelOrder(row)
+            }}
+          >
+            {cancelOrderMutation.isPending && cancelOrderMutation.variables?.order_id === row.order_id
+              ? '撤单中...'
+              : '撤单'}
+          </button>
+        ),
+      },
     ],
-    [],
+    [cancelOrderMutation.isPending, cancelOrderMutation.variables?.order_id, operator],
   )
 
-  const requestError = cancelReplaceMutation.error ? formatApiError(cancelReplaceMutation.error) : null
+  const requestError = replaceOrderMutation.error ? formatApiError(replaceOrderMutation.error) : null
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    cancelReplaceMutation.reset()
+    replaceOrderMutation.reset()
 
-    const normalizedMarketSlug = marketSlug.trim()
-    const normalizedTokenId = manualTokenId.trim()
     const normalizedOperator = operator.trim()
     const numericPrice = Number(newPrice)
 
-    if (!normalizedMarketSlug && !normalizedTokenId) {
-      setFormError('市场标识和代币 ID 至少要提供一个，才能定位要处理的卖单。')
+    if (!selectedOrder?.order_id) {
+      setFormError('请先在订单列表里选择一条订单，再发起替换。')
       return
     }
     if (!Number.isFinite(numericPrice) || numericPrice <= 0 || numericPrice >= 1) {
@@ -157,14 +203,18 @@ export const OrdersPage = () => {
     }
 
     setFormError(null)
-    const targetLabel = normalizedMarketSlug || normalizedTokenId
-    const confirmed = window.confirm(`将对 ${targetLabel} 取消现有卖单，并按 ${newPrice.trim()} 重挂卖单，是否继续？`)
+    const targetLabel = selectedOrder.market_slug ?? selectedOrder.token_id
+    const confirmed = window.confirm(
+      `将取消订单 ${selectedOrder.order_id}（${targetLabel}），并按 ${newPrice.trim()} 重挂，是否继续？`,
+    )
     if (!confirmed) {
       return
     }
-    cancelReplaceMutation.mutate({
-      market_slug: normalizedMarketSlug || undefined,
-      token_id: normalizedTokenId || undefined,
+    replaceOrderMutation.mutate({
+      order_id: selectedOrder.order_id,
+      market_slug: selectedOrder.market_slug ?? undefined,
+      condition_id: selectedOrder.condition_id ?? undefined,
+      token_id: selectedOrder.token_id ?? undefined,
       new_price: newPrice.trim(),
       operator: normalizedOperator,
     })
@@ -175,8 +225,8 @@ export const OrdersPage = () => {
       <header className="page-header">
         <div>
           <p className="eyebrow">订单</p>
-          <h1>订单查询与卖单重挂</h1>
-          <p>查询当前订单，并在人工确认后执行取消并重挂卖单。</p>
+          <h1>订单查询与替换</h1>
+          <p>查询当前订单，并在人工确认后替换选中订单的价格（撤旧 + 挂新经 OrderExecutor 原子完成）。</p>
         </div>
       </header>
 
@@ -234,8 +284,6 @@ export const OrdersPage = () => {
               emptyDescription="当前筛选下没有匹配结果。"
               onRowClick={(row) => {
                 setSelectedOrder(row)
-                setMarketSlug(row.market_slug ?? '')
-                setManualTokenId(row.token_id)
               }}
               selectedRowKey={selectedOrder?.order_id ?? null}
             />
@@ -243,15 +291,15 @@ export const OrdersPage = () => {
         </SectionCard>
 
         <div className="detail-stack">
-          <SectionCard title="取消并重挂卖单" subtitle="只用于人工干预已有持仓的卖单。">
+          <SectionCard title="替换选中订单" subtitle="先在左侧选一条订单，再输入目标价并提交。撤旧 + 挂新经 OrderExecutor 原子完成。">
             <form className="form-grid" onSubmit={handleSubmit}>
               <label>
-                <span>市场标识</span>
-                <input value={marketSlug} onChange={(event) => setMarketSlug(event.target.value)} />
+                <span>选中订单</span>
+                <input value={selectedOrder?.order_id ?? ''} readOnly placeholder="未选择" />
               </label>
               <label>
-                <span>代币 ID</span>
-                <input value={manualTokenId} onChange={(event) => setManualTokenId(event.target.value)} />
+                <span>市场标识</span>
+                <input value={selectedOrder?.market_slug ?? ''} readOnly placeholder="—" />
               </label>
               <label>
                 <span>目标价格</span>
@@ -261,8 +309,8 @@ export const OrdersPage = () => {
                 <span>操作者</span>
                 <input value={operator} onChange={(event) => setOperator(event.target.value)} />
               </label>
-              <button type="submit" disabled={cancelReplaceMutation.isPending}>
-                {cancelReplaceMutation.isPending ? '处理中...' : '确认取消并重挂'}
+              <button type="submit" disabled={replaceOrderMutation.isPending || !selectedOrder?.order_id}>
+                {replaceOrderMutation.isPending ? '处理中...' : '确认替换'}
               </button>
             </form>
             {formError ? (
@@ -281,9 +329,17 @@ export const OrdersPage = () => {
                 </li>
               </ul>
             ) : null}
+            {cancelError ? (
+              <ul className="message-list form-feedback">
+                <li>
+                  <strong>撤单失败</strong>
+                  <span>{cancelError}</span>
+                </li>
+              </ul>
+            ) : null}
           </SectionCard>
 
-          <SectionCard title="当前选中订单" subtitle="点击左侧订单可快速带入市场标识和 Token ID。">
+          <SectionCard title="当前选中订单" subtitle="点击左侧订单可载入到上方替换表单。">
             <JsonPanel
               value={selectedOrder}
               emptyLabel="尚未选择订单。"
@@ -292,29 +348,29 @@ export const OrdersPage = () => {
             />
           </SectionCard>
 
-          <SectionCard title="处理结果" subtitle="展示取消结果、重挂结果和返回摘要。">
+          <SectionCard title="处理结果" subtitle="展示替换返回摘要与原始 payload。">
             <JsonPanel
-              value={cancelReplaceMutation.data}
-              emptyLabel="尚未执行取消并重挂。"
+              value={replaceOrderMutation.data}
+              emptyLabel="尚未执行替换。"
               detailsLabel="查看处理结果原始数据"
               summary={
-                cancelReplaceMutation.data ? (
+                replaceOrderMutation.data ? (
                   <div className="detail-list">
                     <div>
                       <dt>处理状态</dt>
-                      <dd>{formatOrderStatusLabel(cancelReplaceMutation.data.status)}</dd>
+                      <dd>{formatOrderStatusLabel(String(replaceOrderMutation.data.status ?? ''))}</dd>
                     </div>
                     <div>
                       <dt>追踪 ID</dt>
-                      <dd>{cancelReplaceMutation.data.trace_id}</dd>
+                      <dd>{String(replaceOrderMutation.data.trace_id ?? '—')}</dd>
                     </div>
                     <div>
                       <dt>操作者</dt>
-                      <dd>{cancelReplaceMutation.data.operator ?? '—'}</dd>
+                      <dd>{String(replaceOrderMutation.data.operator ?? '—')}</dd>
                     </div>
                     <div>
                       <dt>结果说明</dt>
-                      <dd>{cancelReplaceMutation.data.reason ?? '—'}</dd>
+                      <dd>{String(replaceOrderMutation.data.reason ?? '—')}</dd>
                     </div>
                   </div>
                 ) : null
