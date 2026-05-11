@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 from typing import Any, Generic, Iterable, Sequence, TypeVar, cast
 
 from sqlalchemy import Select, func, select
@@ -13,6 +15,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order, OrderResult
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
+from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db.models import (
     AccountSnapshotModel,
     AllocationModel,
@@ -24,6 +27,8 @@ from polymarket_trader.infra.db.models import (
     OrderbookSnapshotModel,
     OutboxEventModel,
     PositionModel,
+    _decimal,
+    _ensure_aware,
 )
 from polymarket_trader.domain.account import AccountSnapshot
 
@@ -621,6 +626,7 @@ class OrderRepository(BaseRepository):
         trade_id: str | None = None,
         condition_id: str | None = None,
         token_id: str | None = None,
+        time_range: TimeRange | None = None,
     ) -> RepositoryPage[Order]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(OrderModel).order_by(OrderModel.updated_at.desc(), OrderModel.id.desc())
@@ -634,6 +640,12 @@ class OrderRepository(BaseRepository):
             stmt = stmt.where(OrderModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(OrderModel.token_id == token_id)
+        if time_range is not None and not time_range.is_empty:
+            since_dt, until_dt = time_range.to_datetime_range()
+            if since_dt is not None:
+                stmt = stmt.where(OrderModel.created_at >= since_dt)
+            if until_dt is not None:
+                stmt = stmt.where(OrderModel.created_at <= until_dt)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
@@ -690,6 +702,7 @@ class FillRepository(BaseRepository):
         trade_id: str | None = None,
         condition_id: str | None = None,
         token_id: str | None = None,
+        time_range: TimeRange | None = None,
     ) -> RepositoryPage[Fill]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(FillModel).order_by(FillModel.confirmed_at.desc(), FillModel.id.desc())
@@ -703,6 +716,12 @@ class FillRepository(BaseRepository):
             stmt = stmt.where(FillModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(FillModel.token_id == token_id)
+        if time_range is not None and not time_range.is_empty:
+            since_dt, until_dt = time_range.to_datetime_range()
+            if since_dt is not None:
+                stmt = stmt.where(FillModel.created_at >= since_dt)
+            if until_dt is not None:
+                stmt = stmt.where(FillModel.created_at <= until_dt)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
@@ -783,8 +802,25 @@ class PositionRepository(BaseRepository):
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
 
+@dataclass(frozen=True, slots=True)
+class AccountHistoryPoint:
+    """聚合后的账户净值时间序列点。
+
+    ``recorded_at`` 是当前 bucket 内最新一条 snapshot 的写入时间，便于
+    drawdown 计算回到原始时间轴上。
+    """
+
+    recorded_at: datetime
+    net_value_usdc: Decimal
+
+
 class AccountSnapshotRepository(BaseRepository):
-    """账户余额快照仓储。"""
+    """账户余额快照仓储——append-only 时间序列。
+
+    每次 ``save_snapshot`` 都插入一行新记录。读取"当前账户状态"必须按
+    ``recorded_at DESC LIMIT 1`` 查最新一行；``query_history_bucketed`` 用
+    ``date_trunc`` 做服务端 downsampling，避免把原始点全部拉到 Python。
+    """
 
     async def save_snapshot(
         self,
@@ -793,12 +829,16 @@ class AccountSnapshotRepository(BaseRepository):
         trace_id: str | None = None,
         raw_payload: dict[str, Any] | None = None,
         account_key: str = "primary",
+        recorded_at: datetime | None = None,
+        net_value_usdc: Decimal | None = None,
     ) -> AccountSnapshot:
         await self.save_snapshots(
             [snapshot],
             trace_id=trace_id,
             raw_payloads=[raw_payload],
             account_key=account_key,
+            recorded_at=recorded_at,
+            net_values_usdc=None if net_value_usdc is None else [net_value_usdc],
         )
         return snapshot
 
@@ -809,9 +849,14 @@ class AccountSnapshotRepository(BaseRepository):
         trace_id: str | None = None,
         raw_payloads: Sequence[dict[str, Any] | None] | None = None,
         account_key: str = "primary",
+        recorded_at: datetime | None = None,
+        net_values_usdc: Sequence[Decimal | None] | None = None,
     ) -> int:
         snapshots = tuple(snapshots)
+        if not snapshots:
+            return 0
         payloads = raw_payloads or (None,) * len(snapshots)
+        net_values = net_values_usdc or (None,) * len(snapshots)
         rows = [
             _row_dict(
                 AccountSnapshotModel.from_domain(
@@ -819,32 +864,77 @@ class AccountSnapshotRepository(BaseRepository):
                     trace_id=trace_id,
                     raw_payload=payload,
                     account_key=account_key,
+                    recorded_at=recorded_at,
+                    net_value_usdc=net_value,
                 )
             )
-            for snapshot, payload in zip(snapshots, payloads, strict=False)
+            for snapshot, payload, net_value in zip(
+                snapshots, payloads, net_values, strict=False
+            )
         ]
-        return await self._bulk_upsert(
-            AccountSnapshotModel,
-            rows,
-            conflict_columns=("account_key",),
-            update_columns=(
-                "trace_id",
-                "balance_usdc",
-                "allowance_usdc",
-                "user_ws_connected",
-                "allow_new_entries",
-                "market_pauses",
-                "last_reconcile_at",
-                "raw_payload",
-                "updated_at",
-            ),
-        )
+        # append-only：直接 INSERT，没有 ON CONFLICT 收敛。
+        stmt = pg_insert(AccountSnapshotModel).values(list(rows))
+        await self._session.execute(stmt)
+        return len(rows)
 
     async def get_current_snapshot(self, *, account_key: str = "primary") -> AccountSnapshot | None:
-        row = await self._session.scalar(
-            select(AccountSnapshotModel).where(AccountSnapshotModel.account_key == account_key)
+        stmt = (
+            select(AccountSnapshotModel)
+            .where(AccountSnapshotModel.account_key == account_key)
+            .order_by(AccountSnapshotModel.recorded_at.desc())
+            .limit(1)
         )
+        row = await self._session.scalar(stmt)
         return None if row is None else row.to_domain()
+
+    async def query_history_bucketed(
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+        interval_ms: int,
+        account_key: str = "primary",
+    ) -> tuple[AccountHistoryPoint, ...]:
+        """按 ``interval_ms`` 服务器端 downsampling 净值时间序列。
+
+        实现：用 ``to_timestamp(floor(epoch / interval_s) * interval_s)`` 计算
+        bucket，每个 bucket 内取最新一行。所有聚合在 PG 内完成，Python 端只拿
+        ``≈ window/interval`` 条结果。
+        """
+
+        if interval_ms <= 0:
+            raise ValueError("interval_ms must be > 0")
+        since_aware = _ensure_aware(since)
+        until_aware = _ensure_aware(until)
+        interval_s = interval_ms / 1000.0
+        bucket_expr = func.to_timestamp(
+            func.floor(func.extract("epoch", AccountSnapshotModel.recorded_at) / interval_s)
+            * interval_s
+        ).label("bucket_start")
+        # DISTINCT ON bucket：每个 bucket 取 recorded_at 最大那一行。
+        stmt = (
+            select(
+                bucket_expr,
+                AccountSnapshotModel.recorded_at,
+                AccountSnapshotModel.net_value_usdc,
+            )
+            .where(AccountSnapshotModel.account_key == account_key)
+            .where(AccountSnapshotModel.recorded_at >= since_aware)
+            .where(AccountSnapshotModel.recorded_at <= until_aware)
+            .distinct(bucket_expr)
+            .order_by(bucket_expr, AccountSnapshotModel.recorded_at.desc())
+        )
+        result = await self._session.execute(stmt)
+        points: list[AccountHistoryPoint] = []
+        for _bucket_start, recorded_at, net_value in result.all():
+            points.append(
+                AccountHistoryPoint(
+                    recorded_at=_ensure_aware(recorded_at),
+                    net_value_usdc=_decimal(net_value) or Decimal("0"),
+                )
+            )
+        points.sort(key=lambda point: point.recorded_at)
+        return tuple(points)
 
 
 class AuditEventRepository(BaseRepository):
@@ -903,6 +993,7 @@ class AuditEventRepository(BaseRepository):
         event_title: str | None = None,
         condition_id: str | None = None,
         token_id: str | None = None,
+        time_range: TimeRange | None = None,
     ) -> RepositoryPage[AuditEvent]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(AuditEventModel).order_by(AuditEventModel.created_at.desc(), AuditEventModel.id.desc())
@@ -914,6 +1005,12 @@ class AuditEventRepository(BaseRepository):
             stmt = stmt.where(AuditEventModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(AuditEventModel.token_id == token_id)
+        if time_range is not None and not time_range.is_empty:
+            since_dt, until_dt = time_range.to_datetime_range()
+            if since_dt is not None:
+                stmt = stmt.where(AuditEventModel.created_at >= since_dt)
+            if until_dt is not None:
+                stmt = stmt.where(AuditEventModel.created_at <= until_dt)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 

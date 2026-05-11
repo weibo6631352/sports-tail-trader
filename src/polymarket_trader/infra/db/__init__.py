@@ -14,6 +14,7 @@ from polymarket_trader.infra.db.models import (
 )
 from polymarket_trader.infra.db.persistence import DatabasePersistenceRepository
 from polymarket_trader.infra.db.repositories import (
+    AccountHistoryPoint,
     AccountSnapshotRepository,
     AllocationRepository,
     AuditEventRepository,
@@ -29,6 +30,7 @@ from polymarket_trader.infra.db.repositories import (
 from polymarket_trader.infra.db.session import build_engine, build_session_factory, initialize_database
 
 __all__ = [
+    "AccountHistoryPoint",
     "AccountSnapshotModel",
     "AccountSnapshotRepository",
     "AllocationModel",

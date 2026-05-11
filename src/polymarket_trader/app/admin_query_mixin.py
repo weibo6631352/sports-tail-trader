@@ -35,6 +35,7 @@ from polymarket_trader.app.admin_service_helpers import (
 )
 from polymarket_trader.app.trade_replay import TradeReplayFilters, build_trade_replay_records
 from polymarket_trader.domain.market import Market
+from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
 from polymarket_trader.infra.polymarket import PolymarketClientError
 
@@ -148,6 +149,7 @@ class AdminQueryMixin:
         trace_id: str | None = None,
         order_id: str | None = None,
         trade_id: str | None = None,
+        time_range: TimeRange | None = None,
     ) -> dict[str, Any]:
         if open_only:
             snapshot = self._account_snapshot()
@@ -159,6 +161,7 @@ class AdminQueryMixin:
                 and (trace_id is None or order.trace_id == trace_id)
                 and (order_id is None or order.order_id == order_id)
                 and (trade_id is None or order.trade_id == trade_id)
+                and (time_range is None or time_range.contains(order.created_at))
             ]
             page = self._slice_sequence(orders, limit=limit, offset=offset)
             return page_payload(page, serializer=self._serializer().order)
@@ -173,6 +176,7 @@ class AdminQueryMixin:
                 and (trace_id is None or order.trace_id == trace_id)
                 and (order_id is None or order.order_id == order_id)
                 and (trade_id is None or order.trade_id == trade_id)
+                and (time_range is None or time_range.contains(order.created_at))
             ]
             page = self._slice_sequence(orders, limit=limit, offset=offset)
             return page_payload(page, serializer=self._serializer().order)
@@ -186,6 +190,7 @@ class AdminQueryMixin:
                 trade_id=trade_id,
                 condition_id=condition_id,
                 token_id=token_id,
+                time_range=time_range,
             )
 
         page = await self._with_repositories(_query)
@@ -201,6 +206,7 @@ class AdminQueryMixin:
         trade_id: str | None = None,
         condition_id: str | None = None,
         token_id: str | None = None,
+        time_range: TimeRange | None = None,
     ) -> dict[str, Any]:
         if not self._has_db_session_factory():
             snapshot = self._account_snapshot()
@@ -212,6 +218,7 @@ class AdminQueryMixin:
                 and (trade_id is None or fill.trade_id == trade_id)
                 and (condition_id is None or fill.condition_id == condition_id)
                 and (token_id is None or fill.token_id == token_id)
+                and (time_range is None or time_range.contains(fill.created_at))
             ]
             page = self._slice_sequence(fills, limit=limit, offset=offset)
             return page_payload(page, serializer=self._serializer().fill)
@@ -225,6 +232,7 @@ class AdminQueryMixin:
                 trade_id=trade_id,
                 condition_id=condition_id,
                 token_id=token_id,
+                time_range=time_range,
             )
 
         page = await self._with_repositories(_query)
@@ -400,6 +408,7 @@ class AdminQueryMixin:
         event_title: str | None = None,
         condition_id: str | None = None,
         token_id: str | None = None,
+        time_range: TimeRange | None = None,
     ) -> dict[str, Any]:
         if not self._has_db_session_factory():
             page: RepositoryPage[Any] = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
@@ -413,6 +422,7 @@ class AdminQueryMixin:
                 event_title=event_title,
                 condition_id=condition_id,
                 token_id=token_id,
+                time_range=time_range,
             )
 
         page = await self._with_repositories(_query)
@@ -546,6 +556,48 @@ class AdminQueryMixin:
 
         page = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
         return page_payload(page, serializer=self._serializer().outbox_event)
+
+    async def portfolio_equity_curve(
+        self,
+        *,
+        window_ms: int,
+        interval_ms: int,
+        account_key: str = "primary",
+    ) -> dict[str, Any]:
+        """返回 ``GET /portfolio/equity-curve`` 投影。
+
+        Downsampling 在 PG 内完成；服务层只对已聚合点做 drawdown 投影。
+        没有 DB 时抛 ``RuntimeError``——这条接口本身就是审计用途，缺少持久化
+        数据的语义不能用空数组掩盖。
+        """
+
+        if not self._has_db_session_factory():
+            raise RuntimeError("db_session_factory unavailable")
+
+        session_factory = self.runtime.db_session_factory  # type: ignore[union-attr]
+
+        from polymarket_trader.app.portfolio_history_service import (
+            PortfolioHistoryService,
+        )
+        from polymarket_trader.infra.db import AccountSnapshotRepository
+
+        async def _query(*, since, until, interval_ms, account_key):
+            async with session_factory() as session:
+                repo = AccountSnapshotRepository(session)
+                return await repo.query_history_bucketed(
+                    since=since,
+                    until=until,
+                    interval_ms=interval_ms,
+                    account_key=account_key,
+                )
+
+        service = PortfolioHistoryService(query_history=_query)
+        result = await service.equity_curve(
+            window_ms=window_ms,
+            interval_ms=interval_ms,
+            account_key=account_key,
+        )
+        return result.to_payload()
 
     async def portfolio_snapshot(self) -> dict[str, Any]:
         account = self._account_snapshot()

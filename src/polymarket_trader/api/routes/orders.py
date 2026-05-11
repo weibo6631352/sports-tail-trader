@@ -5,7 +5,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.deps import get_admin_service
+from polymarket_trader.api.deps import build_time_range, get_admin_service
 from polymarket_trader.app.admin_service import AdminService
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -43,6 +43,8 @@ async def list_orders(
     trace_id: str | None = Query(default=None),
     order_id: str | None = Query(default=None),
     trade_id: str | None = Query(default=None),
+    since: int | None = Query(default=None, ge=0),
+    until: int | None = Query(default=None, ge=0),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
     return await service.list_orders(
@@ -54,6 +56,7 @@ async def list_orders(
         trace_id=trace_id,
         order_id=order_id,
         trade_id=trade_id,
+        time_range=build_time_range(since=since, until=until),
     )
 
 

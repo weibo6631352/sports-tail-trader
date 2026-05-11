@@ -13,6 +13,7 @@ from polymarket_trader.domain.market import Market, MarketOutcome
 from polymarket_trader.domain.order import Order, OrderResult
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
+from polymarket_trader.domain.position_lifecycle import classify as classify_position_lifecycle
 from polymarket_trader.infra.db import RepositoryPage
 from polymarket_trader.infra.polymarket import ClobPriceHistoryDTO
 from polymarket_trader.domain.account import AccountSnapshot
@@ -293,6 +294,12 @@ class AdminSerializer:
             "percent_realized_pnl": decimal_text(position.percent_realized_pnl),
             "cur_price": decimal_text(position.cur_price),
             "redeemable": position.redeemable,
+            "lifecycle_stage": classify_position_lifecycle(
+                shares=position.shares,
+                open_buy_shares=position.open_buy_shares,
+                open_sell_shares=position.open_sell_shares,
+                confirmed_shares=position.confirmed_shares,
+            ).value,
         }
 
     def order(self, order: Order) -> dict[str, Any]:

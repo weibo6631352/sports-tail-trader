@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.domain.time_filters import TimeRange
 
 
 def get_runtime(request: Request) -> Any:
@@ -29,3 +30,18 @@ def get_admin_service(request: Request) -> AdminService:
     if service is None:
         raise HTTPException(status_code=503, detail="admin_service_unavailable")
     return service
+
+
+def build_time_range(*, since: int | None, until: int | None) -> TimeRange | None:
+    """统一把路由层 ``since`` / ``until`` epoch_ms 转成 domain ``TimeRange``。
+
+    ``since > until`` 由 ``TimeRange`` 构造抛出 ``ValueError``，这里固定映射
+    成 HTTP 400 ``since_after_until``，避免每条路由重写校验。
+    """
+
+    if since is None and until is None:
+        return None
+    try:
+        return TimeRange(since_ms=since, until_ms=until)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

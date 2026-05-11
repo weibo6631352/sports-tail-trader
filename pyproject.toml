@@ -26,6 +26,7 @@ dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "ruff>=0.4",
+  "testcontainers[postgres]>=4.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -35,6 +36,9 @@ where = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["src"]
+markers = [
+  "pg: tests requiring a real PostgreSQL container (enable with --pg)",
+]
 
 [tool.ruff]
 line-length = 100

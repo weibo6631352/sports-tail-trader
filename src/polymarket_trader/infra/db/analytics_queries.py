@@ -1,0 +1,273 @@
+"""SQL queries for analytics endpoints.
+
+只读聚合查询，全部在 SQL 层完成；Python 侧只负责绑定参数和把结果整型化。
+不写库、不影响交易主链路，使用独立 session 即可。
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Mapping, Sequence
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
+# 漏斗阶段：严格使用 DomainEventType 字符串值。
+# 与 polymarket_trader.domain.events.DomainEventType 保持一致，
+# 这里只字面声明顺序，便于 SQL 单条 CTE 一次性返回各阶段计数。
+FUNNEL_STAGES: tuple[str, ...] = (
+    "market_discovered",
+    "market_filtered_in",
+    "market_filtered_out",
+    "risk_check_passed",
+    "order_submitted",
+    "fill_recorded",
+)
+
+REJECTION_EVENT_TITLES: tuple[str, ...] = (
+    "order_rejected",
+    "risk_check_failed",
+    "market_filtered_out",
+)
+
+
+def _build_market_filter(
+    *,
+    condition_alias: str,
+    league: str | None,
+    market_type: str | None,
+) -> tuple[str, str, dict[str, Any]]:
+    """构造可拼接的 ``markets`` JOIN 及 WHERE 片段。
+
+    - 不传 ``league`` / ``market_type`` 时不引入任何 JOIN。
+    - ``league`` 同时匹配 ``markets.category`` 精确值和 ``markets.tags`` JSONB 包含。
+    - ``market_type`` 按 ``markets.tags`` JSONB 包含匹配。
+    """
+
+    if league is None and market_type is None:
+        return "", "", {}
+
+    join_clause = f" JOIN markets m ON m.condition_id = {condition_alias}"
+    where_clauses: list[str] = []
+    params: dict[str, Any] = {}
+    if league is not None:
+        where_clauses.append(
+            "(m.category = :league OR m.tags @> CAST(:league_tag AS jsonb))"
+        )
+        params["league"] = league
+        params["league_tag"] = f'["{_jsonb_escape(league)}"]'
+    if market_type is not None:
+        where_clauses.append("m.tags @> CAST(:market_type_tag AS jsonb)")
+        params["market_type_tag"] = f'["{_jsonb_escape(market_type)}"]'
+    where_extra = " AND " + " AND ".join(where_clauses)
+    return join_clause, where_extra, params
+
+
+def _jsonb_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+async def fetch_funnel_counts(
+    session: AsyncSession,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    league: str | None = None,
+    market_type: str | None = None,
+) -> dict[str, int]:
+    """单条 CTE 一次性产出全部漏斗阶段计数。"""
+
+    join_clause, where_extra, params = _build_market_filter(
+        condition_alias="a.condition_id",
+        league=league,
+        market_type=market_type,
+    )
+
+    filter_clauses = ",\n        ".join(
+        f"COUNT(*) FILTER (WHERE a.event_title = :stage_{i}) AS stage_{i}"
+        for i in range(len(FUNNEL_STAGES))
+    )
+    sql = f"""
+        SELECT {filter_clauses}
+        FROM audit_events a{join_clause}
+        WHERE a.created_at >= :window_start
+          AND a.created_at < :window_end
+          AND a.event_title = ANY(:stage_names){where_extra}
+    """
+    bind: dict[str, Any] = {
+        "window_start": window_start,
+        "window_end": window_end,
+        "stage_names": list(FUNNEL_STAGES),
+        **params,
+    }
+    for i, name in enumerate(FUNNEL_STAGES):
+        bind[f"stage_{i}"] = name
+    result = await session.execute(text(sql), bind)
+    row = result.one()
+    return {FUNNEL_STAGES[i]: int(row[i] or 0) for i in range(len(FUNNEL_STAGES))}
+
+
+async def fetch_rejection_reasons(
+    session: AsyncSession,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    league: str | None = None,
+    market_type: str | None = None,
+    limit: int = 20,
+) -> tuple[int, list[Mapping[str, Any]]]:
+    """统计拒绝原因 top N。
+
+    覆盖 ``order_rejected``、``risk_check_failed``、``market_filtered_out`` 三类事件，
+    按 ``reason`` 文本去前后空白后分组；空 reason 归到 ``<empty>``。
+    """
+
+    join_clause, where_extra, params = _build_market_filter(
+        condition_alias="a.condition_id",
+        league=league,
+        market_type=market_type,
+    )
+
+    sql_top = f"""
+        SELECT COALESCE(NULLIF(BTRIM(a.reason), ''), '<empty>') AS reason_key,
+               COUNT(*) AS reason_count
+        FROM audit_events a{join_clause}
+        WHERE a.created_at >= :window_start
+          AND a.created_at < :window_end
+          AND a.event_title = ANY(:event_titles){where_extra}
+        GROUP BY reason_key
+        ORDER BY reason_count DESC, reason_key ASC
+        LIMIT :limit
+    """
+    sql_total = f"""
+        SELECT COUNT(*) AS total
+        FROM audit_events a{join_clause}
+        WHERE a.created_at >= :window_start
+          AND a.created_at < :window_end
+          AND a.event_title = ANY(:event_titles){where_extra}
+    """
+    bind = {
+        "window_start": window_start,
+        "window_end": window_end,
+        "event_titles": list(REJECTION_EVENT_TITLES),
+        "limit": limit,
+        **params,
+    }
+    total_row = (await session.execute(text(sql_total), bind)).one()
+    total = int(total_row[0] or 0)
+    rows = (await session.execute(text(sql_top), bind)).all()
+    top = [{"key": str(row[0]), "count": int(row[1])} for row in rows]
+    return total, top
+
+
+async def fetch_execution_quality(
+    session: AsyncSession,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    league: str | None = None,
+    market_type: str | None = None,
+) -> dict[str, Any]:
+    """提交、成交延迟分位和滑点统计。
+
+    - submit_latency: ``market_filtered_in`` → ``order_submitted``，按
+      ``condition_id`` + ``token_id`` 配对，取最近一次 filtered_in。
+    - fill_latency: ``orders.created_at`` → ``fills.confirmed_at``，按
+      ``order_id`` 直接连接。
+    - slippage_bps: BUY 取 ``(fill_price - order_price) / order_price * 10000``，
+      SELL 反号，便于"正值=不利"的统一语义。
+    """
+
+    submit_join, submit_where, submit_params = _build_market_filter(
+        condition_alias="sub.condition_id",
+        league=league,
+        market_type=market_type,
+    )
+    fill_join, fill_where, fill_params = _build_market_filter(
+        condition_alias="f.condition_id",
+        league=league,
+        market_type=market_type,
+    )
+
+    sql = f"""
+        WITH submit_lat AS (
+            SELECT EXTRACT(EPOCH FROM (sub.created_at - flt.created_at)) * 1000.0 AS latency_ms
+            FROM audit_events sub
+            JOIN LATERAL (
+                SELECT created_at FROM audit_events
+                WHERE event_title = 'market_filtered_in'
+                  AND condition_id = sub.condition_id
+                  AND token_id IS NOT DISTINCT FROM sub.token_id
+                  AND created_at <= sub.created_at
+                ORDER BY created_at DESC
+                LIMIT 1
+            ) flt ON TRUE{submit_join}
+            WHERE sub.event_title = 'order_submitted'
+              AND sub.created_at >= :window_start
+              AND sub.created_at < :window_end{submit_where}
+        ),
+        fill_lat AS (
+            SELECT EXTRACT(EPOCH FROM (f.confirmed_at - o.created_at)) * 1000.0 AS latency_ms,
+                   o.side AS side,
+                   o.price AS order_price,
+                   f.price AS fill_price
+            FROM fills f
+            JOIN orders o ON o.order_id = f.order_id{fill_join}
+            WHERE f.confirmed_at IS NOT NULL
+              AND f.confirmed_at >= :window_start
+              AND f.confirmed_at < :window_end
+              AND o.price IS NOT NULL
+              AND o.price > 0
+              AND f.price IS NOT NULL{fill_where}
+        )
+        SELECT
+            (SELECT percentile_cont(0.5)  WITHIN GROUP (ORDER BY latency_ms) FROM submit_lat) AS submit_p50,
+            (SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FROM submit_lat) AS submit_p95,
+            (SELECT percentile_cont(0.5)  WITHIN GROUP (ORDER BY latency_ms) FROM fill_lat)   AS fill_p50,
+            (SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FROM fill_lat)   AS fill_p95,
+            (SELECT AVG(
+                CASE WHEN side = 'sell'
+                     THEN (order_price - fill_price) / order_price * 10000.0
+                     ELSE (fill_price - order_price) / order_price * 10000.0 END
+             ) FROM fill_lat) AS slip_mean,
+            (SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY
+                CASE WHEN side = 'sell'
+                     THEN (order_price - fill_price) / order_price * 10000.0
+                     ELSE (fill_price - order_price) / order_price * 10000.0 END
+             ) FROM fill_lat) AS slip_p95,
+            (SELECT COUNT(*) FROM fill_lat) AS sample_size
+    """
+    bind = {
+        "window_start": window_start,
+        "window_end": window_end,
+        **submit_params,
+        **fill_params,
+    }
+    row = (await session.execute(text(sql), bind)).one()
+    return {
+        "submit_p50": _as_float(row[0]),
+        "submit_p95": _as_float(row[1]),
+        "fill_p50": _as_float(row[2]),
+        "fill_p95": _as_float(row[3]),
+        "slip_mean": _as_float(row[4]),
+        "slip_p95": _as_float(row[5]),
+        "sample_size": int(row[6] or 0),
+    }
+
+
+def _as_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+__all__: Sequence[str] = (
+    "FUNNEL_STAGES",
+    "REJECTION_EVENT_TITLES",
+    "fetch_funnel_counts",
+    "fetch_rejection_reasons",
+    "fetch_execution_quality",
+)

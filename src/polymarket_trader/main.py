@@ -803,6 +803,17 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         start=True,
         run_immediately=True,
     )
+    # 60s 写一次账户净值快照——append-only 时间序列，喂给 equity-curve 审计接口。
+    # 任意 DB 异常都不能反向阻塞交易主链路，所以失败只记日志、不抛 supervisor 错。
+    runtime.scheduler.register_job(
+        "account_snapshot_recorder",
+        lambda: _record_account_snapshot(runtime),
+        priority="P3",
+        interval_seconds=60.0,
+        tags=("portfolio", "persistence"),
+        start=True,
+        run_immediately=False,
+    )
 
 
 async def _run_supervised_loop(
@@ -1006,6 +1017,27 @@ async def _run_sports_live_state_sync(runtime: RuntimeComponents) -> None:
             ),
         )
     _sync_runtime_metrics(runtime)
+
+
+async def _record_account_snapshot(runtime: RuntimeComponents) -> None:
+    """把当前内存账户状态写一行到 ``account_snapshots`` 时间序列。
+
+    严格异步、非交易主链路：DB 异常只记日志，绝不向 supervisor 反传错误，
+    避免审计写库回灌阻塞 P0。``net_value_usdc`` 在写入时根据当前持仓
+    ``current_value`` 一次性算好，下游 ``equity-curve`` 不再依赖历史 mark。
+    """
+
+    account_state = runtime.account_state_store
+    snapshot = account_state.snapshot()
+    try:
+        async with runtime.db_session_factory() as session:
+            await AccountSnapshotRepository(session).save_snapshot(snapshot)
+            await session.commit()
+    except Exception as exc:  # pragma: no cover - depends on external db
+        logger.warning(
+            "account snapshot recorder failed",
+            extra={"reason": str(exc)},
+        )
 
 
 async def _run_supervisor_refresh(runtime: RuntimeComponents) -> None:
