@@ -15,13 +15,13 @@ from typing import Any
 
 from polymarket_trader.domain.market import MarketOutcome
 from polymarket_trader.domain.orderbook import PriceLevel
+from polymarket_trader.serialization import utc_now as _utc_now
 
 _FEE_RATE_DENOMINATOR = Decimal("1000")
 _USDC_BASE_UNITS = Decimal("1000000")
 
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+# `_utc_now` 仍以包私有名导出给 schemas 子模块（clob/data/gamma/ws）使用，
+# 实现委托给 serialization.utc_now，避免散落定义。
 
 
 def _first_text(payload: Mapping[str, Any], *keys: str) -> str | None:

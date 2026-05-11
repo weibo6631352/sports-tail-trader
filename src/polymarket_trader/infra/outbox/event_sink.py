@@ -102,167 +102,174 @@ def _to_outbox_event(priority: int, event: Any) -> OutboxEvent | None:
     )
 
 
+# 字段集合型投影：取 payload 里若干已知字段做白名单透出，避免 audit 表暴涨。
+# 多个 event_type 共享同一字段集时只定义一次（如 cancel/cancelled/replace 同
+# _ORDER_ACTION_FIELDS）。新增 event 时只需在这里加一项，无需改 dispatch 函数。
+
+_ORDER_ACTION_FIELDS = (
+    "operator",
+    "reason",
+    "order_id",
+    "trade_id",
+    "old_price",
+    "new_price",
+    "old_size_shares",
+    "new_size_shares",
+    "side",
+    "order_type",
+    "result_status",
+    "occurred_at",
+)
+_TRADING_TOGGLE_FIELDS = (
+    "operator",
+    "reason",
+    "phase_before",
+    "phase_after",
+    "previous_manual_pause_reason",
+    "degraded_reason",
+    "occurred_at",
+)
+_MARKET_DISCOVERY_FIELDS = (
+    "source",
+    "summary",
+    "accepted",
+    "discovery_kind",
+    "extension_reason",
+    "parse_status",
+    "parse_reason",
+    "matched_keywords",
+    "discovered_at",
+    "strategy_id",
+)
+
+_FIELD_PROJECTIONS: dict[str, tuple[str, ...]] = {
+    DomainEventType.BALANCE_UPDATED.value: (
+        "balance_usdc",
+        "allowance_usdc",
+        "user_ws_connected",
+        "allow_new_entries",
+        "market_pauses",
+        "last_reconcile_at",
+    ),
+    DomainEventType.SPORTS_LIVE_STATE_RECORDED.value: (
+        "source",
+        "observed_at",
+        "signal_allowed",
+        "signal_reason",
+        "phase",
+        "live_state_payload",
+        "match_payload",
+    ),
+    DomainEventType.ALLOCATION_DECISION_RECORDED.value: (
+        "candidates",
+        "selected_condition_ids",
+        "skipped_reasons",
+        "total_budget_usdc",
+        "buy_budget_usdc",
+        "allocator",
+    ),
+    DomainEventType.RISK_REJECTION_RECORDED.value: (
+        "passed",
+        "reason",
+        "failed_field",
+        "checks",
+        "intent_summary",
+        "decision_kind",
+    ),
+    DomainEventType.MARKET_SETTLED.value: (
+        "winning_token_id",
+        "winning_outcome",
+        "settled_at",
+        "source",
+        "payout_per_share",
+        "fair_value_at_close",
+    ),
+    DomainEventType.PARAMETER_OVERRIDE_APPLIED.value: (
+        "scope",
+        "key",
+        "previous_value",
+        "new_value",
+        "operator",
+        "applied_at",
+        "expires_at",
+        "cleared",
+    ),
+    DomainEventType.ORDER_CANCEL_REQUESTED.value: _ORDER_ACTION_FIELDS,
+    DomainEventType.ORDER_CANCELLED.value: _ORDER_ACTION_FIELDS,
+    DomainEventType.REPLACE_ORDER_SUBMITTED.value: _ORDER_ACTION_FIELDS,
+    DomainEventType.TRADING_PAUSED.value: _TRADING_TOGGLE_FIELDS,
+    DomainEventType.TRADING_RESUMED.value: _TRADING_TOGGLE_FIELDS,
+}
+
+
+def _pick_fields(payload: Mapping[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
+    return {key: payload[key] for key in fields if key in payload}
+
+
+def _project_order_state(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """ORDER_STATE_UPDATED：保留 order + fill 子映射。其他大字段（raw_response 等）丢弃。"""
+    projected: dict[str, Any] = {}
+    order = _mapping(payload, "order")
+    fill = _mapping(payload, "fill")
+    if order is not None:
+        projected["order"] = order
+    if fill is not None:
+        projected["fill"] = fill
+    return projected
+
+
+def _project_fill(payload: Mapping[str, Any]) -> dict[str, Any]:
+    fill = _mapping(payload, "fill")
+    return {} if fill is None else {"fill": fill}
+
+
+def _project_position(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """POSITION_UPDATED：单 position 或 positions 列表，按需透出。"""
+    projected: dict[str, Any] = {}
+    position = _mapping(payload, "position")
+    positions = _mapping_list(payload, "positions")
+    if position is not None:
+        projected["position"] = position
+    if positions:
+        projected["positions"] = positions
+    return projected
+
+
+def _project_market_discovery(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """MARKET_* 事件：discovery 的 raw_market 是完整 Gamma payload（每条数百字节），
+    落库会让 audit 表暴涨。只保留 records.py 真正消费的字段：
+    - audit reason 已经在 OutboxEvent.reason 上；
+    - market_record builder 需要 market / tracked_market 快照；
+    - funnel/分析需要 discovery_kind / accepted 这类轻量元信息。
+    """
+    projected: dict[str, Any] = {}
+    market = _mapping(payload, "market", "market_snapshot")
+    if market is not None:
+        projected["market"] = market
+    tracked_market = _mapping(payload, "tracked_market")
+    if tracked_market is not None:
+        projected["tracked_market"] = tracked_market
+    projected.update(_pick_fields(payload, _MARKET_DISCOVERY_FIELDS))
+    return projected
+
+
+# 函数型投影：逻辑超出"取字段"的事件（需要 _mapping 解析、子结构判断）。
+_FUNCTION_PROJECTIONS: dict[str, Any] = {
+    DomainEventType.ORDER_STATE_UPDATED.value: _project_order_state,
+    DomainEventType.FILL_RECORDED.value: _project_fill,
+    DomainEventType.POSITION_UPDATED.value: _project_position,
+}
+
+
 def _project_payload(event_type: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-    if event_type == DomainEventType.BALANCE_UPDATED.value:
-        projected: dict[str, Any] = {}
-        for key in (
-            "balance_usdc",
-            "allowance_usdc",
-            "user_ws_connected",
-            "allow_new_entries",
-            "market_pauses",
-            "last_reconcile_at",
-        ):
-            if key in payload:
-                projected[key] = payload[key]
-        return projected
-    if event_type == DomainEventType.ORDER_STATE_UPDATED.value:
-        order_projected: dict[str, Any] = {}
-        order = _mapping(payload, "order")
-        fill = _mapping(payload, "fill")
-        if order is not None:
-            order_projected["order"] = order
-        if fill is not None:
-            order_projected["fill"] = fill
-        return order_projected
-    if event_type == DomainEventType.FILL_RECORDED.value:
-        fill = _mapping(payload, "fill")
-        return {} if fill is None else {"fill": fill}
-    if event_type == DomainEventType.POSITION_UPDATED.value:
-        position = _mapping(payload, "position")
-        positions = _mapping_list(payload, "positions")
-        projected = {}
-        if position is not None:
-            projected["position"] = position
-        if positions:
-            projected["positions"] = positions
-        return projected
-    if event_type == DomainEventType.SPORTS_LIVE_STATE_RECORDED.value:
-        sports_projected: dict[str, Any] = {}
-        for key in (
-            "source",
-            "observed_at",
-            "signal_allowed",
-            "signal_reason",
-            "phase",
-            "live_state_payload",
-            "match_payload",
-        ):
-            if key in payload:
-                sports_projected[key] = payload[key]
-        return sports_projected
-    if event_type == DomainEventType.ALLOCATION_DECISION_RECORDED.value:
-        alloc_projected: dict[str, Any] = {}
-        for key in (
-            "candidates",
-            "selected_condition_ids",
-            "skipped_reasons",
-            "total_budget_usdc",
-            "buy_budget_usdc",
-            "allocator",
-        ):
-            if key in payload:
-                alloc_projected[key] = payload[key]
-        return alloc_projected
-    if event_type == DomainEventType.RISK_REJECTION_RECORDED.value:
-        risk_projected: dict[str, Any] = {}
-        for key in (
-            "passed",
-            "reason",
-            "failed_field",
-            "checks",
-            "intent_summary",
-            "decision_kind",
-        ):
-            if key in payload:
-                risk_projected[key] = payload[key]
-        return risk_projected
-    if event_type == DomainEventType.MARKET_SETTLED.value:
-        settle_projected: dict[str, Any] = {}
-        for key in (
-            "winning_token_id",
-            "winning_outcome",
-            "settled_at",
-            "source",
-            "payout_per_share",
-            "fair_value_at_close",
-        ):
-            if key in payload:
-                settle_projected[key] = payload[key]
-        return settle_projected
-    if event_type in (
-        DomainEventType.ORDER_CANCEL_REQUESTED.value,
-        DomainEventType.ORDER_CANCELLED.value,
-        DomainEventType.REPLACE_ORDER_SUBMITTED.value,
-    ):
-        # 投影 cancel / replace 的 admin / 策略意图字段——避免把整个 order snapshot
-        # 落 audit（那块在 ORDER_STATE_UPDATED 里）。
-        order_action_projected: dict[str, Any] = {}
-        for key in (
-            "operator",
-            "reason",
-            "order_id",
-            "trade_id",
-            "old_price",
-            "new_price",
-            "old_size_shares",
-            "new_size_shares",
-            "side",
-            "order_type",
-            "result_status",
-            "occurred_at",
-        ):
-            if key in payload:
-                order_action_projected[key] = payload[key]
-        return order_action_projected
-    if event_type in (DomainEventType.TRADING_PAUSED.value, DomainEventType.TRADING_RESUMED.value):
-        trading_projected: dict[str, Any] = {}
-        for key in (
-            "operator",
-            "reason",
-            "phase_before",
-            "phase_after",
-            "previous_manual_pause_reason",
-            "degraded_reason",
-            "occurred_at",
-        ):
-            if key in payload:
-                trading_projected[key] = payload[key]
-        return trading_projected
-    if event_type == DomainEventType.PARAMETER_OVERRIDE_APPLIED.value:
-        param_projected: dict[str, Any] = {}
-        for key in (
-            "scope",
-            "key",
-            "previous_value",
-            "new_value",
-            "operator",
-            "applied_at",
-            "expires_at",
-            "cleared",
-        ):
-            if key in payload:
-                param_projected[key] = payload[key]
-        return param_projected
+    fn = _FUNCTION_PROJECTIONS.get(event_type)
+    if fn is not None:
+        return fn(payload)
+    fields = _FIELD_PROJECTIONS.get(event_type)
+    if fields is not None:
+        return _pick_fields(payload, fields)
     if event_type in _MARKET_EVENT_TYPES:
-        # discovery 事件的 raw_market 是完整 Gamma payload（~每条数百字节），
-        # 落库会让 audit 表暴涨。这里只保留 records.py 真正消费的字段：
-        # - audit reason 已经在 OutboxEvent.reason 上；
-        # - market_record builder 需要 market / tracked_market 快照；
-        # - funnel/分析需要 discovery_kind / accepted 这类轻量元信息。
-        projected: dict[str, Any] = {}
-        market = _mapping(payload, "market", "market_snapshot")
-        if market is not None:
-            projected["market"] = market
-        tracked_market = _mapping(payload, "tracked_market")
-        if tracked_market is not None:
-            projected["tracked_market"] = tracked_market
-        for key in ("source", "summary", "accepted", "discovery_kind",
-                    "extension_reason", "parse_status", "parse_reason",
-                    "matched_keywords", "discovered_at", "strategy_id"):
-            if key in payload:
-                projected[key] = payload[key]
-        return projected
+        return _project_market_discovery(payload)
     return {}
 
 
