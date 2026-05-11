@@ -19,13 +19,13 @@ from polymarket_trader.infra.db.models._legacy import (
     DecisionRecordModel,
     FillModel,
     OrderModel,
-    OutboxEventModel,
     PositionModel,
 )
 from polymarket_trader.infra.db.models.allocation import AllocationModel
 from polymarket_trader.infra.db.models.audit import AuditEventModel
 from polymarket_trader.infra.db.models.market import MarketModel
 from polymarket_trader.infra.db.models.orderbook import OrderbookSnapshotModel
+from polymarket_trader.infra.db.models.outbox import OutboxEventModel
 
 __all__ = [
     "AccountSnapshotModel",
