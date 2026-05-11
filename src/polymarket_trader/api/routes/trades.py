@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from polymarket_trader.api.deps import build_time_range, get_admin_service
+from polymarket_trader.api.rate_limit import rate_limit
 from polymarket_trader.app.admin_service import AdminService
 
 router = APIRouter(prefix="/trades", tags=["trades"])
@@ -17,6 +18,7 @@ async def get_trade_timeline(
     limit: int = Query(default=1000, ge=1, le=5000),
     per_table_limit: int = Query(default=1000, ge=1, le=5000),
     service: AdminService = Depends(get_admin_service),
+    _rate: None = Depends(rate_limit(endpoint="trade_timeline", qps=2.0, burst=5)),
 ) -> dict[str, object]:
     """单笔交易/单个市场全生命周期 timeline。
 

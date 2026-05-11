@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -7,6 +9,24 @@ from threading import Lock
 from typing import Callable
 
 from polymarket_trader.domain.market import Market, TradingStatus
+
+logger = logging.getLogger(__name__)
+
+# 写锁 acquire 等超过这个阈值就 WARN——P0 主链路在 event loop 上跑，从
+# async caller 调写方法（market_ws_worker 等）时如果锁被持有，整个 loop
+# 阻塞。50ms 的超时其实是兜底，正常争用应该 < 1ms；阈值留 5ms 给瞬时抖动。
+_LOCK_ACQUIRE_WARN_S = 0.005
+
+
+# === 为什么不用 asyncio.Lock？===
+# 1. registry 写路径同时被 event loop 协程（reconcile / discovery worker）和
+#    thread pool worker（market_ws 反序列化线程）调用——asyncio.Lock 只在
+#    event loop 内有效，跨线程会失效。
+# 2. 写本身是几个 dict 复制 + 一次属性赋值（~微秒级），GIL 已经保证单步原子；
+#    threading.Lock 主要防的是「跨线程同时写不同 condition_id 的 dict copy
+#    互相覆盖」，这种 race 即使在 asyncio.Lock 下也得用 threading 锁。
+# 3. acquire 超 _LOCK_ACQUIRE_WARN_S 会 log warning，真有 event loop 阻塞
+#    问题运维侧能立刻看到。
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,9 +391,28 @@ class MarketRegistry:
         action: Callable[[], Market | None],
     ) -> Market | None:
         lock = self._condition_lock(condition_id)
+        started = time.monotonic()
         acquired = lock.acquire(timeout=timeout)
+        elapsed = time.monotonic() - started
         if not acquired:
+            # 拿不到锁就跳过这次写——交给下一轮 reconcile 兜底。CLAUDE.md §7
+            # 「非关键锁等待超时后跳过并告警，不能无限等待」。
+            logger.warning(
+                "registry write skipped: condition_id=%s lock_timeout_s=%.3f (held > %.3fs)",
+                condition_id,
+                timeout,
+                timeout,
+            )
             return None
+        if elapsed > _LOCK_ACQUIRE_WARN_S:
+            # 真正发生争用（event loop 在 acquire 期间 stuck）才告警；正常情况
+            # threading.Lock 在 GIL 下 acquire 是纳秒级。
+            logger.warning(
+                "registry lock contention: condition_id=%s acquire_s=%.4f (warn_threshold=%.4fs)",
+                condition_id,
+                elapsed,
+                _LOCK_ACQUIRE_WARN_S,
+            )
         try:
             return action()
         finally:

@@ -434,6 +434,15 @@ class AdminControlsMixin:
             OrderResultStatus.FAILED,
             OrderResultStatus.REJECTED,
         }
+        await self._publish_order_action_audit(
+            event_type_pre="ORDER_CANCEL_REQUESTED",
+            event_type_post="ORDER_CANCELLED",
+            trace_id=trace_id,
+            order=source_order,
+            order_result=result,
+            operator=operator,
+            reason=reason,
+        )
         return {
             "status": "failed" if failed else "ok",
             "trace_id": trace_id,
@@ -442,6 +451,82 @@ class AdminControlsMixin:
             "order": self._serializer().order(source_order),
             "review": self._serializer().review(review),
         }
+
+    async def _publish_order_action_audit(
+        self,
+        *,
+        event_type_pre: str,
+        event_type_post: str,
+        trace_id: str,
+        order: Any,
+        order_result: Any,
+        operator: str,
+        reason: str,
+        old_price: Decimal | None = None,
+        new_price: Decimal | None = None,
+        old_size_shares: Decimal | None = None,
+        new_size_shares: Decimal | None = None,
+    ) -> None:
+        """把 admin 触发的 cancel / replace 落 audit（CLAUDE.md §10 可审计要求）。
+
+        发两个事件：``_REQUESTED`` / ``_SUBMITTED`` 记 admin 意图；``_CANCELLED`` 记
+        OrderExecutor 实际返回的结果。两者都必要——worker 路径 (order_result_processor)
+        早已发过同名事件；admin 路径之前是漏的。
+        """
+
+        from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
+
+        event_bus = getattr(self.runtime, "event_bus", None)
+        if event_bus is None:
+            return
+        condition_id = getattr(order, "condition_id", None)
+        token_id = getattr(order, "token_id", None)
+        market_slug = getattr(order, "market_slug", None)
+        order_id = getattr(order, "order_id", None) or normalize_order_id(order)
+        pre_payload: dict[str, Any] = {
+            "operator": operator,
+            "reason": reason,
+            "order_id": order_id,
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if old_price is not None:
+            pre_payload["old_price"] = str(old_price)
+        if new_price is not None:
+            pre_payload["new_price"] = str(new_price)
+        if old_size_shares is not None:
+            pre_payload["old_size_shares"] = str(old_size_shares)
+        if new_size_shares is not None:
+            pre_payload["new_size_shares"] = str(new_size_shares)
+        await event_bus.publish(
+            OutboxPriority.P1,
+            DomainEvent(
+                trace_id=trace_id,
+                event_type=getattr(DomainEventType, event_type_pre),
+                event_id=uuid4().hex,
+                market_slug=market_slug,
+                condition_id=condition_id,
+                token_id=token_id,
+                reason=reason,
+                payload=pre_payload,
+            ),
+        )
+        if order_result is None:
+            return
+        post_payload = dict(pre_payload)
+        post_payload["result_status"] = order_result.status.value if order_result.status else ""
+        await event_bus.publish(
+            OutboxPriority.P1,
+            DomainEvent(
+                trace_id=trace_id,
+                event_type=getattr(DomainEventType, event_type_post),
+                event_id=uuid4().hex,
+                market_slug=market_slug,
+                condition_id=condition_id,
+                token_id=token_id,
+                reason=order_result.reason or reason,
+                payload=post_payload,
+            ),
+        )
 
     async def force_exit_position(
         self,

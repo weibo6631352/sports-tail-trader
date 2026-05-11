@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from polymarket_trader.api.deps import build_time_range, get_admin_service
+from polymarket_trader.api.rate_limit import rate_limit
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.app.virtual_paper_trading import run_virtual_paper_trade
 
@@ -108,6 +110,7 @@ async def list_reconcile_diffs(
 async def parameter_sweep(
     request: ParameterSweepRequest,
     service: AdminService = Depends(get_admin_service),
+    _rate: None = Depends(rate_limit(endpoint="parameter_sweep", qps=0.5, burst=2)),
 ) -> dict[str, object]:
     """对历史决策回放给定参数候选笛卡尔积，输出每组 hypothetical PnL 排序。
 
@@ -115,8 +118,6 @@ async def parameter_sweep(
     ``market_settled`` 是输入；笛卡尔积上限 1000 / decision sample 上限
     20000 由 service / pydantic 守门。
     """
-
-    from decimal import Decimal
 
     try:
         return await service.run_parameter_sweep(

@@ -10,6 +10,9 @@ from typing import Any, Callable
 from polymarket_trader.domain.events import DomainEventType, OutboxPriority
 
 logger = logging.getLogger(__name__)
+# 防 dict / queue drift 的健康度告警阈值——dict size > queue capacity × 此倍数 触发 warning。
+# 1.5 给瞬时抖动留余地（merge 期间临时多一两条），同时能在真有 race / leak 时发声。
+_TRADING_PENDING_DICT_WARN_MULTIPLIER = 1.5
 
 
 # 这里不另起一套同义枚举，直接复用域内优先级定义，避免队列和 outbox 之间出现两套语义。
@@ -148,6 +151,17 @@ class EventBus:
             self._mirror_to_outbox(outbox_priority, event)
             self._broadcast(event)
             self._wake.set()
+            # health-check：pending dict 应当 ≤ queue depth + 少量正在 merge 的 key。
+            # 显著超出意味着消费侧泄漏（pop 漏掉）或并发改写丢失。
+            pending_warn_cap = int(self._trading_capacity * _TRADING_PENDING_DICT_WARN_MULTIPLIER)
+            if len(self._trading_pending_events) > pending_warn_cap:
+                logger.warning(
+                    "event_bus: trading_pending_events drift detected size=%d > %d (queue_cap=%d). "
+                    "Potential consumer leak or merge race.",
+                    len(self._trading_pending_events),
+                    pending_warn_cap,
+                    self._trading_capacity,
+                )
             return
 
         # P2 / P3 不能反向堵住 P0，所以低优先级只能尽量入队，满了就先缓存在本地。

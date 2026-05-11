@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable, Protocol
 from uuid import uuid4
@@ -9,6 +10,7 @@ from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_t
 from polymarket_trader.app.order_projection import AccountStateProjector, normalize_order_id, order_open_shares
 from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.domain.account import AccountSnapshot
+from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order, OrderResultStatus, ReplaceOrderIntent
 
@@ -134,6 +136,15 @@ class AdminOrderController:
         )
         replace_review = await trading_service.replace(replace_intent)
         replace_result = replace_review.order_result
+        await self._publish_replace_audit(
+            trace_id=trace_id,
+            order=source_order,
+            new_price=new_price,
+            new_size_shares=requested_size_shares,
+            operator=operator,
+            reason=reason,
+            order_result=replace_result,
+        )
         if replace_result is None or replace_result.status in {
             OrderResultStatus.FAILED,
             OrderResultStatus.REJECTED,
@@ -165,6 +176,53 @@ class AdminOrderController:
             "replace_review": self._serializer.review(replace_review),
             "replace_order_submitted": self._serializer.order_result(replace_result),
         }
+
+    async def _publish_replace_audit(
+        self,
+        *,
+        trace_id: str,
+        order: Order,
+        new_price: Decimal,
+        new_size_shares: Decimal,
+        operator: str,
+        reason: str,
+        order_result: Any,
+    ) -> None:
+        """Admin 触发 replace 必须落 audit。worker 路径的 ORDER_CANCEL_REQUESTED 不覆盖
+        管理面 replace；CLAUDE.md §10「可审计」要求 admin 写动作 + 结果都进 outbox。"""
+
+        event_bus = getattr(self._runtime, "event_bus", None)
+        if event_bus is None:
+            return
+        payload = {
+            "operator": operator,
+            "reason": reason,
+            "order_id": getattr(order, "order_id", None) or normalize_order_id(order),
+            "old_price": str(order.price) if getattr(order, "price", None) is not None else None,
+            "new_price": str(new_price),
+            "old_size_shares": (
+                str(order_open_shares(order)) if order_open_shares(order) is not None else None
+            ),
+            "new_size_shares": str(new_size_shares),
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if order_result is not None:
+            payload["result_status"] = (
+                order_result.status.value if order_result.status is not None else ""
+            )
+        await event_bus.publish(
+            OutboxPriority.P1,
+            DomainEvent(
+                trace_id=trace_id,
+                event_type=DomainEventType.REPLACE_ORDER_SUBMITTED,
+                event_id=uuid4().hex,
+                market_slug=getattr(order, "market_slug", None),
+                condition_id=getattr(order, "condition_id", None),
+                token_id=getattr(order, "token_id", None),
+                reason=reason,
+                payload=payload,
+            ),
+        )
 
     def _validate_replace_request(
         self,

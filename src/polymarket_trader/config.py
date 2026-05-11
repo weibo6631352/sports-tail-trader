@@ -144,6 +144,16 @@ class Settings(BaseSettings):
     trading_queue_warn_depth: int = Field(default=100, ge=0)
     entry_signal_to_submit_warn_ms: int = Field(default=500, ge=1)
 
+    # === API 服务暴露面（Admin 路由是高危写入入口，必须能在 prod 关掉 Swagger 文档
+    # 和强制 token 鉴权）===
+    # 默认 True 便于本机开发；prod 必须显式 EXPOSE_OPENAPI_DOCS=false。
+    expose_openapi_docs: bool = True
+    # 非 None 时所有 admin 写接口要求 X-Admin-Token 头匹配；None 表示禁用 token 校验
+    # （仅适合本机/受信网络）。生产环境 None 等同于 admin 接口裸跑，应在启动阶段告警。
+    admin_api_token: SecretStr | None = None
+    # CORS 白名单——逗号分隔。生产配置应只列前端实际域名，不留 localhost。
+    cors_allowed_origins: str = "http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:5173,http://localhost:5174"
+
     # 密钥类配置绝不入仓；空值只作为示例，真值必须来自安全环境变量或 secret manager。
     polymarket_api_key: SecretStr | None = None
     polymarket_api_secret: SecretStr | None = None

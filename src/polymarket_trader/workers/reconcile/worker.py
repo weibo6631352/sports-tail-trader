@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import deque
 from dataclasses import dataclass
@@ -40,6 +41,12 @@ AccountSnapshotProvider = Callable[[], AccountSnapshot]
 
 
 logger = logging.getLogger(__name__)
+
+# 每扫描这么多 market_plan 让一次 event loop——配合 await asyncio.sleep(0)
+# 把 P0 trading 事件的处理时机让出来。20 来自经验：100 个 market 的扫描在
+# 笔记本上单次 ~30ms，每 20 个让一次相当于 6ms 一次切换，对 reconcile 总
+# 时长几乎无影响，但能保证 P0 不会等超过 ~10ms。
+_RECONCILE_YIELD_EVERY = 20
 
 
 def _utc_now() -> datetime:
@@ -263,7 +270,11 @@ class ReconcileWorker:
         failed_actions: list[tuple[ReconcileAction, str]] = []
         working_snapshot = account_snapshot
 
-        for market_plan in plan.market_plans:
+        # CLAUDE.md §7：reconciler 不长时间持有交易状态写锁；100+ market 时每
+        # _RECONCILE_YIELD_EVERY 次让出 event loop，避免在批扫描里 starve P0。
+        for market_index, market_plan in enumerate(plan.market_plans):
+            if market_index > 0 and market_index % _RECONCILE_YIELD_EVERY == 0:
+                await asyncio.sleep(0)
             if market_plan.pause_trading:
                 await self._publish(
                     OutboxPriority.P1,
@@ -326,7 +337,7 @@ class ReconcileWorker:
 
         if self._account_state_store is not None:
             self._account_state_store.mark_reconciled()
-            self._prune_unsubscribable_markets(self._account_state_store.snapshot())
+            await self._prune_unsubscribable_markets(self._account_state_store.snapshot())
 
         completed_at = _utc_now()
         self._last_completed_at = completed_at
@@ -383,12 +394,17 @@ class ReconcileWorker:
         if self._event_bus is not None:
             await self._event_bus.publish(priority, event)
 
-    def _prune_unsubscribable_markets(self, account_snapshot: AccountSnapshot) -> None:
+    async def _prune_unsubscribable_markets(self, account_snapshot: AccountSnapshot) -> None:
         if self._registry is None:
             return
         now = _utc_now()
         markets = self._registry.snapshot().markets
-        for market in markets:
+        for market_index, market in enumerate(markets):
+            # 每 _RECONCILE_YIELD_EVERY 个 market 让一次 loop——prune 调用 registry.remove_market
+            # 会拿写锁；100+ market 串行循环会反向阻塞 P0。配合主循环的 yield 一并修复
+            # CLAUDE.md §7「reconciler 不长时间持锁」。
+            if market_index > 0 and market_index % _RECONCILE_YIELD_EVERY == 0:
+                await asyncio.sleep(0)
             prune_reason = market_unsubscribe_prune_reason(
                 account_snapshot,
                 market,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
@@ -35,6 +36,8 @@ from polymarket_trader.infra.polymarket.order_result_builder import (
     normalize_execution_response,
 )
 from polymarket_trader.infra.outbox.event_sink import OutboxSink
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -719,6 +722,16 @@ class PolymarketOrderExecutor:
             entry = self._idempotency_index.get(key)
             if entry is not None:
                 self._idempotency_index[key] = _IdempotencyEntry(signature=entry.signature)
+            # 缓存淘汰 = 同 idempotency_key 重发会重新执行而非返回缓存。这种"被动失效"
+            # 对实盘资金是潜在风险（CLAUDE.md §3「禁止 resting BUY」就靠幂等防重复挂单）。
+            # 记一条 WARNING 让运维知道压力上来了；正常稳态不会到 1024+ 在飞的订单。
+            logger.warning(
+                "order_executor: idempotency cache evicted key=%s (cap=%d, current=%d). "
+                "Subsequent retries on this key will re-execute, not dedupe.",
+                key,
+                self._max_cached_results,
+                len(self._completed),
+            )
 
     def _conflict_result(
         self,

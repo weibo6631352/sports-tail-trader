@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
+from polymarket_trader.app.order_projection import normalize_order_id
 from polymarket_trader.app.trading_decision_service import decision_to_managed_intent
 from polymarket_trader.domain.market import Market, TradingStatus
 from polymarket_trader.domain.order import (
@@ -50,12 +51,6 @@ def _order_open_size(order: Order) -> Decimal:
     if order.amount_usdc is not None:
         return max(order.amount_usdc, Decimal("0"))
     return Decimal("0")
-
-
-def _normalize_order_id(order: Order) -> str:
-    return order.order_id or order.idempotency_key or (
-        f"{order.condition_id}:{order.token_id}:{order.side.value}:{order.status.value}"
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,7 +262,7 @@ class ReconcileService:
         )
 
         order_index = {
-            _normalize_order_id(order): order
+            normalize_order_id(order): order
             for order in open_orders
         }
         actions: list[ReconcileAction] = []

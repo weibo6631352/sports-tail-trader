@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from polymarket_trader.domain.events import DomainEventType, OutboxEvent
+
+logger = logging.getLogger(__name__)
+# 未知 event_type 警告频次去重，避免 worker 循环刷屏。1024 个不同 type 是天花板。
+_unknown_event_types_warned: set[str] = set()
 
 # 这个白名单决定哪些事件可以落 audit / outbox 表。命名上不限于"用户态"——
 # discovery 类事件也需要审计落库以满足 CLAUDE.md §10「拒绝原因必须可审计」，
@@ -31,6 +36,11 @@ _PERSISTABLE_EVENT_TYPES = {
     # 主交易开关变更必须可审计——CLAUDE.md §10「拒绝、降级、恢复动作必须保留可审计原因」
     DomainEventType.TRADING_PAUSED.value,
     DomainEventType.TRADING_RESUMED.value,
+    # cancel / replace 是人工 + 自动都会触发的写动作，事后查"谁/何时/为什么撤了这单"
+    # 必须有独立 audit。ORDER_STATE_UPDATED 只记录结果，不记 intent + operator + reason。
+    DomainEventType.ORDER_CANCEL_REQUESTED.value,
+    DomainEventType.ORDER_CANCELLED.value,
+    DomainEventType.REPLACE_ORDER_SUBMITTED.value,
 }
 
 _MARKET_EVENT_TYPES = {
@@ -64,6 +74,14 @@ def _to_outbox_event(priority: int, event: Any) -> OutboxEvent | None:
         return None
     event_type_text = str(event_type).strip()
     if event_type_text not in _PERSISTABLE_EVENT_TYPES:
+        # 上游新增 event_type 但忘改 _PERSISTABLE_EVENT_TYPES 会导致事件静默丢失，
+        # 上线后只能事后才发现「audit 漏了」。这里记一次 warning（按 type 去重避免刷屏）。
+        if event_type_text and event_type_text not in _unknown_event_types_warned:
+            _unknown_event_types_warned.add(event_type_text)
+            logger.warning(
+                "outbox_sink: dropping non-persistable event_type=%s (add to _PERSISTABLE_EVENT_TYPES if audit needed)",
+                event_type_text,
+            )
         return None
     payload = getattr(event, "payload", {})
     if not isinstance(payload, Mapping):
@@ -172,6 +190,31 @@ def _project_payload(event_type: str, payload: Mapping[str, Any]) -> dict[str, A
             if key in payload:
                 settle_projected[key] = payload[key]
         return settle_projected
+    if event_type in (
+        DomainEventType.ORDER_CANCEL_REQUESTED.value,
+        DomainEventType.ORDER_CANCELLED.value,
+        DomainEventType.REPLACE_ORDER_SUBMITTED.value,
+    ):
+        # 投影 cancel / replace 的 admin / 策略意图字段——避免把整个 order snapshot
+        # 落 audit（那块在 ORDER_STATE_UPDATED 里）。
+        order_action_projected: dict[str, Any] = {}
+        for key in (
+            "operator",
+            "reason",
+            "order_id",
+            "trade_id",
+            "old_price",
+            "new_price",
+            "old_size_shares",
+            "new_size_shares",
+            "side",
+            "order_type",
+            "result_status",
+            "occurred_at",
+        ):
+            if key in payload:
+                order_action_projected[key] = payload[key]
+        return order_action_projected
     if event_type in (DomainEventType.TRADING_PAUSED.value, DomainEventType.TRADING_RESUMED.value):
         trading_projected: dict[str, Any] = {}
         for key in (

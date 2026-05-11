@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from polymarket_trader.api.deps import get_admin_service
@@ -9,7 +11,25 @@ from polymarket_trader.app.portfolio_history_service import (
     DEFAULT_WINDOW_MS,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
+
+
+def _runtime_error_detail(exc: RuntimeError) -> str:
+    """503 detail 收紧：只暴露已知常量码，其他 RuntimeError 一律 generic + log。
+
+    portfolio 端点底层会触碰 DB / runtime 状态；未来 lib 抛 RuntimeError 时
+    message 可能含 schema 字段或栈帧，直接透传到 HTTP detail 是潜在信息泄漏。
+    白名单内的常量码（service 自己 raise）安全透传，其他统一 generic。
+    """
+
+    text = str(exc).strip()
+    # service / runtime 自己拼的常量码——形如 "db_session_factory_unavailable"，无 whitespace
+    if text and "_" in text and " " not in text and len(text) <= 80:
+        return text
+    logger.warning("portfolio endpoint runtime error (detail suppressed): %s", text)
+    return "portfolio_service_unavailable"
 
 
 @router.get("")
@@ -29,7 +49,7 @@ async def get_equity_curve(
             interval_ms=interval_ms,
         )
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=_runtime_error_detail(exc)) from exc
 
 
 @router.get("/risk-metrics")
@@ -53,7 +73,7 @@ async def get_risk_metrics(
             annualization_factor=annualization_factor,
         )
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=503, detail=_runtime_error_detail(exc)) from exc
 
 
 @router.get("/pnl-breakdown")

@@ -14,11 +14,12 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, AsyncIterator, Callable
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from polymarket_trader.api.deps import build_time_range
+from polymarket_trader.api.rate_limit import rate_limit
 from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db.models import AuditEventModel, FillModel, OrderModel
 from polymarket_trader.infra.db.repositories import (
@@ -170,6 +171,7 @@ async def export_resource(
     since: int | None = Query(default=None, ge=0, description="epoch_ms inclusive lower bound"),
     until: int | None = Query(default=None, ge=0, description="epoch_ms inclusive upper bound"),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, description="max rows; capped at 100000"),
+    _rate: None = Depends(rate_limit(endpoint="export_resource", qps=0.2, burst=1)),
 ) -> StreamingResponse:
     if resource not in _ALLOWED_RESOURCES:
         raise HTTPException(

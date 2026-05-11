@@ -15,7 +15,7 @@ from decimal import Decimal
 
 from typing import Literal
 
-from polymarket_trader.domain.fees import FeeQuote, calculate_trade_fee
+from polymarket_trader.domain.fees import FeeQuote, calculate_trade_fee, resolve_taker_fee_rate_bps
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import OrderResultStatus, OrderSide, OrderType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
@@ -96,7 +96,7 @@ def _simulate_buy(
             fee_quote=None,
         )
 
-    fee_rate_bps = _resolve_fee_rate_bps(market)
+    fee_rate_bps = resolve_taker_fee_rate_bps(market)
     # 逐档求 fee：Polymarket 公式含 min(price, 1-price) 在 0.5 附近非线性，
     # 跨档撮合时按 avg_price 单次估算会偏离逐档求和；故按 consumed_levels 累加。
     fee_quote = _aggregate_fees(
@@ -187,7 +187,7 @@ def _simulate_sell(
             fee_quote=None,
         )
 
-    fee_rate_bps = _resolve_fee_rate_bps(market)
+    fee_rate_bps = resolve_taker_fee_rate_bps(market)
     fee_quote = _aggregate_fees(
         match=match,
         side="sell",
@@ -265,20 +265,6 @@ def _aggregate_fees(
         liquidity_role="taker",
         price_source=price_source,
     )
-
-
-def _resolve_fee_rate_bps(market: Market | None) -> int | None:
-    """与 ``domain/fees.py::_resolve_effective_taker_fee_rate_bps`` 同语义。"""
-
-    if market is None:
-        return None
-    if market.fees_enabled is False:
-        return 0
-    if market.fee_rate_bps is not None:
-        return market.fee_rate_bps
-    if market.taker_base_fee_bps is not None:
-        return market.taker_base_fee_bps
-    return None
 
 
 def _decimal(value: Decimal | str | None) -> Decimal:

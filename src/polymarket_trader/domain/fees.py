@@ -93,7 +93,7 @@ def build_taker_fee_preview(
         return None
 
     normalized_basis = _normalize_size(basis_size_shares)
-    effective_fee_rate_bps = _resolve_effective_taker_fee_rate_bps(market)
+    effective_fee_rate_bps = resolve_taker_fee_rate_bps(market)
     if effective_fee_rate_bps is None:
         return None
 
@@ -132,7 +132,16 @@ def build_taker_fee_preview(
     )
 
 
-def _resolve_effective_taker_fee_rate_bps(market: Market) -> int | None:
+def resolve_taker_fee_rate_bps(market: Market | None) -> int | None:
+    """决定一个市场该按多少 bps 收 taker fee。
+
+    优先级：``fees_enabled=False`` → 0；``fee_rate_bps`` 覆盖值 → 用它；否则
+    ``taker_base_fee_bps``；都没就 ``None``（caller 自行决定 fallback）。
+    ``market is None`` 同样返回 ``None``——paper engine 偶尔会被传入未登记的市场。
+    """
+
+    if market is None:
+        return None
     if market.fees_enabled is False:
         return 0
     if market.fee_rate_bps is not None:

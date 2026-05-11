@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from polymarket_trader.api.deps import build_time_range, get_admin_service
+from polymarket_trader.api.rate_limit import rate_limit
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.infra.polymarket import PolymarketClientError
 
@@ -129,6 +130,7 @@ async def get_market_prices_history(
     interval: Literal["max", "all", "1m", "1w", "1d", "6h", "1h"] | None = Query(default=None),
     fidelity: int | None = Query(default=None, ge=1),
     service: AdminService = Depends(get_admin_service),
+    _rate: None = Depends(rate_limit(endpoint="prices_history", qps=2.0, burst=5)),
 ) -> dict[str, object]:
     if start_ts is not None and end_ts is not None and start_ts > end_ts:
         raise HTTPException(status_code=422, detail="start_ts must be <= end_ts")
