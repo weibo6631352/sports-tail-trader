@@ -231,6 +231,56 @@ class AdminControlsMixin:
             "review": self._serializer().review(review),
         }
 
+    async def record_market_settlement(
+        self,
+        *,
+        condition_id: str,
+        winning_token_id: str,
+        winning_outcome: str | None = None,
+        source: str = "manual",
+        operator: str = "manual",
+    ) -> dict[str, Any]:
+        """手工记录市场结算结果——触发 ``MARKET_SETTLED`` 事件。
+
+        当前没有自动 settlement 抓取链路；运维确认 outcome 后调用这里，事件
+        会落 ``audit_events``（event_title=``market_settled``），给 calibration
+        / Brier score 提供 ground truth。
+        """
+
+        from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
+
+        event_bus = getattr(self.runtime, "event_bus", None)
+        if event_bus is None:
+            return {"status": "failed", "reason": "event_bus_unavailable"}
+        trace_id = uuid4().hex
+        await event_bus.publish(
+            OutboxPriority.P3,
+            DomainEvent(
+                trace_id=trace_id,
+                event_type=DomainEventType.MARKET_SETTLED,
+                event_id=uuid4().hex,
+                condition_id=condition_id,
+                token_id=winning_token_id,
+                reason="manual_settlement",
+                payload={
+                    "winning_token_id": winning_token_id,
+                    "winning_outcome": winning_outcome,
+                    "settled_at": datetime.now(timezone.utc).isoformat(),
+                    "source": source,
+                    "operator": operator,
+                },
+            ),
+        )
+        return {
+            "status": "ok",
+            "trace_id": trace_id,
+            "condition_id": condition_id,
+            "winning_token_id": winning_token_id,
+            "winning_outcome": winning_outcome,
+            "source": source,
+            "operator": operator,
+        }
+
     async def pause_trading(
         self,
         *,

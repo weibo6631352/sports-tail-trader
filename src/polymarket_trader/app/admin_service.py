@@ -34,6 +34,7 @@ from polymarket_trader.infra.db import (
     FillRepository,
     MarketRepository,
     OrderRepository,
+    OrderbookSnapshotRepository,
     OutboxEventRepository,
     PositionRepository,
     RepositoryPage,
@@ -362,6 +363,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
                 allocation=AllocationRepository(session),
                 decision=DecisionRecordRepository(session),
                 outbox=OutboxEventRepository(session),
+                orderbook=OrderbookSnapshotRepository(session),
             )
             return await callback(repositories)
 

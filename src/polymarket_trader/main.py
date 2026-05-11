@@ -160,6 +160,7 @@ class RuntimeComponents:
     season_odds_worker: SportsSeasonOddsWorker | None = None
     season_state_client: Any | None = None
     season_odds_client: Any | None = None
+    parameter_store: Any | None = None
 
 
 def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateClient:
@@ -509,6 +510,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     trading_service = TradingService(
         executor=order_executor,
         lifecycle_bus=lifecycle_bus,
+        event_bus=event_bus,
     )
     user_ws_worker = UserWsWorker(
         strategy_id=strategy_id,
@@ -533,6 +535,9 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
             event_slug=market.event_slug,
         )
 
+    from polymarket_trader.app.parameter_store import ParameterStore
+
+    parameter_store = ParameterStore(event_bus=event_bus)
     trading_decision_worker = TradingDecisionWorker(
         event_bus=event_bus,
         trading_decision_service=trading_decision_service,
@@ -545,6 +550,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         max_open_orders=settings.max_open_orders,
         order_retry_limit=settings.order_retry_limit,
         entry_metadata_provider=entry_metadata_for_event,
+        parameter_store=parameter_store,
     )
     reconcile_service = ReconcileService(
         extension_hooks=extension.hooks,
@@ -631,6 +637,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         readiness=readiness,
         extensions=(extension,),
         logging_runtime=logging_runtime,
+        parameter_store=parameter_store,
         gamma_client=gamma_client,
         clob_client=clob_client,
         data_client=data_client,

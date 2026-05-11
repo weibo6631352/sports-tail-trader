@@ -41,6 +41,115 @@ from polymarket_trader.infra.db import RepositoryPage
 from polymarket_trader.infra.polymarket import PolymarketClientError
 
 
+_LATENCY_STAGES: tuple[tuple[str, str, str], ...] = (
+    ("queue_to_sign", "queued_at", "signed_at"),
+    ("sign_to_submit", "sign_started_at", "submitted_at"),
+    ("submit_to_ack", "submitted_at", "ack_at"),
+    ("queue_to_ack", "queued_at", "ack_at"),
+)
+
+_LATENCY_PERCENTILES: tuple[float, ...] = (0.5, 0.9, 0.95, 0.99)
+
+
+def _parse_iso(ts: Any) -> datetime | None:
+    if ts is None or not isinstance(ts, str):
+        return None
+    text = ts.strip()
+    if not text:
+        return None
+    try:
+        value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _percentile(values: list[float], q: float) -> float | None:
+    """线性插值的百分位数；空样本返回 None。
+
+    避免引入 numpy 依赖；纯 Python 实现，按 PostgreSQL ``percentile_cont`` 同义。
+    """
+
+    if not values:
+        return None
+    if q <= 0:
+        return values[0]
+    if q >= 1:
+        return values[-1]
+    pos = q * (len(values) - 1)
+    lower_idx = int(pos)
+    frac = pos - lower_idx
+    if lower_idx + 1 >= len(values):
+        return values[lower_idx]
+    return values[lower_idx] + frac * (values[lower_idx + 1] - values[lower_idx])
+
+
+def _empty_latency_payload(
+    event_types: tuple[str, ...],
+    sample_limit: int,
+    window_ms: int | None,
+) -> dict[str, Any]:
+    return {
+        "window_ms": window_ms,
+        "sample_limit": sample_limit,
+        "event_types": list(event_types),
+        "sample_count": 0,
+        "stages": {
+            stage_name: {"count": 0, "percentiles_ms": {}, "max_ms": None, "min_ms": None}
+            for stage_name, _, _ in _LATENCY_STAGES
+        },
+    }
+
+
+def _compute_latency_payload(
+    events: tuple[Any, ...],
+    event_types: tuple[str, ...],
+    sample_limit: int,
+    window_ms: int | None,
+) -> dict[str, Any]:
+    stages: dict[str, list[float]] = {name: [] for name, _, _ in _LATENCY_STAGES}
+    for event in events:
+        payload = event.payload or {}
+        timestamps = payload.get("timestamps") if isinstance(payload, dict) else None
+        if not isinstance(timestamps, dict):
+            continue
+        parsed: dict[str, datetime | None] = {
+            key: _parse_iso(timestamps.get(key))
+            for key in ("queued_at", "sign_started_at", "signed_at", "submitted_at", "ack_at")
+        }
+        for stage_name, start_key, end_key in _LATENCY_STAGES:
+            start = parsed.get(start_key)
+            end = parsed.get(end_key)
+            if start is None or end is None:
+                continue
+            delta_ms = (end - start).total_seconds() * 1000.0
+            if delta_ms < 0:
+                continue
+            stages[stage_name].append(delta_ms)
+
+    stage_payload: dict[str, Any] = {}
+    for stage_name in stages:
+        values = sorted(stages[stage_name])
+        percentile_map = {
+            f"p{int(q * 100)}": _percentile(values, q) for q in _LATENCY_PERCENTILES
+        }
+        stage_payload[stage_name] = {
+            "count": len(values),
+            "percentiles_ms": percentile_map,
+            "max_ms": values[-1] if values else None,
+            "min_ms": values[0] if values else None,
+        }
+    return {
+        "window_ms": window_ms,
+        "sample_limit": sample_limit,
+        "event_types": list(event_types),
+        "sample_count": len(events),
+        "stages": stage_payload,
+    }
+
+
 def _decision_record_payload(record: DecisionRecord) -> dict[str, Any]:
     """决策录制行的 admin 视图——保持字段命名与 DB 列对齐。"""
 
@@ -596,6 +705,588 @@ class AdminQueryMixin:
         page = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
         return page_payload(page, serializer=self._serializer().outbox_event)
 
+    async def list_outbox_failures(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        trace_id: str | None = None,
+        event_type: str | None = None,
+        time_range: TimeRange | None = None,
+        min_retry_count: int = 1,
+    ) -> dict[str, Any]:
+        """诊断持久化链路：当前重试中或带 ``last_error`` 的 outbox 事件。
+
+        DB 是唯一真相来源；进程内存中的 ``pending_events`` 在运行时崩溃后会
+        丢失，无法反映"上一次重启前失败的事件"。
+        """
+
+        if not self._has_db_session_factory():
+            page: RepositoryPage[Any] = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
+            return page_payload(page, serializer=self._serializer().outbox_event)
+
+        async def _query(repos: _RepositoryGroup) -> RepositoryPage[Any]:
+            return await repos.outbox.list_failures_snapshot(
+                limit=limit,
+                offset=offset,
+                trace_id=trace_id,
+                event_type=event_type,
+                time_range=time_range,
+                min_retry_count=min_retry_count,
+            )
+
+        page = await self._with_repositories(_query)
+        return page_payload(page, serializer=self._serializer().outbox_event)
+
+    async def list_orderbook_history(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+        token_id: str | None = None,
+        condition_id: str | None = None,
+        time_range: TimeRange | None = None,
+    ) -> dict[str, Any]:
+        """历史盘口快照查询，按 ``received_at`` 倒序。
+
+        ``orderbook_snapshots`` 表已经在落，本接口只暴露 GET。复盘"入场那一秒
+        的盘口"用，按 token_id / condition_id + 时间窗过滤。
+        """
+
+        if not self._has_db_session_factory():
+            page: RepositoryPage[Any] = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
+            return page_payload(page, serializer=self._serializer().orderbook)
+
+        async def _query(repos: _RepositoryGroup) -> RepositoryPage[Any]:
+            return await repos.orderbook.list_snapshots(
+                limit=limit,
+                offset=offset,
+                token_id=token_id,
+                condition_id=condition_id,
+                time_range=time_range,
+            )
+
+        page = await self._with_repositories(_query)
+        return page_payload(page, serializer=self._serializer().orderbook)
+
+    async def edge_realization_snapshot(
+        self,
+        *,
+        limit: int = 200,
+        strategy_id: str | None = None,
+        condition_id: str | None = None,
+        time_range: TimeRange | None = None,
+    ) -> dict[str, Any]:
+        """Edge 实现度：预测 edge vs 实际 per-share 回报，按预测 edge 分桶聚合。
+
+        只取 ``accepted=true`` 的决策（拒绝的没有 position 对应）；对每条决策
+        从 ``decision_output`` 抽 ``fair_value`` 和 ``entry_price``，从 position 算
+        ``realized_pnl / cost`` （已平仓优先）或 ``cash_pnl / cost`` （未平仓）。
+        """
+
+        from polymarket_trader.app.edge_realization import (
+            aggregate_by_predicted_edge_buckets,
+            build_edge_realization,
+        )
+
+        if not self._has_db_session_factory():
+            return {
+                "items": [],
+                "buckets": list(aggregate_by_predicted_edge_buckets(())),
+                "limit": limit,
+            }
+
+        async def _query(repos: _RepositoryGroup) -> tuple[Any, ...]:
+            decision_page = await repos.decision.list_decisions_snapshot(
+                limit=limit,
+                offset=0,
+                accepted=True,
+                condition_id=condition_id,
+                strategy_id=strategy_id,
+                time_range=time_range,
+            )
+            decisions = tuple(decision_page.items or ())
+            keys = {(d.condition_id, d.token_id) for d in decisions if d.token_id}
+            if not keys:
+                return decisions, {}
+            position_records: dict[tuple[str, str], Any] = {}
+            condition_ids = {cid for cid, _ in keys}
+            for cid in condition_ids:
+                position_page = await repos.position.list_positions_snapshot(
+                    limit=200,
+                    offset=0,
+                    condition_id=cid,
+                    strategy_id=strategy_id,
+                )
+                for position in position_page.items or ():
+                    position_records[(position.condition_id, position.token_id)] = position
+            return decisions, position_records
+
+        decisions, positions_by_key = await self._with_repositories(_query)
+        items = build_edge_realization(
+            decisions=decisions,
+            positions_by_key=positions_by_key,
+        )
+        return {
+            "items": [item.as_payload() for item in items],
+            "buckets": list(aggregate_by_predicted_edge_buckets(items)),
+            "limit": limit,
+        }
+
+    async def pnl_breakdown_snapshot(
+        self,
+        *,
+        group_by: str,
+        strategy_id: str | None = None,
+        condition_id: str | None = None,
+        position_limit: int = 5000,
+    ) -> dict[str, Any]:
+        """按维度分解的仓位 PnL 聚合。
+
+        合法 ``group_by`` 由 ``pnl_breakdown.valid_group_by_values()`` 暴露：
+        ``strategy_id`` / ``market_slug`` / ``condition_id`` / ``category`` /
+        ``outcome`` / ``redeemable_status``。``category`` 和 ``outcome`` 维度
+        额外做一次 markets 批量 join。
+        """
+
+        from polymarket_trader.app.pnl_breakdown import (
+            aggregate_totals,
+            build_pnl_breakdown,
+            is_valid_group_by,
+            valid_group_by_values,
+        )
+
+        if not is_valid_group_by(group_by):
+            raise ValueError(
+                f"unsupported group_by: {group_by} (valid: {valid_group_by_values()})"
+            )
+
+        if not self._has_db_session_factory():
+            return {
+                "group_by": group_by,
+                "rows": [],
+                "totals": aggregate_totals(()),
+            }
+
+        needs_markets = group_by in {"category", "outcome"}
+
+        async def _query(repos: _RepositoryGroup) -> tuple[Any, ...]:
+            position_page = await repos.position.list_positions_snapshot(
+                limit=position_limit,
+                offset=0,
+                condition_id=condition_id,
+                strategy_id=strategy_id,
+            )
+            positions = tuple(position_page.items or ())
+            if not needs_markets or not positions:
+                return positions, {}
+            condition_ids = tuple({p.condition_id for p in positions if p.condition_id})
+            markets = await repos.market.list_by_condition_ids(condition_ids)
+            markets_by_condition = {m.condition_id: m for m in markets}
+            return positions, markets_by_condition
+
+        positions, markets_by_condition = await self._with_repositories(_query)
+        rows = build_pnl_breakdown(
+            positions=positions,
+            markets_by_condition=markets_by_condition,
+            group_by=group_by,
+        )
+        return {
+            "group_by": group_by,
+            "rows": [row.as_payload() for row in rows],
+            "totals": aggregate_totals(rows),
+        }
+
+    async def get_trade_timeline(
+        self,
+        *,
+        condition_id: str,
+        token_id: str | None = None,
+        time_range: TimeRange | None = None,
+        limit: int = 1000,
+        per_table_limit: int = 1000,
+    ) -> dict[str, Any]:
+        """单笔交易/单个市场全生命周期 timeline。
+
+        合并 ``decision_records / orders / fills / audit_events / outbox_events``
+        按时间戳升序，返回事件序列 + 当前 ``position`` 快照。每张表独立按
+        ``per_table_limit`` 拉，最终统一按 ``limit`` 裁剪——避免长尾市场把响应体
+        撑爆。
+        """
+
+        from polymarket_trader.app.trade_timeline import (
+            TradeTimelineInputs,
+            build_trade_timeline,
+        )
+        from polymarket_trader.domain.events import DomainEventType
+
+        if not self._has_db_session_factory():
+            return {
+                "condition_id": condition_id,
+                "token_id": token_id,
+                "event_count": 0,
+                "truncated": False,
+                "events": [],
+                "current_position": None,
+            }
+
+        reconcile_types = (
+            DomainEventType.RECONCILE_DIFF_DETECTED.value,
+            DomainEventType.RECONCILE_APPLIED.value,
+            DomainEventType.RECONCILE_STARTED.value,
+        )
+
+        async def _query(repos: _RepositoryGroup) -> TradeTimelineInputs:
+            decision_page = await repos.decision.list_decisions_snapshot(
+                limit=per_table_limit,
+                offset=0,
+                condition_id=condition_id,
+                time_range=time_range,
+            )
+            order_page = await repos.order.list_orders_snapshot(
+                limit=per_table_limit,
+                offset=0,
+                condition_id=condition_id,
+                token_id=token_id,
+                time_range=time_range,
+            )
+            fill_page = await repos.fill.list_fills_snapshot(
+                limit=per_table_limit,
+                offset=0,
+                condition_id=condition_id,
+                token_id=token_id,
+                time_range=time_range,
+            )
+            audit_page = await repos.audit.list_audit_events_snapshot(
+                limit=per_table_limit,
+                offset=0,
+                condition_id=condition_id,
+                token_id=token_id,
+                time_range=time_range,
+            )
+            outbox_page = await repos.outbox.list_events_by_types_snapshot(
+                event_types=reconcile_types,
+                limit=per_table_limit,
+                offset=0,
+                condition_id=condition_id,
+                time_range=time_range,
+            )
+            position_page = await repos.position.list_positions_snapshot(
+                limit=per_table_limit,
+                offset=0,
+                condition_id=condition_id,
+                token_id=token_id,
+            )
+            return TradeTimelineInputs(
+                decisions=tuple(decision_page.items or ()),
+                orders=tuple(order_page.items or ()),
+                fills=tuple(fill_page.items or ()),
+                audit_events=tuple(audit_page.items or ()),
+                outbox_events=tuple(outbox_page.items or ()),
+                positions=tuple(position_page.items or ()),
+            )
+
+        inputs = await self._with_repositories(_query)
+        return build_trade_timeline(
+            condition_id=condition_id,
+            token_id=token_id,
+            inputs=inputs,
+            serializer=self._serializer(),
+            limit=limit,
+        )
+
+    async def list_sports_live_events_history(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+        condition_id: str | None = None,
+        time_range: TimeRange | None = None,
+    ) -> dict[str, Any]:
+        """历史体育实时事件——按 audit_events 中 ``event_title='sports_live_state_recorded'`` 过滤。
+
+        每条事件 payload 含 score / clock / phase / signal_allowed / signal_reason
+        等比赛快照，复盘"决策时的比分/时钟/赛况"必备。
+        """
+
+        from polymarket_trader.domain.events import DomainEventType
+
+        return await self.list_audit_events(
+            limit=limit,
+            offset=offset,
+            event_title=DomainEventType.SPORTS_LIVE_STATE_RECORDED.value,
+            condition_id=condition_id,
+            time_range=time_range,
+        )
+
+    async def list_allocation_decisions(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+        condition_id: str | None = None,
+        time_range: TimeRange | None = None,
+    ) -> dict[str, Any]:
+        """AllocationPlan 决策过程历史。
+
+        Payload 含 candidates / selected_condition_ids / skipped_reasons /
+        budget——回答"为什么选这个市场、不选那个"。
+        """
+
+        from polymarket_trader.domain.events import DomainEventType
+
+        return await self.list_audit_events(
+            limit=limit,
+            offset=offset,
+            event_title=DomainEventType.ALLOCATION_DECISION_RECORDED.value,
+            condition_id=condition_id,
+            time_range=time_range,
+        )
+
+    async def list_risk_rejections(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+        condition_id: str | None = None,
+        time_range: TimeRange | None = None,
+    ) -> dict[str, Any]:
+        """风控结构化拒绝详情——含完整 ``checks[]`` 投影。
+
+        与 ``/analytics/rejections`` 的"reason 字符串 top 聚合"互补：这里要的是
+        每次拒绝的逐条 check（``check_name / failed_field / value /
+        suggested_action``），用于精确调整风控阈值。
+        """
+
+        from polymarket_trader.domain.events import DomainEventType
+
+        return await self.list_audit_events(
+            limit=limit,
+            offset=offset,
+            event_title=DomainEventType.RISK_REJECTION_RECORDED.value,
+            condition_id=condition_id,
+            time_range=time_range,
+        )
+
+    async def aggregate_risk_rejections(
+        self,
+        *,
+        time_range: TimeRange | None = None,
+        condition_id: str | None = None,
+        sample_limit: int = 1000,
+    ) -> dict[str, Any]:
+        """按 ``check_name`` 聚合风控拒绝——回答"哪条风控规则在拒哪类市场"。"""
+
+        from polymarket_trader.domain.events import DomainEventType
+
+        if not self._has_db_session_factory():
+            return {"buckets": [], "total_rejections": 0}
+
+        async def _query(repos: _RepositoryGroup) -> RepositoryPage[Any]:
+            return await repos.audit.list_audit_events_snapshot(
+                limit=sample_limit,
+                offset=0,
+                event_title=DomainEventType.RISK_REJECTION_RECORDED.value,
+                condition_id=condition_id,
+                time_range=time_range,
+            )
+
+        page = await self._with_repositories(_query)
+        from collections import Counter
+
+        check_counter: Counter[str] = Counter()
+        field_counter: Counter[str] = Counter()
+        total = 0
+        for event in (page.items or ()):
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            total += 1
+            checks = payload.get("checks")
+            if isinstance(checks, list):
+                for check in checks:
+                    if not isinstance(check, dict):
+                        continue
+                    if check.get("passed") is True:
+                        continue
+                    name = str(check.get("name") or "(unnamed)")
+                    field = str(check.get("field") or "(none)")
+                    check_counter[name] += 1
+                    field_counter[field] += 1
+        return {
+            "total_rejections": total,
+            "by_check_name": [
+                {"check_name": name, "count": cnt}
+                for name, cnt in check_counter.most_common(50)
+            ],
+            "by_failed_field": [
+                {"field": fld, "count": cnt}
+                for fld, cnt in field_counter.most_common(50)
+            ],
+        }
+
+    async def list_market_settlements(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+        condition_id: str | None = None,
+        time_range: TimeRange | None = None,
+    ) -> dict[str, Any]:
+        """市场结算（settlement）历史——含 winning_token_id / outcome / 来源。"""
+
+        from polymarket_trader.domain.events import DomainEventType
+
+        return await self.list_audit_events(
+            limit=limit,
+            offset=offset,
+            event_title=DomainEventType.MARKET_SETTLED.value,
+            condition_id=condition_id,
+            time_range=time_range,
+        )
+
+    async def calibration_snapshot(
+        self,
+        *,
+        bucket_size: Decimal = Decimal("0.05"),
+        strategy_id: str | None = None,
+        time_range: TimeRange | None = None,
+        sample_limit: int = 2000,
+    ) -> dict[str, Any]:
+        """定价模型校准 + Brier score。
+
+        对每个 ``accepted=true`` 的决策，按 ``decision_output.fair_value`` 分桶；
+        每个桶在市场结算后统计实际命中率（市场 RESOLVED 且持仓 redeemable=true
+        视为预测正确）。Brier 是 ``mean((fair_value - outcome)^2)``，越接近 0
+        校准越好。
+        """
+
+        if not self._has_db_session_factory():
+            return {
+                "bucket_size": str(bucket_size),
+                "buckets": [],
+                "brier_score": None,
+                "log_loss": None,
+                "total_samples": 0,
+                "with_outcome_count": 0,
+            }
+
+        from polymarket_trader.domain.events import DomainEventType
+
+        async def _query(repos: _RepositoryGroup) -> tuple[Any, Any]:
+            decision_page = await repos.decision.list_decisions_snapshot(
+                limit=sample_limit,
+                offset=0,
+                accepted=True,
+                strategy_id=strategy_id,
+                time_range=time_range,
+            )
+            settle_page = await repos.audit.list_audit_events_snapshot(
+                limit=sample_limit,
+                offset=0,
+                event_title=DomainEventType.MARKET_SETTLED.value,
+                time_range=None,
+            )
+            return decision_page, settle_page
+
+        decision_page, settle_page = await self._with_repositories(_query)
+        from polymarket_trader.app.calibration import build_calibration
+
+        return build_calibration(
+            decisions=tuple(decision_page.items or ()),
+            settlements=tuple(settle_page.items or ()),
+            bucket_size=bucket_size,
+        )
+
+    async def list_reconcile_diffs(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        trace_id: str | None = None,
+        condition_id: str | None = None,
+        time_range: TimeRange | None = None,
+        include_started: bool = False,
+        include_applied: bool = True,
+    ) -> dict[str, Any]:
+        """从 outbox_events 拉 reconcile 相关事件作为结构化 diff 视图。
+
+        默认返回 ``reconcile_diff_detected``（每条差异 + action_type / target /
+        pause_reason / metadata）和 ``reconcile_applied``（每次执行结果汇总）；
+        要看每轮调度起点可加 ``include_started=true``。
+        """
+
+        from polymarket_trader.domain.events import DomainEventType
+
+        event_types: list[str] = [DomainEventType.RECONCILE_DIFF_DETECTED.value]
+        if include_applied:
+            event_types.append(DomainEventType.RECONCILE_APPLIED.value)
+        if include_started:
+            event_types.append(DomainEventType.RECONCILE_STARTED.value)
+
+        if not self._has_db_session_factory():
+            page: RepositoryPage[Any] = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
+            return page_payload(page, serializer=self._serializer().outbox_event)
+
+        async def _query(repos: _RepositoryGroup) -> RepositoryPage[Any]:
+            return await repos.outbox.list_events_by_types_snapshot(
+                event_types=tuple(event_types),
+                limit=limit,
+                offset=offset,
+                trace_id=trace_id,
+                condition_id=condition_id,
+                time_range=time_range,
+            )
+
+        page = await self._with_repositories(_query)
+        return page_payload(page, serializer=self._serializer().outbox_event)
+
+    async def latency_percentiles_snapshot(
+        self,
+        *,
+        window_ms: int | None = None,
+        sample_limit: int = 500,
+        event_types: tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
+        """计算订单执行 latency 分位数（queue→sign / sign→submit / submit→ack / queue→ack）。
+
+        从 outbox_events.payload->'timestamps' 抽 ``queued_at`` /
+        ``sign_started_at`` / ``signed_at`` / ``submitted_at`` / ``ack_at``，
+        按事件 fan-out 计算 stage 间 latency 毫秒；P0 实时性观测刚需。
+        """
+
+        from polymarket_trader.domain.events import DomainEventType
+
+        types = event_types or (
+            DomainEventType.ORDER_SUBMITTED.value,
+            DomainEventType.ORDER_SIGNED.value,
+            DomainEventType.ORDER_MATCHED.value,
+            DomainEventType.ORDER_PARTIALLY_FILLED.value,
+            DomainEventType.ORDER_NO_FILL.value,
+            DomainEventType.ORDER_REJECTED.value,
+            DomainEventType.ORDER_CANCEL_REQUESTED.value,
+            DomainEventType.ORDER_CANCELLED.value,
+            DomainEventType.REPLACE_ORDER_SUBMITTED.value,
+        )
+
+        time_range: TimeRange | None = None
+        if window_ms is not None and window_ms > 0:
+            now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+            time_range = TimeRange(since_ms=now_ms - window_ms, until_ms=now_ms)
+
+        if not self._has_db_session_factory():
+            return _empty_latency_payload(types, sample_limit, window_ms)
+
+        async def _query(repos: _RepositoryGroup) -> RepositoryPage[Any]:
+            return await repos.outbox.list_events_by_types_snapshot(
+                event_types=types,
+                limit=sample_limit,
+                offset=0,
+                time_range=time_range,
+            )
+
+        page = await self._with_repositories(_query)
+        events = tuple(page.items or ())
+        return _compute_latency_payload(events, types, sample_limit, window_ms)
+
     async def portfolio_equity_curve(
         self,
         *,
@@ -683,6 +1374,23 @@ class AdminQueryMixin:
 
     def metrics_snapshot(self) -> dict[str, Any]:
         return self._runtime_view().metrics_snapshot()
+
+    async def get_decision_record(self, record_id: str) -> dict[str, Any] | None:
+        """按 ``record_id`` 取单条策略决策详情。
+
+        相对 ``/admin/decisions/dump`` 的列表分页，这里返回单条 + 完整
+        ``decision_input`` / ``decision_output`` JSONB——便于从 trade timeline
+        点开后做"为什么决定/拒绝"的根因追查。
+        """
+
+        if not self._has_db_session_factory():
+            return None
+
+        async def _query(repos: _RepositoryGroup) -> DecisionRecord | None:
+            return await repos.decision.get_by_record_id(record_id)
+
+        record = await self._with_repositories(_query)
+        return None if record is None else _decision_record_payload(record)
 
     async def list_decisions(
         self,

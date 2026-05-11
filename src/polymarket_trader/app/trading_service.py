@@ -35,10 +35,15 @@ class TradingService:
         risk_manager: RiskManager | None = None,
         executor: object | None = None,
         lifecycle_bus: LifecyclePublisher | None = None,
+        event_bus: Any | None = None,
     ) -> None:
         self._risk_manager = risk_manager or RiskManager()
         self._executor = executor
         self._lifecycle_bus = lifecycle_bus
+        # 风控拒绝结构化落库走 event_bus → outbox → audit_events。可选，旧测试
+        # 不传也行；CLAUDE.md §3 要求 RiskManager 是强制门禁，但 §7 又要 P0 主
+        # 链路只允许 put_nowait，所以投递失败不能反向阻塞 review_intent。
+        self._event_bus = event_bus
 
     async def review_intent(
         self,
@@ -113,6 +118,9 @@ class TradingService:
             )
             submitted = False
             submission_error = None
+            # 风控拒绝结构化落库——交易主链路已完成判定，此投递只走 put_nowait，
+            # 不 await DB；失败时静默以保 §7 不反向阻塞。
+            self._publish_risk_rejection(intent=intent, risk_decision=risk_decision, operation=operation)
         self._publish_lifecycle(
             intent=intent,
             operation=operation,
@@ -183,6 +191,84 @@ class TradingService:
             order_result=order_result,
             submission_error=submission_error,
         )
+
+    def _publish_risk_rejection(
+        self,
+        *,
+        intent: ManagedOrderIntent,
+        risk_decision: RiskDecision,
+        operation: str,
+    ) -> None:
+        """风控拒绝结构化事件——payload 含每条 RiskCheck 的细节。
+
+        ``event_bus`` 是可选注入；缺失或失败都静默——P0 主链路已判定完成，
+        审计落库属于副作用，不能反向阻塞（§7）。
+        """
+
+        bus = self._event_bus
+        if bus is None:
+            return
+        from polymarket_trader.domain.events import (
+            DomainEvent,
+            DomainEventType,
+            OutboxPriority,
+        )
+        from uuid import uuid4
+
+        checks_payload = [
+            {
+                "name": check.name,
+                "passed": check.passed,
+                "reason": check.reason,
+                "field": check.field,
+                "value": None if check.value is None else str(check.value),
+                "suggested_action": check.suggested_action,
+                "retryable": check.retryable,
+            }
+            for check in (risk_decision.checks or ())
+        ]
+        intent_summary = {
+            "operation": operation,
+            "side": getattr(intent.side, "value", None) if hasattr(intent, "side") else None,
+            "price": str(getattr(intent, "price", "")) if hasattr(intent, "price") else None,
+            "amount_usdc": (
+                str(intent.amount_usdc) if hasattr(intent, "amount_usdc") and intent.amount_usdc is not None else None
+            ),
+            "size_shares": (
+                str(intent.size_shares) if hasattr(intent, "size_shares") and intent.size_shares is not None else None
+            ),
+        }
+        event = DomainEvent(
+            trace_id=intent.trace_id,
+            event_type=DomainEventType.RISK_REJECTION_RECORDED,
+            event_id=uuid4().hex,
+            market_slug=getattr(intent, "market_slug", None),
+            condition_id=intent.condition_id,
+            token_id=getattr(intent, "token_id", None),
+            reason=risk_decision.reason or "risk_rejected",
+            payload={
+                "passed": False,
+                "reason": risk_decision.reason,
+                "failed_field": risk_decision.failed_field,
+                "checks": checks_payload,
+                "intent_summary": intent_summary,
+                "decision_kind": operation,
+            },
+        )
+        try:
+            maybe = bus.publish(OutboxPriority.P3, event)
+            if isawaitable(maybe):
+                # event_bus.publish 通常是 async；在 sync 上下文里挂个 background task
+                # 来避免改变 review_intent 的同步语义。
+                import asyncio
+
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(maybe)
+                except RuntimeError:
+                    return
+        except Exception:
+            return
 
     def _publish_lifecycle(
         self,

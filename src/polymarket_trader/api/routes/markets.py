@@ -5,7 +5,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.deps import get_admin_service
+from polymarket_trader.api.deps import build_time_range, get_admin_service
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.infra.polymarket import PolymarketClientError
 
@@ -94,6 +94,33 @@ async def get_market_midpoint(
     return payload
 
 
+@router.get("/orderbook-history")
+async def list_orderbook_history(
+    limit: int = Query(default=200, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
+    token_id: str | None = Query(default=None, min_length=1),
+    condition_id: str | None = Query(default=None, min_length=1),
+    since: int | None = Query(default=None, ge=0),
+    until: int | None = Query(default=None, ge=0),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """历史盘口快照查询，按 ``received_at`` 倒序。
+
+    ``orderbook_snapshots`` 表已经在落，本接口只暴露 GET。复盘"入场那一秒
+    的盘口"用——按 token_id / condition_id + 时间窗过滤。
+    """
+
+    if token_id is None and condition_id is None:
+        raise HTTPException(status_code=422, detail="token_id_or_condition_id_required")
+    return await service.list_orderbook_history(
+        limit=limit,
+        offset=offset,
+        token_id=token_id,
+        condition_id=condition_id,
+        time_range=build_time_range(since=since, until=until),
+    )
+
+
 @router.get("/prices-history")
 async def get_market_prices_history(
     token_id: str = Query(min_length=1),
@@ -179,5 +206,54 @@ async def resume_market(
 ) -> dict[str, object]:
     return await service.resume_market_manual(
         condition_id=request.condition_id,
+        operator=request.operator,
+    )
+
+
+class SettleMarketRequest(BaseModel):
+    condition_id: str = Field(min_length=1)
+    winning_token_id: str = Field(min_length=1)
+    winning_outcome: str | None = None
+    source: str = Field(default="manual")
+    operator: str = "manual"
+
+
+@router.get("/settlements")
+async def list_market_settlements(
+    limit: int = Query(default=200, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
+    condition_id: str | None = Query(default=None),
+    since: int | None = Query(default=None, ge=0),
+    until: int | None = Query(default=None, ge=0),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """市场结算历史——按 ``event_title='market_settled'`` 投影。"""
+
+    return await service.list_market_settlements(
+        limit=limit,
+        offset=offset,
+        condition_id=condition_id,
+        time_range=build_time_range(since=since, until=until),
+    )
+
+
+@router.post("/settle")
+async def settle_market(
+    request: SettleMarketRequest,
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """手工记录市场结算结果。
+
+    目前没有自动 settlement 抓取链路；此接口让运维在确认 outcome 后写入
+    ``market_settled`` 事件，给 calibration / Brier score 提供 ground truth。
+    payload 含 ``winning_token_id`` / ``winning_outcome`` / ``source`` /
+    ``operator``。
+    """
+
+    return await service.record_market_settlement(
+        condition_id=request.condition_id,
+        winning_token_id=request.winning_token_id,
+        winning_outcome=request.winning_outcome,
+        source=request.source,
         operator=request.operator,
     )

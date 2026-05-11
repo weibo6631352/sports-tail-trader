@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.deps import get_admin_service
+from polymarket_trader.api.deps import build_time_range, get_admin_service
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.app.virtual_paper_trading import run_virtual_paper_trade
 
@@ -38,6 +38,37 @@ async def reconcile(
     return await service.reconcile(
         trace_id=request.trace_id,
         condition_ids=tuple(request.condition_ids),
+    )
+
+
+@router.get("/reconcile/diffs")
+async def list_reconcile_diffs(
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    trace_id: str | None = Query(default=None),
+    condition_id: str | None = Query(default=None),
+    since: int | None = Query(default=None, ge=0),
+    until: int | None = Query(default=None, ge=0),
+    include_started: bool = Query(default=False),
+    include_applied: bool = Query(default=True),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """Reconcile diff 结构化视图。
+
+    从 outbox_events 中筛 ``reconcile_diff_detected`` / ``reconcile_applied`` /
+    可选 ``reconcile_started``，payload 含 action_type / target_size_shares /
+    target_notional_usdc / pause_reason / metadata，回答"对账在修什么、修了
+    几次、根因分布"。
+    """
+
+    return await service.list_reconcile_diffs(
+        limit=limit,
+        offset=offset,
+        trace_id=trace_id,
+        condition_id=condition_id,
+        time_range=build_time_range(since=since, until=until),
+        include_started=include_started,
+        include_applied=include_applied,
     )
 
 

@@ -30,3 +30,32 @@ async def get_equity_curve(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/pnl-breakdown")
+async def get_pnl_breakdown(
+    group_by: str = Query(
+        default="strategy_id",
+        description="strategy_id | market_slug | condition_id | category | outcome | redeemable_status",
+    ),
+    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
+    condition_id: str | None = Query(default=None, min_length=1),
+    position_limit: int = Query(default=5000, ge=1, le=20000),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """按维度分解的 PnL 聚合。
+
+    回答"哪个 strategy / market / category / outcome 是赚钱主力，哪个在烧钱"。
+    ``category`` 和 ``outcome`` 维度会做一次 markets 批量 join；其他维度直接
+    走 positions 表，零 join 成本。
+    """
+
+    try:
+        return await service.pnl_breakdown_snapshot(
+            group_by=group_by,
+            strategy_id=strategy_id,
+            condition_id=condition_id,
+            position_limit=position_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

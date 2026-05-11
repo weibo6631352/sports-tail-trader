@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, AsyncIterator, Generic, Iterable, Sequence, TypeVar, cast
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -255,6 +255,16 @@ class MarketRepository(BaseRepository):
         )
         return None if row is None else row.to_domain()
 
+    async def list_by_condition_ids(self, condition_ids: Sequence[str]) -> tuple[Market, ...]:
+        """按 ``condition_id`` 集合批量取 markets——给跨表聚合（如 PnL breakdown）用。"""
+
+        ids = tuple(set(cid for cid in condition_ids if cid))
+        if not ids:
+            return ()
+        stmt = select(MarketModel).where(MarketModel.condition_id.in_(ids))
+        result = await self._session.scalars(stmt)
+        return tuple(row.to_domain() for row in result.all())
+
     async def list_markets_snapshot(
         self,
         *,
@@ -433,6 +443,7 @@ class OrderbookSnapshotRepository(BaseRepository):
         offset: int = 0,
         token_id: str | None = None,
         condition_id: str | None = None,
+        time_range: TimeRange | None = None,
     ) -> RepositoryPage[OrderbookSnapshot]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(OrderbookSnapshotModel).order_by(
@@ -443,6 +454,12 @@ class OrderbookSnapshotRepository(BaseRepository):
             stmt = stmt.where(OrderbookSnapshotModel.token_id == token_id)
         if condition_id is not None:
             stmt = stmt.where(OrderbookSnapshotModel.condition_id == condition_id)
+        if time_range is not None and not time_range.is_empty:
+            since_dt, until_dt = time_range.to_datetime_range()
+            if since_dt is not None:
+                stmt = stmt.where(OrderbookSnapshotModel.received_at >= since_dt)
+            if until_dt is not None:
+                stmt = stmt.where(OrderbookSnapshotModel.received_at <= until_dt)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(
             items=tuple(row.to_domain() for row in rows),
@@ -1120,6 +1137,11 @@ class DecisionRecordRepository(BaseRepository):
     async def save_decision_record(self, record: DecisionRecord) -> int:
         return await self.save_decision_records([record])
 
+    async def get_by_record_id(self, record_id: str) -> DecisionRecord | None:
+        stmt = select(DecisionRecordModel).where(DecisionRecordModel.record_id == record_id).limit(1)
+        row = await self._session.scalar(stmt)
+        return None if row is None else row.to_domain()
+
     async def save_decision_records(self, records: Iterable[DecisionRecord]) -> int:
         records = tuple(records)
         if not records:
@@ -1228,6 +1250,102 @@ class OutboxEventRepository(BaseRepository):
         )
         if trace_id is not None:
             stmt = stmt.where(OutboxEventModel.trace_id == trace_id)
+        rows, total = await self._paginate(stmt, limit=limit, offset=offset)
+        return RepositoryPage(
+            items=tuple(row.to_domain() for row in rows),
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def list_events_by_types_snapshot(
+        self,
+        *,
+        event_types: Sequence[str],
+        limit: int = 100,
+        offset: int = 0,
+        trace_id: str | None = None,
+        condition_id: str | None = None,
+        time_range: TimeRange | None = None,
+    ) -> RepositoryPage[OutboxEvent]:
+        """按 ``event_type`` 白名单分页查询 outbox 事件。
+
+        outbox_events 表是 append-only 审计层：lifecycle / reconcile / fill 等事件
+        都会先落 outbox 再被消费，本接口给上层做"按事件类型回放"用，按
+        ``created_at`` 倒序。
+        """
+
+        limit, offset = _limit_offset(limit, offset)
+        types = tuple(event_types or ())
+        if not types:
+            return RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
+        stmt = (
+            select(OutboxEventModel)
+            .where(OutboxEventModel.event_type.in_(types))
+            .order_by(
+                OutboxEventModel.created_at.desc(),
+                OutboxEventModel.id.desc(),
+            )
+        )
+        if trace_id is not None:
+            stmt = stmt.where(OutboxEventModel.trace_id == trace_id)
+        if condition_id is not None:
+            stmt = stmt.where(OutboxEventModel.condition_id == condition_id)
+        if time_range is not None and not time_range.is_empty:
+            since_dt, until_dt = time_range.to_datetime_range()
+            if since_dt is not None:
+                stmt = stmt.where(OutboxEventModel.created_at >= since_dt)
+            if until_dt is not None:
+                stmt = stmt.where(OutboxEventModel.created_at <= until_dt)
+        rows, total = await self._paginate(stmt, limit=limit, offset=offset)
+        return RepositoryPage(
+            items=tuple(row.to_domain() for row in rows),
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def list_failures_snapshot(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        trace_id: str | None = None,
+        event_type: str | None = None,
+        time_range: TimeRange | None = None,
+        min_retry_count: int = 1,
+    ) -> RepositoryPage[OutboxEvent]:
+        """Outbox 失败/重试事件视图。
+
+        与 ``list_pending_snapshot`` 互补：这里只回 ``retry_count >= min_retry_count``
+        或 ``last_error IS NOT NULL`` 的事件，按 ``updated_at`` 倒序，用于诊断
+        持久化链路的问题。
+        """
+
+        limit, offset = _limit_offset(limit, offset)
+        stmt = (
+            select(OutboxEventModel)
+            .where(
+                or_(
+                    OutboxEventModel.retry_count >= max(min_retry_count, 0),
+                    OutboxEventModel.last_error.isnot(None),
+                )
+            )
+            .order_by(
+                OutboxEventModel.updated_at.desc(),
+                OutboxEventModel.id.desc(),
+            )
+        )
+        if trace_id is not None:
+            stmt = stmt.where(OutboxEventModel.trace_id == trace_id)
+        if event_type is not None:
+            stmt = stmt.where(OutboxEventModel.event_type == event_type)
+        if time_range is not None and not time_range.is_empty:
+            since_dt, until_dt = time_range.to_datetime_range()
+            if since_dt is not None:
+                stmt = stmt.where(OutboxEventModel.updated_at >= since_dt)
+            if until_dt is not None:
+                stmt = stmt.where(OutboxEventModel.updated_at <= until_dt)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(
             items=tuple(row.to_domain() for row in rows),

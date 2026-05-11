@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 from uuid import uuid4
 
 from polymarket_trader.app.trading_decision_service import EntryPlan, TradingDecisionService
@@ -97,6 +97,7 @@ class TradingDecisionWorker:
         max_open_orders: int | None = None,
         order_retry_limit: int | None = None,
         entry_metadata_provider: EntryMetadataProvider | None = None,
+        parameter_store: Any | None = None,
     ) -> None:
         self._event_bus = event_bus
         if trading_decision_service is None:
@@ -106,15 +107,18 @@ class TradingDecisionWorker:
         self._account_state_store = account_state_store
         self._positions_provider = positions_provider or self._build_positions_provider()
         self._open_orders_provider = open_orders_provider or self._build_open_orders_provider()
-        self._portfolio_budget_usdc = portfolio_budget_usdc
+        # 静态启动值（来自 Settings）；运行时通过 ``parameter_store`` 的 override
+        # 覆盖。每次 review 前用 property 读出当前值——这样 agent PUT 后立刻生效。
+        self._portfolio_budget_usdc_default = portfolio_budget_usdc
         self._available_usdc = available_usdc
-        self._max_order_usdc = max_order_usdc
-        self._max_market_usdc = max_market_usdc
-        self._max_total_usdc = max_total_usdc
+        self._max_order_usdc_default = max_order_usdc
+        self._max_market_usdc_default = max_market_usdc
+        self._max_total_usdc_default = max_total_usdc
         self._balance_usdc = balance_usdc
         self._allowance_usdc = allowance_usdc
-        self._max_open_orders = max_open_orders
-        self._order_retry_limit = order_retry_limit
+        self._max_open_orders_default = max_open_orders
+        self._order_retry_limit_default = order_retry_limit
+        self._parameter_store = parameter_store
         self._entry_metadata_provider = entry_metadata_provider
         self._market_lifecycle: dict[str, MarketLifecycle] = {}
         self._order_result_processor = TradingOrderResultProcessor(
@@ -123,6 +127,36 @@ class TradingDecisionWorker:
             trading_service=self._trading_service,
             account_state_store=self._account_state_store,
         )
+
+    def _param_override(self, key: str, default: Any) -> Any:
+        store = self._parameter_store
+        if store is None:
+            return default
+        return store.get("settings", key, default=default)
+
+    @property
+    def _portfolio_budget_usdc(self) -> Decimal:
+        return self._param_override("portfolio_budget_usdc", self._portfolio_budget_usdc_default)
+
+    @property
+    def _max_order_usdc(self) -> Decimal:
+        return self._param_override("max_order_usdc", self._max_order_usdc_default)
+
+    @property
+    def _max_market_usdc(self) -> Decimal:
+        return self._param_override("max_market_usdc", self._max_market_usdc_default)
+
+    @property
+    def _max_total_usdc(self) -> Decimal:
+        return self._param_override("max_total_usdc", self._max_total_usdc_default)
+
+    @property
+    def _max_open_orders(self) -> int | None:
+        return self._param_override("max_open_orders", self._max_open_orders_default)
+
+    @property
+    def _order_retry_limit(self) -> int | None:
+        return self._param_override("order_retry_limit", self._order_retry_limit_default)
 
     async def run(self) -> None:
         if self._event_bus is None:
@@ -186,6 +220,10 @@ class TradingDecisionWorker:
             ),
             metadata=self._entry_metadata(event, snapshot),
         )
+        # AllocationPlan 决策过程结构化落库——payload 含每个候选的 reason /
+        # release_reason / target_budget / buy_budget，回答"为什么选这个市场
+        # 不选那个"。P3 异步，失败静默；策略层不感知。
+        await self._publish_allocation_decision(event=event, plan=plan)
         if plan.market is None or plan.orderbook is None or event.token_id != plan.orderbook.token_id:
             return None
 
@@ -514,6 +552,66 @@ class TradingDecisionWorker:
             emitted_events=emitted_events_tuple,
             state_after=self._state_for_market(plan.market),
         )
+
+    async def _publish_allocation_decision(
+        self,
+        *,
+        event: DomainEvent,
+        plan: EntryPlan,
+    ) -> None:
+        """投递 ALLOCATION_DECISION_RECORDED 事件。失败静默，不阻塞主链路。"""
+
+        if self._event_bus is None or plan.allocation_plan is None:
+            return
+        allocation_plan = plan.allocation_plan
+        candidates = []
+        for allocation in allocation_plan.allocations:
+            candidates.append(
+                {
+                    "condition_id": allocation.condition_id,
+                    "token_id": allocation.token_id,
+                    "market_slug": allocation.market_slug,
+                    "target_budget_usdc": str(allocation.target_budget_usdc),
+                    "buy_budget_usdc": str(allocation.buy_budget_usdc),
+                    "current_exposure_usdc": str(allocation.current_exposure_usdc),
+                    "released_budget_usdc": str(allocation.released_budget_usdc),
+                    "reason": allocation.reason,
+                    "release_reason": allocation.release_reason,
+                }
+            )
+        skipped_reasons: dict[str, int] = {}
+        for allocation in allocation_plan.allocations:
+            r = allocation.release_reason or allocation.reason or ""
+            if r:
+                skipped_reasons[r] = skipped_reasons.get(r, 0) + 1
+        selected = [
+            allocation.condition_id
+            for allocation in allocation_plan.allocations
+            if allocation.buy_budget_usdc > 0
+        ]
+        try:
+            await self._event_bus.publish(
+                OutboxPriority.P3,
+                DomainEvent(
+                    trace_id=plan.trace_id or event.trace_id,
+                    event_type=DomainEventType.ALLOCATION_DECISION_RECORDED,
+                    event_id=uuid4().hex,
+                    market_slug=plan.market.market_slug if plan.market is not None else None,
+                    condition_id=event.condition_id,
+                    token_id=event.token_id,
+                    reason=allocation_plan.reason or "",
+                    payload={
+                        "candidates": candidates,
+                        "selected_condition_ids": selected,
+                        "skipped_reasons": skipped_reasons,
+                        "total_budget_usdc": str(allocation_plan.total_budget_usdc),
+                        "buy_budget_usdc": str(allocation_plan.allocated_budget_usdc),
+                        "allocator": TRADING_DECISION_WORKER_ORIGIN,
+                    },
+                ),
+            )
+        except Exception:
+            return
 
     async def _publish(
         self,

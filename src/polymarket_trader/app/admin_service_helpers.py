@@ -21,6 +21,7 @@ from polymarket_trader.infra.db import (
     FillRepository,
     MarketRepository,
     OrderRepository,
+    OrderbookSnapshotRepository,
     OutboxEventRepository,
     PositionRepository,
 )
@@ -48,6 +49,7 @@ class _RepositoryGroup:
     allocation: AllocationRepository
     decision: DecisionRecordRepository
     outbox: OutboxEventRepository
+    orderbook: OrderbookSnapshotRepository
 
 
 def _orderbook_has_no_quotes(snapshot: OrderbookSnapshot) -> bool:

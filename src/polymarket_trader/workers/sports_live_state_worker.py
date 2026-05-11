@@ -203,6 +203,9 @@ class SportsLiveStateWorker:
             self._track_entry_signal_market(match=match)
             entry_signals += await self._publish_entry_signal_events(match=match)
             self._publish_live_state_lifecycle(match=match)
+            # 异步落 audit_events——P3 优先级，失败不阻塞热路径；用于复盘"决策时
+            # 的比分/时钟/赛况"这个目前的最大盲点。
+            await self._publish_sports_live_state_recorded(snapshot=snapshot, match=match)
 
         completed_at = _utc_now()
         self._last_games = snapshot.games
@@ -328,6 +331,41 @@ class SportsLiveStateWorker:
         track_market = getattr(tracker, "track_market", None)
         if callable(track_market):
             track_market(match.market)
+
+    async def _publish_sports_live_state_recorded(
+        self,
+        *,
+        snapshot: SportsLiveSnapshot,
+        match: LiveStateMatch,
+    ) -> None:
+        if self._event_bus is None:
+            return
+        market = match.market
+        try:
+            await self._event_bus.publish(
+                OutboxPriority.P3,
+                DomainEvent(
+                    trace_id=f"sports-live-state-{uuid4().hex}",
+                    event_type=DomainEventType.SPORTS_LIVE_STATE_RECORDED,
+                    event_id=uuid4().hex,
+                    market_slug=market.market_slug,
+                    event_slug=market.event_slug,
+                    condition_id=market.condition_id,
+                    token_id=None,
+                    reason=match.signal_reason or "",
+                    payload={
+                        "source": snapshot.source,
+                        "observed_at": jsonable(snapshot.observed_at),
+                        "signal_allowed": match.signal_allowed,
+                        "signal_reason": match.signal_reason,
+                        "phase": match.phase,
+                        "match_payload": jsonable(match.payload),
+                    },
+                ),
+            )
+        except Exception:
+            # 体育事件落库纯属观测，失败不能反向阻塞 P2 worker。
+            return
 
     async def _publish_entry_signal_events(self, *, match: LiveStateMatch) -> int:
         if not self._entry_signal_publish_enabled or self._event_bus is None:

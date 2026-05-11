@@ -1,0 +1,382 @@
+"""实时调参存储 + 应用层 hook。
+
+让 agent 在不重启的前提下调整风控阈值、预算上限、策略关键参数。所有 override
+都通过 ``PARAMETER_OVERRIDE_APPLIED`` 事件落 audit_events，保留 ``previous /
+new / operator / applied_at`` 完整审计链。
+
+设计取向：
+- ``Settings`` / ``CurrentStrategyConfig`` 是启动期不变量；``ParameterStore`` 是
+  runtime 覆盖层，受白名单约束。
+- 读侧：caller 主动 ``store.get(scope, key, default)`` 取覆盖值；没有 override
+  时返回 default。不改变现有 Settings 注入方式，影响面可控。
+- 写侧：``set(scope, key, value, *, operator)`` 校验白名单、类型、范围，原子替
+  换内存值，发 outbox 事件。``clear(scope, key)`` 同理。
+- 重启即丢：当前不持久化 override；要长期生效得改 ``.env`` 或 Settings。这是
+  有意的——agent 的实时调整带探索性，不应跨进程默认存活。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from typing import Any
+from uuid import uuid4
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterSpec:
+    """单个可调参数的定义。
+
+    - ``coerce`` 把任意输入归一化为目标类型（如 Decimal / int / bool）；返回
+      ``ValueError`` 由调用层映射到 422。
+    - ``validator`` 在 coerce 后做语义校验（范围、白名单），不通过抛 ValueError。
+    """
+
+    scope: str
+    key: str
+    description: str
+    coerce: Callable[[Any], Any]
+    validator: Callable[[Any], None] = field(default=lambda value: None)
+
+
+def _coerce_decimal_non_negative(value: Any) -> Decimal:
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"not a decimal: {value!r}") from exc
+    if result < Decimal("0"):
+        raise ValueError("must be non-negative")
+    return result
+
+
+def _coerce_positive_int(value: Any) -> int:
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"not an integer: {value!r}") from exc
+    if result < 0:
+        raise ValueError("must be non-negative")
+    return result
+
+
+def _coerce_probability(value: Any) -> Decimal:
+    result = _coerce_decimal_non_negative(value)
+    if result > Decimal("1"):
+        raise ValueError("must be between 0 and 1")
+    return result
+
+
+# 白名单：只有这些 (scope, key) 能调；其他一律 404。新增字段要显式注册，避免
+# 后端把 SecretStr / 密钥字段误暴露。
+_REGISTRY: dict[tuple[str, str], ParameterSpec] = {}
+
+
+def _register(spec: ParameterSpec) -> None:
+    _REGISTRY[(spec.scope, spec.key)] = spec
+
+
+# Settings 风控/预算可调字段。Settings 自身保持启动时不可变；读侧通过
+# ``ParameterStore.get('settings', key, fallback)`` 取覆盖。
+_register(ParameterSpec(
+    scope="settings",
+    key="portfolio_budget_usdc",
+    description="组合总预算上限（USDC）",
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="settings",
+    key="max_order_usdc",
+    description="单笔订单最大 USDC",
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="settings",
+    key="max_market_usdc",
+    description="单市场暴露上限（USDC）",
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="settings",
+    key="max_total_usdc",
+    description="组合累计暴露上限（USDC）",
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="settings",
+    key="max_open_orders",
+    description="账户级 open order 数量上限",
+    coerce=_coerce_positive_int,
+))
+_register(ParameterSpec(
+    scope="settings",
+    key="order_retry_limit",
+    description="订单重试上限",
+    coerce=_coerce_positive_int,
+))
+
+# 策略级阈值。caller 应在策略包内 ``store.get('strategy', key, fallback=cfg.X)``。
+_register(ParameterSpec(
+    scope="strategy",
+    key="min_edge_bps",
+    description="入场最小 edge（bps）",
+    coerce=_coerce_positive_int,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="exit_edge_target_bps",
+    description="退出目标 edge（bps）",
+    coerce=_coerce_positive_int,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="kelly_fraction_cap",
+    description="Kelly 仓位比例上限（0–1）",
+    coerce=_coerce_probability,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="entry_no_price_max",
+    description="入场允许的最大 No-side 价格（0–1）",
+    coerce=_coerce_probability,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_moneyline_max_entry_price",
+    description="Moneyline tail 最大入场价（0–1）",
+    coerce=_coerce_probability,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_spreads_max_entry_price",
+    description="Spread tail 最大入场价（0–1）",
+    coerce=_coerce_probability,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_min_liquidity_usdc",
+    description="入场最小盘口可吃 ask 深度（USDC）",
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="min_profit_per_share",
+    description="每股最小利润目标",
+    coerce=_coerce_decimal_non_negative,
+))
+
+
+def list_specs() -> tuple[ParameterSpec, ...]:
+    return tuple(_REGISTRY.values())
+
+
+def get_spec(scope: str, key: str) -> ParameterSpec | None:
+    return _REGISTRY.get((scope, key))
+
+
+@dataclass(slots=True)
+class _OverrideEntry:
+    value: Any
+    operator: str
+    applied_at: str
+    reason: str | None
+    expires_at: str | None
+
+
+class ParameterStore:
+    """Runtime 可变参数覆盖层。
+
+    线程安全性：单进程内由 asyncio 事件循环串行调度——读写不会并发。set/clear
+    是 O(1) 字典写。
+    """
+
+    def __init__(self, *, event_bus: Any | None = None) -> None:
+        self._overrides: dict[tuple[str, str], _OverrideEntry] = {}
+        self._event_bus = event_bus
+
+    def bind_event_bus(self, event_bus: Any | None) -> None:
+        self._event_bus = event_bus
+
+    def get(self, scope: str, key: str, default: Any = None) -> Any:
+        entry = self._overrides.get((scope, key))
+        if entry is None:
+            return default
+        return entry.value
+
+    def has_override(self, scope: str, key: str) -> bool:
+        return (scope, key) in self._overrides
+
+    async def set(
+        self,
+        *,
+        scope: str,
+        key: str,
+        value: Any,
+        operator: str = "agent",
+        reason: str | None = None,
+        expires_at: str | None = None,
+    ) -> dict[str, Any]:
+        spec = get_spec(scope, key)
+        if spec is None:
+            raise KeyError(f"unknown parameter: {scope}.{key}")
+        coerced = spec.coerce(value)
+        spec.validator(coerced)
+        previous = self._overrides.get((scope, key))
+        previous_value = None if previous is None else previous.value
+        entry = _OverrideEntry(
+            value=coerced,
+            operator=operator,
+            applied_at=_utc_now_iso(),
+            reason=reason,
+            expires_at=expires_at,
+        )
+        self._overrides[(scope, key)] = entry
+        await self._publish_override(
+            scope=scope,
+            key=key,
+            previous_value=previous_value,
+            new_value=coerced,
+            operator=operator,
+            applied_at=entry.applied_at,
+            expires_at=expires_at,
+            cleared=False,
+        )
+        return self._as_payload(scope, key, entry, spec)
+
+    async def clear(
+        self,
+        *,
+        scope: str,
+        key: str,
+        operator: str = "agent",
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        spec = get_spec(scope, key)
+        if spec is None:
+            raise KeyError(f"unknown parameter: {scope}.{key}")
+        previous = self._overrides.pop((scope, key), None)
+        applied_at = _utc_now_iso()
+        await self._publish_override(
+            scope=scope,
+            key=key,
+            previous_value=None if previous is None else previous.value,
+            new_value=None,
+            operator=operator,
+            applied_at=applied_at,
+            expires_at=None,
+            cleared=True,
+        )
+        return {
+            "scope": scope,
+            "key": key,
+            "cleared": True,
+            "operator": operator,
+            "applied_at": applied_at,
+            "previous_value": None if previous is None else _stringify(previous.value),
+        }
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        """所有当前 override 的快照——用于 GET /parameters 总览。"""
+
+        result: list[dict[str, Any]] = []
+        for (scope, key), entry in self._overrides.items():
+            spec = get_spec(scope, key)
+            if spec is None:
+                continue
+            result.append(self._as_payload(scope, key, entry, spec))
+        return result
+
+    def registry_payload(self) -> list[dict[str, Any]]:
+        """所有可调参数定义 + 当前 override（如有）。"""
+
+        result: list[dict[str, Any]] = []
+        for spec in list_specs():
+            entry = self._overrides.get((spec.scope, spec.key))
+            result.append(
+                {
+                    "scope": spec.scope,
+                    "key": spec.key,
+                    "description": spec.description,
+                    "override": None if entry is None else self._as_payload(spec.scope, spec.key, entry, spec),
+                }
+            )
+        return result
+
+    def _as_payload(
+        self,
+        scope: str,
+        key: str,
+        entry: _OverrideEntry,
+        spec: ParameterSpec,
+    ) -> dict[str, Any]:
+        return {
+            "scope": scope,
+            "key": key,
+            "description": spec.description,
+            "value": _stringify(entry.value),
+            "operator": entry.operator,
+            "applied_at": entry.applied_at,
+            "expires_at": entry.expires_at,
+            "reason": entry.reason,
+        }
+
+    async def _publish_override(
+        self,
+        *,
+        scope: str,
+        key: str,
+        previous_value: Any,
+        new_value: Any,
+        operator: str,
+        applied_at: str,
+        expires_at: str | None,
+        cleared: bool,
+    ) -> None:
+        if self._event_bus is None:
+            return
+        from polymarket_trader.domain.events import (
+            DomainEvent,
+            DomainEventType,
+            OutboxPriority,
+        )
+
+        try:
+            await self._event_bus.publish(
+                OutboxPriority.P3,
+                DomainEvent(
+                    trace_id=f"param-override-{uuid4().hex}",
+                    event_type=DomainEventType.PARAMETER_OVERRIDE_APPLIED,
+                    event_id=uuid4().hex,
+                    reason=f"{scope}.{key}={'<cleared>' if cleared else _stringify(new_value)}",
+                    payload={
+                        "scope": scope,
+                        "key": key,
+                        "previous_value": _stringify(previous_value),
+                        "new_value": _stringify(new_value),
+                        "operator": operator,
+                        "applied_at": applied_at,
+                        "expires_at": expires_at,
+                        "cleared": cleared,
+                    },
+                ),
+            )
+        except Exception:
+            # 审计落库失败不能反向阻塞调参——caller 已经在内存里看到生效。
+            return
+
+
+def _stringify(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {k: _stringify(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_stringify(v) for v in value]
+    return value

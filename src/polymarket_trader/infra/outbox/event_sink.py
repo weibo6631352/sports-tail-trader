@@ -20,6 +20,14 @@ _PERSISTABLE_EVENT_TYPES = {
     DomainEventType.MARKET_FILTERED_IN.value,
     DomainEventType.MARKET_FILTERED_OUT.value,
     DomainEventType.MARKET_RESOLVED_OR_DISABLED.value,
+    # Batch 3 落库：观测面板、分析面板与拒绝原因深挖刚需，全部走 audit_events
+    # 通道（PersistenceRecordBuilder 默认 route 到 audit），单条 payload 体积
+    # 受 _project_payload 截断。
+    DomainEventType.SPORTS_LIVE_STATE_RECORDED.value,
+    DomainEventType.ALLOCATION_DECISION_RECORDED.value,
+    DomainEventType.RISK_REJECTION_RECORDED.value,
+    DomainEventType.MARKET_SETTLED.value,
+    DomainEventType.PARAMETER_OVERRIDE_APPLIED.value,
 }
 
 _MARKET_EVENT_TYPES = {
@@ -108,6 +116,74 @@ def _project_payload(event_type: str, payload: Mapping[str, Any]) -> dict[str, A
         if positions:
             projected["positions"] = positions
         return projected
+    if event_type == DomainEventType.SPORTS_LIVE_STATE_RECORDED.value:
+        sports_projected: dict[str, Any] = {}
+        for key in (
+            "source",
+            "observed_at",
+            "signal_allowed",
+            "signal_reason",
+            "phase",
+            "live_state_payload",
+            "match_payload",
+        ):
+            if key in payload:
+                sports_projected[key] = payload[key]
+        return sports_projected
+    if event_type == DomainEventType.ALLOCATION_DECISION_RECORDED.value:
+        alloc_projected: dict[str, Any] = {}
+        for key in (
+            "candidates",
+            "selected_condition_ids",
+            "skipped_reasons",
+            "total_budget_usdc",
+            "buy_budget_usdc",
+            "allocator",
+        ):
+            if key in payload:
+                alloc_projected[key] = payload[key]
+        return alloc_projected
+    if event_type == DomainEventType.RISK_REJECTION_RECORDED.value:
+        risk_projected: dict[str, Any] = {}
+        for key in (
+            "passed",
+            "reason",
+            "failed_field",
+            "checks",
+            "intent_summary",
+            "decision_kind",
+        ):
+            if key in payload:
+                risk_projected[key] = payload[key]
+        return risk_projected
+    if event_type == DomainEventType.MARKET_SETTLED.value:
+        settle_projected: dict[str, Any] = {}
+        for key in (
+            "winning_token_id",
+            "winning_outcome",
+            "settled_at",
+            "source",
+            "payout_per_share",
+            "fair_value_at_close",
+        ):
+            if key in payload:
+                settle_projected[key] = payload[key]
+        return settle_projected
+    if event_type == DomainEventType.PARAMETER_OVERRIDE_APPLIED.value:
+        param_projected: dict[str, Any] = {}
+        for key in (
+            "scope",
+            "key",
+            "previous_value",
+            "new_value",
+            "operator",
+            "applied_at",
+            "expires_at",
+            "cleared",
+        ):
+            if key in payload:
+                param_projected[key] = payload[key]
+        return param_projected
     if event_type in _MARKET_EVENT_TYPES:
         # discovery 事件的 raw_market 是完整 Gamma payload（~每条数百字节），
         # 落库会让 audit 表暴涨。这里只保留 records.py 真正消费的字段：

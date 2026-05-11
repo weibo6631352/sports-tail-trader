@@ -1,0 +1,172 @@
+"""``ParameterStore`` 行为 + ``GET/PUT/DELETE /parameters`` 路由。
+
+覆盖：
+- get_spec 白名单守门：未注册的 (scope, key) 抛 KeyError
+- coerce 失败抛 ValueError；负数预算被拒
+- set/get/clear 循环回到 default
+- snapshot / registry_payload 形状
+- event_bus.publish 在 set/clear 时被调用
+- 路由层 404 / 422 / 200
+"""
+
+from __future__ import annotations
+
+import asyncio
+from decimal import Decimal
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from polymarket_trader.api.routes.parameters import router as parameters_router
+from polymarket_trader.app.parameter_store import ParameterStore, get_spec
+
+
+class _SpyEventBus:
+    def __init__(self) -> None:
+        self.published: list[tuple[Any, Any]] = []
+
+    async def publish(self, priority: Any, event: Any) -> None:
+        self.published.append((priority, event))
+
+
+async def _set(store: ParameterStore, **kwargs: Any) -> Any:
+    return await store.set(**kwargs)
+
+
+def test_registry_contains_expected_specs() -> None:
+    assert get_spec("settings", "portfolio_budget_usdc") is not None
+    assert get_spec("settings", "max_order_usdc") is not None
+    assert get_spec("strategy", "min_edge_bps") is not None
+    assert get_spec("settings", "wallet_private_key") is None  # 不在白名单
+
+
+def test_unknown_param_raises_key_error() -> None:
+    store = ParameterStore()
+    with pytest.raises(KeyError):
+        asyncio.run(_set(store, scope="settings", key="bogus", value=1))
+
+
+def test_coerce_negative_decimal_rejected() -> None:
+    store = ParameterStore()
+    with pytest.raises(ValueError, match="non-negative"):
+        asyncio.run(_set(store, scope="settings", key="max_order_usdc", value="-5"))
+
+
+def test_coerce_probability_above_one_rejected() -> None:
+    store = ParameterStore()
+    with pytest.raises(ValueError, match="0 and 1"):
+        asyncio.run(_set(store, scope="strategy", key="kelly_fraction_cap", value="1.2"))
+
+
+def test_set_then_get_returns_override() -> None:
+    store = ParameterStore()
+    asyncio.run(_set(store, scope="settings", key="max_order_usdc", value="50"))
+    assert store.get("settings", "max_order_usdc") == Decimal("50")
+    assert store.has_override("settings", "max_order_usdc") is True
+
+
+def test_clear_falls_back_to_default() -> None:
+    store = ParameterStore()
+    asyncio.run(_set(store, scope="settings", key="max_order_usdc", value="50"))
+    asyncio.run(store.clear(scope="settings", key="max_order_usdc"))
+    assert store.has_override("settings", "max_order_usdc") is False
+    assert store.get("settings", "max_order_usdc", default=Decimal("10")) == Decimal("10")
+
+
+def test_event_bus_receives_override_event() -> None:
+    bus = _SpyEventBus()
+    store = ParameterStore(event_bus=bus)
+    asyncio.run(_set(store, scope="strategy", key="min_edge_bps", value=500, operator="agent"))
+    assert len(bus.published) == 1
+    _, event = bus.published[0]
+    assert event.event_type.value == "parameter_override_applied"
+    assert event.payload["scope"] == "strategy"
+    assert event.payload["key"] == "min_edge_bps"
+    # int 类型不通过 _stringify 转字符串；Decimal 才会。
+    assert event.payload["new_value"] == 500
+
+
+def test_registry_payload_includes_override_state() -> None:
+    store = ParameterStore()
+    asyncio.run(_set(store, scope="settings", key="max_market_usdc", value="200"))
+    items = store.registry_payload()
+    by_key = {(item["scope"], item["key"]): item for item in items}
+    target = by_key[("settings", "max_market_usdc")]
+    assert target["override"] is not None
+    assert target["override"]["value"] == "200"
+    untouched = by_key[("settings", "portfolio_budget_usdc")]
+    assert untouched["override"] is None
+
+
+# --------------------------- HTTP route ---------------------------------------
+
+
+class _FakeRuntime:
+    def __init__(self, store: ParameterStore | None) -> None:
+        self.parameter_store = store
+
+
+@pytest.fixture()
+def http_client() -> tuple[TestClient, ParameterStore]:
+    store = ParameterStore()
+    app = FastAPI()
+    app.include_router(parameters_router)
+    app.state.runtime = _FakeRuntime(store)
+    app.state.get_runtime = lambda: app.state.runtime
+    return TestClient(app), store
+
+
+def test_route_set_then_list_overrides(http_client: tuple[TestClient, ParameterStore]) -> None:
+    client, _ = http_client
+    response = client.put(
+        "/parameters/settings/max_order_usdc",
+        json={"value": "25", "operator": "test"},
+    )
+    assert response.status_code == 200
+    assert response.json()["value"] == "25"
+
+    response = client.get("/parameters/overrides")
+    assert response.status_code == 200
+    overrides = response.json()["overrides"]
+    assert len(overrides) == 1
+    assert overrides[0]["key"] == "max_order_usdc"
+
+
+def test_route_unknown_param_returns_404(http_client: tuple[TestClient, ParameterStore]) -> None:
+    client, _ = http_client
+    response = client.put(
+        "/parameters/settings/bogus",
+        json={"value": "1", "operator": "test"},
+    )
+    assert response.status_code == 404
+    assert "unknown parameter" in response.json()["detail"]
+
+
+def test_route_invalid_value_returns_422(http_client: tuple[TestClient, ParameterStore]) -> None:
+    client, _ = http_client
+    response = client.put(
+        "/parameters/settings/max_order_usdc",
+        json={"value": "-1", "operator": "test"},
+    )
+    assert response.status_code == 422
+
+
+def test_route_delete_clears_override(http_client: tuple[TestClient, ParameterStore]) -> None:
+    client, store = http_client
+    client.put("/parameters/settings/max_order_usdc", json={"value": "25"})
+    response = client.delete("/parameters/settings/max_order_usdc")
+    assert response.status_code == 200
+    assert response.json()["cleared"] is True
+    assert store.has_override("settings", "max_order_usdc") is False
+
+
+def test_route_503_when_store_missing() -> None:
+    app = FastAPI()
+    app.include_router(parameters_router)
+    app.state.runtime = _FakeRuntime(None)
+    app.state.get_runtime = lambda: app.state.runtime
+    client = TestClient(app)
+    response = client.get("/parameters")
+    assert response.status_code == 503

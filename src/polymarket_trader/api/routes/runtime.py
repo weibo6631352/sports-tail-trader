@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from polymarket_trader.api.deps import build_time_range, get_admin_service
 from polymarket_trader.app.admin_service import AdminService
@@ -24,6 +24,25 @@ async def workers(service: AdminService = Depends(get_admin_service)) -> dict[st
 @router.get("/metrics")
 async def metrics(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
     return service.metrics_snapshot()
+
+
+@router.get("/metrics/latency-percentiles")
+async def metrics_latency_percentiles(
+    window_ms: int | None = Query(default=None, ge=0),
+    sample_limit: int = Query(default=500, ge=1, le=5000),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """订单执行 latency 分位数（queue→sign / sign→submit / submit→ack / queue→ack）。
+
+    从 ``outbox_events.payload->timestamps`` 抽样最近 ``sample_limit`` 条 order
+    lifecycle 事件，计算每个 stage 的 p50/p90/p95/p99 毫秒数；现网延迟劣化
+    （签名变慢 / WS 卡顿）操盘观测刚需。
+    """
+
+    return await service.latency_percentiles_snapshot(
+        window_ms=window_ms,
+        sample_limit=sample_limit,
+    )
 
 
 @router.get("/admin/decisions/dump")
@@ -52,3 +71,21 @@ async def dump_decision_records(
         time_range=build_time_range(since=since, until=until),
         strategy_id=strategy_id,
     )
+
+
+@router.get("/decisions/{record_id}")
+async def get_decision_record(
+    record_id: str,
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """按 ``record_id`` 取单条策略决策详情。
+
+    返回完整 ``decision_input`` / ``decision_output`` JSONB——含 ``fair_value``、
+    ``entry_price_cap``、``kelly_fraction``、拒绝原因枚举等策略中间量，便于从
+    trade timeline 点开后做根因追查。
+    """
+
+    payload = await service.get_decision_record(record_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="decision_record_not_found")
+    return payload
