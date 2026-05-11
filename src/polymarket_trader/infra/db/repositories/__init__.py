@@ -17,11 +17,11 @@ from polymarket_trader.infra.db.repositories._legacy import (
     DecisionRecordRepository,
     FillRepository,
     OrderRepository,
-    OrderbookSnapshotRepository,
     OutboxEventRepository,
     PositionRepository,
 )
 from polymarket_trader.infra.db.repositories.market import MarketRepository
+from polymarket_trader.infra.db.repositories.orderbook import OrderbookSnapshotRepository
 
 __all__ = [
     "AccountHistoryPoint",
