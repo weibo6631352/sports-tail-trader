@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol, runtime_checkable
 from uuid import uuid4
 
 from polymarket_trader.app.paper import PaperSubmitOnlyOrderClient, PaperVirtualLedger
@@ -30,6 +30,19 @@ from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.serialization import jsonable
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
 from polymarket_trader.workers.trading_decision import TradingDecisionWorkerResult
+
+@runtime_checkable
+class _OrderbookFallbackClient(Protocol):
+    """virtual-paper-trade REST fallback 所需的最小 CLOB 客户端接口。
+
+    runtime.clob_client 实际是 ``infra.polymarket.ClobClient``；这里只显式声明
+    本模块用到的 ``get_orderbook``，避免 ``getattr+callable`` 双层 duck-typing
+    （CLAUDE.md §14：framework 不依赖具体策略实现，但调用侧也应通过显式契约
+    访问 infra，禁止靠属性试探判断对象身份）。
+    """
+
+    async def get_orderbook(self, token_id: str) -> Any: ...
+
 
 _REJECTION_SAMPLE_LIMIT = 12
 # virtual-paper-trade 单次允许的 REST orderbook fallback 上限。
@@ -902,7 +915,7 @@ async def _orderbook_with_rest_fallback(
     if rest_budget_remaining <= 0:
         return ws_snapshot, rest_budget_remaining, False
     clob_client = getattr(runtime, "clob_client", None)
-    if clob_client is None or not callable(getattr(clob_client, "get_orderbook", None)):
+    if not isinstance(clob_client, _OrderbookFallbackClient):
         return ws_snapshot, rest_budget_remaining, False
     try:
         rest_orderbook = await clob_client.get_orderbook(token_id)

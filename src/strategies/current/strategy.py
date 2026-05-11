@@ -53,7 +53,10 @@ from strategies.current.recovery import decide_recovery
 from strategies.current.tail.types import ExecutionPermission as _ExecPerm
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
 from strategies.current.trading import decide_entry, decide_exit, size_entry
-from strategies.current.trading.helpers import bid_plus_tick_fallback_ask
+from strategies.current.trading.helpers import (
+    bid_plus_tick_fallback_ask,
+    bid_plus_tick_fallback_metadata,
+)
 from strategies.current.universe import select_market
 
 
@@ -442,12 +445,11 @@ class CurrentStrategy:
                 if fallback_ask is not None:
                     best_ask = fallback_ask
                     permission_for_token = _ExecPerm.RECORD_ONLY
-                    fallback_meta = {
-                        "best_ask_fallback": "bid_plus_tick",
-                        "best_bid": str(orderbook.best_bid),
-                        "tick_size": str(market.tick_size),
-                        "fallback_ask": str(fallback_ask),
-                    }
+                    fallback_meta = bid_plus_tick_fallback_metadata(
+                        orderbook=orderbook,
+                        tick_size=market.tick_size,
+                        fallback_ask=fallback_ask,
+                    )
             buyable = (
                 orderbook.buyable_ask_depth(max_price=config.tail_outright_max_entry_price)
                 if orderbook is not None

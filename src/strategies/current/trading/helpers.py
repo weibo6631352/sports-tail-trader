@@ -33,6 +33,27 @@ def bid_plus_tick_fallback_ask(
     return fallback_ask
 
 
+def bid_plus_tick_fallback_metadata(
+    *,
+    orderbook: Any,
+    tick_size: Decimal,
+    fallback_ask: Decimal,
+) -> dict[str, str]:
+    """统一 outright + tail 两条路径 RECORD_ONLY decision 的 fallback metadata。
+
+    调用方已通过 ``bid_plus_tick_fallback_ask`` 拿到非 None 的 ``fallback_ask``，
+    这里只负责拼成 decision_records 用于事后校准的四字段写入块——抽出来避免
+    两个 callsite 字段名 / 字符串化方式漂移。
+    """
+
+    return {
+        "best_ask_fallback": "bid_plus_tick",
+        "best_bid": str(orderbook.best_bid),
+        "tick_size": str(tick_size),
+        "fallback_ask": str(fallback_ask),
+    }
+
+
 def _metadata_decimal(context: ExtensionContext, *keys: str) -> Decimal | None:
     """按优先顺序从 metadata 中读取十进制数值。"""
 

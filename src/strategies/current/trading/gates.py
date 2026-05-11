@@ -30,7 +30,11 @@ from strategies.current.tail import (
     live_game_state_from_metadata,
 )
 
-from .helpers import _metadata_decimal, bid_plus_tick_fallback_ask
+from .helpers import (
+    _metadata_decimal,
+    bid_plus_tick_fallback_ask,
+    bid_plus_tick_fallback_metadata,
+)
 from .matching import _target_for_live_game
 from .pricing import _tail_locked_outcome_signal, _tail_price_cap
 from .risk_limits import _buy_fill_summary, _covered_exit_shares
@@ -99,12 +103,11 @@ def _tail_entry_gate(
         )
         if fallback_ask is not None:
             best_ask = fallback_ask
-            snapshot_metadata = {
-                "best_ask_fallback": "bid_plus_tick",
-                "best_bid": str(context.orderbook.best_bid),
-                "tick_size": str(context.market.tick_size),
-                "fallback_ask": str(fallback_ask),
-            }
+            snapshot_metadata = bid_plus_tick_fallback_metadata(
+                orderbook=context.orderbook,
+                tick_size=context.market.tick_size,
+                fallback_ask=fallback_ask,
+            )
     market_snapshot = SportsMarketSnapshot(
         market_type=descriptor.market_type,
         side=target.side,
