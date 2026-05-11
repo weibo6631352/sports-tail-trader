@@ -1,0 +1,40 @@
+"""Repository aggregate.
+
+One module per aggregate root; ``_legacy.py`` keeps remaining repositories
+during the split. Re-exports keep ``from polymarket_trader.infra.db
+import ...`` and other call sites stable.
+"""
+
+from polymarket_trader.infra.db.repositories._base import (
+    BaseRepository,
+    RepositoryPage,
+)
+from polymarket_trader.infra.db.repositories.account import (
+    AccountHistoryPoint,
+    AccountSnapshotRepository,
+)
+from polymarket_trader.infra.db.repositories.allocation import AllocationRepository
+from polymarket_trader.infra.db.repositories.audit import AuditEventRepository
+from polymarket_trader.infra.db.repositories.decision import DecisionRecordRepository
+from polymarket_trader.infra.db.repositories.fill import FillRepository
+from polymarket_trader.infra.db.repositories.market import MarketRepository
+from polymarket_trader.infra.db.repositories.order import OrderRepository
+from polymarket_trader.infra.db.repositories.orderbook import OrderbookSnapshotRepository
+from polymarket_trader.infra.db.repositories.outbox import OutboxEventRepository
+from polymarket_trader.infra.db.repositories.position import PositionRepository
+
+__all__ = [
+    "AccountHistoryPoint",
+    "AccountSnapshotRepository",
+    "AllocationRepository",
+    "AuditEventRepository",
+    "BaseRepository",
+    "DecisionRecordRepository",
+    "FillRepository",
+    "MarketRepository",
+    "OrderRepository",
+    "OrderbookSnapshotRepository",
+    "OutboxEventRepository",
+    "PositionRepository",
+    "RepositoryPage",
+]
