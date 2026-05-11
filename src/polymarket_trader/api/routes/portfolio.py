@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -14,6 +16,10 @@ from polymarket_trader.app.portfolio_history_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
+
+# 单次 pnl_breakdown 上限——20000 positions × markets join 在退化数据下可能跑数十秒，
+# 不能让 admin 查询长期占用 DB 连接（§7 不阻塞 P0）。超时改为 504 + 提示降 limit。
+_PNL_BREAKDOWN_TIMEOUT_SECONDS = 30.0
 
 
 def _runtime_error_detail(exc: RuntimeError) -> str:
@@ -95,11 +101,36 @@ async def get_pnl_breakdown(
     """
 
     try:
-        return await service.pnl_breakdown_snapshot(
-            group_by=group_by,
-            strategy_id=strategy_id,
-            condition_id=condition_id,
-            position_limit=position_limit,
+        return await asyncio.wait_for(
+            service.pnl_breakdown_snapshot(
+                group_by=group_by,
+                strategy_id=strategy_id,
+                condition_id=condition_id,
+                position_limit=position_limit,
+            ),
+            timeout=_PNL_BREAKDOWN_TIMEOUT_SECONDS,
         )
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        logger.warning(
+            "pnl_breakdown_snapshot timed out",
+            extra={"group_by": group_by, "position_limit": position_limit},
+        )
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "reason": "pnl_breakdown_timeout",
+                "timeout_s": _PNL_BREAKDOWN_TIMEOUT_SECONDS,
+                "hint": "reduce position_limit or narrow filters",
+            },
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # ValueError 文本可能含 schema 字段；§10 可审计性要求 trace_id 兜底反查。
+        trace_id = uuid4().hex
+        logger.warning(
+            "pnl_breakdown validation failed",
+            extra={"trace_id": trace_id, "error": str(exc), "group_by": group_by},
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={"reason": "pnl_breakdown_validation_failed", "trace_id": trace_id},
+        ) from exc

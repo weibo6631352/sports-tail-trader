@@ -161,6 +161,10 @@ def _sanitize_structure(value: Any, *, depth: int = 0, limit: int) -> Any:
             return _redact_text(value, limit=limit)
         return _sanitize_structure(parsed, depth=depth + 1, limit=limit)
     if isinstance(value, (int, float, bool)):
+        # 此路径仅处理 sanitize 后的 audit payload（如 raw_response_summary 的解析 JSON），
+        # 不参与业务金额/价格判定——业务侧金额已在 domain 入口强制为 Decimal。这里允许
+        # float 流过是为了忠实保留外部 API（Polymarket / 行情）原生 JSON number；
+        # 在 audit 路径硬转 Decimal 反而会引入"看起来更精确实际不更精确"的伪精度。
         return value
     return _redact_text(str(value), limit=limit)
 

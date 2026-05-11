@@ -7,9 +7,11 @@ cursor，避免一次性把全表加载进内存阻塞 P0 路径。
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, AsyncIterator, Callable
@@ -30,11 +32,18 @@ from polymarket_trader.infra.db.repositories import (
 
 
 router = APIRouter(prefix="/exports", tags=["exports"])
+logger = logging.getLogger(__name__)
 
 _ALLOWED_RESOURCES = ("orders", "fills", "audit_events")
 _ALLOWED_FORMATS = ("csv", "jsonl")
 DEFAULT_LIMIT = 10_000
 MAX_LIMIT = 100_000
+# 每行的服务侧 cursor 拉取上限——慢客户端 / 慢查询不能让一个 export 长期占用
+# DB 连接（§7 Admin 大查询不得反向阻塞 P0 路径）。超时后提前结束 stream，
+# 客户端会拿到截断的文件并通过响应头标记。
+_PER_ROW_TIMEOUT_SECONDS = 5.0
+_TRUNCATED_HEADER = "X-Export-Warning"
+_TRUNCATED_TIMEOUT = "truncated_per_row_timeout"
 
 _LIMIT_CLAMPED_HEADER = "X-Export-Warning"
 _LIMIT_CLAMPED_VALUE = "limit_clamped_to_100000"
@@ -199,7 +208,24 @@ async def export_resource(
 
     async def _row_iterator() -> AsyncIterator[Any]:
         async with session_factory() as session:
-            async for row in stream_fn(session, time_range, clamped_limit):
+            cursor = stream_fn(session, time_range, clamped_limit).__aiter__()
+            while True:
+                try:
+                    row = await asyncio.wait_for(
+                        cursor.__anext__(), timeout=_PER_ROW_TIMEOUT_SECONDS
+                    )
+                except StopAsyncIteration:
+                    return
+                except (asyncio.TimeoutError, TimeoutError):
+                    logger.warning(
+                        "export_resource: per-row timeout; stream truncated",
+                        extra={
+                            "resource": resource,
+                            "timeout_s": _PER_ROW_TIMEOUT_SECONDS,
+                            "limit": clamped_limit,
+                        },
+                    )
+                    return
                 yield row
 
     body: AsyncIterator[bytes]

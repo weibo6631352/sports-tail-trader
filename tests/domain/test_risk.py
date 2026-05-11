@@ -410,6 +410,37 @@ def test_controlled_scale_in_buy_can_pass_open_exit_gate_when_explicitly_allowed
     assert decision.passed is True
 
 
+def test_buy_rejects_gtc_without_post_only_to_block_resting_buy() -> None:
+    """CLAUDE.md §3 不允许长期 resting BUY。GTC + post_only=False 会变成
+    long-resting taker BUY（在足深市场可能 marketable，价格滑动 + 部分成交后
+    仍可能留 resting tail）。新 buy_order_type_gate 在 liquidity_gate 之前
+    强制收敛订单类型为 FAK 或 GTC+post_only。"""
+
+    decision = RiskManager().check_order_intent(
+        BuyOrderIntent(
+            strategy_id="sports_tail",
+            trace_id="trace-buy-gtc-resting",
+            condition_id="condition",
+            token_id="yes",
+            price=Decimal("0.50"),
+            amount_usdc=Decimal("3"),
+            order_type=OrderType.GTC,
+            post_only=False,
+        ),
+        market=_market(min_order_size=Decimal("1")),
+        max_order_usdc=Decimal("10"),
+        max_market_usdc=Decimal("10"),
+        max_total_usdc=Decimal("10"),
+        balance_usdc=Decimal("10"),
+        allowance_usdc=Decimal("10"),
+    )
+
+    assert decision.passed is False
+    assert decision.reason == "resting_buy_not_allowed"
+    assert decision.failed_field == "intent.order_type"
+    assert decision.suggested_action == "use_fak_or_post_only_gtc"
+
+
 def _market(
     *,
     min_order_size: Decimal = Decimal("1"),

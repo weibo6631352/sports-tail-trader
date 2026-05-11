@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any, Mapping
@@ -9,9 +10,53 @@ from uuid import uuid4
 from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics
 from polymarket_trader.runtime.status import WorkerLifecycleState
 
+logger = logging.getLogger(__name__)
+
 _SUBSCRIPTION_REFRESH_SECONDS = 5.0
 _MARKET_WS_LIVE_STATUSES = {"live", "ended"}
 _MARKET_WS_TAIL_WINDOW_SECONDS = 3600.0
+
+
+def _offer_to_ws_queue(
+    queue: asyncio.Queue[Mapping[str, Any]],
+    payload: dict[str, Any],
+    *,
+    runtime: Any,
+    worker_name: str,
+) -> None:
+    """非阻塞投递 WS payload。
+
+    满载时丢弃最老一条腾位（ring buffer），并把 worker 标记为 DEGRADED 暴露背压；
+    若仍满则放弃当前 payload。WS 摄入循环必须保持非阻塞，否则会反向阻塞 §7 P0 路径。
+    """
+
+    try:
+        queue.put_nowait(payload)
+        return
+    except asyncio.QueueFull:
+        pass
+    with suppress(asyncio.QueueEmpty):
+        queue.get_nowait()
+    dropped_after_retry = False
+    try:
+        queue.put_nowait(payload)
+    except asyncio.QueueFull:
+        dropped_after_retry = True
+    runtime.supervisor.heartbeat_worker(
+        worker_name,
+        state=WorkerLifecycleState.DEGRADED,
+        healthy=False,
+        detail=f"queue_saturated qsize={queue.qsize()} dropped_new={dropped_after_retry}",
+        last_error="ws_queue_saturated",
+    )
+    logger.warning(
+        "ws queue saturated; dropped oldest payload",
+        extra={
+            "worker": worker_name,
+            "qsize": queue.qsize(),
+            "dropped_new": dropped_after_retry,
+        },
+    )
 
 
 def _utc_now() -> datetime:
@@ -219,7 +264,7 @@ async def stream_market_ws_messages(
         on_reconnect=on_reconnect,
     ):
         payload = message.payload if isinstance(message.payload, Mapping) else message.raw
-        await queue.put(dict(payload))
+        _offer_to_ws_queue(queue, dict(payload), runtime=runtime, worker_name="market_ws")
 
 
 def market_ws_message_type(message: Mapping[str, Any]) -> str:
@@ -306,7 +351,7 @@ async def stream_user_ws_messages(
         on_reconnect=on_reconnect,
     ):
         payload = message.payload if isinstance(message.payload, Mapping) else message.raw
-        await queue.put(dict(payload))
+        _offer_to_ws_queue(queue, dict(payload), runtime=runtime, worker_name="user_ws")
 
 
 async def run_market_ws(runtime: Any) -> None:

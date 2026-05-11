@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -12,6 +14,7 @@ from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.app.virtual_paper_trading import run_virtual_paper_trade
 
 router = APIRouter(prefix="/operations", tags=["operations"])
+logger = logging.getLogger(__name__)
 
 
 class ReconcileRequest(BaseModel):
@@ -30,10 +33,14 @@ class ParameterSweepRequest(BaseModel):
     """
 
     candidates: dict[str, list[Any]] = Field(default_factory=dict)
-    # ge=0.01 (1 美分) 防止 1e-300 / 1e-9 这种亚精度值传到 service：实盘最小
-    # 名义订单 ¢0.01，sweep 模拟仓位低于此值没有金融意义且会让 PnL 公式产生
-    # 极小或下溢的 size_shares。
-    per_decision_usdc: float = Field(default=10.0, ge=0.01, le=100_000.0)
+    # 用 Decimal 直接接 JSON 数字/字符串：float 中间桥接会在反序列化时引入精度
+    # 漂移（CLAUDE.md「金额/价格用 Decimal，不用浮点」）。ge=0.01 (1 美分)
+    # 防止 1e-300 / 1e-9 这种亚精度值传到 service。
+    per_decision_usdc: Decimal = Field(
+        default=Decimal("10.0"),
+        ge=Decimal("0.01"),
+        le=Decimal("100000.0"),
+    )
     strategy_id: str | None = Field(default=None, min_length=1, max_length=64)
     since: int | None = Field(default=None, ge=0)
     until: int | None = Field(default=None, ge=0)
@@ -56,12 +63,13 @@ class VirtualPaperTradeRequest(BaseModel):
 
 
 class PauseTradingRequest(BaseModel):
-    reason: str = Field(default="manual_pause", min_length=1)
-    operator: str = "manual"
+    # reason 进审计日志，限长防 DoS / 存储溢出。
+    reason: str = Field(default="manual_pause", min_length=1, max_length=200)
+    operator: str = Field(default="manual", min_length=1, max_length=64)
 
 
 class ResumeTradingRequest(BaseModel):
-    operator: str = "manual"
+    operator: str = Field(default="manual", min_length=1, max_length=64)
 
 
 @router.post("/reconcile")
@@ -122,14 +130,27 @@ async def parameter_sweep(
     try:
         return await service.run_parameter_sweep(
             candidates=request.candidates,
-            per_decision_usdc=Decimal(str(request.per_decision_usdc)),
+            per_decision_usdc=request.per_decision_usdc,
             strategy_id=request.strategy_id,
             time_range=build_time_range(since=request.since, until=request.until),
             decision_limit=request.decision_limit,
             settlement_limit=request.settlement_limit,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # ValueError 的文本可能含内部 schema 细节，不能透传给客户端。固定错误
+        # 码 + trace_id 让运维侧在日志里反查具体原因，§10 可审计性保留。
+        trace_id = uuid4().hex
+        logger.warning(
+            "parameter_sweep validation failed",
+            extra={"trace_id": trace_id, "error": str(exc)},
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "reason": "parameter_sweep_validation_failed",
+                "trace_id": trace_id,
+            },
+        ) from exc
 
 
 @router.post("/virtual-paper-trade")

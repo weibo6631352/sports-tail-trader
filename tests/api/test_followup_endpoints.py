@@ -226,4 +226,8 @@ def test_parameter_sweep_route_422_on_unsupported_key(
         json={"candidates": {"bogus_param": [1, 2]}},
     )
     assert response.status_code == 422
-    assert "unsupported sweep parameter" in response.json()["detail"]
+    detail = response.json()["detail"]
+    # detail 不再透传 ValueError 文本（防信息泄漏）；改为固定 reason code + trace_id
+    # 兜底反查（§10 可审计性）。
+    assert detail["reason"] == "parameter_sweep_validation_failed"
+    assert isinstance(detail.get("trace_id"), str) and len(detail["trace_id"]) > 0

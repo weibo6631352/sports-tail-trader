@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from itertools import count
@@ -21,6 +22,20 @@ def _utc_now() -> datetime:
 _extract_market_payloads = market_discovery_adapter.extract_market_payloads
 _normalize_payload = market_discovery_adapter.normalize_payload
 _payload_signature = market_discovery_adapter.payload_signature
+
+# Gamma 长期翻页 + WS new_market 会持续推新 condition_id；缓存必须有上界，否则
+# 进程驻留期内单调增长（§6 队列/缓存容量上限）。10000 远超目前体育市场池规模，
+# 触顶意味着发现源出现异常或体育市场极度泛滥，应触发告警；丢弃最老一项即可，
+# 因为权威源仍是 MarketService.registry，缓存只用来去重 audit 噪声。
+_MAX_CACHED_MARKETS = 10_000
+
+
+def _lru_set(cache: "OrderedDict[str, RawMarketEvent]", key: str, value: RawMarketEvent) -> None:
+    if key in cache:
+        cache.move_to_end(key)
+    cache[key] = value
+    while len(cache) > _MAX_CACHED_MARKETS:
+        cache.popitem(last=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,11 +68,22 @@ class MarketDiscoveryWorker:
         self._source_name = source_name
         self._retry_delay_seconds = retry_delay_seconds
         self._trace_sequence = count()
-        self._markets_by_condition_id: dict[str, RawMarketEvent] = {}
-        self._markets_by_slug: dict[str, RawMarketEvent] = {}
-        self._seen_by_condition_id: dict[str, RawMarketEvent] = {}
-        self._seen_by_slug: dict[str, RawMarketEvent] = {}
+        self._markets_by_condition_id: OrderedDict[str, RawMarketEvent] = OrderedDict()
+        self._markets_by_slug: OrderedDict[str, RawMarketEvent] = OrderedDict()
+        self._seen_by_condition_id: OrderedDict[str, RawMarketEvent] = OrderedDict()
+        self._seen_by_slug: OrderedDict[str, RawMarketEvent] = OrderedDict()
         self._last_failure: DiscoveryFailure | None = None
+
+    def cache_sizes(self) -> dict[str, int]:
+        """缓存大小快照——供 supervisor / admin 观测 §6 容量上界。"""
+
+        return {
+            "markets_by_condition_id": len(self._markets_by_condition_id),
+            "markets_by_slug": len(self._markets_by_slug),
+            "seen_by_condition_id": len(self._seen_by_condition_id),
+            "seen_by_slug": len(self._seen_by_slug),
+            "max": _MAX_CACHED_MARKETS,
+        }
 
     @property
     def last_failure(self) -> DiscoveryFailure | None:
@@ -238,27 +264,29 @@ class MarketDiscoveryWorker:
 
     def _remember(self, raw_event: RawMarketEvent) -> None:
         if raw_event.condition_id:
-            self._markets_by_condition_id[raw_event.condition_id] = raw_event
+            _lru_set(self._markets_by_condition_id, raw_event.condition_id, raw_event)
         if raw_event.market_slug:
-            self._markets_by_slug[raw_event.market_slug] = raw_event
+            _lru_set(self._markets_by_slug, raw_event.market_slug, raw_event)
         self._last_failure = None
 
     def _lookup_seen(self, raw_event: RawMarketEvent) -> RawMarketEvent | None:
         if raw_event.condition_id:
             existing = self._seen_by_condition_id.get(raw_event.condition_id)
             if existing is not None:
+                self._seen_by_condition_id.move_to_end(raw_event.condition_id)
                 return existing
         if raw_event.market_slug:
             existing = self._seen_by_slug.get(raw_event.market_slug)
             if existing is not None:
+                self._seen_by_slug.move_to_end(raw_event.market_slug)
                 return existing
         return None
 
     def _remember_seen(self, raw_event: RawMarketEvent) -> None:
         if raw_event.condition_id:
-            self._seen_by_condition_id[raw_event.condition_id] = raw_event
+            _lru_set(self._seen_by_condition_id, raw_event.condition_id, raw_event)
         if raw_event.market_slug:
-            self._seen_by_slug[raw_event.market_slug] = raw_event
+            _lru_set(self._seen_by_slug, raw_event.market_slug, raw_event)
 
     def _next_trace_id(self, source: str) -> str:
         return f"{source}-{next(self._trace_sequence):08d}-{uuid4().hex}"

@@ -49,17 +49,33 @@ class DecisionEventRecorder:
     def record(self, record: DecisionRecord) -> None:
         if self._outbox is None:
             return
+        log_context = {
+            "trace_id": record.trace_id,
+            "strategy_id": record.strategy_id,
+            "hook_name": record.hook_name,
+            "condition_id": record.condition_id,
+        }
         try:
             event = _build_outbox_event(record)
         except Exception:
-            # P0 路径序列化失败不能影响决策返回。
-            logger.debug("decision recorder serialize failed", exc_info=True)
+            # P0 路径序列化失败不能影响决策返回，但必须带上 trace_id / hook_name
+            # 以便运维侧反查（§10 可审计性）——只 logger.debug 会让丢失的决策完全
+            # 不可追踪。
+            logger.warning(
+                "decision recorder serialize failed",
+                exc_info=True,
+                extra=log_context,
+            )
             return
         try:
             self._outbox.put_nowait(event)
         except Exception:
             # outbox 满 / 异常一律吞掉；DB 不是交易真相，丢一条不能拖停交易。
-            logger.debug("decision recorder outbox put_nowait failed", exc_info=True)
+            logger.warning(
+                "decision recorder outbox put_nowait failed",
+                exc_info=True,
+                extra=log_context,
+            )
             return
 
 
@@ -135,12 +151,17 @@ def _decision_outcome(payload: Mapping[str, Any]) -> tuple[bool, str | None]:
     if isinstance(decision_kind, str) and decision_kind.strip().lower() in {"skip", "decline"}:
         return False, reason
     # tuple of decisions（decide_follow_up 返回 tuple）单独处理；payload 已经被
-    # jsonable 投成 list/dict。
+    # jsonable 投成 list/dict。空 tuple = 策略主动选择不产生 follow-up，明确
+    # 落 reason 防止 audit 显示「拒绝且无原因」的歧义（§10 可审计性）。
     if isinstance(action, list):
-        return bool(action), reason
+        if not action:
+            return False, reason or "no_follow_ups"
+        return True, reason
     if action is None and decision_kind is None and "value" in payload:
         # 包装值——通常是 follow_up 的 tuple 投影或简单类型。
         inner = payload.get("value")
+        if isinstance(inner, list) and not inner:
+            return False, reason or "no_follow_ups"
         return bool(inner), reason
     return action is not None or decision_kind is not None, reason
 

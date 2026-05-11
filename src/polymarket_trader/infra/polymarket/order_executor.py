@@ -336,6 +336,10 @@ class PolymarketOrderExecutor:
         try:
             lock = await self._acquire_lock()
         except TimeoutError:
+            # 不变量：lock 超时意味着我们**根本没启动 task**——既没读也没写 idempotency_index。
+            # `retryable=True` 是安全的：idempotency_key 派生包含 trace_id，正常重试用新 trace_id
+            # → 新 key，不撞当前路径；同 key 重试只可能源于同一发起方，而那个发起方根本没启动 task，
+            # 所以"重试时 index 找不到条目并重新启动"恰是预期，无双发风险。
             result = self._timeout_result(
                 request,
                 intent,
@@ -364,6 +368,9 @@ class PolymarketOrderExecutor:
                 elif entry.task is not None:
                     existing_task = entry.task
             if existing_result is None and existing_task is None:
+                # 锁内只做三件同步操作：create_task（事件循环 schedule，不 await）、
+                # dict 写、add_done_callback（O(1) 推入回调列表）。无 IO await、无日志、
+                # 无大对象序列化——符合 §7 关键锁内禁止反向阻塞。
                 task = asyncio.create_task(self._run_operation(request, intent))
                 self._idempotency_index[request.idempotency_key] = _IdempotencyEntry(
                     signature=signature,

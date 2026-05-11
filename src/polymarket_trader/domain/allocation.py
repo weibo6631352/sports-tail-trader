@@ -80,6 +80,10 @@ def current_exposure_usdc(position: Position | None, open_orders: Iterable[Order
             exposure_usdc += position.cost_usdc * (open_sell_shares / position.shares)
 
     for order in open_orders:
+        # 不变量：open SELL 在上面已经通过 position.open_sell_shares 按持仓成本
+        # 比例计入 exposure。这里只处理 BUY 订单，避免与 open_sell_shares 重复
+        # 计入。修改时务必保持「SELL 计入靠 position 字段，BUY 计入靠 open_orders」
+        # 的二选一分工。
         if order.side != OrderSide.BUY:
             continue
         if order.order_type == OrderType.FAK:

@@ -16,7 +16,16 @@ def _utc_now() -> datetime:
 
 
 class AccountStateStore:
-    """Maintains copy-on-write account snapshots for P0 readers."""
+    """Maintains copy-on-write account snapshots for P0 readers.
+
+    并发模型：``snapshot()`` 是 **lock-free**（直接返回 ``self._snapshot`` 引用，
+    CPython GIL 保证读到的是完整旧/新快照而非撕裂状态）。``_lock`` 只守护写路径
+    之间的 read-modify-write（防止丢失更新）。
+
+    §7 不变量：P0 决策热路径只调 ``snapshot()`` 读取——写入 AccountStateStore
+    的都是后台路径（user_ws / reconcile / fills），所以写锁竞争永远不会反向
+    阻塞 P0 主链路。若日后引入 P0 写入路径，必须先拆分片锁。
+    """
 
     def __init__(self) -> None:
         self._lock = Lock()

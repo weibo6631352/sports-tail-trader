@@ -117,6 +117,10 @@ class EventBus:
         self._persistence_sink: Callable[[int, Any], None] | None = None
         # 只读旁路：SSE / admin 订阅可以挂这里，单纯做 fan-out，不影响交易主链路。
         self._broadcast_callbacks: set[Callable[[Any], None]] = set()
+        # outbox mirror 失败计数器——§10 要求降级动作可审计。失败仍然不向上抛
+        # 异常以保 §7 主链路不被反向阻塞，但累计计数 + 警告日志能让 observability
+        # 看到 sink 故障。
+        self._mirror_failure_count = 0
 
     def bind_persistence_sink(self, sink: Callable[[int, Any], None] | None) -> None:
         self._persistence_sink = sink
@@ -128,6 +132,58 @@ class EventBus:
 
     def remove_broadcast_listener(self, callback: Callable[[Any], None]) -> None:
         self._broadcast_callbacks.discard(callback)
+
+    def publish_nowait(self, priority: EventPriority | int | str, event: Any) -> None:
+        """P0 热路径专用的同步 fire-and-forget 投递。
+
+        与 ``publish`` 行为对齐，但不返回协程；P0/P1 队列满时不 await，转而走 retain
+        + mirror，保证 §7 主链路绝不被 EventBus 反向阻塞。
+        """
+
+        outbox_priority = _normalize_outbox_priority(priority)
+        lane = _normalize_priority(priority)
+        if lane == QueueLane.PERSISTENCE and self._persistence_sink is not None:
+            self._mirror_to_outbox(outbox_priority, event)
+            self._broadcast(event)
+            return
+        if lane == QueueLane.TRADING:
+            key = self._trading_event_key(event)
+            if key in self._trading_pending_events:
+                self._trading_pending_events[key] = event
+                self._mirror_to_outbox(outbox_priority, event)
+                self._broadcast(event)
+                self._wake.set()
+                return
+            try:
+                self._trading_queue.put_nowait((next(self._sequence), key))
+                self._trading_pending_events[key] = event
+            except asyncio.QueueFull:
+                # 主链路绝不能 await；P0 满了仍要保证 outbox 拿到拒绝事件以便审计。
+                self._mirror_to_outbox(outbox_priority, event)
+                self._broadcast(event)
+                logger.warning(
+                    "event_bus: trading queue full on publish_nowait; mirrored to outbox only",
+                    extra={"event_type": str(getattr(event, "event_type", ""))},
+                )
+                return
+            self._mirror_to_outbox(outbox_priority, event)
+            self._broadcast(event)
+            self._wake.set()
+            return
+        if self._low_priority_paused:
+            self._retain(lane, event)
+            self._mirror_to_outbox(outbox_priority, event)
+            self._broadcast(event)
+            self._wake.set()
+            return
+        queue = self._queue_for_lane(lane)
+        try:
+            queue.put_nowait((next(self._sequence), event))
+        except asyncio.QueueFull:
+            self._retain(lane, event)
+        self._mirror_to_outbox(outbox_priority, event)
+        self._broadcast(event)
+        self._wake.set()
 
     async def publish(self, priority: EventPriority | int | str, event: Any) -> None:
         outbox_priority = _normalize_outbox_priority(priority)
@@ -283,7 +339,25 @@ class EventBus:
         try:
             self._persistence_sink(priority, event)
         except Exception:
-            return
+            # 不重新抛出：mirror 是审计副作用，不能反向阻塞 publish 主链路。但必须
+            # 留痕——只静默吞掉会让 outbox 故障完全不可见（§10 可审计性）。
+            self._mirror_failure_count += 1
+            logger.warning(
+                "event_bus: outbox mirror failed; event dropped from persistence sink",
+                exc_info=True,
+                extra={
+                    "priority": priority,
+                    "event_type": str(getattr(event, "event_type", "")),
+                    "event_id": str(getattr(event, "event_id", "")),
+                    "trace_id": str(getattr(event, "trace_id", "")),
+                    "mirror_failure_count": self._mirror_failure_count,
+                },
+            )
+
+    def mirror_failure_count(self) -> int:
+        """累计的 outbox sink 失败次数；供 supervisor / admin 观测。"""
+
+        return self._mirror_failure_count
 
     def _broadcast(self, event: Any) -> None:
         # 热路径旁路：无订阅者时直接返回（O(1)），保证 publish() 在常态下零额外开销。

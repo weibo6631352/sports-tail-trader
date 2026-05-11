@@ -7,8 +7,8 @@ from enum import StrEnum
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
+from polymarket_trader.app.extension_intent_builder import decision_to_managed_intent
 from polymarket_trader.app.order_projection import normalize_order_id
-from polymarket_trader.app.trading_decision_service import decision_to_managed_intent
 from polymarket_trader.domain.market import Market, TradingStatus
 from polymarket_trader.domain.order import (
     BuyOrderIntent,

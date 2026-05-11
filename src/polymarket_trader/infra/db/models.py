@@ -273,6 +273,11 @@ class MarketModel(Base, TimestampMixin):
     tick_size: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False, default=Decimal("0.01"))
     min_order_size: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False, default=Decimal("1"))
     neg_risk: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 费率字段语义：NULL = 「尚未从 Polymarket API 拉到」（真实业务可选状态，非过渡列）。
+    # market 创建在前、fee 采集在后；CLOB 异步上报 fee_rate_bps，未上报时保持 NULL。
+    # 消费侧 (strategies/current/allocation.py) 显式处理 None：fee_rate_bps 为 None 时
+    # 回退到 taker_base_fee_bps，仍为 None / <=0 则跳过 fee 调整。这是 §8 允许的真实可选
+    # 语义而非「nullable 兼容列」。如果未来 fee 采集变成同步必备，再改 NOT NULL。
     fees_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     maker_base_fee_bps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     taker_base_fee_bps: Mapped[int | None] = mapped_column(Integer, nullable=True)

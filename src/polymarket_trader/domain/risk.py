@@ -178,6 +178,10 @@ class RiskManager:
         if decision is not None:
             return decision
 
+        decision = self._check_buy_order_type(intent, checks)
+        if decision is not None:
+            return decision
+
         decision = self._check_liquidity(
             intent,
             checks,
@@ -628,6 +632,55 @@ class RiskManager:
                 retryable=False,
             )
         return None
+
+    def _check_buy_order_type(
+        self,
+        intent: OrderIntent,
+        checks: list[RiskCheck],
+    ) -> RiskDecision | None:
+        """禁止 long-resting BUY：BUY 只允许 FAK（IOC/FOK）或 GTC+post_only（maker）。
+
+        CLAUDE.md §3「买入侧不得保留长期 resting BUY order」。``_check_liquidity``
+        虽然在足深市场会让 marketable GTC taker BUY 通过，但价格滑动 + 部分成交
+        仍可能留 resting tail。这道独立检查保证策略层不会无意中构造 GTC+post_only=False
+        的 BUY，把"是否 resting"的判断收敛到订单类型本身。
+        """
+
+        if intent.side != OrderSide.BUY:
+            return None
+        if intent.order_type == OrderType.FAK:
+            checks.append(
+                RiskCheck(
+                    name="buy_order_type_gate",
+                    passed=True,
+                    field="intent.order_type",
+                    value="FAK",
+                )
+            )
+            return None
+        if intent.order_type == OrderType.GTC and intent.post_only:
+            checks.append(
+                RiskCheck(
+                    name="buy_order_type_gate",
+                    passed=True,
+                    field="intent.order_type",
+                    value="GTC+post_only",
+                )
+            )
+            return None
+        return self._fail(
+            trace_id=intent.trace_id,
+            checks=checks,
+            name="buy_order_type_gate",
+            reason="resting_buy_not_allowed",
+            field="intent.order_type",
+            value={
+                "order_type": intent.order_type.value if intent.order_type else None,
+                "post_only": intent.post_only,
+            },
+            suggested_action="use_fak_or_post_only_gtc",
+            retryable=False,
+        )
 
     def _check_liquidity(
         self,

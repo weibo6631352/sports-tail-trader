@@ -4,6 +4,13 @@ from dataclasses import dataclass
 from decimal import Decimal
 from inspect import isawaitable
 from typing import Any, Iterable
+from uuid import uuid4
+
+from polymarket_trader.domain.events import (
+    DomainEvent,
+    DomainEventType,
+    OutboxPriority,
+)
 
 from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.market import Market
@@ -118,10 +125,9 @@ class TradingService:
             )
             submitted = False
             submission_error = None
-            # 风控拒绝结构化落库——交易主链路已完成判定，此投递走 P3 outbox
-            # mirror（put_nowait + broadcast，无真实 I/O 等待）；失败时静默
-            # 以保 §7 不反向阻塞。
-            await self._publish_risk_rejection(
+            # 风控拒绝结构化落库走 P3 outbox mirror，同步 publish_nowait 即可，
+            # 绝不 await——审计落库不能反向阻塞 P0 主链路（§7）。
+            self._publish_risk_rejection(
                 intent=intent, risk_decision=risk_decision, operation=operation
             )
         self._publish_lifecycle(
@@ -195,38 +201,31 @@ class TradingService:
             submission_error=submission_error,
         )
 
-    async def _publish_risk_rejection(
+    def _publish_risk_rejection(
         self,
         *,
         intent: ManagedOrderIntent,
         risk_decision: RiskDecision,
         operation: str,
     ) -> None:
-        """风控拒绝结构化事件——payload 含每条 RiskCheck 的细节。
+        """风控拒绝结构化事件——同步 fire-and-forget，绝不 await。
 
-        ``event_bus`` 是可选注入；缺失或失败都静默——P0 主链路已判定完成，
-        审计落库属于副作用，不能反向阻塞（§7）。``EventBus.publish`` 对 P3
-        优先级只做 put_nowait + broadcast，无真实 I/O 等待，因此可以放心
-        ``await``——不会引入异步调度风险。
+        ``event_bus`` 缺失或 publish_nowait 抛错都静默：P0 主链路已判定完成，
+        审计落库属于副作用，不能反向阻塞（§7）。``checks[].value`` 在源对象上
+        可能是 Position / list / Decimal 等任意对象，``str()`` 化属于"在主链路
+        同步写大 payload"——故只保留可审计的 ``name/passed/reason/field/
+        suggested_action/retryable``，丢弃 value 字段。
         """
 
         bus = self._event_bus
         if bus is None:
             return
-        from polymarket_trader.domain.events import (
-            DomainEvent,
-            DomainEventType,
-            OutboxPriority,
-        )
-        from uuid import uuid4
-
         checks_payload = [
             {
                 "name": check.name,
                 "passed": check.passed,
                 "reason": check.reason,
                 "field": check.field,
-                "value": None if check.value is None else str(check.value),
                 "suggested_action": check.suggested_action,
                 "retryable": check.retryable,
             }
@@ -235,13 +234,6 @@ class TradingService:
         intent_summary = {
             "operation": operation,
             "side": getattr(intent.side, "value", None) if hasattr(intent, "side") else None,
-            "price": str(getattr(intent, "price", "")) if hasattr(intent, "price") else None,
-            "amount_usdc": (
-                str(intent.amount_usdc) if hasattr(intent, "amount_usdc") and intent.amount_usdc is not None else None
-            ),
-            "size_shares": (
-                str(intent.size_shares) if hasattr(intent, "size_shares") and intent.size_shares is not None else None
-            ),
         }
         event = DomainEvent(
             trace_id=intent.trace_id,
@@ -260,10 +252,17 @@ class TradingService:
                 "decision_kind": operation,
             },
         )
+        publish_nowait = getattr(bus, "publish_nowait", None)
         try:
-            result = bus.publish(OutboxPriority.P3, event)
-            if isawaitable(result):
-                await result
+            if callable(publish_nowait):
+                publish_nowait(OutboxPriority.P3, event)
+            else:
+                # 测试桩可能只实现 publish；兜底为 fire-and-forget task。
+                result = bus.publish(OutboxPriority.P3, event)
+                if isawaitable(result):
+                    import asyncio
+
+                    asyncio.ensure_future(result)
         except Exception:
             return
 
