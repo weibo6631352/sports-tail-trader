@@ -2,11 +2,15 @@ import { apiClient, buildSearch } from './client'
 import type {
   AllocationRecord,
   AuditEventRecord,
+  CancelOrderRequest,
+  CancelOrderResult,
   CancelReplaceSellPayload,
   CandidateRecord,
   ConfirmCandidateRequest,
   ConfirmCandidateResult,
   FillRecord,
+  ForceExitRequest,
+  ForceExitResult,
   MarketView,
   MetricsPayload,
   MidpointPayload,
@@ -14,11 +18,17 @@ import type {
   OrderRecord,
   OutboxEventRecord,
   PageResponse,
+  PauseMarketRequest,
+  PauseMarketResult,
+  PauseTradingRequest,
+  PauseTradingResult,
   PortfolioSnapshot,
   PositionRecord,
   PricesHistoryPayload,
   ReadyPayload,
   ReconcileResult,
+  ResumeMarketRequest,
+  ResumeMarketResult,
   RuntimePayload,
   SportsLiveStateRecord,
   TradeReplayRecord,
@@ -75,4 +85,16 @@ export const adminApi = {
     apiClient.post<ReconcileResult>('/operations/reconcile', payload),
   runVirtualPaperTrade: (payload: VirtualPaperTradeRequest) =>
     apiClient.post<VirtualPaperTradeResult>('/operations/virtual-paper-trade', payload),
+  pauseTrading: (payload: PauseTradingRequest) =>
+    apiClient.post<PauseTradingResult>('/operations/pause-trading', payload),
+  resumeTrading: (payload: PauseTradingRequest) =>
+    apiClient.post<PauseTradingResult>('/operations/resume-trading', payload),
+  cancelOrder: (payload: CancelOrderRequest) =>
+    apiClient.post<CancelOrderResult>('/orders/cancel', payload),
+  forceExitPosition: (payload: ForceExitRequest) =>
+    apiClient.post<ForceExitResult>('/positions/force-exit', payload),
+  pauseMarket: (payload: PauseMarketRequest) =>
+    apiClient.post<PauseMarketResult>('/markets/pause', payload),
+  resumeMarket: (payload: ResumeMarketRequest) =>
+    apiClient.post<ResumeMarketResult>('/markets/resume', payload),
 }

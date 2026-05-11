@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { formatApiError } from '../../core/api/client'
 import { adminApi } from '../../core/api/resources'
 import type { FillRecord, PositionRecord } from '../../core/api/types'
 import { SectionCard } from '../../shared/ui/SectionCard'
@@ -11,9 +12,33 @@ import { formatDateTime, formatDecimal } from '../../shared/utils/format'
 import { formatConfirmationStatusLabel, formatOrderSideLabel, isSellOrderSide } from '../../shared/utils/labels'
 
 export const PositionsPage = () => {
+  const queryClient = useQueryClient()
   const [conditionId, setConditionId] = useState('')
   const [tokenId, setTokenId] = useState('')
   const [fillTraceId, setFillTraceId] = useState('')
+  const [forceExitOperator, setForceExitOperator] = useState('人工')
+
+  const forceExitMutation = useMutation({
+    mutationFn: (payload: { condition_id: string; token_id: string; operator: string }) =>
+      adminApi.forceExitPosition(payload),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['positions'] }),
+        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+      ])
+    },
+  })
+  const forceExitError = forceExitMutation.error ? formatApiError(forceExitMutation.error) : null
+  const handleForceExit = (row: PositionRecord) => {
+    const normalizedOperator = forceExitOperator.trim() || 'manual'
+    if (!window.confirm(`将以当前 best_bid 强平 ${row.market_slug ?? row.condition_id} / ${row.token_id}，是否继续？`)) return
+    forceExitMutation.mutate({
+      condition_id: row.condition_id,
+      token_id: row.token_id,
+      operator: normalizedOperator,
+    })
+  }
 
   const positionsQuery = useQuery({
     queryKey: ['positions', { conditionId, tokenId }],
@@ -74,6 +99,25 @@ export const PositionsPage = () => {
       cell: (row) => <StatusPill label={formatConfirmationStatusLabel(row.confirmation_status)} tone="neutral" />,
     },
     { key: 'updated', header: '更新时间', cell: (row) => formatDateTime(row.updated_at) },
+    {
+      key: 'actions',
+      header: '操作',
+      cell: (row) => {
+        const isExiting =
+          forceExitMutation.isPending &&
+          forceExitMutation.variables?.condition_id === row.condition_id &&
+          forceExitMutation.variables?.token_id === row.token_id
+        return (
+          <button
+            type="button"
+            disabled={forceExitMutation.isPending || !row.shares || Number(row.shares) <= 0}
+            onClick={() => handleForceExit(row)}
+          >
+            {isExiting ? '平仓中...' : '强平'}
+          </button>
+        )
+      },
+    },
   ]
 
   const fillColumns: Array<DataColumn<FillRecord>> = [
@@ -130,7 +174,19 @@ export const PositionsPage = () => {
             <span>成交追踪 ID</span>
             <input value={fillTraceId} onChange={(event) => setFillTraceId(event.target.value)} />
           </label>
+          <label>
+            <span>强平操作者</span>
+            <input value={forceExitOperator} onChange={(event) => setForceExitOperator(event.target.value)} />
+          </label>
         </div>
+        {forceExitError ? (
+          <ul className="message-list form-feedback">
+            <li>
+              <strong>强平失败</strong>
+              <span>{forceExitError}</span>
+            </li>
+          </ul>
+        ) : null}
       </SectionCard>
 
       <SectionCard title="持仓" subtitle={`当前 ${positionsQuery.data?.total ?? 0} 条。`}>

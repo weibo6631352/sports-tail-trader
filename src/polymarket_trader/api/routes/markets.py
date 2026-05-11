@@ -3,12 +3,24 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from polymarket_trader.api.deps import get_admin_service
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.infra.polymarket import PolymarketClientError
 
 router = APIRouter(prefix="/markets", tags=["markets"])
+
+
+class PauseMarketRequest(BaseModel):
+    condition_id: str = Field(min_length=1)
+    reason: str = Field(default="manual_pause", min_length=1)
+    operator: str = "manual"
+
+
+class ResumeMarketRequest(BaseModel):
+    condition_id: str = Field(min_length=1)
+    operator: str = "manual"
 
 
 @router.get("/detail")
@@ -145,4 +157,27 @@ async def list_markets(
         taker_base_fee_bps_max=taker_base_fee_bps_max,
         sort_by=sort_by,
         sort_direction=sort_direction,
+    )
+
+
+@router.post("/pause")
+async def pause_market(
+    request: PauseMarketRequest,
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    return await service.pause_market_manual(
+        condition_id=request.condition_id,
+        reason=request.reason,
+        operator=request.operator,
+    )
+
+
+@router.post("/resume")
+async def resume_market(
+    request: ResumeMarketRequest,
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    return await service.resume_market_manual(
+        condition_id=request.condition_id,
+        operator=request.operator,
     )

@@ -19,8 +19,19 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
-from polymarket_trader.app.admin_operations import normalize_condition_ids
-from polymarket_trader.domain.order import OrderResultStatus
+from polymarket_trader.app.admin_operations import (
+    market_status_allowed_for_manual_order,
+    normalize_condition_ids,
+)
+from polymarket_trader.app.order_projection import normalize_order_id, order_open_shares
+from polymarket_trader.domain.account import MarketPauseSource
+from polymarket_trader.domain.order import (
+    CancelOrderIntent,
+    OrderResultStatus,
+    OrderSide,
+    OrderType,
+    SellOrderIntent,
+)
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
 from polymarket_trader.workers.trading_decision import (
     snapshot_allowance,
@@ -218,6 +229,275 @@ class AdminControlsMixin:
             ),
             "candidate": self._candidate_payload(market, token_id, plan),
             "review": self._serializer().review(review),
+        }
+
+    async def pause_trading(
+        self,
+        *,
+        reason: str = "manual_pause",
+        operator: str = "manual",
+    ) -> dict[str, Any]:
+        """人工触发暂停自动交易。phase 立即切到 PAUSED，等用户 resume 才恢复。"""
+
+        supervisor = getattr(self.runtime, "supervisor", None)
+        if supervisor is None:
+            return {"status": "failed", "reason": "supervisor_unavailable"}
+        normalized_reason = reason.strip() or "manual_pause"
+        supervisor.pause_trading(normalized_reason)
+        return {
+            "status": "ok",
+            "operator": operator,
+            "reason": normalized_reason,
+            "phase": getattr(supervisor.snapshot().phase, "value", "unknown"),
+            "manual_pause_reason": normalized_reason,
+        }
+
+    async def resume_trading(self, *, operator: str = "manual") -> dict[str, Any]:
+        """人工恢复自动交易。仅清除 manual_pause_reason 并回到 TRADING_ENABLED；其他降级原因仍生效。"""
+
+        supervisor = getattr(self.runtime, "supervisor", None)
+        if supervisor is None:
+            return {"status": "failed", "reason": "supervisor_unavailable"}
+        supervisor.resume_trading()
+        snapshot = supervisor.snapshot()
+        return {
+            "status": "ok",
+            "operator": operator,
+            "phase": getattr(snapshot.phase, "value", "unknown"),
+            "manual_pause_reason": snapshot.manual_pause_reason,
+            "degraded_reason": snapshot.degraded_reason,
+        }
+
+    async def cancel_order(
+        self,
+        *,
+        order_id: str,
+        market_slug: str | None = None,
+        condition_id: str | None = None,
+        token_id: str | None = None,
+        operator: str = "manual",
+        reason: str = "admin_cancel_order",
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """人工撤单。走 TradingService → OrderExecutor，与策略撤单同一条主链路。"""
+
+        trace_id = trace_id or uuid4().hex
+        account = self._account_snapshot()
+        source_order = self._find_open_order(
+            account,
+            order_id=order_id,
+            market_slug=market_slug,
+            condition_id=condition_id,
+            token_id=token_id,
+        )
+        if source_order is None:
+            return {
+                "status": "failed",
+                "trace_id": trace_id,
+                "reason": "order_not_found",
+                "order_id": order_id,
+            }
+
+        try:
+            trading_service = self._trading_service()
+        except RuntimeError as exc:
+            return {
+                "status": "failed",
+                "trace_id": trace_id,
+                "reason": str(exc),
+                "order": self._serializer().order(source_order),
+            }
+
+        intent = CancelOrderIntent(
+            trace_id=trace_id,
+            condition_id=source_order.condition_id,
+            token_id=source_order.token_id,
+            order_id=normalize_order_id(source_order),
+            market_slug=source_order.market_slug,
+            reason=reason,
+        )
+        review = await trading_service.cancel(intent)
+        result = review.order_result
+        failed = result is None or result.status in {
+            OrderResultStatus.FAILED,
+            OrderResultStatus.REJECTED,
+        }
+        return {
+            "status": "failed" if failed else "ok",
+            "trace_id": trace_id,
+            "operator": operator,
+            "reason": "" if result is None else result.reason,
+            "order": self._serializer().order(source_order),
+            "review": self._serializer().review(review),
+        }
+
+    async def force_exit_position(
+        self,
+        *,
+        condition_id: str,
+        token_id: str,
+        operator: str = "manual",
+        reason: str = "admin_force_exit",
+        price: Decimal | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """紧急平仓：用当前 best_bid（或调用方指定价）挂全量 SELL，经 RiskManager → OrderExecutor。"""
+
+        trace_id = trace_id or uuid4().hex
+        market = self._resolve_market(condition_id=condition_id, token_id=token_id)
+        if market is None:
+            return {"status": "failed", "trace_id": trace_id, "reason": "market_not_found"}
+        if token_id not in market.token_ids:
+            return {
+                "status": "failed",
+                "trace_id": trace_id,
+                "reason": "token_not_found",
+                "market": self._serializer().market(market),
+            }
+        if not market_status_allowed_for_manual_order(market):
+            return {
+                "status": "failed",
+                "trace_id": trace_id,
+                "reason": "market_not_operable",
+                "market": self._serializer().market(market),
+            }
+        account = self._account_snapshot()
+        position = account.get_position(condition_id, token_id)
+        if position is None or position.shares <= Decimal("0"):
+            return {
+                "status": "failed",
+                "trace_id": trace_id,
+                "reason": "position_not_found",
+                "market": self._serializer().market(market),
+            }
+
+        orderbook = self._market_ws_snapshot(token_id)
+        target_price = price
+        if target_price is None:
+            if orderbook is None or orderbook.best_bid is None or orderbook.best_bid <= Decimal("0"):
+                return {
+                    "status": "failed",
+                    "trace_id": trace_id,
+                    "reason": "best_bid_unavailable",
+                    "market": self._serializer().market(market),
+                }
+            target_price = orderbook.best_bid
+        if target_price <= Decimal("0") or target_price >= Decimal("1"):
+            return {
+                "status": "failed",
+                "trace_id": trace_id,
+                "reason": "invalid_price",
+                "market": self._serializer().market(market),
+            }
+        # 平仓数量按当前 confirmed shares，扣除已挂的 SELL 数量，避免重复挂单。
+        outstanding_sell_shares = Decimal("0")
+        for order in account.open_orders_for_market(condition_id, token_id):
+            if order.side != OrderSide.SELL:
+                continue
+            open_shares = order_open_shares(order)
+            if open_shares is not None:
+                outstanding_sell_shares += open_shares
+        exit_shares = position.shares - outstanding_sell_shares
+        if exit_shares <= Decimal("0"):
+            return {
+                "status": "failed",
+                "trace_id": trace_id,
+                "reason": "no_exit_shares",
+                "market": self._serializer().market(market),
+            }
+
+        try:
+            trading_service = self._trading_service()
+        except RuntimeError as exc:
+            return {"status": "failed", "trace_id": trace_id, "reason": str(exc)}
+
+        intent = SellOrderIntent(
+            trace_id=trace_id,
+            condition_id=condition_id,
+            token_id=token_id,
+            price=target_price,
+            size_shares=exit_shares,
+            market_slug=market.market_slug,
+            order_type=OrderType.GTC,
+        )
+        review = await trading_service.sell(
+            intent,
+            market=market,
+            orderbook=orderbook,
+            position=position,
+            open_orders=account.open_orders_for_market(condition_id, token_id),
+            classification_passed=True,
+            balance_usdc=snapshot_available_usdc(account),
+            allowance_usdc=snapshot_allowance(account),
+            max_order_usdc=self._settings_value("max_order_usdc"),
+            max_market_usdc=self._settings_value("max_market_usdc"),
+            max_total_usdc=self._settings_value("max_total_usdc"),
+            max_open_orders=self._settings_value("max_open_orders"),
+            order_retry_limit=self._settings_value("order_retry_limit"),
+        )
+        result = review.order_result
+        failed = result is None or result.status in {
+            OrderResultStatus.FAILED,
+            OrderResultStatus.REJECTED,
+        }
+        return {
+            "status": "failed" if failed else "ok",
+            "trace_id": trace_id,
+            "operator": operator,
+            "reason": (
+                review.risk_decision.reason
+                if review.risk_decision is not None and not review.risk_decision.passed
+                else ("" if result is None else result.reason)
+            ),
+            "market": self._serializer().market(market),
+            "position": self._serializer().position(position),
+            "review": self._serializer().review(review),
+        }
+
+    async def pause_market_manual(
+        self,
+        *,
+        condition_id: str,
+        reason: str = "manual_pause",
+        operator: str = "manual",
+    ) -> dict[str, Any]:
+        """人工暂停某市场。account_state.market_pauses 写入 source=MANUAL，阻止入场。"""
+
+        account_state = getattr(self.runtime, "account_state_store", None)
+        if account_state is None:
+            return {"status": "failed", "reason": "account_state_store_unavailable"}
+        normalized_reason = reason.strip() or "manual_pause"
+        snapshot = account_state.pause_market(
+            condition_id,
+            reason=normalized_reason,
+            source=MarketPauseSource.MANUAL,
+            recoverable=True,
+        )
+        pause = snapshot.pause_for_market(condition_id)
+        return {
+            "status": "ok",
+            "operator": operator,
+            "condition_id": condition_id,
+            "reason": normalized_reason,
+            "pause": None if pause is None else pause.as_payload(),
+        }
+
+    async def resume_market_manual(
+        self,
+        *,
+        condition_id: str,
+        operator: str = "manual",
+    ) -> dict[str, Any]:
+        """人工恢复某市场。仅清除 market_pauses 中对应条目。"""
+
+        account_state = getattr(self.runtime, "account_state_store", None)
+        if account_state is None:
+            return {"status": "failed", "reason": "account_state_store_unavailable"}
+        account_state.resume_market(condition_id)
+        return {
+            "status": "ok",
+            "operator": operator,
+            "condition_id": condition_id,
         }
 
 

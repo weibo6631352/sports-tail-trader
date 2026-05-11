@@ -14,6 +14,8 @@ export const OperationsPage = () => {
   const queryClient = useQueryClient()
   const [traceId, setTraceId] = useState('')
   const [conditionIdsInput, setConditionIdsInput] = useState('')
+  const [pauseReason, setPauseReason] = useState('manual_pause')
+  const [pauseOperator, setPauseOperator] = useState('人工')
 
   const allocationsQuery = useQuery({
     queryKey: ['allocations'],
@@ -23,6 +25,24 @@ export const OperationsPage = () => {
         offset: 0,
       }),
   })
+
+  const readyQuery = useQuery({
+    queryKey: ['ready'],
+    queryFn: () => adminApi.getReady(),
+    refetchInterval: 5_000,
+  })
+  const runtimeQuery = useQuery({
+    queryKey: ['runtime'],
+    queryFn: () => adminApi.getRuntime(),
+    refetchInterval: 10_000,
+  })
+
+  const invalidateAfterControl = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['ready'] }),
+      queryClient.invalidateQueries({ queryKey: ['runtime'] }),
+    ])
+  }
 
   const reconcileMutation = useMutation({
     mutationFn: (payload: { trace_id?: string; condition_ids: string[] }) => adminApi.reconcile(payload),
@@ -34,8 +54,36 @@ export const OperationsPage = () => {
       ])
     },
   })
+  const pauseTradingMutation = useMutation({
+    mutationFn: (payload: { reason: string; operator: string }) => adminApi.pauseTrading(payload),
+    onSuccess: invalidateAfterControl,
+  })
+  const resumeTradingMutation = useMutation({
+    mutationFn: (payload: { operator: string }) => adminApi.resumeTrading(payload),
+    onSuccess: invalidateAfterControl,
+  })
 
   const requestError = reconcileMutation.error ? formatApiError(reconcileMutation.error) : null
+  const pauseError = pauseTradingMutation.error ? formatApiError(pauseTradingMutation.error) : null
+  const resumeError = resumeTradingMutation.error ? formatApiError(resumeTradingMutation.error) : null
+  const phase = runtimeQuery.data?.phase ?? readyQuery.data?.phase ?? '未知'
+  const manualPauseReason =
+    pauseTradingMutation.data?.manual_pause_reason ??
+    resumeTradingMutation.data?.manual_pause_reason ??
+    null
+  const handlePauseTrading = () => {
+    pauseTradingMutation.reset()
+    const normalizedOperator = pauseOperator.trim() || 'manual'
+    const normalizedReason = pauseReason.trim() || 'manual_pause'
+    if (!window.confirm(`将以"${normalizedReason}"暂停自动交易，是否继续？`)) return
+    pauseTradingMutation.mutate({ reason: normalizedReason, operator: normalizedOperator })
+  }
+  const handleResumeTrading = () => {
+    resumeTradingMutation.reset()
+    const normalizedOperator = pauseOperator.trim() || 'manual'
+    if (!window.confirm('确认恢复自动交易？')) return
+    resumeTradingMutation.mutate({ operator: normalizedOperator })
+  }
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -82,10 +130,50 @@ export const OperationsPage = () => {
       <header className="page-header">
         <div>
           <p className="eyebrow">操作</p>
-          <h1>人工对账与预算分配</h1>
-          <p>这里执行受控对账操作，并观察当前预算分配结果。</p>
+          <h1>人工对账与自动交易控制</h1>
+          <p>这里执行受控对账操作、暂停/恢复自动交易，并观察当前预算分配结果。</p>
         </div>
       </header>
+
+      <SectionCard
+        title="自动交易开关"
+        subtitle={`当前 phase=${phase}${manualPauseReason ? `；manual_pause_reason=${manualPauseReason}` : ''}`}
+      >
+        <div className="form-grid form-grid--filters">
+          <label>
+            <span>操作者</span>
+            <input value={pauseOperator} onChange={(event) => setPauseOperator(event.target.value)} />
+          </label>
+          <label>
+            <span>暂停原因</span>
+            <input value={pauseReason} onChange={(event) => setPauseReason(event.target.value)} />
+          </label>
+          <div className="inline-actions">
+            <button type="button" onClick={handlePauseTrading} disabled={pauseTradingMutation.isPending}>
+              {pauseTradingMutation.isPending ? '暂停中...' : '暂停自动交易'}
+            </button>
+            <button type="button" onClick={handleResumeTrading} disabled={resumeTradingMutation.isPending}>
+              {resumeTradingMutation.isPending ? '恢复中...' : '恢复自动交易'}
+            </button>
+          </div>
+        </div>
+        {pauseError ? (
+          <ul className="message-list form-feedback">
+            <li>
+              <strong>暂停失败</strong>
+              <span>{pauseError}</span>
+            </li>
+          </ul>
+        ) : null}
+        {resumeError ? (
+          <ul className="message-list form-feedback">
+            <li>
+              <strong>恢复失败</strong>
+              <span>{resumeError}</span>
+            </li>
+          </ul>
+        ) : null}
+      </SectionCard>
 
       <div className="content-grid content-grid--two">
         <SectionCard title="执行对账" subtitle="支持按追踪 ID 或条件 ID 限定本次对账范围。">

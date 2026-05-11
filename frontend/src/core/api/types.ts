@@ -620,3 +620,80 @@ export interface CancelReplaceSellPayload {
   replace_review?: JsonValue
   replace_order_submitted?: JsonValue
 }
+
+export interface CancelOrderRequest {
+  order_id: string
+  market_slug?: string
+  condition_id?: string
+  token_id?: string
+  operator?: string
+  reason?: string
+  trace_id?: string
+}
+
+export interface CancelOrderResult {
+  status: string
+  trace_id: string
+  reason?: string
+  operator?: string
+  order?: JsonValue
+  review?: JsonValue
+}
+
+export interface PauseTradingRequest {
+  reason?: string
+  operator?: string
+}
+
+export interface PauseTradingResult {
+  status: string
+  reason?: string
+  operator?: string
+  phase?: string
+  manual_pause_reason?: string | null
+  degraded_reason?: string | null
+}
+
+export interface ForceExitRequest {
+  condition_id: string
+  token_id: string
+  price?: string | number | null
+  operator?: string
+  reason?: string
+  trace_id?: string
+}
+
+export interface ForceExitResult {
+  status: string
+  trace_id: string
+  reason?: string
+  operator?: string
+  market?: JsonValue
+  position?: JsonValue
+  review?: JsonValue
+}
+
+export interface PauseMarketRequest {
+  condition_id: string
+  reason?: string
+  operator?: string
+}
+
+export interface PauseMarketResult {
+  status: string
+  operator?: string
+  condition_id?: string
+  reason?: string
+  pause?: JsonValue
+}
+
+export interface ResumeMarketRequest {
+  condition_id: string
+  operator?: string
+}
+
+export interface ResumeMarketResult {
+  status: string
+  operator?: string
+  condition_id?: string
+}

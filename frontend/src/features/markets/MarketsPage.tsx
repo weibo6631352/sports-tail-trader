@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useSearchParams } from 'react-router-dom'
+import { formatApiError } from '../../core/api/client'
 import { adminApi } from '../../core/api/resources'
 import type { MarketView, TakerFeePreview } from '../../core/api/types'
 import { SectionCard } from '../../shared/ui/SectionCard'
@@ -154,6 +155,7 @@ const renderBinaryQuoteSummary = (row: MarketView) => {
 }
 
 export const MarketsPage = () => {
+  const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [tradingStatus, setTradingStatus] = useState('')
@@ -161,12 +163,36 @@ export const MarketsPage = () => {
   const [sortBy, setSortBy] = useState('fee_rate_updated_at')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [offset, setOffset] = useState(0)
+  const [marketOperator, setMarketOperator] = useState('人工')
+  const [marketPauseReason, setMarketPauseReason] = useState('manual_pause')
 
   const runtimeQuery = useQuery({
     queryKey: ['runtime', 'markets'],
     queryFn: adminApi.getRuntime,
     refetchInterval: 20_000,
   })
+
+  const pauseMarketMutation = useMutation({
+    mutationFn: (payload: { condition_id: string; reason: string; operator: string }) =>
+      adminApi.pauseMarket(payload),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['markets'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+      ])
+    },
+  })
+  const resumeMarketMutation = useMutation({
+    mutationFn: (payload: { condition_id: string; operator: string }) => adminApi.resumeMarket(payload),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['markets'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+      ])
+    },
+  })
+  const pauseMarketError = pauseMarketMutation.error ? formatApiError(pauseMarketMutation.error) : null
+  const resumeMarketError = resumeMarketMutation.error ? formatApiError(resumeMarketMutation.error) : null
 
   const marketsQuery = useQuery({
     queryKey: ['markets', { tradingStatus, feesEnabled, sortBy, sortDirection, offset }],
@@ -398,7 +424,31 @@ export const MarketsPage = () => {
               <option value="asc">升序</option>
             </select>
           </label>
+          <label>
+            <span>暂停/恢复操作者</span>
+            <input value={marketOperator} onChange={(event) => setMarketOperator(event.target.value)} />
+          </label>
+          <label>
+            <span>暂停原因</span>
+            <input value={marketPauseReason} onChange={(event) => setMarketPauseReason(event.target.value)} />
+          </label>
         </div>
+        {pauseMarketError ? (
+          <ul className="message-list form-feedback">
+            <li>
+              <strong>暂停失败</strong>
+              <span>{pauseMarketError}</span>
+            </li>
+          </ul>
+        ) : null}
+        {resumeMarketError ? (
+          <ul className="message-list form-feedback">
+            <li>
+              <strong>恢复失败</strong>
+              <span>{resumeMarketError}</span>
+            </li>
+          </ul>
+        ) : null}
       </SectionCard>
 
       <SectionCard
@@ -445,15 +495,42 @@ export const MarketsPage = () => {
         }
         actions={
           selectedMarket ? (
-            <div className="badge-row">
-              <StatusPill
-                label={formatTradingStatusLabel(selectedMarket.market.trading_status)}
-                tone={tradingStatusTone(selectedMarket.market.trading_status)}
-              />
-              {selectedMarket.tracked ? <StatusPill label="已跟踪" tone="success" /> : null}
-              {extensionPresentation.renderMarketBadges?.(selectedMarket).map((badge) => (
-                <StatusPill key={badge.label} label={badge.label} tone={badge.tone} />
-              ))}
+            <div className="inline-actions">
+              <div className="badge-row">
+                <StatusPill
+                  label={formatTradingStatusLabel(selectedMarket.market.trading_status)}
+                  tone={tradingStatusTone(selectedMarket.market.trading_status)}
+                />
+                {selectedMarket.tracked ? <StatusPill label="已跟踪" tone="success" /> : null}
+                {extensionPresentation.renderMarketBadges?.(selectedMarket).map((badge) => (
+                  <StatusPill key={badge.label} label={badge.label} tone={badge.tone} />
+                ))}
+              </div>
+              <button
+                type="button"
+                disabled={pauseMarketMutation.isPending}
+                onClick={() => {
+                  const conditionId = selectedMarket.market.condition_id
+                  const operator = marketOperator.trim() || 'manual'
+                  const reason = marketPauseReason.trim() || 'manual_pause'
+                  if (!window.confirm(`将以"${reason}"暂停 ${selectedMarket.market.market_slug ?? conditionId}，是否继续？`)) return
+                  pauseMarketMutation.mutate({ condition_id: conditionId, reason, operator })
+                }}
+              >
+                {pauseMarketMutation.isPending ? '暂停中...' : '暂停该市场'}
+              </button>
+              <button
+                type="button"
+                disabled={resumeMarketMutation.isPending}
+                onClick={() => {
+                  const conditionId = selectedMarket.market.condition_id
+                  const operator = marketOperator.trim() || 'manual'
+                  if (!window.confirm(`确认恢复 ${selectedMarket.market.market_slug ?? conditionId}？`)) return
+                  resumeMarketMutation.mutate({ condition_id: conditionId, operator })
+                }}
+              >
+                {resumeMarketMutation.isPending ? '恢复中...' : '恢复该市场'}
+              </button>
             </div>
           ) : null
         }

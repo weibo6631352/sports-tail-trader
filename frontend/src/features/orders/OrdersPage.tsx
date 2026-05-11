@@ -73,6 +73,32 @@ export const OrdersPage = () => {
       ])
     },
   })
+  const cancelOrderMutation = useMutation({
+    mutationFn: (payload: { order_id: string; market_slug?: string; condition_id?: string; token_id?: string; operator: string }) =>
+      adminApi.cancelOrder(payload),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio'] }),
+      ])
+    },
+  })
+  const handleCancelOrder = (row: OrderRecord) => {
+    if (!row.order_id) {
+      window.alert('该订单缺少 order_id，无法撤单。')
+      return
+    }
+    const normalizedOperator = operator.trim() || 'manual'
+    if (!window.confirm(`确认撤销订单 ${row.order_id}（${row.market_slug ?? row.condition_id}）？`)) return
+    cancelOrderMutation.mutate({
+      order_id: row.order_id,
+      market_slug: row.market_slug ?? undefined,
+      condition_id: row.condition_id ?? undefined,
+      token_id: row.token_id ?? undefined,
+      operator: normalizedOperator,
+    })
+  }
+  const cancelError = cancelOrderMutation.error ? formatApiError(cancelOrderMutation.error) : null
 
   const columns: Array<DataColumn<OrderRecord>> = useMemo(
     () => [
@@ -128,8 +154,26 @@ export const OrdersPage = () => {
         header: '更新时间',
         cell: (row) => formatDateTime(row.updated_at),
       },
+      {
+        key: 'actions',
+        header: '操作',
+        cell: (row) => (
+          <button
+            type="button"
+            disabled={!row.order_id || cancelOrderMutation.isPending}
+            onClick={(event) => {
+              event.stopPropagation()
+              handleCancelOrder(row)
+            }}
+          >
+            {cancelOrderMutation.isPending && cancelOrderMutation.variables?.order_id === row.order_id
+              ? '撤单中...'
+              : '撤单'}
+          </button>
+        ),
+      },
     ],
-    [],
+    [cancelOrderMutation.isPending, cancelOrderMutation.variables?.order_id, operator],
   )
 
   const requestError = cancelReplaceMutation.error ? formatApiError(cancelReplaceMutation.error) : null
@@ -278,6 +322,14 @@ export const OrdersPage = () => {
                 <li>
                   <strong>请求失败</strong>
                   <span>{requestError}</span>
+                </li>
+              </ul>
+            ) : null}
+            {cancelError ? (
+              <ul className="message-list form-feedback">
+                <li>
+                  <strong>撤单失败</strong>
+                  <span>{cancelError}</span>
                 </li>
               </ul>
             ) : null}
