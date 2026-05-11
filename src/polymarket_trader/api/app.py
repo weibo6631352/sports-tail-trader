@@ -22,6 +22,7 @@ from polymarket_trader.api.routes import (
     outbox,
     portfolio,
     positions,
+    stream,
     trade_replays,
 )
 from polymarket_trader.api.routes import runtime as runtime_route
@@ -82,4 +83,5 @@ def create_app(*, runtime: Any | None = None, admin_service: AdminService | None
     app.include_router(operations.router)
     app.include_router(analytics.router)
     app.include_router(exports.router)
+    app.include_router(stream.router)
     return app

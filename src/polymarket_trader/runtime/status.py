@@ -117,6 +117,8 @@ class RuntimeSnapshot:
     reconcile: Mapping[str, Any] | None = None
     persistence: Mapping[str, Any] | None = None
     metrics: Mapping[str, Any] | None = None
+    sse_active_subscribers: int = 0
+    sse_dropped_events_total: int = 0
     created_at: datetime = field(default_factory=_utc_now)
 
     def as_dict(self) -> dict[str, Any]:

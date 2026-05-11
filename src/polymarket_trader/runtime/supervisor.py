@@ -91,6 +91,7 @@ class Supervisor:
         reconcile_snapshot_provider: SnapshotProvider | None = None,
         persistence_snapshot_provider: SnapshotProvider | None = None,
         metrics_snapshot_provider: SnapshotProvider | None = None,
+        sse_snapshot_provider: SnapshotProvider | None = None,
         trading_queue_warn_depth: int = 100,
         entry_signal_to_submit_warn_ms: int = 500,
         outbox_depth_warn: int = 1000,
@@ -105,6 +106,7 @@ class Supervisor:
         self._reconcile_snapshot_provider = reconcile_snapshot_provider
         self._persistence_snapshot_provider = persistence_snapshot_provider
         self._metrics_snapshot_provider = metrics_snapshot_provider
+        self._sse_snapshot_provider = sse_snapshot_provider
         self._trading_queue_warn_depth = max(0, trading_queue_warn_depth)
         self._entry_signal_to_submit_warn_ms = max(1, entry_signal_to_submit_warn_ms)
         self._outbox_depth_warn = max(1, outbox_depth_warn)
@@ -245,6 +247,7 @@ class Supervisor:
         persistence = _as_mapping(self._snapshot_from(self._persistence_snapshot_provider))
         if metrics is None:
             metrics = _as_mapping(self._snapshot_from(self._metrics_snapshot_provider))
+        sse_snapshot = _as_mapping(self._snapshot_from(self._sse_snapshot_provider))
         readiness = self._build_readiness(
             settings_readiness=settings_readiness,
             queue_depths=queue_depths,
@@ -278,6 +281,8 @@ class Supervisor:
             reconcile=reconcile,
             persistence=persistence,
             metrics=metrics,
+            sse_active_subscribers=_int(sse_snapshot, "sse_active_subscribers"),
+            sse_dropped_events_total=_int(sse_snapshot, "sse_dropped_events_total"),
         )
 
     def _build_readiness(

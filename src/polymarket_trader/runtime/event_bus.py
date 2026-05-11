@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from enum import IntEnum
 from itertools import count
 from typing import Any, Callable
 
 from polymarket_trader.domain.events import DomainEventType, OutboxPriority
+
+logger = logging.getLogger(__name__)
 
 
 # 这里不另起一套同义枚举，直接复用域内优先级定义，避免队列和 outbox 之间出现两套语义。
@@ -109,9 +112,19 @@ class EventBus:
         self._low_priority_paused = False
         self._wake = asyncio.Event()
         self._persistence_sink: Callable[[int, Any], None] | None = None
+        # 只读旁路：SSE / admin 订阅可以挂这里，单纯做 fan-out，不影响交易主链路。
+        self._broadcast_callbacks: set[Callable[[Any], None]] = set()
 
     def bind_persistence_sink(self, sink: Callable[[int, Any], None] | None) -> None:
         self._persistence_sink = sink
+
+    def add_broadcast_listener(self, callback: Callable[[Any], None]) -> None:
+        """注册只读 fan-out 回调（SSE 等订阅入口用）。"""
+
+        self._broadcast_callbacks.add(callback)
+
+    def remove_broadcast_listener(self, callback: Callable[[Any], None]) -> None:
+        self._broadcast_callbacks.discard(callback)
 
     async def publish(self, priority: EventPriority | int | str, event: Any) -> None:
         outbox_priority = _normalize_outbox_priority(priority)
@@ -120,17 +133,20 @@ class EventBus:
             # P3 只需要镜像到 outbox；运行时没有独立的 persistence lane consumer，
             # 继续把这类事件塞进队列只会制造永远不会被消费的积压。
             self._mirror_to_outbox(outbox_priority, event)
+            self._broadcast(event)
             return
         if lane == QueueLane.TRADING:
             key = self._trading_event_key(event)
             if key in self._trading_pending_events:
                 self._trading_pending_events[key] = event
                 self._mirror_to_outbox(outbox_priority, event)
+                self._broadcast(event)
                 self._wake.set()
                 return
             await self._trading_queue.put((next(self._sequence), key))
             self._trading_pending_events[key] = event
             self._mirror_to_outbox(outbox_priority, event)
+            self._broadcast(event)
             self._wake.set()
             return
 
@@ -138,6 +154,7 @@ class EventBus:
         if self._low_priority_paused:
             self._retain(lane, event)
             self._mirror_to_outbox(outbox_priority, event)
+            self._broadcast(event)
             self._wake.set()
             return
 
@@ -145,10 +162,12 @@ class EventBus:
         try:
             queue.put_nowait((next(self._sequence), event))
             self._mirror_to_outbox(outbox_priority, event)
+            self._broadcast(event)
             self._wake.set()
         except asyncio.QueueFull:
             self._retain(lane, event)
             self._mirror_to_outbox(outbox_priority, event)
+            self._broadcast(event)
             self._wake.set()
 
     async def next_event(self) -> Any:
@@ -251,6 +270,17 @@ class EventBus:
             self._persistence_sink(priority, event)
         except Exception:
             return
+
+    def _broadcast(self, event: Any) -> None:
+        # 热路径旁路：无订阅者时直接返回（O(1)），保证 publish() 在常态下零额外开销。
+        # 任何监听器异常都吞掉并 DEBUG 日志；旁路不允许反向影响交易主链路。
+        if not self._broadcast_callbacks:
+            return
+        for callback in tuple(self._broadcast_callbacks):
+            try:
+                callback(event)
+            except Exception:
+                logger.debug("event_bus broadcast listener failed", exc_info=True)
 
     def _trading_event_key(self, event: Any) -> str:
         event_type = str(getattr(event, "event_type", ""))

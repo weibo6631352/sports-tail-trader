@@ -13,6 +13,7 @@ from uuid import uuid4
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from polymarket_trader.api.routes.stream import SseSubscriptionRegistry
 from polymarket_trader.app.market_service import MarketService
 from polymarket_trader.app.ports import bind_extension_orderbook_reader, build_extension_ports
 from polymarket_trader.app.reconcile_service import ReconcileService
@@ -147,6 +148,7 @@ class RuntimeComponents:
     background_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
     admin_service: object | None = None
     decision_recorder: InMemoryDecisionRecorder | None = None
+    sse_subscription_registry: SseSubscriptionRegistry | None = None
     bootstrap_summary: dict[str, Any] = field(default_factory=dict)
 
 
@@ -283,6 +285,8 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     entry_metadata_store = EntryMetadataStore()
     outbox = LocalOutbox(max_size=settings.persistence_event_queue_max_size)
     event_bus.bind_persistence_sink(build_domain_event_outbox_sink(outbox))
+    sse_subscription_registry = SseSubscriptionRegistry()
+    event_bus.add_broadcast_listener(sse_subscription_registry.broadcast)
     db_session_factory = build_session_factory(settings.database_url)
     persistence_repository = DatabasePersistenceRepository(db_session_factory)
     persistence_worker = PersistenceWorker(
@@ -455,6 +459,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         reconcile_snapshot_provider=reconcile_worker.status_snapshot,
         persistence_snapshot_provider=persistence_worker.snapshot,
         metrics_snapshot_provider=metrics.snapshot,
+        sse_snapshot_provider=sse_subscription_registry.snapshot,
         trading_queue_warn_depth=settings.trading_queue_warn_depth,
         entry_signal_to_submit_warn_ms=settings.entry_signal_to_submit_warn_ms,
         outbox_depth_warn=settings.persistence_event_queue_max_size,
@@ -498,6 +503,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         trading_thread_pool=trading_thread_pool,
         maintenance_thread_pool=maintenance_thread_pool,
         maintenance_process_pool=maintenance_process_pool,
+        sse_subscription_registry=sse_subscription_registry,
     )
 
 
