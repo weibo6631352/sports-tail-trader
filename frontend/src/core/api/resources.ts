@@ -57,7 +57,7 @@ import type {
   WorkersSnapshot,
   WriteOperationResult,
 } from './types'
-import type { MetricsSnapshot, QueryParams } from './types'
+import type { MetricsSnapshot } from './types'
 
 // 所有 resource 函数走 apiClient 的对象参数签名 { params?, body?, signal? }。
 // GET 函数额外接收末位 signal?:AbortSignal——由 React Query 的 queryFn
@@ -75,7 +75,7 @@ export const healthApi = {
   metrics: (signal?: AbortSignal) => apiClient.get<MetricsSnapshot>('/metrics', { signal }),
   latencyPercentiles: (params: { window_ms?: number; sample_limit?: number }, signal?: AbortSignal) =>
     apiClient.get<LatencyPercentilesSnapshot>('/metrics/latency-percentiles', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
 }
@@ -97,7 +97,7 @@ export const decisionsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<DecisionsPage>('/admin/decisions/dump', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   detail: (recordId: string, signal?: AbortSignal) =>
@@ -123,19 +123,19 @@ export const marketsApi = {
       sort_direction?: 'asc' | 'desc'
     },
     signal?: AbortSignal,
-  ) => apiClient.get<MarketsPage>('/markets', { params: params as QueryParams, signal }),
+  ) => apiClient.get<MarketsPage>('/markets', { params, signal }),
   detail: (
     params: { market_slug?: string; condition_id?: string; token_id?: string },
     signal?: AbortSignal,
-  ) => apiClient.get<MarketView>('/markets/detail', { params: params as QueryParams, signal }),
+  ) => apiClient.get<MarketView>('/markets/detail', { params, signal }),
   orderbook: (
     params: { market_slug?: string; condition_id?: string; token_id: string },
     signal?: AbortSignal,
-  ) => apiClient.get<Orderbook>('/markets/orderbook', { params: params as QueryParams, signal }),
+  ) => apiClient.get<Orderbook>('/markets/orderbook', { params, signal }),
   midpoint: (
     params: { market_slug?: string; condition_id?: string; token_id: string },
     signal?: AbortSignal,
-  ) => apiClient.get<Midpoint>('/markets/midpoint', { params: params as QueryParams, signal }),
+  ) => apiClient.get<Midpoint>('/markets/midpoint', { params, signal }),
   orderbookHistory: (
     params: {
       limit?: number
@@ -148,7 +148,7 @@ export const marketsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<OrderbookHistoryPage>('/markets/orderbook-history', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   pricesHistory: (
@@ -162,7 +162,7 @@ export const marketsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<PricesHistory>('/markets/prices-history', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   pause: (body: { condition_id: string; reason?: string; operator: string; trace_id?: string }) =>
@@ -184,7 +184,7 @@ export const marketsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<MarketSettlementsPage>('/markets/settlements', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   settle: (body: SettleMarketRequest) =>
@@ -209,7 +209,7 @@ export const ordersApi = {
       strategy_id?: string
     },
     signal?: AbortSignal,
-  ) => apiClient.get<OrdersPage>('/orders', { params: params as QueryParams, signal }),
+  ) => apiClient.get<OrdersPage>('/orders', { params, signal }),
   replace: (body: {
     order_id: string
     new_price: string
@@ -242,7 +242,7 @@ export const positionsApi = {
       strategy_id?: string
     },
     signal?: AbortSignal,
-  ) => apiClient.get<PositionsPage>('/positions', { params: params as QueryParams, signal }),
+  ) => apiClient.get<PositionsPage>('/positions', { params, signal }),
   forceExit: (body: {
     condition_id: string
     token_id: string
@@ -268,7 +268,7 @@ export const fillsApi = {
       strategy_id?: string
     },
     signal?: AbortSignal,
-  ) => apiClient.get<FillsPage>('/fills', { params: params as QueryParams, signal }),
+  ) => apiClient.get<FillsPage>('/fills', { params, signal }),
 }
 
 export const allocationsApi = {
@@ -283,7 +283,7 @@ export const allocationsApi = {
       strategy_id?: string
     },
     signal?: AbortSignal,
-  ) => apiClient.get<AllocationsPage>('/allocations', { params: params as QueryParams, signal }),
+  ) => apiClient.get<AllocationsPage>('/allocations', { params, signal }),
   decisions: (
     params: {
       limit?: number
@@ -295,7 +295,7 @@ export const allocationsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<AllocationDecisionsPage>('/allocations/decisions', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
 }
@@ -314,7 +314,7 @@ export const auditEventsApi = {
       strategy_id?: string
     },
     signal?: AbortSignal,
-  ) => apiClient.get<AuditEventsPage>('/audit-events', { params: params as QueryParams, signal }),
+  ) => apiClient.get<AuditEventsPage>('/audit-events', { params, signal }),
   operators: (
     params: {
       operator?: string
@@ -325,7 +325,7 @@ export const auditEventsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<OperatorInterventionsAggregate>('/audit-events/operators', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
 }
@@ -336,7 +336,7 @@ export const portfolioApi = {
   snapshot: (signal?: AbortSignal) =>
     apiClient.get<PortfolioSnapshot>('/portfolio', { signal }),
   equityCurve: (params: { window_ms?: number; interval_ms?: number }, signal?: AbortSignal) =>
-    apiClient.get<EquityCurve>('/portfolio/equity-curve', { params: params as QueryParams, signal }),
+    apiClient.get<EquityCurve>('/portfolio/equity-curve', { params, signal }),
   pnlBreakdown: (
     params: {
       group_by: PnlBreakdownGroupBy
@@ -347,7 +347,7 @@ export const portfolioApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<PnlBreakdown>('/portfolio/pnl-breakdown', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   riskMetrics: (
@@ -359,7 +359,7 @@ export const portfolioApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<PortfolioRiskMetrics>('/portfolio/risk-metrics', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
 }
@@ -384,10 +384,10 @@ export const candidatesApi = {
       strategy_id?: string
     },
     signal?: AbortSignal,
-  ) => apiClient.get<CandidatesPage>('/candidates', { params: params as QueryParams, signal }),
+  ) => apiClient.get<CandidatesPage>('/candidates', { params, signal }),
   liveStates: (params: { limit?: number; offset?: number }, signal?: AbortSignal) =>
     apiClient.get<LiveStatesPage>('/candidates/live-states', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   liveSourceGaps: (
@@ -400,7 +400,7 @@ export const candidatesApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<LiveSourceGapsPage>('/candidates/live-source-gaps', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   upsertLiveState: (body: {
@@ -437,7 +437,7 @@ export const analyticsApi = {
       strategy_id?: string
     },
     signal?: AbortSignal,
-  ) => apiClient.get<FunnelSnapshot>('/analytics/funnel', { params: params as QueryParams, signal }),
+  ) => apiClient.get<FunnelSnapshot>('/analytics/funnel', { params, signal }),
   rejections: (
     params: {
       window_ms?: number
@@ -449,7 +449,7 @@ export const analyticsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<RejectionsSnapshot>('/analytics/rejections', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   executionQuality: (
@@ -463,7 +463,7 @@ export const analyticsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<ExecutionQualitySnapshot>('/analytics/execution-quality', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   edgeRealization: (
@@ -477,7 +477,7 @@ export const analyticsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<EdgeRealizationSnapshot>('/analytics/edge-realization', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   riskRejections: (
@@ -491,7 +491,7 @@ export const analyticsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<RiskRejectionsPage>('/analytics/risk-rejections', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   riskRejectionsAggregate: (
@@ -504,7 +504,7 @@ export const analyticsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<RiskRejectionAggregate>('/analytics/risk-rejections/aggregate', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   calibration: (
@@ -518,7 +518,7 @@ export const analyticsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<CalibrationSnapshot>('/analytics/calibration', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   missedOpportunities: (
@@ -532,7 +532,7 @@ export const analyticsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<MissedOpportunitiesSnapshot>('/analytics/missed-opportunities', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
 }
@@ -551,7 +551,7 @@ export const sportsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<SportsLiveEventsPage>('/sports/live-events', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
 }
@@ -562,7 +562,7 @@ export const outboxApi = {
   pending: (
     params: { limit?: number; offset?: number; trace_id?: string },
     signal?: AbortSignal,
-  ) => apiClient.get<OutboxPendingPage>('/outbox/pending', { params: params as QueryParams, signal }),
+  ) => apiClient.get<OutboxPendingPage>('/outbox/pending', { params, signal }),
   failures: (
     params: {
       limit?: number
@@ -575,7 +575,7 @@ export const outboxApi = {
     },
     signal?: AbortSignal,
   ) =>
-    apiClient.get<OutboxFailuresPage>('/outbox/failures', { params: params as QueryParams, signal }),
+    apiClient.get<OutboxFailuresPage>('/outbox/failures', { params, signal }),
 }
 
 // ---------- Operations ----------
@@ -597,7 +597,7 @@ export const operationsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<ReconcileDiffsPage>('/operations/reconcile/diffs', {
-      params: params as QueryParams,
+      params,
       signal,
     }),
   virtualPaperTrade: (body: {
@@ -627,7 +627,7 @@ export const tradeReplaysApi = {
       strategy_id?: string
     },
     signal?: AbortSignal,
-  ) => apiClient.get<TradeReplaysPage>('/trade-replays', { params: params as QueryParams, signal }),
+  ) => apiClient.get<TradeReplaysPage>('/trade-replays', { params, signal }),
 }
 
 export const tradesApi = {
@@ -643,7 +643,7 @@ export const tradesApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<TradeTimeline>(`/trades/${encodeURIComponent(conditionId)}/timeline`, {
-      params: params as QueryParams,
+      params,
       signal,
     }),
 }

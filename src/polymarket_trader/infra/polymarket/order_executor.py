@@ -445,8 +445,10 @@ class PolymarketOrderExecutor:
                     queued_at=timestamps.queued_at,
                     sign_started_at=sign_started_at,
                 )
+                # OrderExecutionClient Protocol 声明 sign_order 必存在；client=None 时
+                # 上游已在 _invoke_adapter 内 raise，这里仅判断"是否注入了 client"。
                 signed_response = None
-                if self._client is not None and hasattr(self._client, "sign_order"):
+                if self._client is not None:
                     signed_response = await self._invoke_adapter(
                         "sign_order",
                         request,

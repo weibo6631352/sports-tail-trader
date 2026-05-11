@@ -6,7 +6,12 @@ const API_BASE = '/api'
 const DEFAULT_TIMEOUT_MS = 30_000
 
 export type QueryValue = string | number | boolean | null | undefined
-export type QueryParams = Record<string, QueryValue | QueryValue[]>
+/**
+ * buildUrl 内部对每个值跑 String(raw) coerce；放宽为 unknown 让 TypeScript 子类型
+ * 接 narrow 的 `{ limit?: number; trace_id?: string }` 等具体 params 类型，
+ * 避免每个 resources.ts callsite 写 `as QueryParams` cast。
+ */
+export type QueryParams = Record<string, unknown>
 
 /**
  * 所有 HTTP 方法统一对象参数：未来给任何方法加 params / signal / headers 时
