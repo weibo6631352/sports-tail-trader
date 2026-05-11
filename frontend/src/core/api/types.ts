@@ -338,6 +338,180 @@ export type AuditEventRow = {
 
 export type AuditEventsPage = Page<AuditEventRow>
 
+// ---------- AuditEvent / OutboxEvent payload 收紧（按 event_type 做 narrow） ----------
+// 后端契约：infra/outbox/event_sink.py::_FIELD_PROJECTIONS / _FUNCTION_PROJECTIONS
+// 决定每种 event_type 落库时的字段白名单；audit_events.event_title 与
+// outbox_events.event_type 同源（workers/persistence/records.py 用 event_type
+// 字符串填 event_title）。所以两侧共用同一份 by-type schema。
+//
+// 这里只覆盖 dashboard / audit / strategy-config 等高频读取的 event_type；
+// 其余事件 payload 仍按 base 类型 Record<string, unknown> 处理。新增 event 时
+// 在 AuditEventPayloadByType 里加键即可，narrowAuditEvent / narrowOutboxEvent
+// 自动覆盖。
+//
+// 注意：base AuditEventRow / OutboxPendingRow 不变，callsite 通过 narrowAuditEvent
+// 主动 narrow；未识别的 event_type 返回 null，由 callsite 兜底（不抛错、不破坏列表渲染）。
+
+/** 共享：order_cancel_requested / order_cancelled / replace_order_submitted。 */
+export type OrderActionEventPayload = {
+  operator?: string | null
+  reason?: string | null
+  order_id?: string | null
+  trade_id?: string | null
+  old_price?: DecimalStr | null
+  new_price?: DecimalStr | null
+  old_size_shares?: DecimalStr | null
+  new_size_shares?: DecimalStr | null
+  side?: 'BUY' | 'SELL' | string | null
+  order_type?: string | null
+  result_status?: string | null
+  occurred_at?: Iso | null
+}
+
+/** 共享：trading_paused / trading_resumed。 */
+export type TradingToggleEventPayload = {
+  operator?: string | null
+  reason?: string | null
+  phase_before?: string | null
+  phase_after?: string | null
+  previous_manual_pause_reason?: string | null
+  degraded_reason?: string | null
+  occurred_at?: Iso | null
+}
+
+export type ParameterOverrideAppliedPayload = {
+  scope: string
+  key: string
+  previous_value: unknown
+  new_value: unknown
+  operator: string
+  applied_at: Iso
+  expires_at: Iso | null
+  cleared: boolean
+}
+
+export type RiskRejectionRecordedPayload = {
+  passed?: boolean
+  reason?: string | null
+  failed_field?: string | null
+  checks?: RiskCheck[]
+  intent_summary?: Record<string, unknown>
+  decision_kind?: string | null
+}
+
+export type AllocationDecisionRecordedPayload = {
+  candidates?: unknown[]
+  selected_condition_ids?: string[]
+  skipped_reasons?: Record<string, string> | Array<{ condition_id?: string; reason?: string }>
+  total_budget_usdc?: DecimalStr
+  buy_budget_usdc?: DecimalStr
+  allocator?: string | null
+}
+
+export type MarketSettledPayload = {
+  winning_token_id?: string | null
+  winning_outcome?: string | null
+  settled_at?: Iso | null
+  source?: string | null
+  payout_per_share?: DecimalStr | null
+  fair_value_at_close?: DecimalStr | null
+}
+
+export type SportsLiveStateRecordedPayload = {
+  source?: string
+  observed_at?: Iso
+  signal_allowed?: boolean | null
+  signal_reason?: string | null
+  phase?: string | null
+  live_state_payload?: Record<string, unknown>
+  match_payload?: Record<string, unknown>
+}
+
+export type BalanceUpdatedPayload = {
+  balance_usdc?: DecimalStr | null
+  allowance_usdc?: DecimalStr | null
+  user_ws_connected?: boolean | null
+  allow_new_entries?: boolean | null
+  market_pauses?: Record<string, unknown> | unknown[]
+  last_reconcile_at?: Iso | null
+}
+
+/**
+ * 高频 event_type → payload schema 映射。
+ * 与后端 _FIELD_PROJECTIONS 字段保持一致；未列出的 event_type 由 base 类型兜底。
+ */
+export type AuditEventPayloadByType = {
+  parameter_override_applied: ParameterOverrideAppliedPayload
+  trading_paused: TradingToggleEventPayload
+  trading_resumed: TradingToggleEventPayload
+  order_cancel_requested: OrderActionEventPayload
+  order_cancelled: OrderActionEventPayload
+  replace_order_submitted: OrderActionEventPayload
+  risk_rejection_recorded: RiskRejectionRecordedPayload
+  allocation_decision_recorded: AllocationDecisionRecordedPayload
+  market_settled: MarketSettledPayload
+  sports_live_state_recorded: SportsLiveStateRecordedPayload
+  balance_updated: BalanceUpdatedPayload
+}
+
+export type KnownAuditEventType = keyof AuditEventPayloadByType
+
+/** Narrow 后的 AuditEventRow：payload 类型按 event_title 精确化。 */
+export type KnownAuditEvent<T extends KnownAuditEventType = KnownAuditEventType> = Omit<
+  AuditEventRow,
+  'event_title' | 'payload'
+> & {
+  event_title: T
+  payload: AuditEventPayloadByType[T]
+}
+
+/** Narrow 后的 OutboxPendingRow：payload 类型按 event_type 精确化。 */
+export type KnownOutboxEvent<T extends KnownAuditEventType = KnownAuditEventType> = Omit<
+  OutboxPendingRow,
+  'event_type' | 'payload'
+> & {
+  event_type: T
+  payload: AuditEventPayloadByType[T]
+}
+
+const KNOWN_AUDIT_EVENT_TITLES: ReadonlySet<KnownAuditEventType> = new Set<KnownAuditEventType>([
+  'parameter_override_applied',
+  'trading_paused',
+  'trading_resumed',
+  'order_cancel_requested',
+  'order_cancelled',
+  'replace_order_submitted',
+  'risk_rejection_recorded',
+  'allocation_decision_recorded',
+  'market_settled',
+  'sports_live_state_recorded',
+  'balance_updated',
+])
+
+function isKnownAuditEventType(value: string | null | undefined): value is KnownAuditEventType {
+  return typeof value === 'string' && KNOWN_AUDIT_EVENT_TITLES.has(value as KnownAuditEventType)
+}
+
+/**
+ * Narrow AuditEventRow → KnownAuditEvent；event_title 不在白名单或 payload 缺失时返回 null。
+ * 不做运行时字段验证（task 约束：不引入 zod / 任何运行时验证）；
+ * callsite 仅依赖后端 _FIELD_PROJECTIONS 已经过的字段白名单。
+ */
+export function narrowAuditEvent(event: AuditEventRow): KnownAuditEvent | null {
+  if (!isKnownAuditEventType(event.event_title) || event.payload == null) {
+    return null
+  }
+  return event as KnownAuditEvent
+}
+
+/** OutboxPendingRow / OutboxFailureRow 同源；narrow 到 KnownOutboxEvent。 */
+export function narrowOutboxEvent(event: OutboxPendingRow): KnownOutboxEvent | null {
+  if (!isKnownAuditEventType(event.event_type) || event.payload == null) {
+    return null
+  }
+  return event as KnownOutboxEvent
+}
+
 // ---------- Portfolio ----------
 
 export type PortfolioSnapshot = {
