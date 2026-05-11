@@ -41,7 +41,7 @@ show_help() {
      - `start_all.sh`
      - `stop_all.sh`
      - `frontend/dist`
-     - `support/fdv_static_server.py`
+     - `support/serve_frontend.py`
      - `config/.env` / `.env.example` / `.env.full.example`
      - `wheels/`
   4. 传入 `--archive` 后，额外生成 `.dist-packages/fdv-runtime.tar.gz`。
@@ -140,7 +140,7 @@ assemble_bundle() {
   install -m 644 "$ROOT_DIR/.env.example" "$CONFIG_DIR/.env"
   install -m 644 "$ROOT_DIR/.env.example" "$CONFIG_DIR/.env.example"
   install -m 644 "$ROOT_DIR/.env.full.example" "$CONFIG_DIR/.env.full.example"
-  install -m 644 "$ROOT_DIR/support/fdv_static_server.py" "$SUPPORT_DIR/fdv_static_server.py"
+  install -m 644 "$ROOT_DIR/support/serve_frontend.py" "$SUPPORT_DIR/serve_frontend.py"
   write_bundle_readme
   write_build_info
 

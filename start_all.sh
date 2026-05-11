@@ -7,7 +7,7 @@ set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_MODE=0
-if [[ -d "$APP_DIR/wheels" && -f "$APP_DIR/support/fdv_static_server.py" ]]; then
+if [[ -d "$APP_DIR/wheels" && -f "$APP_DIR/support/serve_frontend.py" ]]; then
   PACKAGE_MODE=1
 fi
 
@@ -307,7 +307,7 @@ stop_existing_services() {
   log "关闭已有前后端服务"
   cleanup_pid_file_process "$FRONTEND_PID_FILE"
   cleanup_pid_file_process "$BACKEND_PID_FILE"
-  reclaim_managed_port "$FRONTEND_PORT" "前端服务" "fdv_static_server.py" || return 1
+  reclaim_managed_port "$FRONTEND_PORT" "前端服务" "serve_frontend.py" || return 1
   reclaim_managed_port "$BACKEND_PORT" "后端服务" "polymarket_trader.api.app:create_app" || return 1
 }
 
@@ -514,11 +514,11 @@ ensure_frontend() {
   ensure_frontend_dist
 
   cleanup_pid_file_process "$FRONTEND_PID_FILE"
-  reclaim_managed_port "$FRONTEND_PORT" "前端服务" "fdv_static_server.py" || return 1
+  reclaim_managed_port "$FRONTEND_PORT" "前端服务" "serve_frontend.py" || return 1
 
   log "启动前端静态服务"
   start_background_process \
-    "'$PYTHON_BIN' '$APP_DIR/support/fdv_static_server.py' --host '$FRONTEND_HOST' --port '$FRONTEND_PORT' --static-dir '$APP_DIR/frontend/dist' --backend-base-url '$BACKEND_BASE_URL'" \
+    "'$PYTHON_BIN' '$APP_DIR/support/serve_frontend.py' --host '$FRONTEND_HOST' --port '$FRONTEND_PORT' --static-dir '$APP_DIR/frontend/dist' --backend-base-url '$BACKEND_BASE_URL'" \
     "$FRONTEND_PID_FILE"
 
   wait_for_http "前端服务" "$FRONTEND_URL" 30

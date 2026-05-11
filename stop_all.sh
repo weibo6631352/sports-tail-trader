@@ -7,7 +7,7 @@ set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_MODE=0
-if [[ -d "$APP_DIR/wheels" && -f "$APP_DIR/support/fdv_static_server.py" ]]; then
+if [[ -d "$APP_DIR/wheels" && -f "$APP_DIR/support/serve_frontend.py" ]]; then
   PACKAGE_MODE=1
 fi
 

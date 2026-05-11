@@ -49,7 +49,7 @@ class FrontendProxyHandler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         sys.stdout.write(
-            f"[fdv_static_server] {self.address_string()} - {format % args}\n"
+            f"[serve_frontend] {self.address_string()} - {format % args}\n"
         )
         sys.stdout.flush()
 
@@ -198,7 +198,7 @@ def main() -> int:
     FrontendProxyHandler.backend_base_url = args.backend_base_url.rstrip("/")
     server = ThreadingHTTPServer((args.host, args.port), FrontendProxyHandler)
     print(
-        f"[fdv_static_server] serving {FrontendProxyHandler.static_dir} "
+        f"[serve_frontend] serving {FrontendProxyHandler.static_dir} "
         f"on http://{args.host}:{args.port} -> {FrontendProxyHandler.backend_base_url}",
         flush=True,
     )
