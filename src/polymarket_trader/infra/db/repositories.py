@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Generic, Iterable, Sequence, TypeVar, cast
+from typing import Any, AsyncIterator, Generic, Iterable, Sequence, TypeVar, cast
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -649,6 +649,29 @@ class OrderRepository(BaseRepository):
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
+    async def stream_orders_in_range(
+        self,
+        *,
+        time_range: TimeRange | None,
+        limit: int,
+    ) -> AsyncIterator[OrderModel]:
+        """按 updated_at 时间窗流式拉取订单 ORM 行，供 export 端点消费。
+
+        使用 stream_scalars 走 server-side cursor，避免一次性把全表读进内存。
+        """
+
+        stmt = select(OrderModel).order_by(OrderModel.updated_at.asc(), OrderModel.id.asc())
+        if time_range is not None and not time_range.is_empty:
+            since_dt, until_dt = time_range.to_datetime_range()
+            if since_dt is not None:
+                stmt = stmt.where(OrderModel.updated_at >= since_dt)
+            if until_dt is not None:
+                stmt = stmt.where(OrderModel.updated_at <= until_dt)
+        stmt = stmt.limit(limit)
+        result = await self._session.stream_scalars(stmt)
+        async for row in result:
+            yield row
+
 
 class FillRepository(BaseRepository):
     """成交记录仓储。"""
@@ -724,6 +747,31 @@ class FillRepository(BaseRepository):
                 stmt = stmt.where(FillModel.created_at <= until_dt)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
+
+    async def stream_fills_in_range(
+        self,
+        *,
+        time_range: TimeRange | None,
+        limit: int,
+    ) -> AsyncIterator[FillModel]:
+        """按 confirmed_at 时间窗流式拉取成交 ORM 行。
+
+        confirmed_at 可空：对 NULL 行用 created_at 兜底，确保未确认 fill 也能被
+        导出窗口看到，不至于在审计时被静默丢掉。
+        """
+
+        time_column = func.coalesce(FillModel.confirmed_at, FillModel.created_at)
+        stmt = select(FillModel).order_by(time_column.asc(), FillModel.id.asc())
+        if time_range is not None and not time_range.is_empty:
+            since_dt, until_dt = time_range.to_datetime_range()
+            if since_dt is not None:
+                stmt = stmt.where(time_column >= since_dt)
+            if until_dt is not None:
+                stmt = stmt.where(time_column <= until_dt)
+        stmt = stmt.limit(limit)
+        result = await self._session.stream_scalars(stmt)
+        async for row in result:
+            yield row
 
 
 class PositionRepository(BaseRepository):
@@ -1013,6 +1061,28 @@ class AuditEventRepository(BaseRepository):
                 stmt = stmt.where(AuditEventModel.created_at <= until_dt)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
+
+    async def stream_audit_events_in_range(
+        self,
+        *,
+        time_range: TimeRange | None,
+        limit: int,
+    ) -> AsyncIterator[AuditEventModel]:
+        """按 created_at 时间窗流式拉取审计事件 ORM 行，供 export 端点消费。"""
+
+        stmt = select(AuditEventModel).order_by(
+            AuditEventModel.created_at.asc(), AuditEventModel.id.asc()
+        )
+        if time_range is not None and not time_range.is_empty:
+            since_dt, until_dt = time_range.to_datetime_range()
+            if since_dt is not None:
+                stmt = stmt.where(AuditEventModel.created_at >= since_dt)
+            if until_dt is not None:
+                stmt = stmt.where(AuditEventModel.created_at <= until_dt)
+        stmt = stmt.limit(limit)
+        result = await self._session.stream_scalars(stmt)
+        async for row in result:
+            yield row
 
 
 class OutboxEventRepository(BaseRepository):

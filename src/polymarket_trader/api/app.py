@@ -13,6 +13,7 @@ from polymarket_trader.api.routes import (
     analytics,
     audit_events,
     candidates,
+    exports,
     fills,
     health,
     markets,
@@ -80,4 +81,5 @@ def create_app(*, runtime: Any | None = None, admin_service: AdminService | None
     app.include_router(outbox.router)
     app.include_router(operations.router)
     app.include_router(analytics.router)
+    app.include_router(exports.router)
     return app
