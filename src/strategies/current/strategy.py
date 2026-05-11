@@ -44,6 +44,7 @@ from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_pla
 from strategies.current.live_state import build_live_state_match
 from strategies.current.outcomes import describe_sports_market
 from strategies.current.outright import (
+    check_outright_entry_risk,
     evaluate_outright_opportunity,
     season_odds_from_metadata,
 )
@@ -432,6 +433,33 @@ class CurrentStrategy:
             return ExtensionDecision.skip(
                 reason="outright_budget_exhausted",
                 metadata={"market_family": "outright"},
+            )
+        # outright 风控前置（horizon / 相关性 / per-market / total）。框架 RiskManager
+        # 是最终门禁，这里负责给出 outright-specific 拒绝原因便于审计。
+        market_end_at = getattr(market, "end_date", None)
+        # 已有敞口可能由 framework 通过 context.metadata 透出；缺失视为 0。
+        ctx_meta = context.metadata or {}
+        existing_outright_exposure = _decimal_from_metadata(ctx_meta.get("outright_total_exposure_usdc")) or Decimal("0")
+        existing_event_exposure = _decimal_from_metadata(ctx_meta.get("outright_event_exposure_usdc")) or Decimal("0")
+        risk_reject = check_outright_entry_risk(
+            now=now,
+            market_end_at=market_end_at,
+            proposed_amount_usdc=proposed_amount,
+            existing_outright_exposure_usdc=existing_outright_exposure,
+            existing_event_exposure_usdc=existing_event_exposure,
+            max_per_market_usdc=config.tail_outright_max_per_market_usdc,
+            max_event_correlation_usdc=config.tail_outright_max_event_correlation_usdc,
+            max_total_outright_usdc=budget,
+            max_hold_horizon_days=config.tail_outright_max_hold_horizon_days,
+        )
+        if risk_reject is not None:
+            return ExtensionDecision.skip(
+                reason=f"outright_{risk_reject.value}",
+                metadata={
+                    "market_family": "outright",
+                    "outright_reject_reason": risk_reject.value,
+                    "outright_metadata": dict(evaluation.metadata),
+                },
             )
         return ExtensionDecision.buy(
             reason=evaluation.reason,

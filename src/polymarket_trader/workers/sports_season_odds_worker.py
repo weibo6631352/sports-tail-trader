@@ -101,22 +101,37 @@ class SportsSeasonOddsWorker:
         return (_utc_now() - last).total_seconds() >= self._ttl_seconds
 
     def _upsert(self, market: Market, snapshot: SeasonOddsSnapshot) -> None:
-        # 合并到既有 metadata，避免覆盖 live_state worker 已经写入的字段。
+        # EntryMetadataStore.upsert 是整记录替换，必须保留既有 live_state_* 字段，
+        # 否则 outright 的 odds 写入会清掉 live_state worker 的 single_game 数据。
         payload = dict(jsonable(snapshot))
-        existing = self._entry_metadata_store.metadata_for(
+        existing_record = self._entry_metadata_store.find(
             condition_id=market.condition_id,
             market_slug=market.market_slug,
             event_slug=market.event_slug,
         )
-        merged = dict(existing)
-        merged["season_odds_snapshot"] = payload
+        existing_metadata: dict = {}
+        existing_live_state_allowed = None
+        existing_live_state_reason = ""
+        existing_live_state_phase = ""
+        existing_live_state_payload: dict = {}
+        if existing_record is not None:
+            existing_metadata = dict(existing_record.metadata)
+            existing_live_state_allowed = existing_record.live_state_signal_allowed
+            existing_live_state_reason = existing_record.live_state_signal_reason or ""
+            existing_live_state_phase = existing_record.live_state_phase or ""
+            existing_live_state_payload = dict(existing_record.live_state_payload or {})
+        existing_metadata["season_odds_snapshot"] = payload
         self._entry_metadata_store.upsert(
             condition_id=market.condition_id,
             market_slug=market.market_slug,
             event_slug=market.event_slug,
             source=f"season_odds:{snapshot.source}",
             updated_at=snapshot.observed_at,
-            metadata=merged,
+            metadata=existing_metadata,
+            live_state_signal_allowed=existing_live_state_allowed,
+            live_state_signal_reason=existing_live_state_reason,
+            live_state_phase=existing_live_state_phase,
+            live_state_payload=existing_live_state_payload,
         )
 
     def status_snapshot(self) -> Mapping[str, object]:

@@ -132,6 +132,86 @@ def test_outright_decide_entry_builds_buy_when_unlocked_and_edge_sufficient() ->
     assert decision.metadata.get("market_family") == "outright"
 
 
+def test_outright_decide_entry_rejected_when_market_end_passed() -> None:
+    """风控前置：market.end_date 已过去，不应构造 BUY，应返回带 reject reason 的 SKIP。"""
+
+    from datetime import timedelta
+
+    config = replace(
+        CurrentStrategyConfig(),
+        tail_outright_execution_permission=ExecutionPermission.AUTO_EXECUTE,
+        tail_outright_budget_usdc=Decimal("50"),
+    )
+    strategy = CurrentStrategy(config=config)
+    base = _outright_market()
+    expired = Market(
+        condition_id=base.condition_id,
+        market_slug=base.market_slug,
+        market_question=base.market_question,
+        event_title=base.event_title,
+        event_slug=base.event_slug,
+        category=base.category,
+        tags=base.tags,
+        outcomes=base.outcomes,
+        end_date=datetime(2026, 5, 10, tzinfo=timezone.utc),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    yes_book = _orderbook("celtics-yes", best_ask=Decimal("0.30"), depth_shares=Decimal("1000"))
+    snapshot = {
+        "market_key": "will-celtics-win-2026-nba-championship",
+        "fair_probabilities": {"Yes": "0.40"},
+        "observed_at": "2026-05-11T11:00:00+00:00",
+        "source": "theoddsapi",
+    }
+    ctx = ExtensionContext(
+        trace_id="t",
+        strategy_id=STRATEGY_ID,
+        market=expired,
+        market_token_views=(MarketTokenView(token_id="celtics-yes", outcome="Yes", orderbook=yes_book),),
+        metadata={"season_odds_snapshot": snapshot},
+        now=datetime(2026, 5, 11, tzinfo=timezone.utc) + timedelta(seconds=0),
+    )
+
+    decision = strategy.decide_entry(ctx)
+    assert decision.action == ExtensionAction.SKIP
+    assert decision.metadata.get("outright_reject_reason") == "market_end_passed"
+
+
+def test_outright_decide_entry_rejected_when_total_exposure_exceeds_cap() -> None:
+    """已累计敞口接近 budget 上限时 risk gate 拒绝新单。"""
+
+    config = replace(
+        CurrentStrategyConfig(),
+        tail_outright_execution_permission=ExecutionPermission.AUTO_EXECUTE,
+        tail_outright_budget_usdc=Decimal("30"),  # 已敞口 25 + proposed 25 > 30
+        tail_outright_max_per_market_usdc=Decimal("25"),
+    )
+    strategy = CurrentStrategy(config=config)
+    market = _outright_market()
+    yes_book = _orderbook("celtics-yes", best_ask=Decimal("0.30"), depth_shares=Decimal("1000"))
+    snapshot = {
+        "market_key": "will-celtics-win-2026-nba-championship",
+        "fair_probabilities": {"Yes": "0.40"},
+        "observed_at": "2026-05-11T11:00:00+00:00",
+        "source": "theoddsapi",
+    }
+    ctx = ExtensionContext(
+        trace_id="t",
+        strategy_id=STRATEGY_ID,
+        market=market,
+        market_token_views=(MarketTokenView(token_id="celtics-yes", outcome="Yes", orderbook=yes_book),),
+        metadata={
+            "season_odds_snapshot": snapshot,
+            "outright_total_exposure_usdc": "25",
+        },
+        now=datetime(2026, 5, 11, 12, tzinfo=timezone.utc),
+    )
+
+    decision = strategy.decide_entry(ctx)
+    assert decision.action == ExtensionAction.SKIP
+    assert decision.metadata.get("outright_reject_reason") == "event_correlation_cap"
+
+
 def test_outright_decide_entry_locked_when_budget_zero() -> None:
     """budget=0 时即使 permission=AUTO_EXECUTE 也只录单不构造 BUY。"""
 

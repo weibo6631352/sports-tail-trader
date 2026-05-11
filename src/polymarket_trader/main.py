@@ -158,6 +158,8 @@ class RuntimeComponents:
     season_state_store: SeasonStateStore | None = None
     season_state_worker: SportsSeasonStateWorker | None = None
     season_odds_worker: SportsSeasonOddsWorker | None = None
+    season_state_client: Any | None = None
+    season_odds_client: Any | None = None
 
 
 def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateClient:
@@ -261,11 +263,14 @@ def _build_season_state_worker(
     *,
     store: SeasonStateStore,
     lifecycle_bus: Any,
-) -> SportsSeasonStateWorker | None:
-    """按 settings 装配 sports_season_state_worker；未启用时返回 None。"""
+) -> tuple[SportsSeasonStateWorker, Any] | tuple[None, None]:
+    """按 settings 装配 sports_season_state_worker；未启用时返回 (None, None)。
+
+    第二项是底层 httpx-backed client，用于运行时 shutdown 时关闭，避免泄漏连接。
+    """
 
     if not settings.sports_season_state_enabled:
-        return None
+        return None, None
     league_codes = tuple(
         code.strip().lower()
         for code in settings.sports_season_state_leagues.split(",")
@@ -277,12 +282,12 @@ def _build_season_state_worker(
         if code.strip()
     }
     if "espn" not in sources or not league_codes:
-        return None
+        return None, None
     client = EspnStandingsClient(
         leagues=league_codes,
         timeout_s=settings.sports_season_state_timeout_s,
     )
-    return SportsSeasonStateWorker(
+    worker = SportsSeasonStateWorker(
         snapshot_provider=client.fetch_snapshot,
         store=store,
         lifecycle_bus=lifecycle_bus,
@@ -290,6 +295,7 @@ def _build_season_state_worker(
         source="espn",
         leagues=league_codes,
     )
+    return worker, client
 
 
 def _build_season_odds_worker(
@@ -298,13 +304,16 @@ def _build_season_odds_worker(
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
     extension: Any,
-) -> SportsSeasonOddsWorker | None:
-    """按 settings 装配 sports_season_odds_worker；缺 api_key 或未启用 outright 时返回 None。"""
+) -> tuple[SportsSeasonOddsWorker, Any] | tuple[None, None]:
+    """按 settings 装配 sports_season_odds_worker；缺 api_key 或未启用 outright 时返回 (None, None)。
+
+    第二项是底层 httpx-backed odds client，用于运行时 shutdown 时关闭。
+    """
 
     token_secret = settings.sports_season_odds_api_key
     api_key = token_secret.get_secret_value() if token_secret is not None else None
     if not api_key or settings.sports_season_odds_provider != "theoddsapi":
-        return None
+        return None, None
     client = TheOddsApiClient(
         api_key=api_key,
         base_url=settings.sports_season_odds_base_url,
@@ -347,7 +356,7 @@ def _build_season_odds_worker(
     def _market_key(market: Any) -> str:
         return getattr(market, "event_slug", None) or getattr(market, "market_slug", None) or ""
 
-    return SportsSeasonOddsWorker(
+    worker = SportsSeasonOddsWorker(
         odds_client=client,
         registry=registry,
         entry_metadata_store=entry_metadata_store,
@@ -357,6 +366,7 @@ def _build_season_odds_worker(
         ttl_seconds=settings.sports_season_odds_ttl_seconds,
         enabled=True,
     )
+    return worker, client
 
 
 def _validate_extension_config(extension: Any, settings: Settings) -> tuple[ConfigIssue, ...]:
@@ -588,12 +598,12 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 publish_entry_signals=settings.sports_live_state_publish_entry_signals,
             )
     season_state_store = SeasonStateStore()
-    season_state_worker = _build_season_state_worker(
+    season_state_worker, season_state_client = _build_season_state_worker(
         settings,
         store=season_state_store,
         lifecycle_bus=lifecycle_bus,
     )
-    season_odds_worker = _build_season_odds_worker(
+    season_odds_worker, season_odds_client = _build_season_odds_worker(
         settings,
         registry=registry,
         entry_metadata_store=entry_metadata_store,
@@ -645,6 +655,8 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         season_state_store=season_state_store,
         season_state_worker=season_state_worker,
         season_odds_worker=season_odds_worker,
+        season_state_client=season_state_client,
+        season_odds_client=season_odds_client,
         trading_decision_service=trading_decision_service,
         trading_service=trading_service,
         trading_decision_worker=trading_decision_worker,
@@ -757,6 +769,12 @@ async def shutdown_runtime(runtime: RuntimeComponents) -> None:
     if runtime.sports_live_state_client is not None:
         with suppress(Exception):
             await runtime.sports_live_state_client.aclose()
+    if runtime.season_state_client is not None:
+        with suppress(Exception):
+            await runtime.season_state_client.aclose()
+    if runtime.season_odds_client is not None:
+        with suppress(Exception):
+            await runtime.season_odds_client.aclose()
     bind = getattr(runtime.db_session_factory, "kw", {}).get("bind")
     if bind is not None:
         with suppress(Exception):
