@@ -4,13 +4,13 @@ import type {
   AuditEventRecord,
   CancelOrderRequest,
   CancelOrderResult,
-  CancelReplaceSellPayload,
   CandidateRecord,
   ConfirmCandidateRequest,
   ConfirmCandidateResult,
   FillRecord,
   ForceExitRequest,
   ForceExitResult,
+  JsonObject,
   MarketView,
   MetricsPayload,
   MidpointPayload,
@@ -63,8 +63,8 @@ export const adminApi = {
     apiClient.get<PricesHistoryPayload>(`/markets/prices-history${buildSearch(params)}`),
   listOrders: (params: Record<string, unknown>) =>
     apiClient.get<PageResponse<OrderRecord>>(`/orders${buildSearch(params)}`),
-  cancelReplaceSell: (payload: Record<string, unknown>) =>
-    apiClient.post<CancelReplaceSellPayload>('/orders/cancel-replace-sell', payload),
+  replaceOrder: (payload: Record<string, unknown>) =>
+    apiClient.post<JsonObject>('/orders/replace', payload),
   listPositions: (params: Record<string, unknown>) =>
     apiClient.get<PageResponse<PositionRecord>>(`/positions${buildSearch(params)}`),
   listFills: (params: Record<string, unknown>) =>

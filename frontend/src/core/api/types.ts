@@ -609,18 +609,6 @@ export interface VirtualPaperTradeResult {
   raw?: JsonValue
 }
 
-export interface CancelReplaceSellPayload {
-  status: string
-  trace_id: string
-  reason?: string
-  operator?: string
-  market?: JsonValue
-  cancelled_orders?: JsonValue
-  failed_cancels?: JsonValue
-  replace_review?: JsonValue
-  replace_order_submitted?: JsonValue
-}
-
 export interface CancelOrderRequest {
   order_id: string
   market_slug?: string
