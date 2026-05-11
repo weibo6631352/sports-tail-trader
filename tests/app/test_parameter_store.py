@@ -38,7 +38,8 @@ async def _set(store: ParameterStore, **kwargs: Any) -> Any:
 def test_registry_contains_expected_specs() -> None:
     assert get_spec("settings", "portfolio_budget_usdc") is not None
     assert get_spec("settings", "max_order_usdc") is not None
-    assert get_spec("strategy", "min_edge_bps") is not None
+    assert get_spec("strategy", "tail_outright_min_edge_bps") is not None
+    assert get_spec("strategy", "tail_outright_min_profit_per_share") is not None
     assert get_spec("settings", "wallet_private_key") is None  # 不在白名单
 
 
@@ -57,7 +58,7 @@ def test_coerce_negative_decimal_rejected() -> None:
 def test_coerce_probability_above_one_rejected() -> None:
     store = ParameterStore()
     with pytest.raises(ValueError, match="0 and 1"):
-        asyncio.run(_set(store, scope="strategy", key="kelly_fraction_cap", value="1.2"))
+        asyncio.run(_set(store, scope="strategy", key="entry_no_price_max", value="1.2"))
 
 
 def test_set_then_get_returns_override() -> None:
@@ -78,12 +79,20 @@ def test_clear_falls_back_to_default() -> None:
 def test_event_bus_receives_override_event() -> None:
     bus = _SpyEventBus()
     store = ParameterStore(event_bus=bus)
-    asyncio.run(_set(store, scope="strategy", key="min_edge_bps", value=500, operator="agent"))
+    asyncio.run(
+        _set(
+            store,
+            scope="strategy",
+            key="tail_outright_min_edge_bps",
+            value=500,
+            operator="agent",
+        )
+    )
     assert len(bus.published) == 1
     _, event = bus.published[0]
     assert event.event_type.value == "parameter_override_applied"
     assert event.payload["scope"] == "strategy"
-    assert event.payload["key"] == "min_edge_bps"
+    assert event.payload["key"] == "tail_outright_min_edge_bps"
     # int 类型不通过 _stringify 转字符串；Decimal 才会。
     assert event.payload["new_value"] == 500
 

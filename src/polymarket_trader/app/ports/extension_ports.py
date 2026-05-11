@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
@@ -119,12 +119,30 @@ class UtcClockPort:
         return datetime.now(timezone.utc)
 
 
+class ParameterStorePort:
+    """``ParameterPort`` 的默认实现——委托给 ``ParameterStore``。
+
+    策略层只接触 ``ports.parameter.get(scope, key, default=)`` 这个轻接口，
+    不直接依赖 ``ParameterStore`` 的内部状态（白名单、审计 event 等）。
+    """
+
+    def __init__(self, *, store: Any) -> None:
+        self._store = store
+
+    def get(self, scope: str, key: str, *, default: Any = None) -> Any:
+        return self._store.get(scope, key, default=default)
+
+    def has_override(self, scope: str, key: str) -> bool:
+        return self._store.has_override(scope, key)
+
+
 def build_extension_ports(
     *,
     registry: MarketRegistry,
     snapshot_provider: AccountSnapshotProvider,
     orderbook_reader: OrderbookReader | None = None,
     lifecycle_bus: InProcessLifecycleBus | None = None,
+    parameter_store: Any | None = None,
 ) -> ExtensionPorts:
     market_port = MarketDataPort(registry=registry, orderbook_reader=orderbook_reader)
     return ExtensionPorts(
@@ -136,6 +154,7 @@ def build_extension_ports(
         telemetry=NullTelemetryPort(),
         clock=UtcClockPort(),
         lifecycle=lifecycle_bus,
+        parameter=ParameterStorePort(store=parameter_store) if parameter_store is not None else None,
     )
 
 

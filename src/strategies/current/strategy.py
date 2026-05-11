@@ -48,6 +48,7 @@ from strategies.current.outright import (
     evaluate_outright_opportunity,
     season_odds_from_metadata,
 )
+from strategies.current.parameter_overrides import effective_decimal, effective_int
 from strategies.current.recovery import decide_recovery
 from strategies.current.tail.types import ExecutionPermission as _ExecPerm
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
@@ -435,6 +436,9 @@ class CurrentStrategy:
             # buyable_ask_depth 返回的是 shares 数；按价格折算成 USDC 才能与 min_orderbook_depth_usdc 比较。
             ask_for_calc = best_ask if best_ask is not None else Decimal("1")
             buyable_usdc = buyable * ask_for_calc
+            # Runtime override 优先于 frozen config——让 agent 通过 PUT
+            # /parameters/strategy/{key} 实时调阈值。无 port 或无 override 时
+            # 行为与原来完全一致。
             evaluation = evaluate_outright_opportunity(
                 snapshot=snapshot,
                 market_slug=market.market_slug,
@@ -445,11 +449,31 @@ class CurrentStrategy:
                 buyable_liquidity_usdc=buyable_usdc,
                 now=now,
                 max_season_odds_age_seconds=config.tail_outright_max_season_odds_age_seconds,
-                min_edge_bps=config.tail_outright_min_edge_bps,
-                max_entry_price=config.tail_outright_max_entry_price,
-                min_orderbook_depth_usdc=config.tail_outright_min_orderbook_depth_usdc,
-                exit_edge_target=config.tail_outright_exit_edge_target,
-                min_profit_per_share=config.tail_outright_min_profit_per_share,
+                min_edge_bps=effective_int(
+                    self._ports,
+                    "tail_outright_min_edge_bps",
+                    config.tail_outright_min_edge_bps,
+                ),
+                max_entry_price=effective_decimal(
+                    self._ports,
+                    "tail_outright_max_entry_price",
+                    config.tail_outright_max_entry_price,
+                ),
+                min_orderbook_depth_usdc=effective_decimal(
+                    self._ports,
+                    "tail_outright_min_orderbook_depth_usdc",
+                    config.tail_outright_min_orderbook_depth_usdc,
+                ),
+                exit_edge_target=effective_decimal(
+                    self._ports,
+                    "tail_outright_exit_edge_target",
+                    config.tail_outright_exit_edge_target,
+                ),
+                min_profit_per_share=effective_decimal(
+                    self._ports,
+                    "tail_outright_min_profit_per_share",
+                    config.tail_outright_min_profit_per_share,
+                ),
                 execution_permission=effective_permission,
             )
             if evaluation.accepted:

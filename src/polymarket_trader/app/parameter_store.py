@@ -120,29 +120,42 @@ _register(ParameterSpec(
     coerce=_coerce_positive_int,
 ))
 
-# 策略级阈值。caller 应在策略包内 ``store.get('strategy', key, fallback=cfg.X)``。
+# 策略级阈值。键名对齐 CurrentStrategyConfig 实际字段——agent 调参时清楚知道
+# 自己在调哪一个 frozen 字段的 runtime 覆盖。
 _register(ParameterSpec(
     scope="strategy",
-    key="min_edge_bps",
-    description="入场最小 edge（bps）",
+    key="tail_outright_min_edge_bps",
+    description="Outright 入场最小 edge（bps）；默认 500=5%",
     coerce=_coerce_positive_int,
 ))
 _register(ParameterSpec(
     scope="strategy",
-    key="exit_edge_target_bps",
-    description="退出目标 edge（bps）",
-    coerce=_coerce_positive_int,
-))
-_register(ParameterSpec(
-    scope="strategy",
-    key="kelly_fraction_cap",
-    description="Kelly 仓位比例上限（0–1）",
+    key="tail_outright_max_entry_price",
+    description="Outright 最大入场价（0–1，price space）",
     coerce=_coerce_probability,
 ))
 _register(ParameterSpec(
     scope="strategy",
+    key="tail_outright_min_orderbook_depth_usdc",
+    description="Outright 入场要求的最小盘口可吃深度（USDC）",
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_outright_exit_edge_target",
+    description="Outright 退出目标 edge（小数分数，例如 0.03 = 3%）",
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_outright_min_profit_per_share",
+    description="Outright 退出最小每股利润（USDC/股）",
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="strategy",
     key="entry_no_price_max",
-    description="入场允许的最大 No-side 价格（0–1）",
+    description="No-side 入场允许的最大价格（0–1）",
     coerce=_coerce_probability,
 ))
 _register(ParameterSpec(
@@ -160,13 +173,7 @@ _register(ParameterSpec(
 _register(ParameterSpec(
     scope="strategy",
     key="tail_min_liquidity_usdc",
-    description="入场最小盘口可吃 ask 深度（USDC）",
-    coerce=_coerce_decimal_non_negative,
-))
-_register(ParameterSpec(
-    scope="strategy",
-    key="min_profit_per_share",
-    description="每股最小利润目标",
+    description="通用 tail 入场最小盘口可吃深度（USDC）",
     coerce=_coerce_decimal_non_negative,
 ))
 

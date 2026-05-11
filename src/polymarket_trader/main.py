@@ -437,10 +437,14 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         allowance_usdc=settings.portfolio_budget_usdc,
     )
     lifecycle_bus = InProcessLifecycleBus()
+    from polymarket_trader.app.parameter_store import ParameterStore
+
+    parameter_store = ParameterStore(event_bus=event_bus)
     extension_ports = build_extension_ports(
         registry=registry,
         snapshot_provider=account_state_store.snapshot,
         lifecycle_bus=lifecycle_bus,
+        parameter_store=parameter_store,
     )
     if settings.extension_module is None:
         raise ConfigLoadError(
@@ -535,9 +539,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
             event_slug=market.event_slug,
         )
 
-    from polymarket_trader.app.parameter_store import ParameterStore
-
-    parameter_store = ParameterStore(event_bus=event_bus)
     trading_decision_worker = TradingDecisionWorker(
         event_bus=event_bus,
         trading_decision_service=trading_decision_service,
@@ -1022,6 +1023,17 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         start=True,
         run_immediately=False,
     )
+    # 5 分钟扫一次已结算市场——把 outcomePrices 抓回来发 MARKET_SETTLED 事件，
+    # 给 calibration / Brier 提供 ground truth。失败/未结算/查不到一律静默。
+    runtime.scheduler.register_job(
+        "settlement_scanner",
+        lambda: _run_settlement_scan(runtime),
+        priority="P3",
+        interval_seconds=300.0,
+        tags=("settlement", "calibration"),
+        start=True,
+        run_immediately=False,
+    )
 
 
 async def _run_supervised_loop(
@@ -1292,6 +1304,52 @@ async def _record_account_snapshot(runtime: RuntimeComponents) -> None:
         logger.warning(
             "account snapshot recorder failed",
             extra={"reason": str(exc)},
+        )
+
+
+async def _run_settlement_scan(runtime: RuntimeComponents) -> None:
+    """运行一次结算扫描。任何异常仅记日志——不阻塞 supervisor。"""
+
+    from polymarket_trader.app.settlement_scanner import SettlementScannerService
+    from polymarket_trader.infra.db import AuditEventRepository, PositionRepository
+
+    async def _list_positions() -> list[Any]:
+        try:
+            async with runtime.db_session_factory() as session:
+                page = await PositionRepository(session).list_positions_snapshot(
+                    limit=200,
+                    offset=0,
+                )
+                return list(page.items or ())
+        except Exception:
+            logger.warning("settlement_scanner.positions_query_failed", exc_info=True)
+            return []
+
+    async def _audit_query(**kwargs: Any) -> Any:
+        async with runtime.db_session_factory() as session:
+            return await AuditEventRepository(session).list_audit_events_snapshot(**kwargs)
+
+    positions = await _list_positions()
+    service = SettlementScannerService(
+        gamma_market_fetcher=runtime.gamma_client.get_market,
+        positions_provider=lambda: positions,
+        audit_events_query=_audit_query,
+        event_bus=runtime.event_bus,
+    )
+    try:
+        result = await service.run_once()
+    except Exception:  # pragma: no cover - 安全网；service 内层已 catch
+        logger.warning("settlement_scanner.run_failed", exc_info=True)
+        return
+    if result.detected or result.failed_lookups:
+        logger.info(
+            "settlement_scanner.tick",
+            extra={
+                "scanned": result.scanned,
+                "skipped_already_settled": result.skipped_already_settled,
+                "detected": result.detected,
+                "failed_lookups": result.failed_lookups,
+            },
         )
 
 

@@ -55,6 +55,19 @@ class ClockPort(Protocol):
     def now(self) -> datetime: ...
 
 
+class ParameterPort(Protocol):
+    """策略层访问运行时参数 override 的端口。
+
+    用法：``ports.parameter.get('strategy', 'min_edge_bps', default=cfg.X)``。
+    无 override 时返回 ``default``，所以策略代码默认行为不变。Override 的全
+    集和写入入口由 ``GET/PUT /parameters`` 路由暴露——白名单约束在框架侧。
+    """
+
+    def get(self, scope: str, key: str, *, default: Any = None) -> Any: ...
+
+    def has_override(self, scope: str, key: str) -> bool: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ExtensionPorts:
     market: MarketReadPort | None = None
@@ -66,3 +79,4 @@ class ExtensionPorts:
     telemetry: TelemetryPort | None = None
     clock: ClockPort | None = None
     lifecycle: LifecycleBus | None = None
+    parameter: ParameterPort | None = None

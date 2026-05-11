@@ -118,9 +118,12 @@ class TradingService:
             )
             submitted = False
             submission_error = None
-            # 风控拒绝结构化落库——交易主链路已完成判定，此投递只走 put_nowait，
-            # 不 await DB；失败时静默以保 §7 不反向阻塞。
-            self._publish_risk_rejection(intent=intent, risk_decision=risk_decision, operation=operation)
+            # 风控拒绝结构化落库——交易主链路已完成判定，此投递走 P3 outbox
+            # mirror（put_nowait + broadcast，无真实 I/O 等待）；失败时静默
+            # 以保 §7 不反向阻塞。
+            await self._publish_risk_rejection(
+                intent=intent, risk_decision=risk_decision, operation=operation
+            )
         self._publish_lifecycle(
             intent=intent,
             operation=operation,
@@ -192,7 +195,7 @@ class TradingService:
             submission_error=submission_error,
         )
 
-    def _publish_risk_rejection(
+    async def _publish_risk_rejection(
         self,
         *,
         intent: ManagedOrderIntent,
@@ -202,7 +205,9 @@ class TradingService:
         """风控拒绝结构化事件——payload 含每条 RiskCheck 的细节。
 
         ``event_bus`` 是可选注入；缺失或失败都静默——P0 主链路已判定完成，
-        审计落库属于副作用，不能反向阻塞（§7）。
+        审计落库属于副作用，不能反向阻塞（§7）。``EventBus.publish`` 对 P3
+        优先级只做 put_nowait + broadcast，无真实 I/O 等待，因此可以放心
+        ``await``——不会引入异步调度风险。
         """
 
         bus = self._event_bus
@@ -256,17 +261,9 @@ class TradingService:
             },
         )
         try:
-            maybe = bus.publish(OutboxPriority.P3, event)
-            if isawaitable(maybe):
-                # event_bus.publish 通常是 async；在 sync 上下文里挂个 background task
-                # 来避免改变 review_intent 的同步语义。
-                import asyncio
-
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(maybe)
-                except RuntimeError:
-                    return
+            result = bus.publish(OutboxPriority.P3, event)
+            if isawaitable(result):
+                await result
         except Exception:
             return
 
