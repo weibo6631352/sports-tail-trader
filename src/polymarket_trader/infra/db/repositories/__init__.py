@@ -12,7 +12,6 @@ from polymarket_trader.infra.db.repositories._base import (
 from polymarket_trader.infra.db.repositories._legacy import (
     AccountHistoryPoint,
     AccountSnapshotRepository,
-    AllocationRepository,
     AuditEventRepository,
     DecisionRecordRepository,
     FillRepository,
@@ -20,6 +19,7 @@ from polymarket_trader.infra.db.repositories._legacy import (
     OutboxEventRepository,
     PositionRepository,
 )
+from polymarket_trader.infra.db.repositories.allocation import AllocationRepository
 from polymarket_trader.infra.db.repositories.market import MarketRepository
 from polymarket_trader.infra.db.repositories.orderbook import OrderbookSnapshotRepository
 
