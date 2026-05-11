@@ -1143,6 +1143,197 @@ class AdminQueryMixin:
             time_range=time_range,
         )
 
+    async def aggregate_operator_interventions(
+        self,
+        *,
+        operator: str | None = None,
+        time_range: TimeRange | None = None,
+        sample_limit: int = 2000,
+    ) -> dict[str, Any]:
+        """按 ``operator`` 聚合人工干预——audit_events.payload 里有 operator 字段。
+
+        ``operator`` 缺省时返回所有 operator 的次数分布；指定后给该 operator
+        最近 N 次干预的事件类型分布 + 时间线摘要。回答"谁在动盘、动了什么"。
+        """
+
+        from collections import Counter
+
+        if not self._has_db_session_factory():
+            return {
+                "operator": operator,
+                "total_events": 0,
+                "by_operator": [],
+                "by_event_title": [],
+                "events": [],
+            }
+
+        async def _query(repos: _RepositoryGroup) -> RepositoryPage[Any]:
+            return await repos.audit.list_audit_events_snapshot(
+                limit=sample_limit,
+                offset=0,
+                time_range=time_range,
+            )
+
+        page = await self._with_repositories(_query)
+        operator_counter: Counter[str] = Counter()
+        event_counter: Counter[str] = Counter()
+        events_sample: list[dict[str, Any]] = []
+        total_with_operator = 0
+        for event in (page.items or ()):
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            op = payload.get("operator")
+            if op is None:
+                continue
+            op_text = str(op)
+            if operator is not None and op_text != operator:
+                continue
+            total_with_operator += 1
+            operator_counter[op_text] += 1
+            event_counter[event.event_title] += 1
+            if len(events_sample) < 200:
+                events_sample.append(
+                    {
+                        "event_id": event.event_id,
+                        "event_title": event.event_title,
+                        "operator": op_text,
+                        "reason": event.reason,
+                        "condition_id": event.condition_id,
+                        "token_id": event.token_id,
+                        "created_at": jsonable(event.created_at),
+                    }
+                )
+        return {
+            "operator": operator,
+            "total_events": total_with_operator,
+            "by_operator": [
+                {"operator": op, "count": cnt} for op, cnt in operator_counter.most_common(50)
+            ],
+            "by_event_title": [
+                {"event_title": title, "count": cnt}
+                for title, cnt in event_counter.most_common(50)
+            ],
+            "events": events_sample,
+        }
+
+    async def missed_opportunities_snapshot(
+        self,
+        *,
+        limit: int = 500,
+        per_decision_usdc: Decimal = Decimal("10"),
+        strategy_id: str | None = None,
+        time_range: TimeRange | None = None,
+    ) -> dict[str, Any]:
+        """对 ``accepted=false`` 的决策做事后盈利模拟。
+
+        join settlement 事件 + 决策 token_id 判断"如果当时下单了赚还是亏"，
+        按 reason 聚合——配合 ``risk_rejections`` 用，判断风控阈值是否过严。
+        """
+
+        from polymarket_trader.app.missed_opportunities import build_missed_opportunities
+        from polymarket_trader.domain.events import DomainEventType
+
+        if not self._has_db_session_factory():
+            return build_missed_opportunities(
+                rejected_decisions=(),
+                settlements=(),
+                per_decision_usdc=per_decision_usdc,
+            )
+
+        async def _query(repos: _RepositoryGroup) -> tuple[Any, Any]:
+            decision_page = await repos.decision.list_decisions_snapshot(
+                limit=limit,
+                offset=0,
+                accepted=False,
+                strategy_id=strategy_id,
+                time_range=time_range,
+            )
+            settle_page = await repos.audit.list_audit_events_snapshot(
+                limit=max(limit, 500),
+                offset=0,
+                event_title=DomainEventType.MARKET_SETTLED.value,
+                time_range=None,
+            )
+            return decision_page, settle_page
+
+        decision_page, settle_page = await self._with_repositories(_query)
+        return build_missed_opportunities(
+            rejected_decisions=tuple(decision_page.items or ()),
+            settlements=tuple(settle_page.items or ()),
+            per_decision_usdc=per_decision_usdc,
+        )
+
+    async def get_market_settlement(
+        self,
+        *,
+        condition_id: str,
+    ) -> dict[str, Any] | None:
+        """单市场最新 settlement——含 winning_token_id / outcome / 时间戳，加上
+        我们最后一次的 fair_value 偏差（如果有对应的 accepted 决策）。
+
+        给"市场资源化后我们的定价对不对"快速诊断。无结算返回 None → 404。
+        """
+
+        if not self._has_db_session_factory():
+            return None
+
+        from polymarket_trader.domain.events import DomainEventType
+
+        async def _query(repos: _RepositoryGroup) -> tuple[Any, Any]:
+            settle_page = await repos.audit.list_audit_events_snapshot(
+                limit=1,
+                offset=0,
+                event_title=DomainEventType.MARKET_SETTLED.value,
+                condition_id=condition_id,
+            )
+            decision_page = await repos.decision.list_decisions_snapshot(
+                limit=1,
+                offset=0,
+                condition_id=condition_id,
+                accepted=True,
+            )
+            return settle_page, decision_page
+
+        settle_page, decision_page = await self._with_repositories(_query)
+        settle_items = tuple(settle_page.items or ())
+        if not settle_items:
+            return None
+        settlement = settle_items[0]
+        payload = settlement.payload if isinstance(settlement.payload, dict) else {}
+        winning_token_id = payload.get("winning_token_id")
+        last_decision = (
+            tuple(decision_page.items or ())[0] if (decision_page.items or ()) else None
+        )
+        last_fair_value: str | None = None
+        last_token_id: str | None = None
+        deviation: str | None = None
+        if last_decision is not None and isinstance(last_decision.decision_output, dict):
+            fv = last_decision.decision_output.get("fair_value")
+            last_token_id = last_decision.token_id
+            if fv is not None:
+                last_fair_value = str(fv)
+                try:
+                    actual = (
+                        Decimal("1") if winning_token_id and last_token_id == winning_token_id else Decimal("0")
+                    )
+                    fair_dec = Decimal(str(fv))
+                    deviation = str(actual - fair_dec)
+                except Exception:
+                    deviation = None
+        return {
+            "condition_id": condition_id,
+            "settled_at": payload.get("settled_at"),
+            "winning_token_id": winning_token_id,
+            "winning_outcome": payload.get("winning_outcome"),
+            "source": payload.get("source"),
+            "operator": payload.get("operator"),
+            "last_decision": {
+                "record_id": None if last_decision is None else last_decision.record_id,
+                "token_id": last_token_id,
+                "fair_value": last_fair_value,
+                "outcome_minus_fair": deviation,
+            },
+        }
+
     async def calibration_snapshot(
         self,
         *,
@@ -1286,6 +1477,57 @@ class AdminQueryMixin:
         page = await self._with_repositories(_query)
         events = tuple(page.items or ())
         return _compute_latency_payload(events, types, sample_limit, window_ms)
+
+    async def portfolio_risk_metrics(
+        self,
+        *,
+        window_ms: int,
+        interval_ms: int,
+        account_key: str = "primary",
+        annualization_factor: float | None = None,
+    ) -> dict[str, Any]:
+        """组合级风险归因——max drawdown / time underwater / 波动率 / Sharpe-like。
+
+        复用 ``equity-curve`` 同一份 downsampled 时间序列；空 / 单点序列也
+        安全（相关指标返回 None 而不是抛错）。``annualization_factor`` 可
+        选，如 365 表示按 1d 桶年化 Sharpe。
+        """
+
+        if not self._has_db_session_factory():
+            raise RuntimeError("db_session_factory unavailable")
+
+        session_factory = self.runtime.db_session_factory  # type: ignore[union-attr]
+
+        from polymarket_trader.app.portfolio_history_service import (
+            PortfolioHistoryService,
+        )
+        from polymarket_trader.app.risk_metrics import build_risk_metrics
+        from polymarket_trader.infra.db import AccountSnapshotRepository
+
+        async def _query(*, since, until, interval_ms, account_key):
+            async with session_factory() as session:
+                repo = AccountSnapshotRepository(session)
+                return await repo.query_history_bucketed(
+                    since=since,
+                    until=until,
+                    interval_ms=interval_ms,
+                    account_key=account_key,
+                )
+
+        service = PortfolioHistoryService(query_history=_query)
+        result = await service.equity_curve(
+            window_ms=window_ms,
+            interval_ms=interval_ms,
+            account_key=account_key,
+        )
+        return {
+            "window_ms": result.window_ms,
+            "interval_ms": result.interval_ms,
+            "metrics": build_risk_metrics(
+                result.points,
+                annualization_factor=annualization_factor,
+            ),
+        }
 
     async def portfolio_equity_curve(
         self,

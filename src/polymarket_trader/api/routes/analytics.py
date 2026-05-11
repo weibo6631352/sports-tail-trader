@@ -180,4 +180,29 @@ async def get_calibration(
     )
 
 
+@router.get("/missed-opportunities")
+async def get_missed_opportunities(
+    limit: int = Query(default=500, ge=1, le=5000),
+    per_decision_usdc: float = Query(default=10.0, gt=0, le=10_000),
+    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
+    since: int | None = Query(default=None, ge=0),
+    until: int | None = Query(default=None, ge=0),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, Any]:
+    """被风控/策略拒绝的决策事后盈利模拟。
+
+    join 决策与 settlement 事件，按 reason 聚合"如果当时下了会赚还是亏"。
+    配合 ``/analytics/risk-rejections`` 用——判断风控阈值是否过严。
+    """
+
+    from decimal import Decimal
+
+    return await service.missed_opportunities_snapshot(
+        limit=limit,
+        per_decision_usdc=Decimal(str(per_decision_usdc)),
+        strategy_id=strategy_id,
+        time_range=build_time_range(since=since, until=until),
+    )
+
+
 __all__ = ("router", "DEFAULT_WINDOW_MS", "MAX_WINDOW_MS", "get_analytics_service")

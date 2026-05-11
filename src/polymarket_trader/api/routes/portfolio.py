@@ -32,6 +32,30 @@ async def get_equity_curve(
         raise HTTPException(status_code=503, detail=str(exc))
 
 
+@router.get("/risk-metrics")
+async def get_risk_metrics(
+    window_ms: int = Query(default=DEFAULT_WINDOW_MS, ge=1),
+    interval_ms: int = Query(default=DEFAULT_INTERVAL_MS, ge=1),
+    annualization_factor: float | None = Query(default=None, gt=0.0, le=10_000.0),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """组合级风险归因。
+
+    复用 equity-curve 的 downsampled 时间序列，计算 max drawdown / time
+    underwater / 波动率 / Sharpe-like / total return。``annualization_factor``
+    可选，例如按 1d 桶传 365 来年化 Sharpe。
+    """
+
+    try:
+        return await service.portfolio_risk_metrics(
+            window_ms=window_ms,
+            interval_ms=interval_ms,
+            annualization_factor=annualization_factor,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
 @router.get("/pnl-breakdown")
 async def get_pnl_breakdown(
     group_by: str = Query(

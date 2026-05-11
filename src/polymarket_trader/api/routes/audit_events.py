@@ -31,3 +31,24 @@ async def list_audit_events(
         time_range=build_time_range(since=since, until=until),
         strategy_id=strategy_id,
     )
+
+
+@router.get("/operators")
+async def aggregate_operator_interventions(
+    operator: str | None = Query(default=None, min_length=1, max_length=64),
+    since: int | None = Query(default=None, ge=0),
+    until: int | None = Query(default=None, ge=0),
+    sample_limit: int = Query(default=2000, ge=1, le=10_000),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """人工干预审计聚合——按 ``operator`` 分组事件计数 + 类型分布。
+
+    ``operator=None`` 时返回所有 operator 的总分布；指定后返回该 operator
+    的事件类型分布 + 最近 200 条详情。回答"谁动了什么"。
+    """
+
+    return await service.aggregate_operator_interventions(
+        operator=operator,
+        time_range=build_time_range(since=since, until=until),
+        sample_limit=sample_limit,
+    )

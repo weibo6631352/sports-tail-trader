@@ -218,6 +218,21 @@ class SettleMarketRequest(BaseModel):
     operator: str = "manual"
 
 
+@router.get("/{condition_id}/settlement")
+async def get_market_settlement(
+    condition_id: str,
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """单市场最新 settlement——含 winning_token_id / outcome / 时间戳，加上
+    我们最后一次 accepted 决策的 fair_value 偏差（``outcome - fair``，正数
+    表示低估了赢家）。"""
+
+    payload = await service.get_market_settlement(condition_id=condition_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="settlement_not_found")
+    return payload
+
+
 @router.get("/settlements")
 async def list_market_settlements(
     limit: int = Query(default=200, ge=1, le=2000),
