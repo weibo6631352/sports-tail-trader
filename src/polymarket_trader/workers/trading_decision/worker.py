@@ -559,11 +559,17 @@ class TradingDecisionWorker:
         event: DomainEvent,
         plan: EntryPlan,
     ) -> None:
-        """投递 ALLOCATION_DECISION_RECORDED 事件。失败静默，不阻塞主链路。"""
+        """投递 ALLOCATION_DECISION_RECORDED 事件。失败静默，不阻塞主链路。
+
+        emit guard：只有当 ``allocation_plan.allocations`` 实际产生了候选时才
+        发——orderbook 每次更新都触发本路径，空 plan 不发避免 audit 表暴涨。
+        """
 
         if self._event_bus is None or plan.allocation_plan is None:
             return
         allocation_plan = plan.allocation_plan
+        if not allocation_plan.allocations:
+            return
         candidates = []
         for allocation in allocation_plan.allocations:
             candidates.append(

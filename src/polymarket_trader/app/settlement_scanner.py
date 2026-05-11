@@ -49,7 +49,7 @@ class _ResolvedMarket:
     closed: bool
 
 
-GammaMarketFetcher = Callable[[str], Awaitable[Any]]
+GammaMarketByConditionLookup = Callable[[str], Awaitable[Any | None]]
 PositionsProvider = Callable[[], Iterable[Any]]
 AuditEventsQuery = Callable[..., Awaitable[Any]]
 EventBus = Any  # 与 main.RuntimeComponents.event_bus 一致
@@ -61,13 +61,16 @@ class SettlementScannerService:
     def __init__(
         self,
         *,
-        gamma_market_fetcher: GammaMarketFetcher,
+        gamma_market_by_condition: GammaMarketByConditionLookup,
         positions_provider: PositionsProvider,
         audit_events_query: AuditEventsQuery,
         event_bus: EventBus,
         max_markets_per_run: int = 50,
     ) -> None:
-        self._fetch_market = gamma_market_fetcher
+        # Gamma ``/markets/{id}`` 用的是 Polymarket 内部 id 而不是 condition_id；
+        # 必须用 query 端 ``condition_ids`` 过滤拉单条市场。caller 注入做了这层
+        # 转换的 callable，本服务不依赖 GammaClient 的具体形状。
+        self._lookup_by_condition = gamma_market_by_condition
         self._positions_provider = positions_provider
         self._audit_events_query = audit_events_query
         self._event_bus = event_bus
@@ -138,7 +141,7 @@ class SettlementScannerService:
         return bool(items)
 
     async def _lookup_resolution(self, condition_id: str) -> _ResolvedMarket | None:
-        payload = await self._fetch_market(condition_id)
+        payload = await self._lookup_by_condition(condition_id)
         if payload is None:
             return None
         return _resolve_from_gamma_payload(condition_id, payload)

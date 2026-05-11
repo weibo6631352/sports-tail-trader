@@ -115,7 +115,7 @@ def test_resolve_payload_closed_but_missing_prices_returns_closed_record() -> No
 def test_scanner_skips_positions_with_zero_shares() -> None:
     bus = _SpyEventBus()
     service = SettlementScannerService(
-        gamma_market_fetcher=lambda cid: asyncio.sleep(0),
+        gamma_market_by_condition=lambda cid: asyncio.sleep(0),
         positions_provider=lambda: (_StubPosition("c1", Decimal("0")),),
         audit_events_query=_empty_audit_query,
         event_bus=bus,
@@ -137,7 +137,7 @@ def test_scanner_skips_already_settled() -> None:
         raise AssertionError("should not fetch already-settled market")
 
     service = SettlementScannerService(
-        gamma_market_fetcher=_fetch_should_not_be_called,
+        gamma_market_by_condition=_fetch_should_not_be_called,
         positions_provider=lambda: (_StubPosition("c1", Decimal("10")),),
         audit_events_query=_audit,
         event_bus=bus,
@@ -161,7 +161,7 @@ def test_scanner_emits_settlement_event_for_resolved_market() -> None:
         return payload
 
     service = SettlementScannerService(
-        gamma_market_fetcher=_fetch,
+        gamma_market_by_condition=_fetch,
         positions_provider=lambda: (_StubPosition("c1", Decimal("10")),),
         audit_events_query=_empty_audit_query,
         event_bus=bus,
@@ -182,7 +182,7 @@ def test_scanner_silent_on_fetch_failure() -> None:
         raise RuntimeError("upstream down")
 
     service = SettlementScannerService(
-        gamma_market_fetcher=_fetch,
+        gamma_market_by_condition=_fetch,
         positions_provider=lambda: (_StubPosition("c1", Decimal("10")),),
         audit_events_query=_empty_audit_query,
         event_bus=bus,
@@ -208,7 +208,7 @@ def test_scanner_dedupes_condition_ids_across_multiple_token_positions() -> None
         _StubPosition("c2", Decimal("3")),
     )
     service = SettlementScannerService(
-        gamma_market_fetcher=_fetch,
+        gamma_market_by_condition=_fetch,
         positions_provider=lambda: positions,
         audit_events_query=_empty_audit_query,
         event_bus=bus,

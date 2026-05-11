@@ -51,6 +51,7 @@ class _Resolved:
     entry_price: Decimal
     liquidity_usdc: Decimal | None
     predicted_edge_bps: Decimal
+    entry_price_source: str  # 'real_best_ask' | 'entry_price_cap_fallback'
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +132,10 @@ def build_parameter_sweep(
             continue
         resolved_decisions.append((record, resolved))
 
+    fallback_count = sum(
+        1 for _record, info in resolved_decisions if info.entry_price_source == "entry_price_cap_fallback"
+    )
+
     results: list[SweepCandidateResult] = []
     for params in grid:
         result = _evaluate_candidate(
@@ -159,6 +164,9 @@ def build_parameter_sweep(
         "decision_sample_count": len(decisions),
         "scorable_decision_count": len(resolved_decisions),
         "unscorable_decision_count": unscorable,
+        # 警告 caller：entry_price_cap fallback 的样本数；非零时 PnL 数字偏高，
+        # 应让 evaluator 在 decision_output.metadata 里写真实 best_ask 后再跑。
+        "entry_price_cap_fallback_count": fallback_count,
         "per_decision_usdc": str(per_decision_usdc),
         "supported_parameter_keys": list(supported_parameter_keys()),
         "results": [r.as_payload() for r in results_sorted],
@@ -223,14 +231,22 @@ def _resolve_decision(record: DecisionRecord) -> _Resolved | None:
     fair_value = _decimal(record.decision_output, "fair_value")
     if fair_value is None or fair_value <= Decimal("0"):
         return None
+    entry_price_source = "real_best_ask"
     entry_price = _decimal(record.decision_output, "entry_price")
     if entry_price is None:
         # outright 评估时 metadata 里通常带 best_ask
         metadata = record.decision_output.get("metadata")
         if isinstance(metadata, Mapping):
             entry_price = _decimal(metadata, "best_ask")
-        if entry_price is None:
-            entry_price = _decimal(record.decision_output, "entry_price_cap")
+    if entry_price is None:
+        # 退回到 entry_price_cap 是有偏的——cap 是策略目标价
+        # (fair * (1 - min_edge_bps/10000))，比实际 best_ask 系统性更低，会
+        # 让 hypothetical PnL 偏高。生产环境跑 sweep 前应让 evaluator 把
+        # best_ask 真实值写到 metadata。
+        cap = _decimal(record.decision_output, "entry_price_cap")
+        if cap is not None and cap > Decimal("0"):
+            entry_price = cap
+            entry_price_source = "entry_price_cap_fallback"
     if entry_price is None or entry_price <= Decimal("0"):
         return None
     liquidity_usdc: Decimal | None = None
@@ -245,6 +261,7 @@ def _resolve_decision(record: DecisionRecord) -> _Resolved | None:
         entry_price=entry_price,
         liquidity_usdc=liquidity_usdc,
         predicted_edge_bps=predicted_edge_bps,
+        entry_price_source=entry_price_source,
     )
 
 

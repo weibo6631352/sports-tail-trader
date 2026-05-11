@@ -1329,9 +1329,27 @@ async def _run_settlement_scan(runtime: RuntimeComponents) -> None:
         async with runtime.db_session_factory() as session:
             return await AuditEventRepository(session).list_audit_events_snapshot(**kwargs)
 
+    async def _gamma_by_condition(condition_id: str) -> Any | None:
+        """Gamma ``/markets/{id}`` 用内部数值 id，不接受 condition_id；用
+        ``condition_ids`` 过滤拉一行。``list_markets_by_params`` 一次最多返回
+        一个匹配（同一条 condition_id 对应一个 market）。"""
+
+        try:
+            markets = await runtime.gamma_client.list_markets_by_params(
+                {"condition_ids": condition_id, "limit": 1}
+            )
+        except Exception:
+            logger.info(
+                "settlement_scanner.gamma_filter_failed",
+                extra={"condition_id": condition_id},
+                exc_info=True,
+            )
+            return None
+        return markets[0] if markets else None
+
     positions = await _list_positions()
     service = SettlementScannerService(
-        gamma_market_fetcher=runtime.gamma_client.get_market,
+        gamma_market_by_condition=_gamma_by_condition,
         positions_provider=lambda: positions,
         audit_events_query=_audit_query,
         event_bus=runtime.event_bus,

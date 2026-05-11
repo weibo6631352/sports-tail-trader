@@ -14,7 +14,6 @@ Trade timeline 把分散在 ``decision_records`` / ``orders`` / ``fills`` /
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Sequence
 
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
@@ -190,13 +189,3 @@ def _outbox_event(event: OutboxEvent, serializer: AdminSerializer) -> dict[str, 
         "last_error": event.last_error,
         "full": serializer.outbox_event(event),
     }
-
-
-def _event_sort_timestamp(ev: dict[str, Any]) -> datetime | None:
-    ts = ev.get("timestamp")
-    if not isinstance(ts, str) or not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None

@@ -298,3 +298,63 @@ def test_best_by_win_rate_picks_highest_with_settled() -> None:
 def test_grid_cap_constant_is_reasonable() -> None:
     # 防回归——别人改 cap 时应该清楚改了什么
     assert MAX_GRID_COMBINATIONS == 1_000
+
+
+def test_entry_price_cap_fallback_counted_and_surfaced() -> None:
+    """没 entry_price / metadata.best_ask 时退回 entry_price_cap——偏差应暴露
+    在 ``entry_price_cap_fallback_count`` 字段，让 caller 知道结果有偏。"""
+
+    decisions = (
+        DecisionRecord(
+            strategy_id="sports_tail",
+            record_id="r1",
+            trace_id="trace-r1",
+            condition_id="c1",
+            token_id="t1",
+            decision_input={},
+            decision_output={
+                "fair_value": "0.50",
+                # 故意不给 entry_price 也不给 metadata.best_ask；只给 cap
+                "entry_price_cap": "0.40",
+            },
+            accepted=False,
+            reason="record_only",
+            created_at=BASE,
+        ),
+    )
+    result = build_parameter_sweep(
+        decisions=decisions,
+        settlements=(),
+        candidates={"tail_outright_min_edge_bps": [100]},
+    )
+    assert result["entry_price_cap_fallback_count"] == 1
+    # 仍可评分（不是 unscorable）
+    assert result["scorable_decision_count"] == 1
+
+
+def test_entry_price_cap_fallback_zero_when_metadata_has_best_ask() -> None:
+    decisions = (
+        DecisionRecord(
+            strategy_id="sports_tail",
+            record_id="r1",
+            trace_id="trace-r1",
+            condition_id="c1",
+            token_id="t1",
+            decision_input={},
+            decision_output={
+                "fair_value": "0.50",
+                "metadata": {"best_ask": "0.42"},
+                "entry_price_cap": "0.40",
+            },
+            accepted=False,
+            reason="record_only",
+            created_at=BASE,
+        ),
+    )
+    result = build_parameter_sweep(
+        decisions=decisions,
+        settlements=(),
+        candidates={"tail_outright_min_edge_bps": [100]},
+    )
+    assert result["entry_price_cap_fallback_count"] == 0
+    assert result["scorable_decision_count"] == 1
