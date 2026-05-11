@@ -29,6 +29,7 @@ from polymarket_trader.extension_api import (
     MarketTokenView,
     ExtensionContext,
 )
+from polymarket_trader.serialization import utc_now
 
 
 class ReconcileActionType(StrEnum):
@@ -37,10 +38,6 @@ class ReconcileActionType(StrEnum):
     REPLACE_ORDER = "replace_order"
     PAUSE_TRADING = "pause_trading"
     RESUME_TRADING = "resume_trading"
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _order_open_size(order: Order) -> Decimal:
@@ -166,7 +163,7 @@ class ReconcileService:
         paused_market_count = sum(1 for plan in market_plans if plan.pause_trading)
         return ReconcilePlan(
             trace_id=trace_id,
-            generated_at=_utc_now(),
+            generated_at=utc_now(),
             market_plans=market_plans,
             total_actions=total_actions,
             paused_market_count=paused_market_count,
@@ -225,7 +222,7 @@ class ReconcileService:
                 account_snapshot=recovery_account_snapshot,
                 position=position,
                 open_orders=open_orders,
-                now=_utc_now(),
+                now=utc_now(),
                 metadata=metadata,
             )
         )

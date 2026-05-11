@@ -48,10 +48,13 @@ Sports Tail Trader 是一个跑实盘资金的 Polymarket 体育扫尾交易后�
 ## 4. 交易主链路
 
 ```text
-event -> TradingDecisionWorker -> TradingDecisionService -> PortfolioAllocator -> RiskManager -> TradingService -> OrderExecutor -> outbox/audit
+event -> TradingDecisionWorker -> TradingDecisionService -> EntryPlanner -> RiskManager -> TradingService -> OrderExecutor -> outbox/audit
 ```
 
-App 层只编排决策与执行流程，不维护绕过 allocator / risk / executor 的第二套交易事实。
+- `EntryPlanner`（`app/entry_planner.py`）产出 `AllocationPlan`，承担"组合预算分配 + 入场计划构造"职责。
+- `RiskManager`（`domain/risk.py`）是强制门禁；`TradingService` 编排执行；`OrderExecutor` 是唯一下单入口。
+
+App 层只编排决策与执行流程，不维护绕过 entry planner / risk / executor 的第二套交易事实。
 
 ## 5. 改动落点
 

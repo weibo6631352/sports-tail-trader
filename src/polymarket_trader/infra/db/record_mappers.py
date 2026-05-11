@@ -13,12 +13,9 @@ from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.order import Order, OrderSide, OrderStatus, OrderType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.position import Position
+from polymarket_trader.serialization import utc_now
 
 logger = logging.getLogger(__name__)
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _text(value: Any | None) -> str | None:
@@ -266,7 +263,7 @@ def audit_event_from_record(record: Mapping[str, Any]) -> AuditEvent | None:
     if trace_id is None or event_title is None or strategy_id is None:
         _log_skip("audit", record, "missing trace_id/event_title/strategy_id")
         return None
-    created_at = _datetime(record.get("created_at"), _utc_now())
+    created_at = _datetime(record.get("created_at"), utc_now())
     payload = dict(record)
     payload["created_at"] = created_at
     payload["updated_at"] = _datetime(record.get("updated_at"), created_at) or created_at
@@ -383,9 +380,9 @@ def orderbook_from_record(record: Mapping[str, Any]) -> OrderbookSnapshot | None
         asks=_price_levels(record.get("asks")),
         received_at=_datetime(
             record.get("received_at") or record.get("snapshot_time") or record.get("created_at"),
-            _utc_now(),
+            utc_now(),
         )
-        or _utc_now(),
+        or utc_now(),
         market_slug=_text(record.get("market_slug")),
         condition_id=_text(record.get("condition_id")),
         best_bid_size=_decimal(record.get("best_bid_size")),
@@ -445,7 +442,7 @@ def fill_from_record(record: Mapping[str, Any]) -> Fill | None:
         market_slug=_text(record.get("market_slug")),
         condition_id=_text(record.get("condition_id")),
         token_id=_text(record.get("token_id")),
-        created_at=_datetime(record.get("created_at"), _utc_now()) or _utc_now(),
+        created_at=_datetime(record.get("created_at"), utc_now()) or utc_now(),
         order_id=_text(record.get("order_id")),
         trade_id=_text(record.get("trade_id")),
         side=_text(record.get("side")),
@@ -551,7 +548,7 @@ def decision_record_from_record(record: Mapping[str, Any]) -> DecisionRecord | N
         decision_output=decision_output,
         accepted=accepted,
         reason=_text(record.get("reason")),
-        created_at=_datetime(record.get("created_at"), _utc_now()) or _utc_now(),
+        created_at=_datetime(record.get("created_at"), utc_now()) or utc_now(),
     )
 
 
@@ -573,7 +570,7 @@ def outbox_event_from_record(record: Mapping[str, Any]) -> OutboxEvent | None:
         condition_id=_text(record.get("condition_id")),
         token_id=_text(record.get("token_id")),
         reason=_text(record.get("reason")),
-        created_at=_datetime(record.get("created_at"), _utc_now()) or _utc_now(),
+        created_at=_datetime(record.get("created_at"), utc_now()) or utc_now(),
         priority=int(record.get("priority", 0)),
         retry_count=int(record.get("retry_count", 0)),
         last_error=_text(record.get("last_error")),

@@ -36,12 +36,9 @@ from polymarket_trader.infra.polymarket.order_result_builder import (
     normalize_execution_response,
 )
 from polymarket_trader.infra.outbox.event_sink import OutboxSink
+from polymarket_trader.serialization import utc_now
 
 logger = logging.getLogger(__name__)
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _as_text(value: Any | None) -> str | None:
@@ -327,7 +324,7 @@ class PolymarketOrderExecutor:
         request: OrderExecutionRequest,
         intent: ManagedOrderIntent,
     ) -> OrderResult:
-        started_at = _utc_now()
+        started_at = utc_now()
         request = replace(request, timestamps=ExecutionTimestamps(queued_at=started_at))
         signature = request.fingerprint()
         task: asyncio.Task[OrderResult] | None = None
@@ -443,7 +440,7 @@ class PolymarketOrderExecutor:
                 )
 
             if request.action in {"submit", "cancel", "replace"}:
-                sign_started_at = _utc_now()
+                sign_started_at = utc_now()
                 timestamps = ExecutionTimestamps(
                     queued_at=timestamps.queued_at,
                     sign_started_at=sign_started_at,
@@ -458,7 +455,7 @@ class PolymarketOrderExecutor:
                 timestamps = ExecutionTimestamps(
                     queued_at=timestamps.queued_at,
                     sign_started_at=sign_started_at,
-                    signed_at=_utc_now(),
+                    signed_at=utc_now(),
                 )
                 await self._publish_lifecycle_event(
                     "order_signed",
@@ -471,7 +468,7 @@ class PolymarketOrderExecutor:
                     timestamps=timestamps,
                 )
 
-            submit_started_at = _utc_now()
+            submit_started_at = utc_now()
             timestamps = ExecutionTimestamps(
                 queued_at=timestamps.queued_at,
                 sign_started_at=timestamps.sign_started_at,
@@ -498,7 +495,7 @@ class PolymarketOrderExecutor:
                     sign_started_at=timestamps.sign_started_at,
                     signed_at=timestamps.signed_at,
                     submitted_at=timestamps.submitted_at,
-                    ack_at=_utc_now(),
+                    ack_at=utc_now(),
                 ),
             )
             event_type = _final_event_type(request.action, result.status)
@@ -576,7 +573,7 @@ class PolymarketOrderExecutor:
                 sign_started_at=timestamps.sign_started_at,
                 signed_at=timestamps.signed_at,
                 submitted_at=timestamps.submitted_at,
-                ack_at=_utc_now(),
+                ack_at=utc_now(),
             ),
         )
         await self._publish_lifecycle_event(
@@ -624,8 +621,8 @@ class PolymarketOrderExecutor:
             retryable=True,
             timestamps=ExecutionTimestamps(
                 queued_at=started_at,
-                submitted_at=_utc_now(),
-                ack_at=_utc_now(),
+                submitted_at=utc_now(),
+                ack_at=utc_now(),
             ),
         )
 
@@ -760,7 +757,7 @@ class PolymarketOrderExecutor:
             requested_size_shares=request.size_shares,
             reason="idempotency_key_conflict",
             retryable=False,
-            timestamps=ExecutionTimestamps(queued_at=_utc_now(), ack_at=_utc_now()),
+            timestamps=ExecutionTimestamps(queued_at=utc_now(), ack_at=utc_now()),
         )
 
     def _timeout_for_action(self, action: str) -> float:

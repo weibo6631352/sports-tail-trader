@@ -424,6 +424,9 @@ class PersistenceWorker:
         self._stats.written_records += written_records
         self._stats.failed_records += failed_records
         self._stats.route_write_counts.update(route_write_counts)
+        # 至少一条事件成功落库才推 last_persisted_at——监控面板用它判断"持久化是否还在前进"。
+        if persisted_events > 0:
+            self._stats.last_persisted_at = _utc_now()
 
         last_event_lag_ms = 0
         if events:

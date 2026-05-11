@@ -12,6 +12,7 @@ from typing import Any, Iterator, Mapping
 
 from polymarket_trader.domain.events import sanitize_raw_response
 from polymarket_trader.observability.trace import current_trace_id
+from polymarket_trader.serialization import utc_now
 
 _LOG_CONTEXT: ContextVar[dict[str, Any]] = ContextVar("trader_log_context", default={})
 _ACTIVE_RUNTIME: "LoggingRuntime | None" = None
@@ -77,12 +78,8 @@ _EXCLUDED_RECORD_KEYS = {
 _EXCLUDED_RECORD_KEYS.update(_STRUCTURED_FIELDS)
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
 def _normalize_datetime(value: datetime | None = None) -> datetime:
-    value = value or _utc_now()
+    value = value or utc_now()
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
@@ -273,7 +270,7 @@ class LoggingRuntime:
     queue_handler: DroppingQueueHandler
     listener: logging.handlers.QueueListener
     sink_handler: logging.Handler
-    started_at: datetime = field(default_factory=_utc_now)
+    started_at: datetime = field(default_factory=utc_now)
 
     def shutdown(self) -> None:
         self.listener.stop()
