@@ -97,8 +97,11 @@ class Settings(BaseSettings):
     max_open_orders: int = Field(default=0, ge=0)
 
     # 外部体育直播状态源只提供入场前事实，不承载策略阈值或交易参数。
-    sports_live_state_enabled: bool = False
-    sports_live_state_sources: str = "espn,nba,nhl,mlb,sofascore,thesportsdb"
+    # 默认 ``True``：strategies/current 的入场链路依赖直播状态，关闭后整个 funnel
+    # 在 candidates 阶段卡死（实测 25k discovered / 0 filtered_in）。所以默认开 +
+    # supervisor 启动期对"trading 已就绪但 sports_live_state 关闭"发告警。
+    sports_live_state_enabled: bool = True
+    sports_live_state_sources: str = "espn,nba,nhl,mlb,thesportsdb"
     sports_live_state_espn_base_url: str = "https://site.api.espn.com"
     sports_live_state_nba_base_url: str = "https://cdn.nba.com"
     sports_live_state_nhl_base_url: str = "https://api-web.nhle.com"

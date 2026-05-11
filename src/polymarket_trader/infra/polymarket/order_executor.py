@@ -7,7 +7,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from functools import partial
 from typing import Any, Mapping

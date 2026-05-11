@@ -147,7 +147,13 @@
   tail_outright_min_orderbook_depth_usdc, tail_outright_exit_edge_target,
   tail_outright_min_profit_per_share, entry_no_price_max,
   tail_moneyline_max_entry_price, tail_spreads_max_entry_price,
-  tail_min_liquidity_usdc}`
+  tail_min_liquidity_usdc, tail_outright_budget_usdc,
+  tail_stale_no_live_state_seconds}`
+
+注意 `tail_outright_budget_usdc` 默认 **0**——所有 outright family 市场（赛季冠军 /
+球员奖项 / 转会等长期事件）会落 `outright_budget_zero` 拒绝，仅审计不下单。
+要启用 outright 自动交易：`POST /parameters/strategy/tail_outright_budget_usdc`
+（值 ≥ `tail_outright_max_per_market_usdc`，默认 25）。
 
 边界：
 

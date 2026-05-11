@@ -146,6 +146,11 @@ class CurrentStrategyConfig:
     tail_max_game_state_age_seconds: int = 10
     tail_baseball_max_game_state_age_seconds: int = 45
     tail_tennis_max_game_state_age_seconds: int = 35
+    # 赛事起始时间超过该秒数且仍无任何直播状态 → 视为 stale market 主动 pause。
+    # 默认 24 小时：MLB/NBA/NHL 单场比赛通常 4-6 小时内完成；超过 24 小时无任何
+    # 直播信号意味着该 market 已脱离入场窗口（赛事已结束 / 联赛不被任何数据源覆盖），
+    # 继续扫描只是 noise。reconcile 看到 pause 后会把 market 从订阅集合排除。
+    tail_stale_no_live_state_seconds: int = 86_400
     tail_market_end_horizon_seconds: int = 3600
     tail_max_under_seconds_remaining: int = 30
     tail_max_moneyline_seconds_remaining: int = 180

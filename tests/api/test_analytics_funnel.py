@@ -222,14 +222,20 @@ async def test_funnel_integration_real_postgres(pg_session_factory: Any) -> None
                 created_at=base.replace(microsecond=offset_seconds),
             )
 
+        # 新 funnel 语义（修复后）：
+        # - market_discovered stage = COUNT(discovered + updated + filtered_out) — 漏斗顶端总处理量
+        # - market_filtered_in stage = COUNT(discovered + updated) — 接受总量
+        # - market_filtered_out stage = COUNT(filtered_out)
+        # market_service.py 实际只 emit discovered/updated/filtered_out 三种事件。
         session.add_all(
             [
                 _audit("market_discovered", "cond_nba_1", 1),
                 _audit("market_discovered", "cond_nba_1", 2),
-                _audit("market_filtered_in", "cond_nba_1", 3),
+                _audit("market_updated", "cond_nba_1", 3),
                 _audit("order_submitted", "cond_nba_1", 4),
                 _audit("market_discovered", "cond_nfl_1", 5),
-                _audit("order_rejected", "cond_nba_1", 6),
+                _audit("market_filtered_out", "cond_nfl_1", 6),
+                _audit("order_rejected", "cond_nba_1", 7),
             ]
         )
         await session.commit()
@@ -241,8 +247,11 @@ async def test_funnel_integration_real_postgres(pg_session_factory: Any) -> None
             league=None,
             market_type=None,
         )
-        assert counts_all["market_discovered"] == 3
-        assert counts_all["market_filtered_in"] == 1
+        # 3 discovered + 1 updated + 1 filtered_out = 5 顶端处理量
+        assert counts_all["market_discovered"] == 5
+        # 3 discovered + 1 updated = 4 接受
+        assert counts_all["market_filtered_in"] == 4
+        assert counts_all["market_filtered_out"] == 1
         assert counts_all["order_submitted"] == 1
 
         counts_nba = await fetch_funnel_counts(
@@ -252,7 +261,8 @@ async def test_funnel_integration_real_postgres(pg_session_factory: Any) -> None
             league="NBA",
             market_type=None,
         )
-        assert counts_nba["market_discovered"] == 2
+        # NBA：2 discovered + 1 updated = 3 (顶端)，4? NBA 没有 filtered_out
+        assert counts_nba["market_discovered"] == 3
+        assert counts_nba["market_filtered_in"] == 3
+        assert counts_nba["market_filtered_out"] == 0
         assert counts_nba["order_submitted"] == 1
-        # NFL discover 不应被算到 NBA
-        assert counts_nba.get("market_filtered_in", 0) == 1

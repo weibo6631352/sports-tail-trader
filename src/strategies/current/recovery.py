@@ -64,7 +64,10 @@ def decide_recovery(
             )
 
     actions: list[ExtensionDecision] = []
-    abnormal_pause_reason = _abnormal_live_state_pause_reason(config, context)
+    abnormal_pause_reason = (
+        _abnormal_live_state_pause_reason(config, context)
+        or _stale_no_live_state_pause_reason(config, context)
+    )
     recovery_metadata = _recovery_metadata(config, context, abnormal_pause_reason=abnormal_pause_reason)
     for order in open_orders:
         order_id = _order_identifier(order)
@@ -317,6 +320,36 @@ def _decimal_metadata_text(value: Decimal) -> str:
     """把 Decimal 转成稳定 metadata 文本。"""
 
     return str(value.quantize(Decimal("0.000000000000000001")).normalize())
+
+
+def _stale_no_live_state_pause_reason(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+) -> str | None:
+    """检测「赛事起始已过 stale 阈值但完全无直播状态」的 stale market。
+
+    意味着 market 已经脱离入场窗口、活跃直播源也无法提供数据（赛事结束 /
+    联赛不被任何数据源覆盖）。继续保留在 registry 仅是 scanner 噪音；主动
+    pause 让 reconcile / settle scanner 把它纳入退订路径。
+    """
+
+    market = context.market
+    if market is None or market.game_start_time is None:
+        return None
+    if live_game_state_from_metadata(context.metadata) is not None:
+        return None
+    threshold_seconds = getattr(config, "tail_stale_no_live_state_seconds", 86_400)
+    if threshold_seconds <= 0:
+        return None
+    now = context.now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    game_start = market.game_start_time
+    if game_start.tzinfo is None:
+        game_start = game_start.replace(tzinfo=timezone.utc)
+    if (now.astimezone(timezone.utc) - game_start.astimezone(timezone.utc)).total_seconds() <= threshold_seconds:
+        return None
+    return "stale_no_live_state"
 
 
 def _abnormal_live_state_pause_reason(

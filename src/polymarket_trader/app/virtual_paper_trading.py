@@ -505,6 +505,27 @@ def _rejection(
 ) -> dict[str, Any]:
     summary = None if plan is None else plan.summary
     extras = dict(summary.extras) if summary is not None else {}
+    # action / execution_permission 在 reject 时常被策略侧留空（StrategySummary 默认值是 ""）。
+    # 用 extras 里的 tail_action / outright_action / execution_permission（如有）兜底，再
+    # 不行就映射 stage → 一个有诊断价值的字面值，避免 by_action / by_execution_permission
+    # 维度只剩 "unknown" 一个桶（§10 拒绝原因可审计）。
+    summary_action = (summary.action or "").strip() if summary is not None else ""
+    fallback_action = (
+        str(extras.get("tail_action") or extras.get("outright_action") or "").strip()
+    )
+    if summary_action:
+        action_label = summary_action
+    elif fallback_action:
+        action_label = fallback_action
+    elif stage == "orderbook":
+        action_label = "orderbook_unavailable"
+    elif plan is not None and not plan.ready_to_trade:
+        action_label = "plan_built_not_ready"
+    else:
+        action_label = "no_plan"
+    execution_permission = (
+        str(extras.get("execution_permission") or "").strip() or "not_evaluated"
+    )
     return {
         "condition_id": market.condition_id,
         "market_slug": market.market_slug,
@@ -513,13 +534,13 @@ def _rejection(
         "reason": reason,
         "plan_ready": None if plan is None else plan.ready_to_trade,
         "plan_reason": None if plan is None else plan.reason,
-        "action": None if summary is None else (summary.action or None),
+        "action": action_label,
         "summary_reason": None if summary is None else (summary.reason or None),
         "risk_reason": extras.get("risk_reason"),
-        "execution_permission": extras.get("execution_permission"),
-        "market_family": extras.get("market_family"),
-        "market_type": None if summary is None else (summary.market_type or None),
-        "game_status": extras.get("game_status"),
+        "execution_permission": execution_permission,
+        "market_family": extras.get("market_family") or "unknown",
+        "market_type": (None if summary is None else (summary.market_type or None)) or "unknown",
+        "game_status": extras.get("game_status") or "unknown",
         "best_ask": None if summary is None or summary.best_ask is None else str(summary.best_ask),
         "line": None if summary is None or summary.line is None else str(summary.line),
     }

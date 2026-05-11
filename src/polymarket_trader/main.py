@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass, field
+from decimal import Decimal
 import hashlib
 import logging
 from typing import Any
@@ -752,6 +753,19 @@ async def bootstrap_runtime(runtime: RuntimeComponents) -> RuntimeComponents:
         logger.warning(
             "runtime bootstrapped in safe mode; automatic trading remains disabled",
             extra={"readiness": None if snapshot.readiness is None else snapshot.readiness.as_dict()},
+        )
+    # 启动期合理性告警：交易客户端已就绪但直播状态 worker 关闭——意味着 funnel 上游
+    # 永远拿不到 candidates，运维容易误以为"策略选择性谨慎"。明确告警让人在 .env
+    # 里打开 SPORTS_LIVE_STATE_ENABLED 或确认是有意关闭。
+    runtime_settings = runtime.settings
+    wallet_secret = runtime_settings.wallet_private_key
+    wallet_present = wallet_secret is not None and bool(wallet_secret.get_secret_value())
+    funded = runtime_settings.portfolio_budget_usdc > Decimal("0")
+    if not runtime_settings.sports_live_state_enabled and wallet_present and funded:
+        logger.warning(
+            "sports_live_state worker disabled while trading config is funded — "
+            "strategy entry-signals depend on live state; funnel will stay at 0 candidates "
+            "until SPORTS_LIVE_STATE_ENABLED=true",
         )
     return runtime
 

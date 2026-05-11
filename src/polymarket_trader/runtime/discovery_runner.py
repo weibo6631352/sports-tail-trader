@@ -16,7 +16,21 @@ _MARKET_DISCOVERY_MAX_RUNTIME_MS = 200.0
 _LIVE_EVENT_EXPANSION_BUDGET_PER_TICK = 1
 _LIVE_EVENT_EXPANSION_REFRESH_SECONDS = 30.0
 MARKET_DISCOVERY_TICK_SECONDS = 0.5
+# 单次失败的基础回退，下次重试至少等这么久。
 MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS = 5
+# 指数回退上限：5 → 10 → 20 → 40 → 60s 后封顶。tail 策略对发现实时性要求高，
+# 一次 gamma 超时不应让我们 60s 无新市场；同时避免长期故障打爆 gamma API。
+MARKET_DISCOVERY_RETRY_BACKOFF_MAX_SECONDS = 60
+
+
+def _retry_backoff_seconds(consecutive_failures: int) -> int:
+    """指数回退：5/10/20/40/60s，最多翻倍 4 次后封顶。"""
+
+    exponent = max(0, consecutive_failures - 1)
+    if exponent > 4:
+        exponent = 4
+    backoff = MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS * (2 ** exponent)
+    return min(backoff, MARKET_DISCOVERY_RETRY_BACKOFF_MAX_SECONDS)
 
 logger = logging.getLogger(__name__)
 RuntimeMetricsSync = Callable[[Any], None]
@@ -215,17 +229,25 @@ async def run_market_discovery_scan(
         await expand_live_event_market_discovery(runtime)
     except Exception as exc:  # pragma: no cover - depends on external gamma
         state.record_failure(str(exc))
+        backoff_seconds = _retry_backoff_seconds(state.consecutive_failures)
         runtime.market_discovery_worker.record_failure(
             source="gamma.events_keyset",
             reason=str(exc),
-            retry_after_seconds=MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS,
+            retry_after_seconds=backoff_seconds,
         )
         runtime.supervisor.mark_worker_error(
             "market_discovery",
-            detail="discover_failed",
+            detail=f"discover_failed retry_in={backoff_seconds}s fail_n={state.consecutive_failures}",
             last_error=str(exc),
         )
-        logger.warning("market discovery scan failed", extra={"reason": str(exc)})
+        logger.warning(
+            "market discovery scan failed",
+            extra={
+                "reason": str(exc),
+                "consecutive_failures": state.consecutive_failures,
+                "retry_after_seconds": backoff_seconds,
+            },
+        )
     else:
         state.finish_tick()
         if round_completed and completed_round_id is not None:

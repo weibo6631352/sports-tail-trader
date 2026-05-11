@@ -430,6 +430,23 @@ class CurrentStrategy:
         for token_view in token_views:
             orderbook = getattr(token_view, "orderbook", None)
             best_ask = getattr(orderbook, "best_ask", None) if orderbook is not None else None
+            # missing_best_ask fallback：盘口有 best_bid + tick_size 时用 bid+tick 估算
+            # 一个"理论可成交 ask"，让 evaluator 仍然能跑出 fair_value 与估算 ask 的对比
+            # 并产生 RECORD_ONLY 决策——下单不允许，但分析路径不再 silent drop（§10
+            # 拒绝原因可审计）。所有 fallback metadata 透传到 decision_records 用于校准。
+            permission_for_token = effective_permission
+            fallback_meta: dict[str, str] = {}
+            if best_ask is None and orderbook is not None:
+                fallback_ask = _bid_plus_tick_fallback_ask(orderbook, market.tick_size)
+                if fallback_ask is not None:
+                    best_ask = fallback_ask
+                    permission_for_token = _ExecPerm.RECORD_ONLY
+                    fallback_meta = {
+                        "best_ask_fallback": "bid_plus_tick",
+                        "best_bid": str(orderbook.best_bid),
+                        "tick_size": str(market.tick_size),
+                        "fallback_ask": str(fallback_ask),
+                    }
             buyable = (
                 orderbook.buyable_ask_depth(max_price=config.tail_outright_max_entry_price)
                 if orderbook is not None
@@ -476,7 +493,8 @@ class CurrentStrategy:
                     "tail_outright_min_profit_per_share",
                     config.tail_outright_min_profit_per_share,
                 ),
-                execution_permission=effective_permission,
+                execution_permission=permission_for_token,
+                extra_metadata=fallback_meta or None,
             )
             if evaluation.accepted:
                 edge = (evaluation.fair_value or Decimal(0)) - (best_ask or Decimal(0))
@@ -1202,3 +1220,26 @@ def _int_value(value: object) -> int | None:
         return None if value is None or value == "" else int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _bid_plus_tick_fallback_ask(
+    orderbook: Any,
+    tick_size: Decimal | None,
+) -> Decimal | None:
+    """missing_best_ask 时用 ``best_bid + tick_size`` 估算 fallback ask。
+
+    返回 None 表示 fallback 不可用（无 bid 或 tick / 估算价越界）。返回估算价时
+    调用方应把执行权限降级为 RECORD_ONLY——估算价仅供 evaluator 跑出 fair_value
+    与"理论可成交价"的对比，下单仍需要真实 ask 流动性。
+    """
+
+    if orderbook is None or tick_size is None or tick_size <= Decimal("0"):
+        return None
+    best_bid = getattr(orderbook, "best_bid", None)
+    if best_bid is None or best_bid <= Decimal("0"):
+        return None
+    fallback_ask = best_bid + tick_size
+    # 越界（>= 1 or <= 0）的估算价无金融意义。
+    if fallback_ask <= Decimal("0") or fallback_ask >= Decimal("1"):
+        return None
+    return fallback_ask

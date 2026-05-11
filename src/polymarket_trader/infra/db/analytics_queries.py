@@ -11,23 +11,56 @@ from typing import Any, Mapping, Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from polymarket_trader.domain.events import DomainEventType
 
-# 漏斗阶段：严格使用 DomainEventType 字符串值。
-# 与 polymarket_trader.domain.events.DomainEventType 保持一致，
-# 这里只字面声明顺序，便于 SQL 单条 CTE 一次性返回各阶段计数。
-FUNNEL_STAGES: tuple[str, ...] = (
-    "market_discovered",
-    "market_filtered_in",
-    "market_filtered_out",
-    "risk_check_passed",
-    "order_submitted",
-    "fill_recorded",
+
+# 漏斗阶段 → 对应的 ``audit_events.event_title`` 集合。
+# market_service 在接受新市场时 emit ``market_discovered``，对已跟踪市场的更新 emit
+# ``market_updated``，拒绝时 emit ``market_filtered_out``。漏斗顶端「processed」
+# 需要把这三类都纳入；中段「filtered_in」只算接受（discovered+updated）。
+# 历史上 stage 名字面匹配 event_title 导致 ``market_filtered_in`` 永远 0，详见
+# git log 该文件 commit。修复后 stage 是聚合视图名而非 event_title 别名。
+FUNNEL_STAGE_EVENT_TITLES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "market_discovered",
+        (
+            DomainEventType.MARKET_DISCOVERED.value,
+            DomainEventType.MARKET_UPDATED.value,
+            DomainEventType.MARKET_FILTERED_OUT.value,
+        ),
+    ),
+    (
+        "market_filtered_in",
+        (
+            DomainEventType.MARKET_DISCOVERED.value,
+            DomainEventType.MARKET_UPDATED.value,
+        ),
+    ),
+    (
+        "market_filtered_out",
+        (DomainEventType.MARKET_FILTERED_OUT.value,),
+    ),
+    (
+        "risk_check_passed",
+        (DomainEventType.RISK_CHECK_PASSED.value,),
+    ),
+    (
+        "order_submitted",
+        (DomainEventType.ORDER_SUBMITTED.value,),
+    ),
+    (
+        "fill_recorded",
+        (DomainEventType.FILL_RECORDED.value,),
+    ),
 )
+FUNNEL_STAGES: tuple[str, ...] = tuple(stage for stage, _ in FUNNEL_STAGE_EVENT_TITLES)
+# submit-latency 计算时「filtered_in」用的同一组 event_title。
+_FILTERED_IN_EVENT_TITLES: tuple[str, ...] = dict(FUNNEL_STAGE_EVENT_TITLES)["market_filtered_in"]
 
 REJECTION_EVENT_TITLES: tuple[str, ...] = (
-    "order_rejected",
-    "risk_check_failed",
-    "market_filtered_out",
+    DomainEventType.ORDER_REJECTED.value,
+    DomainEventType.RISK_CHECK_FAILED.value,
+    DomainEventType.MARKET_FILTERED_OUT.value,
 )
 
 
@@ -76,7 +109,12 @@ async def fetch_funnel_counts(
     market_type: str | None = None,
     strategy_id: str | None = None,
 ) -> dict[str, int]:
-    """单条 CTE 一次性产出全部漏斗阶段计数。"""
+    """单条查询一次性产出全部漏斗阶段计数。
+
+    每个 stage 用 ``COUNT(*) FILTER (WHERE event_title = ANY(...))`` 聚合，stage
+    与底层 ``audit_events.event_title`` 解耦——漏斗顶端把"接受+更新+拒绝"全算进
+    ``market_discovered``，中段 ``market_filtered_in`` 只算"接受+更新"。
+    """
 
     join_clause, where_extra, params = _build_market_filter(
         condition_alias="a.condition_id",
@@ -86,29 +124,40 @@ async def fetch_funnel_counts(
     strategy_where = " AND a.strategy_id = :strategy_id" if strategy_id is not None else ""
 
     filter_clauses = ",\n        ".join(
-        f"COUNT(*) FILTER (WHERE a.event_title = :stage_{i}) AS stage_{i}"
-        for i in range(len(FUNNEL_STAGES))
+        f"COUNT(*) FILTER (WHERE a.event_title = ANY(:stage_{i}_titles)) AS stage_{i}"
+        for i in range(len(FUNNEL_STAGE_EVENT_TITLES))
     )
+    # 总过滤集 = 所有 stage 对应 event_title 的并集，避免扫无关行
+    all_event_titles: list[str] = []
+    seen: set[str] = set()
+    for _, titles in FUNNEL_STAGE_EVENT_TITLES:
+        for title in titles:
+            if title not in seen:
+                seen.add(title)
+                all_event_titles.append(title)
     sql = f"""
         SELECT {filter_clauses}
         FROM audit_events a{join_clause}
         WHERE a.created_at >= :window_start
           AND a.created_at < :window_end
-          AND a.event_title = ANY(:stage_names){where_extra}{strategy_where}
+          AND a.event_title = ANY(:all_event_titles){where_extra}{strategy_where}
     """
     bind: dict[str, Any] = {
         "window_start": window_start,
         "window_end": window_end,
-        "stage_names": list(FUNNEL_STAGES),
+        "all_event_titles": all_event_titles,
         **params,
     }
     if strategy_id is not None:
         bind["strategy_id"] = strategy_id
-    for i, name in enumerate(FUNNEL_STAGES):
-        bind[f"stage_{i}"] = name
+    for i, (_, titles) in enumerate(FUNNEL_STAGE_EVENT_TITLES):
+        bind[f"stage_{i}_titles"] = list(titles)
     result = await session.execute(text(sql), bind)
     row = result.one()
-    return {FUNNEL_STAGES[i]: int(row[i] or 0) for i in range(len(FUNNEL_STAGES))}
+    return {
+        stage: int(row[i] or 0)
+        for i, (stage, _) in enumerate(FUNNEL_STAGE_EVENT_TITLES)
+    }
 
 
 async def fetch_rejection_reasons(
@@ -206,7 +255,7 @@ async def fetch_execution_quality(
             FROM audit_events sub
             JOIN LATERAL (
                 SELECT created_at FROM audit_events
-                WHERE event_title = 'market_filtered_in'
+                WHERE event_title = ANY(:filtered_in_titles)
                   AND condition_id = sub.condition_id
                   AND token_id IS NOT DISTINCT FROM sub.token_id
                   AND created_at <= sub.created_at
@@ -251,6 +300,7 @@ async def fetch_execution_quality(
     bind = {
         "window_start": window_start,
         "window_end": window_end,
+        "filtered_in_titles": list(_FILTERED_IN_EVENT_TITLES),
         **submit_params,
         **fill_params,
     }

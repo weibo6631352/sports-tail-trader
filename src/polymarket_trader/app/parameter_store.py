@@ -176,6 +176,25 @@ _register(ParameterSpec(
     description="通用 tail 入场最小盘口可吃深度（USDC）",
     coerce=_coerce_decimal_non_negative,
 ))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_outright_budget_usdc",
+    description=(
+        "Outright family（赛季冠军 / 球员奖项等长期市场）总预算上限（USDC）。"
+        "默认 0 = 全部 outright 拒绝（仅审计、不下单）。要启用 outright 自动交易，"
+        "设置该值 ≥ tail_outright_max_per_market_usdc（默认 25）。"
+    ),
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_stale_no_live_state_seconds",
+    description=(
+        "赛事起始超过该秒数且仍无任何直播状态 → 主动 pause stale market。"
+        "默认 86400（24h）。改 0 = 关闭 stale 检测。"
+    ),
+    coerce=_coerce_positive_int,
+))
 
 
 def list_specs() -> tuple[ParameterSpec, ...]:
