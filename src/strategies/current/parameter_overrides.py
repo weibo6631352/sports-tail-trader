@@ -8,22 +8,44 @@
 frozen dataclass，启动期校验后不应再被替换。Override 是 runtime 临时探索值，
 不能跨重启存活——单独走 port 让职责清晰。
 
-调用约定：``effective(port, 'strategy_key', config.fallback_field)``。port 为
-None（旧测试 / 兼容路径）时直接返回 fallback。
+两种解析入口：
+- ``effective_*(ports, key, default)``：显式传 ports；调用方持有引用时用。
+- ``effective_*(None, key, default)``：用 ``ContextVar`` 取 strategy 在 hook
+  入口注册的"当前激活 ports"。这条路径让 ``_tail_price_cap`` 等深层 helper
+  不必把 ports 一路 plumb 到所有调用点。
 """
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Iterator
 
 from polymarket_trader.extension_api import ExtensionPorts
 
 
+_active_ports: ContextVar[ExtensionPorts | None] = ContextVar(
+    "strategies.current.active_ports", default=None
+)
+
+
+@contextmanager
+def active_ports_scope(ports: ExtensionPorts | None) -> Iterator[None]:
+    """在 strategy hook 入口处包一层；嵌套调用安全（ContextVar.reset）。"""
+
+    token = _active_ports.set(ports)
+    try:
+        yield
+    finally:
+        _active_ports.reset(token)
+
+
 def _resolve(ports: ExtensionPorts | None, key: str, default: Any) -> Any:
-    if ports is None:
+    effective_ports = ports if ports is not None else _active_ports.get()
+    if effective_ports is None:
         return default
-    port = getattr(ports, "parameter", None)
+    port = getattr(effective_ports, "parameter", None)
     if port is None:
         return default
     try:

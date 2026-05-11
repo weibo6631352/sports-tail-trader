@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from polymarket_trader.extension_api import ExtensionContext
+from polymarket_trader.extension_api import ExtensionContext, ExtensionPorts
 
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.outcomes import describe_sports_market, target_for_token
+from strategies.current.parameter_overrides import effective_decimal
 
 
 def _tail_price_cap(
@@ -16,21 +17,35 @@ def _tail_price_cap(
     token_id: str | None,
     *,
     locked_outcome_signal: bool = False,
+    ports: ExtensionPorts | None = None,
 ) -> Decimal:
+    """计算入场价格上限。
+
+    优先级：runtime override（``ports.parameter``）> frozen ``config``。
+    ``ports=None`` 时行为与无 override 完全一致——保持旧测试和工具脚本兼容。
+    """
+
     descriptor = describe_sports_market(market)
+    entry_no_price_max = effective_decimal(
+        ports, "entry_no_price_max", config.entry_no_price_max
+    )
     if descriptor.market_type is None:
-        return config.entry_no_price_max
+        return entry_no_price_max
     if token_id is not None and target_for_token(market, token_id) is None:
-        return config.entry_no_price_max
+        return entry_no_price_max
     if locked_outcome_signal and descriptor.market_type.value == "moneyline" and _is_tennis_set_winner_market(market):
         return config.tail_tennis_locked_moneyline_max_entry_price
     if descriptor.market_type.value == "totals":
         return config.tail_totals_max_entry_price
     if descriptor.market_type.value == "moneyline":
-        return config.tail_moneyline_max_entry_price
+        return effective_decimal(
+            ports, "tail_moneyline_max_entry_price", config.tail_moneyline_max_entry_price
+        )
     if descriptor.market_type.value == "spreads":
-        return config.tail_spreads_max_entry_price
-    return config.entry_no_price_max
+        return effective_decimal(
+            ports, "tail_spreads_max_entry_price", config.tail_spreads_max_entry_price
+        )
+    return entry_no_price_max
 
 
 def _tail_locked_outcome_signal(context: ExtensionContext) -> bool:

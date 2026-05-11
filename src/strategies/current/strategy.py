@@ -48,7 +48,7 @@ from strategies.current.outright import (
     evaluate_outright_opportunity,
     season_odds_from_metadata,
 )
-from strategies.current.parameter_overrides import effective_decimal, effective_int
+from strategies.current.parameter_overrides import active_ports_scope, effective_decimal, effective_int
 from strategies.current.recovery import decide_recovery
 from strategies.current.tail.types import ExecutionPermission as _ExecPerm
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
@@ -341,7 +341,8 @@ class CurrentStrategy:
         descriptor = describe_sports_market(context.market) if context.market else None
         if descriptor is not None and descriptor.market_family.value == "outright":
             return self._size_outright_entry(context)
-        return size_entry(self._config, context)
+        with active_ports_scope(self._ports):
+            return size_entry(self._config, context)
 
     def _size_outright_entry(self, context: ExtensionContext) -> EntrySizing:
         config = self._config
@@ -388,7 +389,8 @@ class CurrentStrategy:
                 self._decide_outright_entry(context),
                 default_kind=DecisionKind.ENTRY,
             )
-        return _enrich_decision(decide_entry(self._config, context), default_kind=DecisionKind.ENTRY)
+        with active_ports_scope(self._ports):
+            return _enrich_decision(decide_entry(self._config, context), default_kind=DecisionKind.ENTRY)
 
     def _decide_outright_entry(self, context: ExtensionContext) -> ExtensionDecision:
         """outright 子包驱动的入场决策。
@@ -571,7 +573,8 @@ class CurrentStrategy:
     def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
         """根据持仓状态生成 SELL 决策。"""
 
-        return _enrich_decision(decide_exit(self._config, context), default_kind=DecisionKind.EXIT)
+        with active_ports_scope(self._ports):
+            return _enrich_decision(decide_exit(self._config, context), default_kind=DecisionKind.EXIT)
 
     async def _on_live_state_no_feasible_source(self, envelope: Any) -> None:
         """Lifecycle 回调：worker 报出"全源不可用"后，缓存为 True；后续可在重新可用

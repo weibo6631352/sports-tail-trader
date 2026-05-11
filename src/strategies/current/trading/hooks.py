@@ -182,7 +182,9 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         if decision is not None:
             return decision
     else:
-        allowed_price = config.entry_no_price_max
+        from strategies.current.parameter_overrides import effective_decimal
+
+        allowed_price = effective_decimal(None, "entry_no_price_max", config.entry_no_price_max)
         tail_metadata = {}
 
     best_ask = context.orderbook.best_ask
