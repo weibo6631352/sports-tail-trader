@@ -34,7 +34,7 @@ from polymarket_trader.infra.polymarket.order_result_builder import (
     build_order_result,
     normalize_execution_response,
 )
-from polymarket_trader.infra.outbox.local_queue import DEFAULT_ENQUEUE_TIMEOUT, LocalOutbox
+from polymarket_trader.infra.outbox.event_sink import OutboxSink
 
 
 def _utc_now() -> datetime:
@@ -193,14 +193,13 @@ class PolymarketOrderExecutor:
         self,
         *,
         client: OrderExecutionClient | None = None,
-        outbox: LocalOutbox | None = None,
+        outbox: OutboxSink | None = None,
         thread_pool: ThreadPoolExecutor | None = None,
         sign_timeout_ms: int = 1000,
         submit_timeout_ms: int = 3000,
         cancel_timeout_ms: int | None = None,
         replace_timeout_ms: int | None = None,
         critical_lock_timeout_ms: int = 20,
-        outbox_timeout_s: float = DEFAULT_ENQUEUE_TIMEOUT,
         max_cached_results: int = 1024,
     ) -> None:
         self._client = client
@@ -214,7 +213,6 @@ class PolymarketOrderExecutor:
         self._cancel_timeout_s = (cancel_timeout_ms or submit_timeout_ms) / 1000
         self._replace_timeout_s = (replace_timeout_ms or submit_timeout_ms) / 1000
         self._critical_lock_timeout_s = critical_lock_timeout_ms / 1000
-        self._outbox_timeout_s = outbox_timeout_s
         self._max_cached_results = max_cached_results
         self._idempotency_lock = asyncio.Lock()
         self._idempotency_index: dict[str, _IdempotencyEntry] = {}
@@ -662,14 +660,7 @@ class PolymarketOrderExecutor:
         if self._outbox is None:
             return
         try:
-            if hasattr(self._outbox, "put_nowait"):
-                self._outbox.put_nowait(event)
-                return
-            if hasattr(self._outbox, "enqueue"):
-                await asyncio.wait_for(self._outbox.enqueue(event), timeout=self._outbox_timeout_s)
-                return
-            if hasattr(self._outbox, "put"):
-                await asyncio.wait_for(self._outbox.put(event), timeout=self._outbox_timeout_s)
+            self._outbox.put_nowait(event)
         except Exception:
             # Outbox 失败不能挡住交易热路径；执行器仍然继续返回订单结果。
             return
