@@ -195,7 +195,11 @@ def _totals_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
     targets: list[SportsTokenTarget] = []
     for outcome in market.outcomes:
         normalized = _normalize_text(outcome.outcome)
-        if "over" in normalized:
+        # Polymarket 把 totals outcome 写成 "Over 86.5" 或缩写 "O 86.5"——
+        # 单字母 "O"/"U" 在线赛季 win totals 等长盘上很常见，必须识别，
+        # 否则 _token_targets 返回空、整条市场以 missing_target_token 静默丢弃。
+        first_token = normalized.split(" ", 1)[0] if normalized else ""
+        if "over" in normalized or first_token == "o":
             targets.append(
                 SportsTokenTarget(
                     token_id=outcome.token_id,
@@ -203,7 +207,7 @@ def _totals_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
                     label=outcome.outcome,
                 )
             )
-        elif "under" in normalized:
+        elif "under" in normalized or first_token == "u":
             targets.append(
                 SportsTokenTarget(
                     token_id=outcome.token_id,

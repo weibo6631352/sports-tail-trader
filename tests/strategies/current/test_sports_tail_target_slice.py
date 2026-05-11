@@ -144,6 +144,40 @@ def test_universe_accepts_tennis_first_set_totals_as_single_game_market() -> Non
     assert descriptor.line == Decimal("9.5")
 
 
+def test_describe_sports_market_resolves_abbreviated_over_under_outcomes() -> None:
+    """Polymarket 部分赛季 Win Totals 把 outcome 写成 "O 86.5" / "U 86.5"，
+    历史代码只匹配完整 "over"/"under"，结果 30+ MLB Win Totals 市场以
+    missing_target_token 静默丢弃。describe_sports_market 必须把缩写解出。"""
+
+    market = Market(
+        condition_id="mlb-yankees-win-totals-2026",
+        market_slug="2026-mlb-win-totals-new-york-yankees",
+        market_question=(
+            "Will the New York Yankees win more than 86.5 games in the 2026 MLB Regular Season?"
+        ),
+        event_title="2026 MLB Win Totals",
+        event_slug="2026-mlb-win-totals",
+        category="Sports",
+        tags=("MLB", "Baseball"),
+        outcomes=(
+            MarketOutcome(token_id="yankees-over-865", outcome="O 86.5"),
+            MarketOutcome(token_id="yankees-under-865", outcome="U 86.5"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+    descriptor = describe_sports_market(market)
+
+    assert descriptor.accepted is True, (
+        f"abbreviated O/U outcomes should resolve, got reason={descriptor.reason!r}"
+    )
+    assert descriptor.market_type == SportsMarketType.TOTALS
+    assert descriptor.line == Decimal("86.5")
+    target_sides = {target.side for target in descriptor.targets}
+    assert SportsMarketSide.OVER in target_sides
+    assert SportsMarketSide.UNDER in target_sides
+
+
 def test_universe_accepts_single_game_binary_props_for_whole_market_coverage() -> None:
     market = _single_game_binary_prop_market()
 
