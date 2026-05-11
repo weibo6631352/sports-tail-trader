@@ -111,7 +111,7 @@ export function SportsEventsPage() {
     },
     {
       header: 'condition',
-      cell: ({ row }) => <CopyableId value={row.original.condition_id ?? ''} head={4} tail={4} />,
+      cell: ({ row }) => <CopyableId value={row.original.condition_id ?? ''} dense />,
     },
     {
       header: '操作',

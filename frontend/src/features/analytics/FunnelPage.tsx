@@ -11,6 +11,7 @@ import { SectionCard } from '@shared/ui/SectionCard'
 import { EmptyState } from '@shared/ui/EmptyState'
 import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
 import { DataTable } from '@shared/tables/DataTable'
+import { chartTooltipStyle } from '@shared/charts'
 import { AnalyticsToolbar } from './AnalyticsToolbar'
 import { useAnalyticsParams } from './_useAnalyticsParams'
 
@@ -51,7 +52,7 @@ export function FunnelPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#243352" />
                   <XAxis dataKey="stage" stroke="#97a6c2" tick={{ fontSize: 11 }} />
                   <YAxis stroke="#97a6c2" tick={{ fontSize: 11 }} />
-                  <Tooltip contentStyle={{ background: '#121e36', border: '1px solid #243352' }} />
+                  <Tooltip contentStyle={chartTooltipStyle} />
                   <Bar dataKey="count" fill="#5cd9c5" />
                 </BarChart>
               </ResponsiveContainer>

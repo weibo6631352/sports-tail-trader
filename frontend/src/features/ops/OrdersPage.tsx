@@ -58,7 +58,7 @@ export function OrdersPage() {
         `${formatDecimal(row.original.filled_shares, { dp: 2 })} / ${formatDecimal(row.original.size_shares, { dp: 2 })}`,
     },
     { header: 'status', cell: ({ row }) => <StatusPill size="xs">{row.original.status}</StatusPill> },
-    { header: 'trace', cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} head={4} tail={4} /> },
+    { header: 'trace', cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} dense /> },
   ]
 
   const total = query.data?.total ?? query.data?.items?.length ?? 0

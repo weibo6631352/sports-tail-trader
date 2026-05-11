@@ -14,6 +14,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { qk } from '@core/api/keys'
 import { portfolioApi } from '@core/api/resources'
 import type { PnlBreakdownRow, PnlBreakdownGroupBy } from '@core/api/types'
+import { chartTooltipStyle } from '@shared/charts'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { EmptyState } from '@shared/ui/EmptyState'
@@ -120,7 +121,7 @@ export function PnlBreakdownPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#243352" />
                   <XAxis dataKey="group_key" stroke="#97a6c2" tick={{ fontSize: 10 }} angle={-15} textAnchor="end" height={50} />
                   <YAxis stroke="#97a6c2" tick={{ fontSize: 11 }} />
-                  <Tooltip contentStyle={{ background: '#121e36', border: '1px solid #243352' }} />
+                  <Tooltip contentStyle={chartTooltipStyle} />
                   <Bar dataKey="realized" fill="#5cd9c5" name="realized" />
                   <Bar dataKey="cash" fill="#5aa9ff" name="cash" />
                 </BarChart>

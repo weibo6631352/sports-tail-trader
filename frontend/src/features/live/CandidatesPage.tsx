@@ -68,7 +68,7 @@ export function CandidatesPage() {
             <CopyableId value={row.original.condition_id} />
             {row.original.token_id ? (
               <div style={{ marginTop: 2 }}>
-                <CopyableId value={row.original.token_id} label="tok" head={4} tail={4} />
+                <CopyableId value={row.original.token_id} label="tok" dense />
               </div>
             ) : null}
           </div>

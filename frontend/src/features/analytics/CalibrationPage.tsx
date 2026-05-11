@@ -18,6 +18,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { qk } from '@core/api/keys'
 import { analyticsApi } from '@core/api/resources'
 import type { CalibrationBucket } from '@core/api/types'
+import { chartTooltipStyle } from '@shared/charts'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { EmptyState } from '@shared/ui/EmptyState'
@@ -195,7 +196,7 @@ export function CalibrationPage() {
                   <ZAxis dataKey="count" range={[40, 240]} />
                   <Tooltip
                     cursor={{ strokeDasharray: '3 3' }}
-                    contentStyle={{ background: '#121e36', border: '1px solid #243352' }}
+                    contentStyle={chartTooltipStyle}
                     formatter={(value) => (typeof value === 'number' ? value.toFixed(3) : String(value))}
                   />
                   <ReferenceLine

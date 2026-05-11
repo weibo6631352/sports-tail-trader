@@ -57,7 +57,7 @@ export function TimelineEventNode({ event, onOpenDetail }: Props) {
           <Text size="xs" c="dimmed" ff="var(--font-mono)" title={formatIso(event.timestamp)}>
             {formatIso(event.timestamp, 'MM-DD HH:mm:ss')}
           </Text>
-          {event.trace_id ? <CopyableId value={event.trace_id} label="trace" head={4} tail={4} /> : null}
+          {event.trace_id ? <CopyableId value={event.trace_id} label="trace" dense /> : null}
         </Group>
         <div className={styles.body}>{renderBody(event)}</div>
       </div>

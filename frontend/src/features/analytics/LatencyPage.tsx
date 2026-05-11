@@ -15,6 +15,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { qk } from '@core/api/keys'
 import { healthApi } from '@core/api/resources'
 import type { LatencyPercentile } from '@core/api/types'
+import { chartTooltipStyle } from '@shared/charts'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { EmptyState } from '@shared/ui/EmptyState'
@@ -81,7 +82,7 @@ export function LatencyPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#243352" />
                   <XAxis dataKey="stage" stroke="#97a6c2" tick={{ fontSize: 10 }} angle={-10} textAnchor="end" height={50} />
                   <YAxis stroke="#97a6c2" tick={{ fontSize: 11 }} />
-                  <Tooltip contentStyle={{ background: '#121e36', border: '1px solid #243352' }} />
+                  <Tooltip contentStyle={chartTooltipStyle} />
                   <Legend />
                   <Bar dataKey="p50_ms" fill="#5cd9c5" name="p50" />
                   <Bar dataKey="p95_ms" fill="#f0b955" name="p95" />

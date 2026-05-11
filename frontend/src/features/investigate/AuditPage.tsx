@@ -17,6 +17,7 @@ import type {
   AuditEventRow,
   OperatorAggregateEvent,
 } from '@core/api/types'
+import { chartTooltipStyle } from '@shared/charts'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { CopyableId } from '@shared/ui/CopyableId'
@@ -89,11 +90,11 @@ function ListTab() {
       },
       {
         header: 'condition',
-        cell: ({ row }) => <CopyableId value={row.original.condition_id ?? ''} head={4} tail={4} />,
+        cell: ({ row }) => <CopyableId value={row.original.condition_id ?? ''} dense />,
       },
       {
         header: 'trace',
-        cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} head={4} tail={4} />,
+        cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} dense />,
       },
     ],
     [],
@@ -197,7 +198,7 @@ function OperatorTab() {
     },
     {
       header: 'condition',
-      cell: ({ row }) => <CopyableId value={row.original.condition_id ?? ''} head={4} tail={4} />,
+      cell: ({ row }) => <CopyableId value={row.original.condition_id ?? ''} dense />,
     },
   ]
 
@@ -319,7 +320,7 @@ function HorizontalBar({
           <CartesianGrid strokeDasharray="3 3" stroke="#243352" />
           <XAxis type="number" stroke="#97a6c2" tick={{ fontSize: 11 }} />
           <YAxis type="category" dataKey="key" stroke="#97a6c2" tick={{ fontSize: 11 }} width={120} />
-          <Tooltip contentStyle={{ background: '#121e36', border: '1px solid #243352' }} />
+          <Tooltip contentStyle={chartTooltipStyle} />
           <Bar
             dataKey="count"
             fill={color}

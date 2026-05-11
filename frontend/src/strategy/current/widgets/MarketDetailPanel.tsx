@@ -74,7 +74,7 @@ export function MarketDetailPanel({ market }: { market: MarketView }) {
                   <Text size="xs" ff="var(--font-mono)">
                     fair={formatDecimal(fair, { dp: 4 })} cap={formatDecimal(cap, { dp: 4 })}
                   </Text>
-                  <CopyableId value={d.trace_id} head={4} tail={4} label="trace" />
+                  <CopyableId value={d.trace_id} dense label="trace" />
                 </Stack>
               </Group>
             )

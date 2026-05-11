@@ -13,6 +13,7 @@ import {
 import { qk } from '@core/api/keys'
 import { analyticsApi } from '@core/api/resources'
 import type { RiskCheck, RiskRejectionEvent } from '@core/api/types'
+import { chartTooltipStyle } from '@shared/charts'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { EmptyState } from '@shared/ui/EmptyState'
@@ -177,7 +178,7 @@ function BucketChart({
               tick={{ fontSize: 11 }}
               width={120}
             />
-            <Tooltip contentStyle={{ background: '#121e36', border: '1px solid #243352' }} />
+            <Tooltip contentStyle={chartTooltipStyle} />
             <Bar dataKey="count" fill="#f0b955" />
           </BarChart>
         </ResponsiveContainer>
@@ -249,8 +250,8 @@ function RiskRejectionCard({
             <Text size="xs" c="dimmed" ff="var(--font-mono)">
               {formatIso(event.created_at, 'MM-DD HH:mm:ss')}
             </Text>
-            <CopyableId value={event.condition_id ?? ''} head={4} tail={4} />
-            <CopyableId value={event.trace_id ?? ''} head={4} tail={4} label="trace" />
+            <CopyableId value={event.condition_id ?? ''} dense />
+            <CopyableId value={event.trace_id ?? ''} dense label="trace" />
             <code style={{ fontSize: 11, color: 'var(--color-text-dim)' }}>
               {event.reason ?? '—'}
             </code>

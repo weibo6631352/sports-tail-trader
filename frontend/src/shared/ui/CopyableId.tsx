@@ -7,12 +7,16 @@ type Props = {
   value: string | null | undefined
   head?: number
   tail?: number
+  /** 表格密集场景走 4/4；默认 6/4 适合 detail / overview。 */
+  dense?: boolean
   label?: string
 }
 
-export function CopyableId({ value, head = 6, tail = 4, label }: Props) {
+export function CopyableId({ value, head, tail, dense, label }: Props) {
   if (!value) return <span className={styles.empty}>—</span>
-  const display = truncateId(value, head, tail)
+  const h = head ?? (dense ? 4 : 6)
+  const t = tail ?? (dense ? 4 : 4)
+  const display = truncateId(value, h, t)
   return (
     <span className={styles.wrap}>
       <Tooltip label={value} withArrow openDelay={300} position="top">

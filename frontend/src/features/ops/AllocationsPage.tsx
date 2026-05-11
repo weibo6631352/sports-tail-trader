@@ -42,7 +42,7 @@ export function AllocationsPage() {
         <code style={{ fontSize: 11, color: 'var(--color-text-dim)' }}>{row.original.release_reason ?? '—'}</code>
       ),
     },
-    { header: 'trace', cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} head={4} tail={4} /> },
+    { header: 'trace', cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} dense /> },
   ]
 
   const total = query.data?.total ?? query.data?.items?.length ?? 0

@@ -49,7 +49,7 @@ export function MarketsListPage() {
       cell: ({ row }) => (
         <div>
           <div style={{ fontSize: 12 }}>{row.original.market_slug}</div>
-          <CopyableId value={row.original.condition_id} head={4} tail={4} />
+          <CopyableId value={row.original.condition_id} dense />
         </div>
       ),
     },

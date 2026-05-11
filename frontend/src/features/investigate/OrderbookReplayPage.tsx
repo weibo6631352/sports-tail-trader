@@ -14,6 +14,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { qk } from '@core/api/keys'
 import { marketsApi } from '@core/api/resources'
 import type { OrderbookSnapshotRow } from '@core/api/types'
+import { chartTooltipStyle } from '@shared/charts'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { EmptyState } from '@shared/ui/EmptyState'
@@ -216,7 +217,7 @@ export function OrderbookReplayPage() {
                         domain={[0, 1]}
                       />
                       <YAxis stroke="#97a6c2" tick={{ fontSize: 11 }} />
-                      <Tooltip contentStyle={{ background: '#121e36', border: '1px solid #243352' }} />
+                      <Tooltip contentStyle={chartTooltipStyle} />
                       <Bar dataKey="bidSize" name="bid" fill="#38d39f" stackId="depth" />
                       <Bar dataKey="askSize" name="ask" fill="#f06568" stackId="depth" />
                     </BarChart>

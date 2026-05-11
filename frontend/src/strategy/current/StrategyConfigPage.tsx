@@ -433,7 +433,7 @@ function HistoryTable({
     },
     {
       header: 'trace',
-      cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} head={4} tail={4} />,
+      cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} dense />,
     },
   ]
 

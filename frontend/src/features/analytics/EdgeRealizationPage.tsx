@@ -15,6 +15,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { qk } from '@core/api/keys'
 import { analyticsApi } from '@core/api/resources'
 import type { EdgeRealizationBucket, EdgeRealizationItem } from '@core/api/types'
+import { chartTooltipStyle } from '@shared/charts'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { EmptyState } from '@shared/ui/EmptyState'
@@ -57,8 +58,8 @@ export function EdgeRealizationPage() {
       header: 'record / condition',
       cell: ({ row }) => (
         <Stack gap={2}>
-          <CopyableId value={row.original.record_id} head={4} tail={4} />
-          <CopyableId value={row.original.condition_id} head={4} tail={4} />
+          <CopyableId value={row.original.record_id} dense />
+          <CopyableId value={row.original.condition_id} dense />
         </Stack>
       ),
     },
@@ -162,7 +163,7 @@ export function EdgeRealizationPage() {
                   <ZAxis range={[40, 80]} />
                   <Tooltip
                     cursor={{ strokeDasharray: '3 3' }}
-                    contentStyle={{ background: '#121e36', border: '1px solid #243352' }}
+                    contentStyle={chartTooltipStyle}
                   />
                   <Scatter data={scatterData} fill="#5cd9c5" />
                 </ScatterChart>

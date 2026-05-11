@@ -77,14 +77,14 @@ function SettlementsList() {
     { header: 'when', cell: ({ row }) => formatIso(row.original.created_at, 'MM-DD HH:mm:ss') },
     {
       header: 'condition',
-      cell: ({ row }) => <CopyableId value={row.original.condition_id ?? ''} head={4} tail={4} />,
+      cell: ({ row }) => <CopyableId value={row.original.condition_id ?? ''} dense />,
     },
     {
       header: 'winning_token_id',
       cell: ({ row }) => {
         const p = (row.original.payload ?? {}) as Record<string, unknown>
         const winner = p.winning_token_id ? String(p.winning_token_id) : null
-        return winner ? <CopyableId value={winner} head={4} tail={4} /> : <span>—</span>
+        return winner ? <CopyableId value={winner} dense /> : <span>—</span>
       },
     },
     {

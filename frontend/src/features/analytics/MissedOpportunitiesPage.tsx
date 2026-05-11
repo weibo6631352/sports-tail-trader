@@ -74,8 +74,8 @@ export function MissedOpportunitiesPage() {
       header: 'condition / token',
       cell: ({ row }) => (
         <Stack gap={2}>
-          <CopyableId value={row.original.condition_id} head={4} tail={4} />
-          {row.original.token_id ? <CopyableId value={row.original.token_id} head={4} tail={4} label="tok" /> : null}
+          <CopyableId value={row.original.condition_id} dense />
+          {row.original.token_id ? <CopyableId value={row.original.token_id} dense label="tok" /> : null}
         </Stack>
       ),
     },

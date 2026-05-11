@@ -76,7 +76,7 @@ export function StrategyOverviewPage() {
                     </Text>
                   </Stack>
                   <Stack gap={2} align="flex-end">
-                    {s.condition_id ? <CopyableId value={s.condition_id} head={4} tail={4} /> : null}
+                    {s.condition_id ? <CopyableId value={s.condition_id} dense /> : null}
                     <StatusPill
                       tone={s.signal_allowed === true ? 'success' : s.signal_allowed === false ? 'danger' : 'neutral'}
                       size="xs"

@@ -13,6 +13,7 @@ import {
 import { qk } from '@core/api/keys'
 import { portfolioApi } from '@core/api/resources'
 import type { EquityPoint } from '@core/api/types'
+import { chartTooltipStyle } from '@shared/charts'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
@@ -214,7 +215,7 @@ function EquityChart({ points }: { points: EquityPoint[] }) {
           <XAxis dataKey="label" stroke="#97a6c2" tick={{ fontSize: 11 }} minTickGap={40} />
           <YAxis stroke="#97a6c2" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
           <Tooltip
-            contentStyle={{ background: '#121e36', border: '1px solid #243352' }}
+            contentStyle={chartTooltipStyle}
             formatter={(value) =>
               typeof value === 'number' ? value.toFixed(2) : String(value)
             }

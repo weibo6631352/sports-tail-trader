@@ -56,7 +56,7 @@ export function CandidatesWidget() {
                   <Text size="xs" c="dimmed">
                     {c.league ?? '—'} · {c.market_type ?? '—'}
                   </Text>
-                  {c.token_id ? <CopyableId value={c.token_id} head={4} tail={4} label="tok" /> : null}
+                  {c.token_id ? <CopyableId value={c.token_id} dense label="tok" /> : null}
                 </Group>
               </Stack>
               <StatusPill

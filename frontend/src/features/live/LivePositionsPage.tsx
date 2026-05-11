@@ -45,7 +45,7 @@ export function LivePositionsPage() {
         cell: ({ row }) => (
           <div>
             <div style={{ fontSize: 12 }}>{row.original.market_slug ?? '—'}</div>
-            <CopyableId value={row.original.token_id} head={4} tail={4} />
+            <CopyableId value={row.original.token_id} dense />
           </div>
         ),
       },

@@ -41,7 +41,7 @@ export function AllocationDecisionsPage() {
     { header: 'when', cell: ({ row }) => formatIso(row.original.created_at, 'MM-DD HH:mm:ss') },
     {
       header: 'condition',
-      cell: ({ row }) => <CopyableId value={row.original.condition_id ?? ''} head={4} tail={4} />,
+      cell: ({ row }) => <CopyableId value={row.original.condition_id ?? ''} dense />,
     },
     {
       header: '候选数',
@@ -80,7 +80,7 @@ export function AllocationDecisionsPage() {
     },
     {
       header: 'trace',
-      cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} head={4} tail={4} />,
+      cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} dense />,
     },
     {
       header: '操作',

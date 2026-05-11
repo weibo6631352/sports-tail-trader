@@ -45,7 +45,7 @@ function PendingTab() {
     { header: 'when', cell: ({ row }) => formatIso(row.original.created_at, 'MM-DD HH:mm:ss') },
     { header: 'event_type', accessorKey: 'event_type' },
     { header: 'retries', accessorKey: 'retry_count' },
-    { header: 'trace', cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} head={4} tail={4} /> },
+    { header: 'trace', cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} dense /> },
   ]
   const total = query.data?.total ?? query.data?.items?.length ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -103,7 +103,7 @@ function FailuresTab() {
         <code style={{ fontSize: 11, color: 'var(--color-danger)' }}>{row.original.last_error ?? '—'}</code>
       ),
     },
-    { header: 'trace', cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} head={4} tail={4} /> },
+    { header: 'trace', cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} dense /> },
   ]
   const total = query.data?.total ?? query.data?.items?.length ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))

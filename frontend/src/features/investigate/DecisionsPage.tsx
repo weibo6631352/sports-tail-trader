@@ -59,10 +59,10 @@ export function DecisionsPage() {
         header: 'condition / token',
         cell: ({ row }) => (
           <div>
-            <CopyableId value={row.original.condition_id} head={4} tail={4} />
+            <CopyableId value={row.original.condition_id} dense />
             {row.original.token_id ? (
               <div style={{ marginTop: 2 }}>
-                <CopyableId value={row.original.token_id} head={4} tail={4} label="tok" />
+                <CopyableId value={row.original.token_id} dense label="tok" />
               </div>
             ) : null}
           </div>
@@ -85,7 +85,7 @@ export function DecisionsPage() {
       },
       {
         header: 'trace',
-        cell: ({ row }) => <CopyableId value={row.original.trace_id} head={4} tail={4} />,
+        cell: ({ row }) => <CopyableId value={row.original.trace_id} dense />,
       },
       {
         header: '操作',

@@ -24,13 +24,13 @@ export function FillsPage() {
 
   const columns: ColumnDef<FillRow, unknown>[] = [
     { header: 'when', cell: ({ row }) => formatIso(row.original.created_at, 'MM-DD HH:mm:ss') },
-    { header: 'order_id', cell: ({ row }) => <CopyableId value={row.original.order_id ?? ''} head={4} tail={4} /> },
+    { header: 'order_id', cell: ({ row }) => <CopyableId value={row.original.order_id ?? ''} dense /> },
     { header: 'side', accessorKey: 'side' },
     { header: 'price', cell: ({ row }) => formatDecimal(row.original.price, { dp: 4 }) },
     { header: 'size', cell: ({ row }) => formatDecimal(row.original.size, { dp: 2 }) },
     { header: 'notional', cell: ({ row }) => formatUsdc(row.original.notional_usdc) },
     { header: 'fee', cell: ({ row }) => formatUsdc(row.original.fee_usdc, 4) },
-    { header: 'trace', cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} head={4} tail={4} /> },
+    { header: 'trace', cell: ({ row }) => <CopyableId value={row.original.trace_id ?? ''} dense /> },
   ]
 
   const total = query.data?.total ?? query.data?.items?.length ?? 0
