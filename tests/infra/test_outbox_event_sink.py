@@ -20,12 +20,11 @@ class _CollectingOutbox:
 @pytest.mark.parametrize(
     "event_type",
     (
-        DomainEventType.MARKET_DISCOVERED,
         DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED,
         DomainEventType.SKIPPED,
     ),
 )
-def test_non_transaction_runtime_events_are_not_persisted(event_type: DomainEventType) -> None:
+def test_non_persistable_event_types_are_dropped(event_type: DomainEventType) -> None:
     outbox = _CollectingOutbox()
     sink = build_domain_event_outbox_sink(outbox)
     event = DomainEvent(
@@ -34,34 +33,87 @@ def test_non_transaction_runtime_events_are_not_persisted(event_type: DomainEven
         event_id="event-1",
         market_slug="nba-game-moneyline",
         condition_id="condition-1",
+        payload={"unused": "should-not-enter-outbox"},
+    )
+
+    sink(3, event)
+
+    assert outbox.events == []
+
+
+def test_market_discovered_event_is_persisted_with_stripped_payload() -> None:
+    """discovery 事件需要落库（CLAUDE.md §10 可审计），但 raw_market 这类
+    重型字段必须在 _project_payload 阶段剔除，避免 audit 表暴涨。"""
+
+    outbox = _CollectingOutbox()
+    sink = build_domain_event_outbox_sink(outbox)
+    event = DomainEvent(
+        trace_id="trace-market-discovered",
+        event_type=DomainEventType.MARKET_DISCOVERED,
+        event_id="event-md-1",
+        market_slug="nba-game-moneyline",
+        condition_id="condition-1",
+        reason="market_selected",
         payload={
             "source": "gamma.events_keyset",
-            "summary": {"market_slug": "nba-game-moneyline"},
+            "summary": "nba-game-moneyline",
             "parse_status": "accepted",
             "accepted": True,
             "discovery_kind": "market_discovered",
+            "extension_reason": "market_selected",
             "raw_market": {
                 "condition_id": "condition-1",
-                "private_key": "should-not-enter-outbox",
-                "nested": {"token": "should-not-enter-outbox"},
                 "large_blob": "x" * 20_000,
             },
             "market": {
                 "condition_id": "condition-1",
                 "market_slug": "nba-game-moneyline",
                 "token_ids": ["token-yes", "token-no"],
-                "outcomes": [
-                    {"token_id": "token-yes", "outcome": "Yes"},
-                    {"token_id": "token-no", "outcome": "No"},
-                ],
-                "fees": {"enabled": True, "fee_rate_bps": 0},
             },
         },
     )
 
     sink(3, event)
 
-    assert outbox.events == []
+    assert len(outbox.events) == 1
+    persisted = outbox.events[0]
+    assert persisted.event_type == "market_discovered"
+    assert persisted.reason == "market_selected"
+    assert persisted.payload.get("market", {}).get("market_slug") == "nba-game-moneyline"
+    assert "raw_market" not in persisted.payload
+    assert persisted.payload.get("accepted") is True
+    assert persisted.payload.get("discovery_kind") == "market_discovered"
+
+
+def test_market_filtered_out_event_is_persisted_for_audit() -> None:
+    """universe 拒绝首次目标盘口时必须留下可审计记录。"""
+
+    outbox = _CollectingOutbox()
+    sink = build_domain_event_outbox_sink(outbox)
+    event = DomainEvent(
+        trace_id="trace-filtered",
+        event_type=DomainEventType.MARKET_FILTERED_OUT,
+        event_id="event-mfo-1",
+        market_slug="nba-futures-champion",
+        condition_id="condition-2",
+        reason="market_family_not_single_game",
+        payload={
+            "source": "gamma.events_keyset",
+            "accepted": False,
+            "discovery_kind": "market_filtered_out",
+            "extension_reason": "market_family_not_single_game",
+            "raw_market": {"large_blob": "x" * 20_000},
+        },
+    )
+
+    sink(3, event)
+
+    assert len(outbox.events) == 1
+    persisted = outbox.events[0]
+    assert persisted.event_type == "market_filtered_out"
+    assert persisted.reason == "market_family_not_single_game"
+    assert persisted.payload.get("extension_reason") == "market_family_not_single_game"
+    assert "raw_market" not in persisted.payload
 
 
 def test_transaction_snapshot_event_is_persisted() -> None:

@@ -6,11 +6,28 @@ from typing import Any, Protocol
 
 from polymarket_trader.domain.events import DomainEventType, OutboxEvent
 
-_USER_EVENT_TYPES = {
+# 这个白名单决定哪些事件可以落 audit / outbox 表。命名上不限于"用户态"——
+# discovery 类事件也需要审计落库以满足 CLAUDE.md §10「拒绝原因必须可审计」，
+# 同时给 /analytics/funnel 提供真实计数。Worker 侧已用 _seen_* 缓存做首次
+# 拒绝才发的去重，避免每轮重复发现把 audit 淹没。
+_PERSISTABLE_EVENT_TYPES = {
     DomainEventType.BALANCE_UPDATED.value,
     DomainEventType.ORDER_STATE_UPDATED.value,
     DomainEventType.FILL_RECORDED.value,
     DomainEventType.POSITION_UPDATED.value,
+    DomainEventType.MARKET_DISCOVERED.value,
+    DomainEventType.MARKET_UPDATED.value,
+    DomainEventType.MARKET_FILTERED_IN.value,
+    DomainEventType.MARKET_FILTERED_OUT.value,
+    DomainEventType.MARKET_RESOLVED_OR_DISABLED.value,
+}
+
+_MARKET_EVENT_TYPES = {
+    DomainEventType.MARKET_DISCOVERED.value,
+    DomainEventType.MARKET_UPDATED.value,
+    DomainEventType.MARKET_FILTERED_IN.value,
+    DomainEventType.MARKET_FILTERED_OUT.value,
+    DomainEventType.MARKET_RESOLVED_OR_DISABLED.value,
 }
 
 
@@ -35,7 +52,7 @@ def _to_outbox_event(priority: int, event: Any) -> OutboxEvent | None:
     if event_type is None or event_id is None or trace_id is None:
         return None
     event_type_text = str(event_type).strip()
-    if event_type_text not in _USER_EVENT_TYPES:
+    if event_type_text not in _PERSISTABLE_EVENT_TYPES:
         return None
     payload = getattr(event, "payload", {})
     if not isinstance(payload, Mapping):
@@ -90,6 +107,25 @@ def _project_payload(event_type: str, payload: Mapping[str, Any]) -> dict[str, A
             projected["position"] = position
         if positions:
             projected["positions"] = positions
+        return projected
+    if event_type in _MARKET_EVENT_TYPES:
+        # discovery 事件的 raw_market 是完整 Gamma payload（~每条数百字节），
+        # 落库会让 audit 表暴涨。这里只保留 records.py 真正消费的字段：
+        # - audit reason 已经在 OutboxEvent.reason 上；
+        # - market_record builder 需要 market / tracked_market 快照；
+        # - funnel/分析需要 discovery_kind / accepted 这类轻量元信息。
+        projected: dict[str, Any] = {}
+        market = _mapping(payload, "market", "market_snapshot")
+        if market is not None:
+            projected["market"] = market
+        tracked_market = _mapping(payload, "tracked_market")
+        if tracked_market is not None:
+            projected["tracked_market"] = tracked_market
+        for key in ("source", "summary", "accepted", "discovery_kind",
+                    "extension_reason", "parse_status", "parse_reason",
+                    "matched_keywords", "discovered_at", "strategy_id"):
+            if key in payload:
+                projected[key] = payload[key]
         return projected
     return {}
 
