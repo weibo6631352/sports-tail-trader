@@ -145,12 +145,17 @@ class AdminRuntimeView:
         return dict(payload) if isinstance(payload, Mapping) else {}
 
     def _readiness_payload(self, supervisor: Mapping[str, Any]) -> dict[str, Any]:
+        # 生产路径下 supervisor.snapshot() 总会带结构化 readiness（见 Supervisor._snapshot_with）。
+        # 这里只有在 runtime.supervisor 缺席（如部分 unit test 用 SimpleNamespace 构造的 runtime，
+        # 或 bootstrap 极早期 supervisor 尚未挂上）才会走 fallback。
         readiness = supervisor.get("readiness")
         if isinstance(readiness, Mapping):
             return dict(readiness)
         return self._fallback_readiness_payload()
 
     def _fallback_readiness_payload(self) -> dict[str, Any]:
+        # 仅在 supervisor 不可用时使用（见 _readiness_payload 注释）。
+        # 不要在生产链路新增依赖此分支的调用——任何新调用方应保证 supervisor.snapshot() 可用。
         config = self._config_readiness_snapshot()
         account = self._account_snapshot()
         reasons: list[str] = []

@@ -10,7 +10,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 from typing import AsyncIterator, Iterator
 
 import pytest
@@ -107,12 +106,3 @@ def pg_session_factory(pg_engine):
     return async_sessionmaker(pg_engine, expire_on_commit=False)
 
 
-@pytest.fixture(scope="session")
-def event_loop() -> Iterator[asyncio.AbstractEventLoop]:
-    """pytest-asyncio 在 session-scoped async fixture 下需要 session-scoped loop。"""
-
-    loop = asyncio.new_event_loop()
-    try:
-        yield loop
-    finally:
-        loop.close()
