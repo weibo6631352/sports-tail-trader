@@ -20,6 +20,7 @@ from polymarket_trader.api.deps import get_admin_service
 from polymarket_trader.api.routes.analytics import router as analytics_router
 from polymarket_trader.api.routes.audit_events import router as audit_router
 from polymarket_trader.api.routes.markets import router as markets_router
+from polymarket_trader.api.routes.operations import router as operations_router
 from polymarket_trader.api.routes.portfolio import router as portfolio_router
 
 
@@ -53,6 +54,24 @@ class _RecordingService:
             "events": [],
         }
 
+    async def run_parameter_sweep(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls["run_parameter_sweep"] = kwargs
+        # 路由对 422 的契约——service 在校验失败时抛 ValueError
+        candidates = kwargs.get("candidates") or {}
+        if "bogus_param" in candidates:
+            raise ValueError("unsupported sweep parameter: bogus_param")
+        return {
+            "candidate_count": 1,
+            "decision_sample_count": 0,
+            "scorable_decision_count": 0,
+            "unscorable_decision_count": 0,
+            "per_decision_usdc": str(kwargs.get("per_decision_usdc")),
+            "supported_parameter_keys": [],
+            "results": [],
+            "best_by_pnl": None,
+            "best_by_win_rate": None,
+        }
+
 
 @pytest.fixture()
 def http_client() -> tuple[TestClient, _RecordingService]:
@@ -62,6 +81,7 @@ def http_client() -> tuple[TestClient, _RecordingService]:
     app.include_router(analytics_router)
     app.include_router(portfolio_router)
     app.include_router(audit_router)
+    app.include_router(operations_router)
     app.dependency_overrides[get_admin_service] = lambda: service
     return TestClient(app), service
 
@@ -166,3 +186,44 @@ def test_operator_aggregation_route_with_filter(http_client: tuple[TestClient, _
     assert kwargs["sample_limit"] == 500
     tr = kwargs["time_range"]
     assert tr is not None and (tr.since_ms, tr.until_ms) == (1000, 2000)
+
+
+# ----------------------------- /operations/parameter-sweep ---------------------
+
+
+def test_parameter_sweep_route_passes_candidates(
+    http_client: tuple[TestClient, _RecordingService],
+) -> None:
+    client, service = http_client
+    response = client.post(
+        "/operations/parameter-sweep",
+        json={
+            "candidates": {
+                "tail_outright_min_edge_bps": [100, 500],
+                "tail_outright_max_entry_price": [0.5, 0.9],
+            },
+            "per_decision_usdc": 20,
+            "strategy_id": "sports_tail",
+            "since": 100,
+            "until": 500,
+        },
+    )
+    assert response.status_code == 200
+    kwargs = service.calls["run_parameter_sweep"]
+    assert kwargs["candidates"]["tail_outright_min_edge_bps"] == [100, 500]
+    assert kwargs["per_decision_usdc"] == Decimal("20")
+    assert kwargs["strategy_id"] == "sports_tail"
+    tr = kwargs["time_range"]
+    assert tr is not None and (tr.since_ms, tr.until_ms) == (100, 500)
+
+
+def test_parameter_sweep_route_422_on_unsupported_key(
+    http_client: tuple[TestClient, _RecordingService],
+) -> None:
+    client, _ = http_client
+    response = client.post(
+        "/operations/parameter-sweep",
+        json={"candidates": {"bogus_param": [1, 2]}},
+    )
+    assert response.status_code == 422
+    assert "unsupported sweep parameter" in response.json()["detail"]

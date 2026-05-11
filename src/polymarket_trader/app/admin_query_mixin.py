@@ -1215,6 +1215,56 @@ class AdminQueryMixin:
             "events": events_sample,
         }
 
+    async def run_parameter_sweep(
+        self,
+        *,
+        candidates: dict[str, Any],
+        per_decision_usdc: Decimal = Decimal("10"),
+        strategy_id: str | None = None,
+        time_range: TimeRange | None = None,
+        decision_limit: int = 2000,
+        settlement_limit: int = 2000,
+    ) -> dict[str, Any]:
+        """对历史决策回放给定参数候选笛卡尔积，输出每组 hypothetical PnL 排序。
+
+        所有副作用都在内存（不改 ParameterStore、不下单），可在策略迭代期
+        反复跑。``candidates`` 由调用层校验（白名单 + 笛卡尔积上限）。
+        """
+
+        from polymarket_trader.app.parameter_sweep import build_parameter_sweep
+        from polymarket_trader.domain.events import DomainEventType
+
+        if not self._has_db_session_factory():
+            return build_parameter_sweep(
+                decisions=(),
+                settlements=(),
+                candidates=candidates,
+                per_decision_usdc=per_decision_usdc,
+            )
+
+        async def _query(repos: _RepositoryGroup) -> tuple[Any, Any]:
+            decision_page = await repos.decision.list_decisions_snapshot(
+                limit=decision_limit,
+                offset=0,
+                strategy_id=strategy_id,
+                time_range=time_range,
+            )
+            settle_page = await repos.audit.list_audit_events_snapshot(
+                limit=settlement_limit,
+                offset=0,
+                event_title=DomainEventType.MARKET_SETTLED.value,
+                time_range=None,
+            )
+            return decision_page, settle_page
+
+        decision_page, settle_page = await self._with_repositories(_query)
+        return build_parameter_sweep(
+            decisions=tuple(decision_page.items or ()),
+            settlements=tuple(settle_page.items or ()),
+            candidates=candidates,
+            per_decision_usdc=per_decision_usdc,
+        )
+
     async def missed_opportunities_snapshot(
         self,
         *,

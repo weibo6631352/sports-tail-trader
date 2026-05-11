@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from polymarket_trader.api.deps import build_time_range, get_admin_service
@@ -13,6 +15,23 @@ router = APIRouter(prefix="/operations", tags=["operations"])
 class ReconcileRequest(BaseModel):
     trace_id: str | None = None
     condition_ids: list[str] = Field(default_factory=list)
+
+
+class ParameterSweepRequest(BaseModel):
+    """参数扫描请求。
+
+    ``candidates`` 是 ``{参数键: 候选值列表}``；笛卡尔积上限 1000 由 service
+    侧守门。``per_decision_usdc`` 控制单笔模拟仓位规模，默认 10 USDC。
+    ``since`` / ``until`` 限定回放窗口（ms）。
+    """
+
+    candidates: dict[str, list[Any]] = Field(default_factory=dict)
+    per_decision_usdc: float = Field(default=10.0, gt=0.0, le=100_000.0)
+    strategy_id: str | None = Field(default=None, min_length=1, max_length=64)
+    since: int | None = Field(default=None, ge=0)
+    until: int | None = Field(default=None, ge=0)
+    decision_limit: int = Field(default=2000, ge=1, le=20_000)
+    settlement_limit: int = Field(default=2000, ge=1, le=20_000)
 
 
 class VirtualPaperTradeRequest(BaseModel):
@@ -70,6 +89,33 @@ async def list_reconcile_diffs(
         include_started=include_started,
         include_applied=include_applied,
     )
+
+
+@router.post("/parameter-sweep")
+async def parameter_sweep(
+    request: ParameterSweepRequest,
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """对历史决策回放给定参数候选笛卡尔积，输出每组 hypothetical PnL 排序。
+
+    Read-only：不下单、不改 ``ParameterStore``。``decision_records`` +
+    ``market_settled`` 是输入；笛卡尔积上限 1000 / decision sample 上限
+    20000 由 service / pydantic 守门。
+    """
+
+    from decimal import Decimal
+
+    try:
+        return await service.run_parameter_sweep(
+            candidates=request.candidates,
+            per_decision_usdc=Decimal(str(request.per_decision_usdc)),
+            strategy_id=request.strategy_id,
+            time_range=build_time_range(since=request.since, until=request.until),
+            decision_limit=request.decision_limit,
+            settlement_limit=request.settlement_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/virtual-paper-trade")
