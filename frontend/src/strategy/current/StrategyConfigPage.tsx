@@ -19,6 +19,7 @@ import { qk } from '@core/api/keys'
 import { parametersApi, auditEventsApi } from '@core/api/resources'
 import { ApiError, describeError } from '@core/api/errors'
 import type { AuditEventRow, ParameterRegistryEntry } from '@core/api/types'
+import { narrowAuditEvent } from '@core/api/types'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { StatusPill } from '@shared/ui/StatusPill'
@@ -383,26 +384,28 @@ function HistoryTable({
     {
       header: 'scope.key',
       cell: ({ row }) => {
-        const p = (row.original.payload ?? {}) as Record<string, unknown>
-        return (
-          <MonoCell>
-            {String(p.scope ?? '?')}.{String(p.key ?? '?')}
-          </MonoCell>
-        )
+        // narrow 到 parameter_override_applied schema：scope/key/previous_value/new_value/
+        // operator/applied_at/expires_at/cleared 字段类型化；不在白名单时退化用 row.original.event_title。
+        const narrowed = narrowAuditEvent(row.original)
+        if (narrowed?.event_title === 'parameter_override_applied') {
+          return <MonoCell>{narrowed.payload.scope}.{narrowed.payload.key}</MonoCell>
+        }
+        return <MonoCell>?.?</MonoCell>
       },
     },
     {
       header: '变更',
       cell: ({ row }) => {
-        const p = (row.original.payload ?? {}) as Record<string, unknown>
-        const cleared = Boolean(p.cleared)
+        const narrowed = narrowAuditEvent(row.original)
+        if (narrowed?.event_title !== 'parameter_override_applied') return null
+        const { previous_value, new_value, cleared } = narrowed.payload
         return (
           <Group gap={6} ff="var(--font-mono)">
-            <code style={beforeStyle}>{String(p.previous_value ?? '∅')}</code>
+            <code style={beforeStyle}>{String(previous_value ?? '∅')}</code>
             <Text size="xs" c="dimmed">
               →
             </Text>
-            <code style={afterStyle}>{cleared ? '(cleared)' : String(p.new_value ?? '∅')}</code>
+            <code style={afterStyle}>{cleared ? '(cleared)' : String(new_value ?? '∅')}</code>
           </Group>
         )
       },
@@ -410,8 +413,12 @@ function HistoryTable({
     {
       header: 'operator',
       cell: ({ row }) => {
-        const p = (row.original.payload ?? {}) as Record<string, unknown>
-        return <span>{String(p.operator ?? row.original.operator ?? '—')}</span>
+        const narrowed = narrowAuditEvent(row.original)
+        const operator =
+          narrowed?.event_title === 'parameter_override_applied'
+            ? narrowed.payload.operator
+            : row.original.operator
+        return <span>{operator ?? '—'}</span>
       },
     },
     {
@@ -423,8 +430,9 @@ function HistoryTable({
     {
       header: 'cleared',
       cell: ({ row }) => {
-        const p = (row.original.payload ?? {}) as Record<string, unknown>
-        return p.cleared ? (
+        const narrowed = narrowAuditEvent(row.original)
+        const cleared = narrowed?.event_title === 'parameter_override_applied' && narrowed.payload.cleared
+        return cleared ? (
           <StatusPill tone="warning" size="xs">
             yes
           </StatusPill>

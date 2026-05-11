@@ -456,23 +456,25 @@ export type AuditEventPayloadByType = {
 
 export type KnownAuditEventType = keyof AuditEventPayloadByType
 
-/** Narrow 后的 AuditEventRow：payload 类型按 event_title 精确化。 */
-export type KnownAuditEvent<T extends KnownAuditEventType = KnownAuditEventType> = Omit<
-  AuditEventRow,
-  'event_title' | 'payload'
-> & {
-  event_title: T
-  payload: AuditEventPayloadByType[T]
-}
+/** Narrow 后的 AuditEventRow：payload 类型按 event_title 精确化。
+ *
+ * 用 distributive conditional type 让 union 在 mapped type 上展开——这样
+ * `if (e.event_title === 'parameter_override_applied') { e.payload }` 时 TS
+ * 能把 payload narrow 到对应 schema，而不是看到 union of all payloads。 */
+export type KnownAuditEvent<T extends KnownAuditEventType = KnownAuditEventType> = T extends KnownAuditEventType
+  ? Omit<AuditEventRow, 'event_title' | 'payload'> & {
+      event_title: T
+      payload: AuditEventPayloadByType[T]
+    }
+  : never
 
-/** Narrow 后的 OutboxPendingRow：payload 类型按 event_type 精确化。 */
-export type KnownOutboxEvent<T extends KnownAuditEventType = KnownAuditEventType> = Omit<
-  OutboxPendingRow,
-  'event_type' | 'payload'
-> & {
-  event_type: T
-  payload: AuditEventPayloadByType[T]
-}
+/** Narrow 后的 OutboxPendingRow：payload 类型按 event_type 精确化。同 distributive 套路。 */
+export type KnownOutboxEvent<T extends KnownAuditEventType = KnownAuditEventType> = T extends KnownAuditEventType
+  ? Omit<OutboxPendingRow, 'event_type' | 'payload'> & {
+      event_type: T
+      payload: AuditEventPayloadByType[T]
+    }
+  : never
 
 const KNOWN_AUDIT_EVENT_TITLES: ReadonlySet<KnownAuditEventType> = new Set<KnownAuditEventType>([
   'parameter_override_applied',

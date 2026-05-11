@@ -17,6 +17,7 @@ import { qk, qkRoots } from '@core/api/keys'
 import { marketsApi } from '@core/api/resources'
 import { ApiError, describeError } from '@core/api/errors'
 import type { AuditEventRow, MarketSettlement } from '@core/api/types'
+import { narrowAuditEvent } from '@core/api/types'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { EmptyState } from '@shared/ui/EmptyState'
@@ -83,23 +84,28 @@ function SettlementsList() {
     {
       header: 'winning_token_id',
       cell: ({ row }) => {
-        const p = (row.original.payload ?? {}) as Record<string, unknown>
-        const winner = p.winning_token_id ? String(p.winning_token_id) : null
+        const narrowed = narrowAuditEvent(row.original)
+        const winner =
+          narrowed?.event_title === 'market_settled' ? narrowed.payload.winning_token_id : null
         return winner ? <CopyableId value={winner} dense /> : <span>—</span>
       },
     },
     {
       header: 'outcome',
       cell: ({ row }) => {
-        const p = (row.original.payload ?? {}) as Record<string, unknown>
-        return p.winning_outcome ? <MonoCell>{String(p.winning_outcome)}</MonoCell> : '—'
+        const narrowed = narrowAuditEvent(row.original)
+        const outcome =
+          narrowed?.event_title === 'market_settled' ? narrowed.payload.winning_outcome : null
+        return outcome ? <MonoCell>{outcome}</MonoCell> : '—'
       },
     },
     {
       header: 'source',
       cell: ({ row }) => {
-        const p = (row.original.payload ?? {}) as Record<string, unknown>
-        return p.source ? <MonoCell>{String(p.source)}</MonoCell> : '—'
+        const narrowed = narrowAuditEvent(row.original)
+        const source =
+          narrowed?.event_title === 'market_settled' ? narrowed.payload.source : null
+        return source ? <MonoCell>{source}</MonoCell> : '—'
       },
     },
     { header: 'operator', accessorKey: 'operator' },
