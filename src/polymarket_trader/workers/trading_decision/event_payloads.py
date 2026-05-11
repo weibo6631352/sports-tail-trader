@@ -9,12 +9,15 @@ from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.market import Market, MarketOutcome
 from polymarket_trader.domain.order import (
+    BuyOrderIntent,
     CancelOrderIntent,
     ManagedOrderIntent,
     OrderResult,
     OrderResultStatus,
     OrderSide,
     OrderType,
+    ReplaceOrderIntent,
+    SellOrderIntent,
 )
 from polymarket_trader.domain.position import Position
 from polymarket_trader.serialization import jsonable
@@ -128,24 +131,43 @@ def serialize_plan_metadata(plan: EntryPlan) -> dict[str, object]:
 
 
 def serialize_intent(intent: ManagedOrderIntent) -> dict[str, object]:
-    amount_usdc = getattr(intent, "amount_usdc", None)
-    size_shares = getattr(intent, "size_shares", None)
-    return {
+    # ManagedOrderIntent = BuyOrderIntent | SellOrderIntent | CancelOrderIntent | ReplaceOrderIntent；
+    # Buy/Sell 携带 side/order_type/price/数量字段，Cancel/Replace 只有 order_id/reason。
+    # 用 isinstance 显式 narrow 替代之前的 hasattr/getattr duck-typing。
+    payload: dict[str, object] = {
         "strategy_id": intent.strategy_id,
         "trace_id": intent.trace_id,
         "condition_id": intent.condition_id,
         "token_id": intent.token_id,
-        "side": intent.side.value if hasattr(intent, "side") else None,
-        "order_type": intent.order_type.value if hasattr(intent, "order_type") else None,
-        "price": str(intent.price) if hasattr(intent, "price") and intent.price is not None else None,
-        "amount_usdc": None if amount_usdc is None else str(amount_usdc),
-        "size_shares": None if size_shares is None else str(size_shares),
-        "order_id": getattr(intent, "order_id", None),
-        "reason": getattr(intent, "reason", ""),
-        "allow_open_exit_overlap": bool(getattr(intent, "allow_open_exit_overlap", False)),
         "market_slug": intent.market_slug,
-        "metadata": jsonable(getattr(intent, "metadata", {}) or {}),
+        "side": None,
+        "order_type": None,
+        "price": None,
+        "amount_usdc": None,
+        "size_shares": None,
+        "order_id": None,
+        "reason": "",
+        "allow_open_exit_overlap": False,
+        "metadata": {},
     }
+    if isinstance(intent, (BuyOrderIntent, SellOrderIntent)):
+        payload["side"] = intent.side.value
+        payload["order_type"] = intent.order_type.value
+        payload["price"] = str(intent.price) if intent.price is not None else None
+        amount_usdc = intent.amount_usdc
+        size_shares = intent.size_shares
+        payload["amount_usdc"] = None if amount_usdc is None else str(amount_usdc)
+        payload["size_shares"] = None if size_shares is None else str(size_shares)
+        payload["metadata"] = jsonable(intent.metadata or {})
+        if isinstance(intent, BuyOrderIntent):
+            payload["allow_open_exit_overlap"] = bool(intent.allow_open_exit_overlap)
+    elif isinstance(intent, (CancelOrderIntent, ReplaceOrderIntent)):
+        payload["order_id"] = intent.order_id
+        payload["reason"] = intent.reason
+        if isinstance(intent, ReplaceOrderIntent):
+            payload["price"] = str(intent.new_price)
+            payload["size_shares"] = str(intent.size_shares)
+    return payload
 
 
 def serialize_review(review: TradingReviewResult) -> dict[str, object]:

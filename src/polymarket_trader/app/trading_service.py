@@ -231,10 +231,11 @@ class TradingService:
             }
             for check in (risk_decision.checks or ())
         ]
-        intent_summary = {
-            "operation": operation,
-            "side": getattr(intent.side, "value", None) if hasattr(intent, "side") else None,
-        }
+        # Buy/Sell intent 携带 side enum；Cancel/Replace 不携带——用 isinstance narrow
+        # 替代 hasattr+getattr duck-typing。
+        intent_summary: dict[str, object] = {"operation": operation, "side": None}
+        if isinstance(intent, (BuyOrderIntent, SellOrderIntent)):
+            intent_summary["side"] = intent.side.value
         event = DomainEvent(
             trace_id=intent.trace_id,
             event_type=DomainEventType.RISK_REJECTION_RECORDED,

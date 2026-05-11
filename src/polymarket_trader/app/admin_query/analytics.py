@@ -363,7 +363,8 @@ class AdminAnalyticsQueryMixin:
         if not self._has_db_session_factory():
             raise RuntimeError("db_session_factory unavailable")
 
-        session_factory = self.runtime.db_session_factory  # type: ignore[union-attr]
+        session_factory = self.runtime.db_session_factory
+        assert session_factory is not None  # narrowed by _has_db_session_factory above
 
         from polymarket_trader.app.portfolio_history_service import (
             PortfolioHistoryService,
@@ -413,7 +414,8 @@ class AdminAnalyticsQueryMixin:
         if not self._has_db_session_factory():
             raise RuntimeError("db_session_factory unavailable")
 
-        session_factory = self.runtime.db_session_factory  # type: ignore[union-attr]
+        session_factory = self.runtime.db_session_factory
+        assert session_factory is not None  # narrowed by _has_db_session_factory above
 
         from polymarket_trader.app.portfolio_history_service import (
             PortfolioHistoryService,
