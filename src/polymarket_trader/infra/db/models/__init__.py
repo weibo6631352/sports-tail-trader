@@ -15,11 +15,11 @@ from polymarket_trader.infra.db.base import (
     _ensure_aware,
 )
 from polymarket_trader.infra.db.models._legacy import (
-    AccountSnapshotModel,
     FillModel,
     OrderModel,
     PositionModel,
 )
+from polymarket_trader.infra.db.models.account import AccountSnapshotModel
 from polymarket_trader.infra.db.models.allocation import AllocationModel
 from polymarket_trader.infra.db.models.audit import AuditEventModel
 from polymarket_trader.infra.db.models.decision import DecisionRecordModel

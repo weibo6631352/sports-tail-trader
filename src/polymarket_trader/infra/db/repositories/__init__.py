@@ -10,11 +10,13 @@ from polymarket_trader.infra.db.repositories._base import (
     RepositoryPage,
 )
 from polymarket_trader.infra.db.repositories._legacy import (
-    AccountHistoryPoint,
-    AccountSnapshotRepository,
     FillRepository,
     OrderRepository,
     PositionRepository,
+)
+from polymarket_trader.infra.db.repositories.account import (
+    AccountHistoryPoint,
+    AccountSnapshotRepository,
 )
 from polymarket_trader.infra.db.repositories.allocation import AllocationRepository
 from polymarket_trader.infra.db.repositories.audit import AuditEventRepository
