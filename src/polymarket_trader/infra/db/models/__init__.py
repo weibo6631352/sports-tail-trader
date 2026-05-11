@@ -14,10 +14,7 @@ from polymarket_trader.infra.db.base import (
     _decimal,
     _ensure_aware,
 )
-from polymarket_trader.infra.db.models._legacy import (
-    OrderModel,
-    PositionModel,
-)
+from polymarket_trader.infra.db.models._legacy import OrderModel
 from polymarket_trader.infra.db.models.account import AccountSnapshotModel
 from polymarket_trader.infra.db.models.allocation import AllocationModel
 from polymarket_trader.infra.db.models.audit import AuditEventModel
@@ -26,6 +23,7 @@ from polymarket_trader.infra.db.models.fill import FillModel
 from polymarket_trader.infra.db.models.market import MarketModel
 from polymarket_trader.infra.db.models.orderbook import OrderbookSnapshotModel
 from polymarket_trader.infra.db.models.outbox import OutboxEventModel
+from polymarket_trader.infra.db.models.position import PositionModel
 
 __all__ = [
     "AccountSnapshotModel",

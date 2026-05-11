@@ -9,10 +9,7 @@ from polymarket_trader.infra.db.repositories._base import (
     BaseRepository,
     RepositoryPage,
 )
-from polymarket_trader.infra.db.repositories._legacy import (
-    OrderRepository,
-    PositionRepository,
-)
+from polymarket_trader.infra.db.repositories._legacy import OrderRepository
 from polymarket_trader.infra.db.repositories.account import (
     AccountHistoryPoint,
     AccountSnapshotRepository,
@@ -24,6 +21,7 @@ from polymarket_trader.infra.db.repositories.fill import FillRepository
 from polymarket_trader.infra.db.repositories.market import MarketRepository
 from polymarket_trader.infra.db.repositories.orderbook import OrderbookSnapshotRepository
 from polymarket_trader.infra.db.repositories.outbox import OutboxEventRepository
+from polymarket_trader.infra.db.repositories.position import PositionRepository
 
 __all__ = [
     "AccountHistoryPoint",
