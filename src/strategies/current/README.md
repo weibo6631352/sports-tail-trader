@@ -5,7 +5,12 @@
 - `manifest.py`：策略 manifest
 - `strategy.py`：策略装配入口
 - `config.py`：策略配置 dataclass
-- `tail/`：体育扫尾候选、执行权限、评估结果和拒绝原因（拆分为 types/parsing/leagues/slug/core/mlb/tennis/evaluator 子模块）
+- `identity.py` / `runtime_limits.py`：策略身份与配置驱动的 runtime 限额
+- `allocation.py` / `discovery.py`：候选预算分配 / 远端 discovery 查询构造
+- `parameter_overrides.py`：策略侧 ParameterPort scope；让深层 helper 通过 ContextVar 读 runtime override 值
+- `calibration.py` / `live_sample_validation.py`：calibration 与活样本质量校验
+- `tail/`：体育扫尾候选家族（types / core / slug / mlb / tennis / evaluator 子模块）
+- `outright/`：长周期 outright 与系列赛家族（types / match / pricing / evaluator / risk 子模块）
 - `live_state.py`：外部直播比赛状态与当前策略 market 的匹配和 metadata 映射
 - `outcomes.py`：体育盘口类型、盘口线和目标 token 方向解析
 - `universe.py`：返回后本地 universe 精筛
@@ -25,8 +30,8 @@
    再看有哪些业务参数可以改，哪些阈值会影响扫描、筛选和交易。
 3. `universe.py`
    理解扫回来的 market 为什么会被纳入或排除。
-4. `tail/` / `outcomes.py` / `live_state.py`
-   理解 `Totals`、`Moneyline`、`Spreads` 如何被统一建模、解析和评估。
+4. `tail/` / `outright/` / `outcomes.py` / `live_state.py`
+   理解 `Totals`、`Moneyline`、`Spreads`（tail/）与 outright 系列赛 / 季节冠军（outright/）如何被分家族统一建模、解析和评估。
 5. `risk.py` / `exit_plan.py` / `trading/`
    理解资金怎么分配、什么条件下会买、什么条件下会卖，以及买入后怎么保留退出计划。
 6. `recovery.py` / `tracking.py`

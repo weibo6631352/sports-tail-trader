@@ -12,6 +12,19 @@
 - Reconcile 发现 open BUY 后生成 cancel 修复动作。
 - Reconcile 发现持仓和 open SELL 不一致后的补挂或取消。
 - Admin cancel + replace 的顺序和风控约束。
+- TradingService lifecycle 全状态映射：FULL_FILL → ORDER_FILLED、LIVE → ORDER_SUBMITTED、
+  NO_FILL 不发任何事件、cancel/replace 路径 → ORDER_CANCELLED/REJECTED、风控拒绝
+  → ORDER_REJECTED、executor=None → FAILED + executor_unavailable、intent_tags 透传、
+  cancel 路径不触发 RiskManager。
+
+## 相关 P0 套件（外层）
+
+- `tests/infra/test_order_executor.py`：OrderExecutor 是 CLAUDE.md §3 唯一下单/签名/
+  取消/替换入口；覆盖 submit/cancel/replace 主路径、同 idempotency_key 缓存复用、
+  outbox lifecycle 事件投递、client 异常 → FAILED 状态映射、submit(CancelIntent) 类型保护。
+- `tests/workers/test_persistence_worker.py`：outbox → DB 异步消费消费者；覆盖
+  audit/order/outbox 路由、retryable error + retry<max → outbox.retry、达到 max →
+  dead_letter、低优先 coalesce、critical 不合并、snapshot 累计统计、空 strategy_id 保护。
 
 ## 必须保持的边界
 
