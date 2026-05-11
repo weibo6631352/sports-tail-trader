@@ -99,14 +99,14 @@
 - 入口：`src/strategies/current/strategy.py`
 - 配置：`src/strategies/current/config.py`
 - 远端 discovery 粗筛输入：`src/strategies/current/config.py` 的 `discovery_title_searches` / `discovery_tag_slugs`；当前默认可以用 `sports` tag 扩大市场扫描，但本地 universe 只按已覆盖联赛 token 通过候选，官方 Gamma Events keyset 文档：<https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination>
-- 直播比赛驱动 discovery：`sports_live_discovery_max_games` 控制每轮最多取多少个直播源比赛生成高意图查询，`sports_live_discovery_max_queries` 控制追加 query 上限；默认会先按 live 状态排序，再按 Polymarket 单场盘口覆盖度优先使用 NBA/NHL/MLB/ATP/WTA，避免 ITF 等低覆盖赛事消耗扫描预算。这两个字段属于策略配置，不写入框架 `.env`。
-- 受控加仓参数：`sports_scale_in_budget_fraction` 控制单次加仓预算相对首笔 BUY 成交额的比例，`sports_scale_in_max_buy_fills` 控制同 token BUY 成交次数上限；这两个字段属于策略配置，不写入框架 `.env`。
-- 直播状态 freshness：`sports_max_game_state_age_seconds` 是通用 live 状态最大年龄，`sports_baseball_max_game_state_age_seconds` 只用于 MLB 官方结构化局面，避免 schedule/linescore 批量同步和市场匹配耗时把第 9 局真实尾盘误判为 stale；网球继续使用 `sports_tennis_max_game_state_age_seconds`。
-- MLB 第 8 局 moneyline 早期机会：`sports_mlb_eighth_moneyline_min_lead` 默认 2，只在第 8 局、至少一出局、领先方达到该分差且二/三垒无得分威胁时放行；第 9 局仍沿用更强的 `sports_min_moneyline_lead` 终局规则。
-- 资金效率参数：`sports_min_expected_profit_usdc` 和 `sports_min_expected_profit_per_hour_usdc` 控制等待权威结算时的最低预期毛利润与每小时资金效率，`sports_settlement_hold_minutes` 是保守结算占用时长估算。低于结算效率门槛的单子不会直接长期持有；一档 profit-take SELL 只要满足 `sports_profit_take_min_profit_usdc` 的绝对毛利润，或按 `sports_profit_take_hold_minutes` 折算后的每小时资金效率达到 `sports_min_expected_profit_per_hour_usdc`，就允许买入并在成交后挂卖。结算效率已经达标的单子也会在一档 profit-take 毛利润达标时附加止盈挂单，成交则提前释放资金，未成交则继续等待权威结算。
-- 历史仓位补救：`sports_recovery_profit_take_enabled` 默认开启，用于恢复侧发现近端高成本价、无开放 SELL 的旧仓或漏挂止盈仓位时补一张 profit-take SELL；`sports_recovery_profit_take_min_avg_price` 限定只处理均价不低于默认 `0.90` 的仓位，预期毛利润仍沿用 `sports_profit_take_min_profit_usdc`，避免把低成本 settlement 仓位误改成主动退出。若历史市场缺少完整 outcomes 导致体育目标无法解析，恢复侧只允许 eligible 市场做这种 sell-only profit-take 补救，并继续暂停该市场新增交易。
+- 直播比赛驱动 discovery：`tail_live_discovery_max_games` 控制每轮最多取多少个直播源比赛生成高意图查询，`tail_live_discovery_max_queries` 控制追加 query 上限；默认会先按 live 状态排序，再按 Polymarket 单场盘口覆盖度优先使用 NBA/NHL/MLB/ATP/WTA，避免 ITF 等低覆盖赛事消耗扫描预算。这两个字段属于策略配置，不写入框架 `.env`。
+- 受控加仓参数：`tail_scale_in_budget_fraction` 控制单次加仓预算相对首笔 BUY 成交额的比例，`tail_scale_in_max_buy_fills` 控制同 token BUY 成交次数上限；这两个字段属于策略配置，不写入框架 `.env`。
+- 直播状态 freshness：`tail_max_game_state_age_seconds` 是通用 live 状态最大年龄，`tail_baseball_max_game_state_age_seconds` 只用于 MLB 官方结构化局面，避免 schedule/linescore 批量同步和市场匹配耗时把第 9 局真实尾盘误判为 stale；网球继续使用 `tail_tennis_max_game_state_age_seconds`。
+- MLB 第 8 局 moneyline 早期机会：`tail_mlb_eighth_moneyline_min_lead` 默认 2，只在第 8 局、至少一出局、领先方达到该分差且二/三垒无得分威胁时放行；第 9 局仍沿用更强的 `tail_min_moneyline_lead` 终局规则。
+- 资金效率参数：`tail_min_expected_profit_usdc` 和 `tail_min_expected_profit_per_hour_usdc` 控制等待权威结算时的最低预期毛利润与每小时资金效率，`tail_settlement_hold_minutes` 是保守结算占用时长估算。低于结算效率门槛的单子不会直接长期持有；一档 profit-take SELL 只要满足 `tail_profit_take_min_profit_usdc` 的绝对毛利润，或按 `tail_profit_take_hold_minutes` 折算后的每小时资金效率达到 `tail_min_expected_profit_per_hour_usdc`，就允许买入并在成交后挂卖。结算效率已经达标的单子也会在一档 profit-take 毛利润达标时附加止盈挂单，成交则提前释放资金，未成交则继续等待权威结算。
+- 历史仓位补救：`tail_recovery_profit_take_enabled` 默认开启，用于恢复侧发现近端高成本价、无开放 SELL 的旧仓或漏挂止盈仓位时补一张 profit-take SELL；`tail_recovery_profit_take_min_avg_price` 限定只处理均价不低于默认 `0.90` 的仓位，预期毛利润仍沿用 `tail_profit_take_min_profit_usdc`，避免把低成本 settlement 仓位误改成主动退出。若历史市场缺少完整 outcomes 导致体育目标无法解析，恢复侧只允许 eligible 市场做这种 sell-only profit-take 补救，并继续暂停该市场新增交易。
 - 候选市场减仓：本地市场仍处于 `candidate` 时，框架风控只允许已有持仓完全覆盖的 SELL 减仓退出通过；BUY 或无持仓 SELL 仍按 market gate 拒绝，避免把历史补救扩大成新增风险暴露。
-- 体育扫尾模型和权限：`src/strategies/current/sports_tail/`（拆分为 types/parsing/leagues/slug/core/mlb/tennis/evaluator 子模块）。策略目标范围是整个体育市场；所有体育盘口应优先被解析成统一 market family / market type / side / line。没有专用胜率模型的单场 Yes/No prop 只做 record-only 候选诊断，不能绕过策略评估、资金效率和风控进入自动执行。
+- 体育扫尾模型和权限：`src/strategies/current/tail/`（types / core / evaluator / slug / mlb / tennis 子模块），通用解析与联赛工具在 `src/strategies/sports_framework/`（parsing / leagues / slug / types）。策略目标范围是整个体育市场；所有体育盘口应优先被解析成统一 market family / market type / side / line。没有专用胜率模型的单场 Yes/No prop 只做 record-only 候选诊断，不能绕过策略评估、资金效率和风控进入自动执行。
 - 体育扫尾策略级风控：`src/strategies/current/risk.py`
 - 体育扫尾退出计划：`src/strategies/current/exit_plan.py`
 - 盘口方向解析：`src/strategies/current/outcomes.py`
