@@ -809,17 +809,16 @@ class AdminQueryMixin:
             keys = {(d.condition_id, d.token_id) for d in decisions if d.token_id}
             if not keys:
                 return decisions, {}
-            position_records: dict[tuple[str, str], Any] = {}
-            condition_ids = {cid for cid, _ in keys}
-            for cid in condition_ids:
-                position_page = await repos.position.list_positions_snapshot(
-                    limit=200,
-                    offset=0,
-                    condition_id=cid,
-                    strategy_id=strategy_id,
-                )
-                for position in position_page.items or ():
-                    position_records[(position.condition_id, position.token_id)] = position
+            condition_ids = tuple({cid for cid, _ in keys})
+            # 单次 IN 查询替代 N+1：edge-realization 的 condition_ids 可达数百，
+            # 旧实现每个一次 await 会把响应放大百倍延迟。
+            positions = await repos.position.list_by_condition_ids(
+                condition_ids,
+                strategy_id=strategy_id,
+            )
+            position_records: dict[tuple[str, str], Any] = {
+                (p.condition_id, p.token_id): p for p in positions
+            }
             return decisions, position_records
 
         decisions, positions_by_key = await self._with_repositories(_query)

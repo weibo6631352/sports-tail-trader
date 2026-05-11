@@ -887,6 +887,24 @@ class PositionRepository(BaseRepository):
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
+    async def list_by_condition_ids(
+        self,
+        condition_ids: Sequence[str],
+        *,
+        strategy_id: str | None = None,
+    ) -> tuple[Position, ...]:
+        """按 ``condition_id`` 集合批量取仓位——给跨表聚合（edge-realization 等）用，
+        避免 N+1。无 condition_ids 时返回空 tuple。"""
+
+        ids = tuple({cid for cid in condition_ids if cid})
+        if not ids:
+            return ()
+        stmt = select(PositionModel).where(PositionModel.condition_id.in_(ids))
+        if strategy_id is not None:
+            stmt = stmt.where(PositionModel.strategy_id == strategy_id)
+        result = await self._session.scalars(stmt)
+        return tuple(row.to_domain() for row in result.all())
+
 
 @dataclass(frozen=True, slots=True)
 class AccountHistoryPoint:
