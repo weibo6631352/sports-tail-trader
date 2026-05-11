@@ -27,6 +27,7 @@ import { CopyableId } from '@shared/ui/CopyableId'
 import { DataTable } from '@shared/tables/DataTable'
 import { confirmAction } from '@shared/forms/confirmAction'
 import { type DiffRow } from '@shared/forms/DiffPreview'
+import { appendTraceToReason } from '@shared/forms/manualTraceId'
 import { formatIso } from '@shared/format'
 import { getParamMetadata, type ParamMetadata } from './paramMetadata'
 
@@ -257,11 +258,14 @@ function ParamEditor({
 }
 
 function renderInput(meta: ParamMetadata, value: string, onChange: (v: string) => void) {
+  // integer / bps：走 NumberInput 但传 string value——避免 Number(value) 截 IEEE754 精度。
+  // decimal / price_0_to_1 / usdc：一律用 TextInput 保留任意小数位字符串原样写入；
+  // Decimal as string 是后端契约，NumberInput 的 number 中转必丢精度。
   if (meta.inputHint === 'integer' || meta.inputHint === 'bps') {
     return (
       <NumberInput
         size="xs"
-        value={value === '' ? '' : Number(value)}
+        value={value}
         onChange={(v) => onChange(typeof v === 'number' ? String(v) : String(v ?? ''))}
         min={0}
         step={meta.inputHint === 'bps' ? 10 : 1}
@@ -270,26 +274,20 @@ function renderInput(meta: ParamMetadata, value: string, onChange: (v: string) =
       />
     )
   }
-  if (meta.inputHint === 'price_0_to_1') {
-    return (
-      <NumberInput
-        size="xs"
-        value={value === '' ? '' : Number(value)}
-        onChange={(v) => onChange(typeof v === 'number' ? String(v) : String(v ?? ''))}
-        min={0}
-        max={1}
-        step={0.01}
-        decimalScale={6}
-        w={180}
-      />
-    )
-  }
+  const placeholder =
+    meta.inputHint === 'price_0_to_1'
+      ? '0–1 Decimal（如 0.5500）'
+      : meta.inputHint === 'usdc'
+        ? 'USDC（Decimal as string）'
+        : meta.inputHint === 'decimal'
+          ? 'Decimal as string'
+          : 'value'
   return (
     <TextInput
       size="xs"
       value={value}
       onChange={(e) => onChange(e.currentTarget.value)}
-      placeholder={meta.inputHint === 'usdc' ? 'USDC（Decimal as string）' : 'value'}
+      placeholder={placeholder}
       w={180}
     />
   )
@@ -328,8 +326,16 @@ function promptSet(
     description: '生效后立即影响策略 / 风控，重启即丢；高风险变更请明确 reason。',
     tone: meta.risk === 'high' ? 'danger' : 'warning',
     diff,
-    onConfirm: async ({ operator, reason }) =>
-      submit({ scope: entry.scope, key: entry.key, value: newValue, operator, reason }),
+    // /parameters PUT body 暂未支持 trace_id 字段 → 把 trace_id 拼到 reason 末尾，
+    // 后端 audit_events 仍能 grep 回这条意图。后端补字段后再切到正式字段。
+    onConfirm: async ({ operator, reason, trace_id }) =>
+      submit({
+        scope: entry.scope,
+        key: entry.key,
+        value: newValue,
+        operator,
+        reason: appendTraceToReason(reason, trace_id),
+      }),
   })
 }
 
@@ -350,8 +356,13 @@ function promptClear(
         risk: meta.risk,
       },
     ],
-    onConfirm: async ({ operator, reason }) =>
-      submit({ scope: entry.scope, key: entry.key, operator, reason }),
+    onConfirm: async ({ operator, reason, trace_id }) =>
+      submit({
+        scope: entry.scope,
+        key: entry.key,
+        operator,
+        reason: appendTraceToReason(reason, trace_id),
+      }),
   })
 }
 

@@ -9,6 +9,7 @@ import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { StatusPill } from '@shared/ui/StatusPill'
 import { confirmAction } from '@shared/forms/confirmAction'
+import { appendTraceToReason } from '@shared/forms/manualTraceId'
 import { useOperatorStore } from '@core/identity/store'
 
 export function OperationsPage() {
@@ -75,8 +76,12 @@ export function OperationsPage() {
                     title: '暂停全局自动交易',
                     description: '所有市场将停止自动开新单；已挂订单不受影响。',
                     tone: 'warning',
-                    onConfirm: async ({ operator: op, reason }) =>
-                      pauseMutation.mutateAsync({ reason, operator: op }),
+                    // 后端 pauseTrading body 尚未支持 trace_id 字段 → 拼到 reason 末尾。
+                    onConfirm: async ({ operator: op, reason, trace_id }) =>
+                      pauseMutation.mutateAsync({
+                        reason: appendTraceToReason(reason, trace_id),
+                        operator: op,
+                      }),
                   })
                 }
               >
@@ -170,8 +175,13 @@ function MarketPauseCard({ operator: _operator }: { operator: string }) {
                 title: `暂停市场 ${conditionId.slice(0, 12)}…`,
                 tone: 'warning',
                 defaultReason: reason,
-                onConfirm: async ({ operator: op, reason: r }) =>
-                  pause.mutateAsync({ condition_id: conditionId.trim(), reason: r, operator: op }),
+                // 单市场 pause body 也未支持 trace_id 字段 → 拼到 reason 末尾。
+                onConfirm: async ({ operator: op, reason: r, trace_id }) =>
+                  pause.mutateAsync({
+                    condition_id: conditionId.trim(),
+                    reason: appendTraceToReason(r, trace_id),
+                    operator: op,
+                  }),
               })
             }
           >

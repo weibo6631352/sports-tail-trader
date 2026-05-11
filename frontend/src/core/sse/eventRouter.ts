@@ -163,15 +163,20 @@ function extractConditionId(event: SseEvent): string | null {
 }
 
 function keyMatchesConditionId(queryKey: readonly unknown[], conditionId: string): boolean {
-  // 我们的 query key 形态约定：[root, action, params?]；params 是 plain object。
-  // 遍历找到第一个含 condition_id 字段的对象——若与 event 一致则失效，不一致则跳过。
-  // 没找到 condition_id 字段视为"广域"查询，保守地失效。
+  // 我们的 query key 形态约定：
+  //   [root, action, params?]，params 是 plain object，可能含 condition_id 字段；
+  //   或 [root, 'timeline', conditionId, params]——conditionId 作裸字符串 segment。
+  // 任意 segment 命中即比较；没找到 condition_id 视为"广域"查询，保守失效。
   for (const seg of queryKey) {
     if (seg && typeof seg === 'object' && 'condition_id' in (seg as Record<string, unknown>)) {
       const v = (seg as Record<string, unknown>).condition_id
       if (typeof v === 'string') {
         return v === conditionId
       }
+    }
+    // Polymarket condition_id 形如 0x{64hex}——长字符串 segment 视为 condition_id。
+    if (typeof seg === 'string' && seg.startsWith('0x') && seg.length >= 10) {
+      return seg === conditionId
     }
   }
   return true

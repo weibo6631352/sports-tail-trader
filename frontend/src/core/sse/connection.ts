@@ -65,9 +65,8 @@ export class SseConnection {
   }
 
   start(): void {
-    if (this.source || this.explicitlyClosed) {
-      if (this.explicitlyClosed) this.explicitlyClosed = false
-    }
+    // 显式 close 后允许重启；已有 source 则视作"已经在跑"，no-op。
+    this.explicitlyClosed = false
     if (this.source) return
     this.open()
   }
@@ -173,8 +172,9 @@ export class SseConnection {
     }
   }
 
-  // 用 HEAD 探测一次 /stream/events；命中 429 时切到 rate_limited 状态，并启用
-  // RATE_LIMIT_FALLBACK_MS 周期的"重试连接"循环。不在 dispatch 链路内 await。
+  // 用 GET 探测一次 /stream/events（SSE 端点不支持 HEAD，必须 GET）；命中 429 时切到
+  // rate_limited 状态并启用 RATE_LIMIT_FALLBACK_MS 周期的"重试连接"循环。
+  // 命中后立即 cancel body 不真消费流；不在 dispatch 链路内 await。
   private probeForRateLimit(): void {
     if (this.explicitlyClosed) return
     fetch(buildStreamUrl(this.filters), { method: 'GET', cache: 'no-store' })

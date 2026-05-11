@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
 import { Group, NumberInput, Modal, Button, Text, Stack } from '@mantine/core'
@@ -13,6 +13,7 @@ import { InlineActionButton } from '@shared/ui/InlineActionButton'
 import { DataTable } from '@shared/tables/DataTable'
 import { confirmAction } from '@shared/forms/confirmAction'
 import { OperatorReasonFields } from '@shared/forms/OperatorReasonFields'
+import { generateManualTraceId } from '@shared/forms/manualTraceId'
 import { useOperatorStore } from '@core/identity/store'
 import { describeError } from '@core/api/errors'
 import { formatDecimal, formatIso } from '@shared/format'
@@ -168,6 +169,7 @@ function ReplaceModal({
     size_shares?: string
     operator: string
     reason: string
+    trace_id: string
   }) => Promise<unknown>
 }) {
   // 外层只挂 Modal；表单用 key={order_id} 让换不同订单时重新挂载（state reset）。
@@ -223,12 +225,15 @@ function ReplaceForm({
     size_shares?: string
     operator: string
     reason: string
+    trace_id: string
   }) => Promise<unknown>
 }) {
   const storedOperator = useOperatorStore((s) => s.operator)
   const [operator, setOperator] = useState(storedOperator)
   const [reason, setReason] = useState('admin_replace_order')
   const [newPrice, setNewPrice] = useState<number | string>(target.price ?? 0)
+  // 与 confirmAction 一样在 modal 挂载时生成 trace_id 一次；失败重试不变，审计可串。
+  const traceIdRef = useRef<string>(generateManualTraceId())
 
   const canSubmit =
     operator.trim().length > 0 &&
@@ -273,6 +278,7 @@ function ReplaceForm({
               new_price: String(newPrice),
               operator: operator.trim(),
               reason: reason.trim(),
+              trace_id: traceIdRef.current,
             })
           }}
         >

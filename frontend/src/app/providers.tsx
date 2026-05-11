@@ -29,14 +29,17 @@ export function Providers({ children }: Props) {
   // 接通 API 健康统计——HealthPage 读 useApiHealthStore 渲染。
   useEffect(() => attachQueryStats(client.getQueryCache()), [client])
 
+  // 嵌套顺序：BrowserRouter 提到 Mantine 之外让所有 provider 都能感知路由（modals
+  // 在路由变化时可以选择 unmount）。Notifications 包 ModalsProvider 让弹窗在 modal
+  // 关闭后仍能正常显示（顺序问题；zIndex 已经兜底但顺序统一更稳）。
   return (
-    <MantineProvider theme={theme} defaultColorScheme="dark">
-      <QueryClientProvider client={client}>
-        <ModalsProvider>
+    <BrowserRouter>
+      <MantineProvider theme={theme} defaultColorScheme="dark">
+        <QueryClientProvider client={client}>
           <Notifications position="top-right" zIndex={2000} />
-          <BrowserRouter>{children}</BrowserRouter>
-        </ModalsProvider>
-      </QueryClientProvider>
-    </MantineProvider>
+          <ModalsProvider>{children}</ModalsProvider>
+        </QueryClientProvider>
+      </MantineProvider>
+    </BrowserRouter>
   )
 }

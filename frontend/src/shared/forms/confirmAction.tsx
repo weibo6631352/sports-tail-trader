@@ -2,10 +2,11 @@
 // 同文件导出 confirmAction 函数 + 内部组件，是惯用法——fast-refresh 提示忽略。
 import { modals } from '@mantine/modals'
 import { Button, Group, Stack, Text } from '@mantine/core'
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useOperatorStore } from '@core/identity/store'
 import { OperatorReasonFields } from './OperatorReasonFields'
 import { DiffPreview, type DiffRow } from './DiffPreview'
+import { generateManualTraceId } from './manualTraceId'
 
 type Tone = 'danger' | 'warning' | 'info'
 
@@ -42,15 +43,6 @@ export function confirmAction(input: ConfirmActionInput): void {
   })
 }
 
-function generateManualTraceId(): string {
-  // crypto.randomUUID 在所有现代浏览器都有；不依赖外部库。
-  const uuid =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 14)}`
-  return `manual-${uuid.replace(/-/g, '').slice(0, 12)}`
-}
-
 function ConfirmBody(props: ConfirmActionInput) {
   // operator 在 modal 打开时取最新 store 值；之后由用户编辑接管。
   const storedOperator = useOperatorStore((s) => s.operator)
@@ -58,6 +50,8 @@ function ConfirmBody(props: ConfirmActionInput) {
   const [reason, setReason] = useState(props.defaultReason ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // trace_id 在 modal mount 时生成一次；失败重试复用同一 trace_id 让审计能串成一条意图。
+  const traceIdRef = useRef<string>(generateManualTraceId())
 
   const requireReason = props.requireReason ?? true
   const canSubmit = operator.trim().length > 0 && (!requireReason || reason.trim().length > 0)
@@ -70,7 +64,7 @@ function ConfirmBody(props: ConfirmActionInput) {
       await props.onConfirm({
         operator: operator.trim(),
         reason: reason.trim(),
-        trace_id: generateManualTraceId(),
+        trace_id: traceIdRef.current,
       })
       modals.closeAll()
     } catch (err) {

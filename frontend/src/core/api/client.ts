@@ -1,6 +1,9 @@
 import { ApiError } from './errors'
 
 const API_BASE = '/api'
+// 默认 30s timeout——后端慢路径不应让浏览器挂到默认 180s。callsite 传 signal 时
+// 与默认 timeout 通过 AbortSignal.any 合并；任意一边触发就 abort。
+const DEFAULT_TIMEOUT_MS = 30_000
 
 export type QueryValue = string | number | boolean | null | undefined
 export type QueryParams = Record<string, QueryValue | QueryValue[]>
@@ -13,6 +16,8 @@ export type RequestOptions = {
   params?: QueryParams
   body?: unknown
   signal?: AbortSignal
+  /** 自定义超时（毫秒）；不传走默认 30s。0 / 负数 = 不超时。 */
+  timeoutMs?: number
 }
 
 function buildUrl(path: string, params?: QueryParams): string {
@@ -73,7 +78,20 @@ async function request<T>(method: string, path: string, options: RequestOptions 
     headers['content-type'] = 'application/json'
     body = JSON.stringify(options.body)
   }
-  const response = await fetch(url, { method, headers, body, signal: options.signal })
+  // 把用户 signal 与 timeout signal 合并。AbortSignal.timeout 是浏览器原生 API；
+  // AbortSignal.any 同样原生。两者都在现代浏览器（Chrome 116+ / FF 124+）可用。
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const timeoutSignal =
+    timeoutMs > 0 && typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal
+      ? AbortSignal.timeout(timeoutMs)
+      : null
+  let signal: AbortSignal | undefined
+  if (options.signal && timeoutSignal && 'any' in AbortSignal) {
+    signal = AbortSignal.any([options.signal, timeoutSignal])
+  } else {
+    signal = options.signal ?? timeoutSignal ?? undefined
+  }
+  const response = await fetch(url, { method, headers, body, signal })
   if (!response.ok) throw await parseError(response, url)
   if (response.status === 204) return undefined as T
   const contentType = response.headers.get('content-type') ?? ''

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import {
   Alert,
   Badge,
@@ -14,7 +14,6 @@ import {
 import { notifications } from '@mantine/notifications'
 import { IconAlertTriangle, IconPlayerPlay, IconTrophy } from '@tabler/icons-react'
 import type { ColumnDef } from '@tanstack/react-table'
-import { qk } from '@core/api/keys'
 import { operationsApi, parametersApi } from '@core/api/resources'
 import { describeError } from '@core/api/errors'
 import type {
@@ -32,6 +31,7 @@ import { DataTable } from '@shared/tables/DataTable'
 import { TimeWindowPicker } from '@shared/time/TimeWindowPicker'
 import { confirmAction } from '@shared/forms/confirmAction'
 import { type DiffRow } from '@shared/forms/DiffPreview'
+import { appendTraceToReason } from '@shared/forms/manualTraceId'
 import { formatUsdc, pnlTone } from '@shared/format'
 import { useTimeWindowStore } from '@core/time/store'
 
@@ -138,7 +138,6 @@ function parseCandidates(inputs: SweepInputs): {
 }
 
 export function ParameterSweepPage() {
-  const client = useQueryClient()
   const since = useTimeWindowStore((s) => s.since)
   const until = useTimeWindowStore((s) => s.until)
   const [inputs, setInputs] = useState<SweepInputs>({
@@ -151,7 +150,6 @@ export function ParameterSweepPage() {
   const [decisionLimit, setDecisionLimit] = useState(2000)
   const [settlementLimit, setSettlementLimit] = useState(2000)
   const [result, setResult] = useState<ParameterSweepResponse | null>(null)
-  const [submittedQueryKey, setSubmittedQueryKey] = useState<Record<string, unknown> | null>(null)
 
   const parsed = useMemo(() => parseCandidates(inputs), [inputs])
   const gridOverLimit = parsed.gridSize > 1000
@@ -183,7 +181,6 @@ export function ParameterSweepPage() {
       decision_limit: decisionLimit,
       settlement_limit: settlementLimit,
     }
-    setSubmittedQueryKey({ ...body, ts: Date.now() })
     sweep.mutate(body)
   }
 
@@ -294,28 +291,14 @@ export function ParameterSweepPage() {
             description="结果按 hypothetical PnL 降序；可一键把某组合应用到 /parameters。"
           />
         ) : (
-          <ResultsView
-            data={result}
-            client={client}
-            queryKey={submittedQueryKey ? qk.operations.parameterSweep(submittedQueryKey) : ['parameter-sweep', 'last']}
-          />
+          <ResultsView data={result} />
         )}
       </Stack>
     </>
   )
 }
 
-function ResultsView({
-  data,
-  client,
-  queryKey,
-}: {
-  data: ParameterSweepResponse
-  client: ReturnType<typeof useQueryClient>
-  queryKey: readonly unknown[]
-}) {
-  void client
-  void queryKey
+function ResultsView({ data }: { data: ParameterSweepResponse }) {
   const fallbackWarn = data.entry_price_cap_fallback_count > 0
   const bestPnlKey = data.best_by_pnl ? paramsKey(data.best_by_pnl.parameters) : null
   const bestWinKey = data.best_by_win_rate ? paramsKey(data.best_by_win_rate.parameters) : null
@@ -590,7 +573,10 @@ function promptApplyToParameters(result: SweepCandidateResult) {
     description: `共 ${entries.length} 个 strategy 参数；逐个 PUT，全部走 audit_events 记录。`,
     tone: 'danger',
     diff,
-    onConfirm: async ({ operator, reason }) => {
+    onConfirm: async ({ operator, reason, trace_id }) => {
+      // /parameters PUT body 暂未支持 trace_id 字段 → 拼到 reason 末尾让 audit 能 grep 回；
+      // 一组里所有 PUT 共用同一 trace_id，整组 apply 在审计上是一条意图。
+      const reasonWithTrace = appendTraceToReason(reason, trace_id)
       const applied: string[] = []
       const failed: Array<{ key: string; err: string }> = []
       for (const [key, value] of entries) {
@@ -598,7 +584,7 @@ function promptApplyToParameters(result: SweepCandidateResult) {
           await parametersApi.set('strategy', key, {
             value: typeof value === 'number' ? value : String(value),
             operator,
-            reason,
+            reason: reasonWithTrace,
           })
           applied.push(key)
         } catch (err) {

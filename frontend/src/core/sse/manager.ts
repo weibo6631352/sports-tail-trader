@@ -90,17 +90,22 @@ export class SseManager {
       })
       conn.start()
     }
-    pooled.listeners.add(listener)
+    const captured = pooled
+    captured.listeners.add(listener)
+    // close 幂等 + 守卫池里的是不是同一个 pooled——避免 strict mode 重复 cleanup
+    // 把"后注册的同 key 新连接"误删。
+    let closed = false
     const handle: SubscriptionHandle = {
       close: () => {
-        if (!pooled) return
-        pooled.listeners.delete(listener)
-        if (pooled.listeners.size === 0) {
-          pooled.conn.close()
-          this.pool.delete(key)
+        if (closed) return
+        closed = true
+        captured.listeners.delete(listener)
+        if (captured.listeners.size === 0) {
+          captured.conn.close()
+          if (this.pool.get(key) === captured) this.pool.delete(key)
         }
       },
-      status: () => pooled!.conn.getStatus(),
+      status: () => captured.conn.getStatus(),
     }
     return handle
   }
