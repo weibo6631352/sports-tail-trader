@@ -65,7 +65,7 @@ def test_risk_rejects_when_per_market_cap_breached() -> None:
         max_total_outright_usdc=Decimal("100"),
         max_hold_horizon_days=180,
     )
-    assert reason == OutrightRejectReason.EVENT_CORRELATION_CAP
+    assert reason == OutrightRejectReason.PER_MARKET_CAP_EXCEEDED
 
 
 def test_risk_rejects_when_event_correlation_cap_breached() -> None:
@@ -95,7 +95,7 @@ def test_risk_rejects_when_total_outright_cap_breached() -> None:
         max_total_outright_usdc=Decimal("100"),
         max_hold_horizon_days=180,
     )
-    assert reason == OutrightRejectReason.EVENT_CORRELATION_CAP
+    assert reason == OutrightRejectReason.TOTAL_BUDGET_EXHAUSTED
 
 
 def test_risk_accepts_when_market_end_none() -> None:

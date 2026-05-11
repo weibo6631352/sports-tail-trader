@@ -251,6 +251,89 @@ def test_sports_live_state_worker_exposes_source_statuses() -> None:
     asyncio.run(run())
 
 
+def test_no_feasible_source_lifecycle_fires_on_both_transitions() -> None:
+    """worker 在"进入"和"离开"全源不可用状态时各发一次 lifecycle，确保订阅
+    侧能正确清除暂停标志。"""
+
+    from polymarket_trader.extension_api.lifecycle import (
+        LifecycleEvent,
+        SubscriptionHandle,
+    )
+
+    class _CaptureBus:
+        def __init__(self) -> None:
+            self.published: list[tuple[LifecycleEvent, dict]] = []
+
+        def publish(self, event, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            self.published.append((event, dict(kwargs.get("payload") or {})))
+
+        def subscribe(self, event, callback):  # type: ignore[no-untyped-def]
+            return SubscriptionHandle(subscription_id=1)
+
+        def unsubscribe(self, handle) -> None:
+            return None
+
+    async def run() -> _CaptureBus:
+        registry = MarketRegistry()
+        bus = _CaptureBus()
+        snapshots: list[SportsLiveSnapshot] = [
+            # 第 1 轮：全部失败 → 进入 no_feasible_source
+            SportsLiveSnapshot(
+                source="sports_live_aggregate",
+                observed_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
+                games=(),
+                source_statuses=(
+                    SportsLiveSourceStatus(source="espn", success=False, last_error="500"),
+                    SportsLiveSourceStatus(source="nba", success=False, last_error="429"),
+                ),
+            ),
+            # 第 2 轮：状态稳定（仍全部失败）→ 不应重复发布
+            SportsLiveSnapshot(
+                source="sports_live_aggregate",
+                observed_at=datetime(2026, 4, 27, 0, 0, 5, tzinfo=timezone.utc),
+                games=(),
+                source_statuses=(
+                    SportsLiveSourceStatus(source="espn", success=False),
+                    SportsLiveSourceStatus(source="nba", success=False),
+                ),
+            ),
+            # 第 3 轮：一个源恢复 → 离开 no_feasible_source，需要再发一次
+            SportsLiveSnapshot(
+                source="sports_live_aggregate",
+                observed_at=datetime(2026, 4, 27, 0, 0, 10, tzinfo=timezone.utc),
+                games=(),
+                source_statuses=(
+                    SportsLiveSourceStatus(source="espn", success=True, games_seen=1),
+                    SportsLiveSourceStatus(source="nba", success=False),
+                ),
+            ),
+        ]
+        provider_calls = iter(snapshots)
+
+        async def provider() -> SportsLiveSnapshot:
+            return next(provider_calls)
+
+        worker = SportsLiveStateWorker(
+            snapshot_provider=provider,
+            match_live_state=lambda _m, _g: None,
+            registry=registry,
+            entry_metadata_store=EntryMetadataStore(),
+            lifecycle_bus=bus,
+            enabled=True,
+            publish_entry_signals=False,
+        )
+        for _ in range(3):
+            await worker.sync_once()
+        return bus
+
+    bus = asyncio.run(run())
+    no_feasible_events = [p for ev, p in bus.published if ev == LifecycleEvent.LIVE_STATE_NO_FEASIBLE_SOURCE]
+    # 应该恰好 2 次：一次 True（进入），一次 False（离开）；中间稳定轮不重复刷
+    assert len(no_feasible_events) == 2
+    assert no_feasible_events[0]["no_feasible_source"] is True
+    assert no_feasible_events[1]["no_feasible_source"] is False
+
+
 def test_sports_live_state_worker_yields_during_bulk_market_matching() -> None:
     async def run() -> None:
         registry = MarketRegistry()

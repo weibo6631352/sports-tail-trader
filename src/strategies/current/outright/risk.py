@@ -41,11 +41,11 @@ def check_outright_entry_risk(
         if horizon_seconds > max_hold_horizon_days * 86400:
             return OutrightRejectReason.HOLD_HORIZON_EXCEEDED
     if existing_outright_exposure_usdc + proposed_amount_usdc > max_total_outright_usdc:
-        return OutrightRejectReason.EVENT_CORRELATION_CAP
+        return OutrightRejectReason.TOTAL_BUDGET_EXHAUSTED
     if existing_event_exposure_usdc + proposed_amount_usdc > max_event_correlation_usdc:
         return OutrightRejectReason.EVENT_CORRELATION_CAP
     if proposed_amount_usdc > max_per_market_usdc:
-        return OutrightRejectReason.EVENT_CORRELATION_CAP
+        return OutrightRejectReason.PER_MARKET_CAP_EXCEEDED
     return None
 
 

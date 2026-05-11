@@ -37,6 +37,8 @@ class OutrightRejectReason(StrEnum):
     OUTCOME_RESOLVED = "outcome_resolved"
     HOLD_HORIZON_EXCEEDED = "hold_horizon_exceeded"
     EVENT_CORRELATION_CAP = "event_correlation_cap"
+    TOTAL_BUDGET_EXHAUSTED = "total_budget_exhausted"
+    PER_MARKET_CAP_EXCEEDED = "per_market_cap_exceeded"
     MARKET_END_PASSED = "market_end_passed"
     SOURCE_CONFLICT = "source_conflict"
 

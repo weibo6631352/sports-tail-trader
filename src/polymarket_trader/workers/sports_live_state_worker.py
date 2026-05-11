@@ -253,12 +253,15 @@ class SportsLiveStateWorker:
                 )
             self._previous_source_health[status.source] = status.health
         no_feasible = self._compute_no_feasible_source(statuses)
-        if no_feasible and not self._last_no_feasible_source_published:
+        # 两端都要发：进入"全源不可用"时发 transition_in；离开时再发一次让订阅者
+        # 能把缓存的暂停标志清掉。状态稳定（同样的真值）则不再重复刷。
+        if no_feasible != self._last_no_feasible_source_published:
             self._lifecycle_bus.publish(
                 LifecycleEvent.LIVE_STATE_NO_FEASIBLE_SOURCE,
                 payload={
                     "observed_at": observed_at.isoformat(),
                     "source_statuses": [jsonable(status) for status in statuses],
+                    "no_feasible_source": no_feasible,
                 },
             )
         self._last_no_feasible_source_published = no_feasible

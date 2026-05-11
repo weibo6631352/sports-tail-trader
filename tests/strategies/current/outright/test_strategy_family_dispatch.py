@@ -209,7 +209,8 @@ def test_outright_decide_entry_rejected_when_total_exposure_exceeds_cap() -> Non
 
     decision = strategy.decide_entry(ctx)
     assert decision.action == ExtensionAction.SKIP
-    assert decision.metadata.get("outright_reject_reason") == "event_correlation_cap"
+    # 已敞口 25 + proposed 25 > total budget 30 → 总额耗尽
+    assert decision.metadata.get("outright_reject_reason") == "total_budget_exhausted"
 
 
 def test_outright_decide_entry_locked_when_budget_zero() -> None:
