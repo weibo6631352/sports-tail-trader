@@ -8,6 +8,9 @@
 from __future__ import annotations
 
 from polymarket_trader.app.admin_query.market import AdminMarketQueryMixin
+from polymarket_trader.app.admin_query.reconcile_decisions import (
+    AdminReconcileDecisionsQueryMixin,
+)
 from polymarket_trader.app.admin_query.runtime import AdminRuntimeQueryMixin
 from polymarket_trader.app.admin_query.sports import AdminSportsQueryMixin
 from polymarket_trader.app.admin_query.timeline import AdminTimelineQueryMixin
@@ -19,6 +22,7 @@ class AdminQueryMixin(
     AdminMarketQueryMixin,
     AdminTradingQueryMixin,
     AdminTimelineQueryMixin,
+    AdminReconcileDecisionsQueryMixin,
     AdminSportsQueryMixin,
 ):
     """admin 只读查询方法聚合。
