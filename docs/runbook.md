@@ -133,6 +133,26 @@
    并清掉 override（`DELETE /parameters/{scope}/{key}`），避免内存值与启动
    配置长期分裂。
 
+## audit_events 表暴涨 / 查询慢
+
+症状：
+- `audit_events` 表磁盘占用持续增长（每天累计 100k–1M+ 行）。
+- 包含 `audit_events` 的 admin 查询（trade timeline / parameter history / risk-rejections）
+  开始变慢。
+
+处置：
+1. 默认 daily P3 worker `audit_retention_purge` 每 24h 删早于 `audit_retention_days`
+   天（默认 14）的行；看 supervisor `/workers` 或日志 `audit_retention.purge_run`
+   是否正常跑。
+2. 紧急清理：临时调小 `PUT /parameters/settings/audit_retention_days` 为更小天数
+   触发下一次 daily 时收紧（重启即丢）。
+3. 长期固化：改 `.env` `AUDIT_RETENTION_DAYS` 重启。
+4. **彻底关 retention**：`audit_retention_days=0`（仅调试用，会让表无界增长）。
+5. 批次行为：CTE-based ctid + `FOR UPDATE SKIP LOCKED`，每批
+   `audit_retention_purge_batch_size`（默认 10000）行，最多 200 批；不锁全表。
+6. 失败处理：worker 内 try/except 后只日志不外抛——CLAUDE.md §7 后台不能
+   阻塞 P0 主链路。看 `last_error` snapshot 字段排查 DB 异常。
+
 ## 市场结算无 ground truth
 
 症状：

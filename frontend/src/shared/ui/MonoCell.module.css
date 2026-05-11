@@ -1,0 +1,19 @@
+/* admin 表格密集 cell 的视觉常量；4 个组件共用——颜色 / 字号变更只动这里。 */
+
+.mono {
+  font-size: 11px;
+}
+
+.monoText {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.dimMono {
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
+.dim {
+  color: var(--color-text-dim);
+}

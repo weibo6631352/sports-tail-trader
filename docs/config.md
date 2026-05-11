@@ -92,6 +92,17 @@
 - `DATABASE_URL` 优先级最高；一旦填写，`DATABASE_DRIVER`、`DATABASE_HOST`、`DATABASE_PORT`、`DATABASE_NAME`、`DATABASE_USER`、`DATABASE_PASSWORD` 会被忽略。
 - 当 `DATABASE_URL` 为空时，运行时会用上述拆分字段拼接 PostgreSQL 连接串。
 
+### `audit_events` 表 14 天 retention purge
+
+- `audit_retention_days`（默认 14，ge=0 le=365）：早于该天数的 `audit_events` 行会被
+  daily purge 删除。设为 **0** 显式禁用 retention（运维仅在调试时使用）。
+- `audit_retention_interval_seconds`（默认 86400 = 24h）：purge job 的运行周期。
+- `audit_retention_purge_batch_size`（默认 10000）：单批 DELETE 锁定的最大行数；
+  CTE-based ctid 批 + `FOR UPDATE SKIP LOCKED` 避免大表锁。
+- 实现：`app/audit_retention.py` + `supervisor.register_worker("audit_retention_purge", priority="P3")`，
+  失败仅日志不抛错，不阻塞 P0 交易热路径。
+- 三个字段都在 ParameterStore 白名单——运行时可改保留期（重启即丢）。
+
 ## 扩展文件
 
 - 当 `EXTENSION_MODULE=strategies.current` 时，对应文件为：
