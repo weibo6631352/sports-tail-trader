@@ -34,7 +34,7 @@ from polymarket_trader.infra.polymarket.order_result_builder import (
     build_order_result,
     normalize_execution_response,
 )
-from polymarket_trader.infra.outbox.local_queue import DEFAULT_ENQUEUE_TIMEOUT, LocalOutbox
+from polymarket_trader.infra.outbox.event_sink import OutboxSink
 
 
 def _utc_now() -> datetime:
@@ -193,14 +193,13 @@ class PolymarketOrderExecutor:
         self,
         *,
         client: OrderExecutionClient | None = None,
-        outbox: LocalOutbox | None = None,
+        outbox: OutboxSink | None = None,
         thread_pool: ThreadPoolExecutor | None = None,
         sign_timeout_ms: int = 1000,
         submit_timeout_ms: int = 3000,
         cancel_timeout_ms: int | None = None,
         replace_timeout_ms: int | None = None,
         critical_lock_timeout_ms: int = 20,
-        outbox_timeout_s: float = DEFAULT_ENQUEUE_TIMEOUT,
         max_cached_results: int = 1024,
     ) -> None:
         self._client = client
@@ -214,7 +213,6 @@ class PolymarketOrderExecutor:
         self._cancel_timeout_s = (cancel_timeout_ms or submit_timeout_ms) / 1000
         self._replace_timeout_s = (replace_timeout_ms or submit_timeout_ms) / 1000
         self._critical_lock_timeout_s = critical_lock_timeout_ms / 1000
-        self._outbox_timeout_s = outbox_timeout_s
         self._max_cached_results = max_cached_results
         self._idempotency_lock = asyncio.Lock()
         self._idempotency_index: dict[str, _IdempotencyEntry] = {}
@@ -662,14 +660,7 @@ class PolymarketOrderExecutor:
         if self._outbox is None:
             return
         try:
-            if hasattr(self._outbox, "put_nowait"):
-                self._outbox.put_nowait(event)
-                return
-            if hasattr(self._outbox, "enqueue"):
-                await asyncio.wait_for(self._outbox.enqueue(event), timeout=self._outbox_timeout_s)
-                return
-            if hasattr(self._outbox, "put"):
-                await asyncio.wait_for(self._outbox.put(event), timeout=self._outbox_timeout_s)
+            self._outbox.put_nowait(event)
         except Exception:
             # Outbox 失败不能挡住交易热路径；执行器仍然继续返回订单结果。
             return
@@ -800,25 +791,27 @@ def _response_raw(response: Any) -> Any:
 
 def _serialize_intent(intent: ManagedOrderIntent) -> dict[str, Any]:
     data: dict[str, Any] = {
-        "trace_id": getattr(intent, "trace_id", ""),
-        "condition_id": getattr(intent, "condition_id", ""),
-        "token_id": getattr(intent, "token_id", ""),
-        "market_slug": getattr(intent, "market_slug", None),
+        "trace_id": intent.trace_id,
+        "condition_id": intent.condition_id,
+        "token_id": intent.token_id,
+        "market_slug": intent.market_slug,
     }
-    if hasattr(intent, "side"):
-        data["side"] = getattr(intent, "side").value
-    if hasattr(intent, "order_type"):
-        data["order_type"] = getattr(intent, "order_type").value
-    if hasattr(intent, "price"):
-        data["price"] = str(getattr(intent, "price"))
-    if hasattr(intent, "amount_usdc") and getattr(intent, "amount_usdc") is not None:
-        data["amount_usdc"] = str(getattr(intent, "amount_usdc"))
-    if hasattr(intent, "size_shares") and getattr(intent, "size_shares") is not None:
-        data["size_shares"] = str(getattr(intent, "size_shares"))
-    if hasattr(intent, "order_id") and getattr(intent, "order_id", None) is not None:
-        data["order_id"] = getattr(intent, "order_id")
-    if hasattr(intent, "new_price") and getattr(intent, "new_price") is not None:
-        data["new_price"] = str(getattr(intent, "new_price"))
+    if isinstance(intent, BuyOrderIntent):
+        data["side"] = intent.side.value
+        data["order_type"] = intent.order_type.value
+        data["price"] = str(intent.price)
+        data["amount_usdc"] = str(intent.amount_usdc)
+    elif isinstance(intent, SellOrderIntent):
+        data["side"] = intent.side.value
+        data["order_type"] = intent.order_type.value
+        data["price"] = str(intent.price)
+        data["size_shares"] = str(intent.size_shares)
+    elif isinstance(intent, CancelOrderIntent):
+        data["order_id"] = intent.order_id
+    elif isinstance(intent, ReplaceOrderIntent):
+        data["order_id"] = intent.order_id
+        data["new_price"] = str(intent.new_price)
+        data["size_shares"] = str(intent.size_shares)
     return data
 
 

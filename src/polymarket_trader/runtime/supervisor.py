@@ -215,17 +215,27 @@ class Supervisor:
                 self._degraded_reason = None
                 if self._manual_pause_reason is None:
                     self._phase = RuntimePhase.WORKERS_STARTED
+            queue_depths = _as_mapping(self._event_bus.snapshot())
 
-        snapshot = self.snapshot()
+        snapshot = self._snapshot_with(queue_depths=queue_depths, metrics=metrics)
         readiness = snapshot.readiness
         if readiness is not None and readiness.ready and self._manual_pause_reason is None:
             self._phase = RuntimePhase.TRADING_ENABLED
-            snapshot = self.snapshot()
+            snapshot = self._snapshot_with(queue_depths=queue_depths, metrics=metrics)
         return snapshot
 
     def snapshot(self) -> RuntimeSnapshot:
+        return self._snapshot_with()
+
+    def _snapshot_with(
+        self,
+        *,
+        queue_depths: Mapping[str, Any] | None = None,
+        metrics: Mapping[str, Any] | None = None,
+    ) -> RuntimeSnapshot:
         settings_readiness = _as_mapping(self._settings_readiness)
-        queue_depths = _as_mapping(self._event_bus.snapshot())
+        if queue_depths is None:
+            queue_depths = _as_mapping(self._event_bus.snapshot())
         scheduler_value = self._snapshot_from(self._scheduler_snapshot_provider)
         scheduler = scheduler_value if isinstance(scheduler_value, SchedulerSnapshot) else None
         account_snapshot = _as_mapping(self._snapshot_from(self._account_snapshot_provider))
@@ -233,7 +243,8 @@ class Supervisor:
         user_ws = _as_mapping(self._snapshot_from(self._user_ws_snapshot_provider))
         reconcile = _as_mapping(self._snapshot_from(self._reconcile_snapshot_provider))
         persistence = _as_mapping(self._snapshot_from(self._persistence_snapshot_provider))
-        metrics = _as_mapping(self._snapshot_from(self._metrics_snapshot_provider))
+        if metrics is None:
+            metrics = _as_mapping(self._snapshot_from(self._metrics_snapshot_provider))
         readiness = self._build_readiness(
             settings_readiness=settings_readiness,
             queue_depths=queue_depths,

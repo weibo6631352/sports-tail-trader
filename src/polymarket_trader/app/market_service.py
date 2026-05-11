@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
 
 from polymarket_trader.app.market_payload_parser import MarketParseResult, MarketPayloadParser
@@ -17,6 +17,16 @@ from polymarket_trader.extension_api import ExtensionHooks, UniverseDecision
 AccountSnapshotProvider = Callable[[], AccountSnapshot]
 
 
+class MarketTracker(Protocol):
+    """订阅侧 worker 的 track/untrack 接口，由 `MarketWsWorker` 实现。"""
+
+    def track_market(self, market: Market) -> None: ...
+
+    def untrack_market(self, token_ids: tuple[str, ...]) -> None: ...
+
+    def build_subscription_request(self, token_ids: tuple[str, ...]) -> dict[str, Any]: ...
+
+
 class MarketService:
     """Coordinates market discovery, extension universe filtering, and registry updates."""
 
@@ -26,7 +36,7 @@ class MarketService:
         extension_hooks: ExtensionHooks,
         parser: MarketPayloadParser | None = None,
         registry: MarketRegistry | None = None,
-        market_tracker: Any | None = None,
+        market_tracker: MarketTracker | None = None,
         account_snapshot_provider: AccountSnapshotProvider | None = None,
     ) -> None:
         self._parser = parser or MarketPayloadParser()
@@ -109,10 +119,9 @@ class MarketService:
                         self._registry.upsert(market)
                     if self._market_tracker is not None:
                         self._market_tracker.track_market(market)
-                        if hasattr(self._market_tracker, "build_subscription_request"):
-                            subscription_request = self._market_tracker.build_subscription_request(
-                                market.token_ids
-                            )
+                        subscription_request = self._market_tracker.build_subscription_request(
+                            market.token_ids
+                        )
                 elif existing_market is not None:
                     if self._should_retain_filtered_market(existing_market, account_snapshot):
                         tracked_market = self._build_retained_filtered_market(
@@ -277,7 +286,7 @@ class MarketService:
     def _remove_market_tracking(self, market: Market) -> None:
         if self._registry is not None:
             self._registry.remove_market(market.condition_id)
-        if self._market_tracker is not None and hasattr(self._market_tracker, "untrack_market"):
+        if self._market_tracker is not None:
             self._market_tracker.untrack_market(market.token_ids)
 
 

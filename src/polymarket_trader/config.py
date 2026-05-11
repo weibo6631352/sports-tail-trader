@@ -132,7 +132,6 @@ class Settings(BaseSettings):
     polymarket_api_passphrase: SecretStr | None = None
     wallet_private_key: SecretStr | None = None
     signer_private_key: SecretStr | None = None
-    builder_attribution_credentials: SecretStr | None = None
 
     # 数据库连接支持完整 URL 覆盖，也支持拆分字段；数据库密码同样不得写入仓库。
     database_url_override: str | None = Field(default=None, validation_alias="DATABASE_URL")
@@ -149,7 +148,6 @@ class Settings(BaseSettings):
         "polymarket_api_passphrase",
         "wallet_private_key",
         "signer_private_key",
-        "builder_attribution_credentials",
         "database_password",
         "database_url_override",
     )
@@ -209,7 +207,6 @@ class Settings(BaseSettings):
         "polymarket_api_passphrase",
         "wallet_private_key",
         "signer_private_key",
-        "builder_attribution_credentials",
         "polymarket_funder_address",
         "database_password",
         "database_url_override",
