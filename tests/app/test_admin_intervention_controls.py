@@ -137,6 +137,77 @@ def test_pause_trading_returns_failed_when_supervisor_missing() -> None:
     assert result == {"status": "failed", "reason": "supervisor_unavailable"}
 
 
+# === F-4 pause/resume 必须经 event_bus 落 outbox 审计 ===
+
+class _RecordingEventBus:
+    def __init__(self) -> None:
+        self.published: list[tuple[Any, Any]] = []
+
+    async def publish(self, priority: Any, event: Any) -> None:
+        self.published.append((priority, event))
+
+
+def test_pause_trading_publishes_trading_paused_audit_event() -> None:
+    from polymarket_trader.domain.events import DomainEventType
+
+    supervisor = _build_supervisor()
+    supervisor._phase = RuntimePhase.TRADING_ENABLED
+    event_bus = _RecordingEventBus()
+    service = AdminService(
+        runtime=SimpleNamespace(supervisor=supervisor, event_bus=event_bus),
+    )
+
+    result = asyncio.run(service.pause_trading(reason="market_alarm", operator="op"))
+
+    assert result["status"] == "ok"
+    assert result["audit_published"] is True
+    assert result["phase_before"] == RuntimePhase.TRADING_ENABLED.value
+    assert result["phase"] == RuntimePhase.PAUSED.value
+    assert len(event_bus.published) == 1
+    _, event = event_bus.published[0]
+    assert event.event_type == DomainEventType.TRADING_PAUSED
+    assert event.payload["operator"] == "op"
+    assert event.payload["reason"] == "market_alarm"
+    assert event.payload["phase_before"] == RuntimePhase.TRADING_ENABLED.value
+    assert event.payload["phase_after"] == RuntimePhase.PAUSED.value
+
+
+def test_resume_trading_publishes_trading_resumed_audit_event() -> None:
+    from polymarket_trader.domain.events import DomainEventType
+
+    supervisor = _build_supervisor()
+    supervisor._phase = RuntimePhase.TRADING_ENABLED
+    event_bus = _RecordingEventBus()
+    service = AdminService(
+        runtime=SimpleNamespace(supervisor=supervisor, event_bus=event_bus),
+    )
+
+    asyncio.run(service.pause_trading(reason="market_alarm", operator="op"))
+    resume_result = asyncio.run(service.resume_trading(operator="op"))
+
+    assert resume_result["status"] == "ok"
+    assert resume_result["audit_published"] is True
+    assert len(event_bus.published) == 2
+    _, resumed = event_bus.published[1]
+    assert resumed.event_type == DomainEventType.TRADING_RESUMED
+    assert resumed.payload["operator"] == "op"
+    assert resumed.payload["previous_manual_pause_reason"] == "market_alarm"
+    assert resumed.payload["phase_before"] == RuntimePhase.PAUSED.value
+    assert resumed.payload["phase_after"] == RuntimePhase.TRADING_ENABLED.value
+
+
+def test_pause_trading_skips_audit_when_event_bus_missing() -> None:
+    # event_bus 不可用时不应崩溃；response 标明 audit_published=False，方便监控告警
+    supervisor = _build_supervisor()
+    supervisor._phase = RuntimePhase.TRADING_ENABLED
+    service = AdminService(runtime=SimpleNamespace(supervisor=supervisor))
+
+    result = asyncio.run(service.pause_trading(reason="manual_pause", operator="op"))
+
+    assert result["status"] == "ok"
+    assert result["audit_published"] is False
+
+
 def test_cancel_order_routes_through_trading_service() -> None:
     market = _build_market()
     registry = _build_registry(market)

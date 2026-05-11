@@ -31,13 +31,42 @@ from polymarket_trader.domain.events import AuditEvent
 
 MAX_GRID_COMBINATIONS = 1_000
 
+@dataclass(frozen=True, slots=True)
+class _ParameterSpec:
+    """sweep 候选值类型 + 金融取值范围。
+
+    sweep 输出会被人工搬到真实 ParameterStore，所以接受 ``-0.5`` / ``2.5``
+    这种物理上不可达的值会污染调优结论。范围检查在 ``_coerce_value`` 内立即做。
+    """
+
+    type_name: str  # "int" 或 "decimal"
+    minimum: Decimal | None = None       # 含端点（>=）
+    minimum_exclusive: Decimal | None = None  # 严格大于（>）
+    maximum: Decimal | None = None       # 含端点（<=）
+    maximum_exclusive: Decimal | None = None  # 严格小于（<）
+
+
 # sweep 允许调的参数白名单——按 strategy parameter_store 注册值的子集挑出来。
 # 不开放结算 / 退出参数因为它们影响的是离场端，本模块只算入场后到结算的总 PnL。
-_SUPPORTED_PARAMETERS: dict[str, str] = {
-    "tail_outright_min_edge_bps": "int",
-    "tail_outright_max_entry_price": "decimal",
-    "tail_outright_min_orderbook_depth_usdc": "decimal",
-    "entry_no_price_max": "decimal",
+_SUPPORTED_PARAMETERS: dict[str, _ParameterSpec] = {
+    # bps 不能为负——负 edge 等于"接受亏损交易"，物理上不可达
+    "tail_outright_min_edge_bps": _ParameterSpec("int", minimum=Decimal("0")),
+    # 概率在 (0, 1)，PolymarketYes/No share 价格区间
+    "tail_outright_max_entry_price": _ParameterSpec(
+        "decimal",
+        minimum_exclusive=Decimal("0"),
+        maximum_exclusive=Decimal("1"),
+    ),
+    # 盘口深度不能为负
+    "tail_outright_min_orderbook_depth_usdc": _ParameterSpec(
+        "decimal", minimum=Decimal("0")
+    ),
+    # No-price 上限同样属于概率域，允许等于 1（"不限"）
+    "entry_no_price_max": _ParameterSpec(
+        "decimal",
+        minimum_exclusive=Decimal("0"),
+        maximum=Decimal("1"),
+    ),
 }
 
 
@@ -197,7 +226,7 @@ def _expand_grid(
     typed_values: list[list[Any]] = []
     for key in keys:
         spec = _SUPPORTED_PARAMETERS[key]
-        normalized = [_coerce_value(value, spec) for value in candidates[key]]
+        normalized = [_coerce_value(key, value, spec) for value in candidates[key]]
         typed_values.append(normalized)
     grid: list[dict[str, Any]] = []
     for combo in itertools.product(*typed_values):
@@ -205,18 +234,39 @@ def _expand_grid(
     return grid
 
 
-def _coerce_value(value: Any, spec: str) -> Any:
-    if spec == "int":
+def _coerce_value(key: str, value: Any, spec: _ParameterSpec) -> Any:
+    if spec.type_name == "int":
         try:
-            return int(value)
+            coerced: Any = int(value)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"expected int candidate, got {value!r}") from exc
-    if spec == "decimal":
+    elif spec.type_name == "decimal":
         try:
-            return Decimal(str(value))
+            coerced = Decimal(str(value))
         except (InvalidOperation, ValueError) as exc:
             raise ValueError(f"expected decimal candidate, got {value!r}") from exc
-    raise ValueError(f"unknown spec: {spec}")  # pragma: no cover - guarded by whitelist
+    else:
+        raise ValueError(f"unknown spec: {spec.type_name}")  # pragma: no cover
+    _check_range(key, coerced, spec)
+    return coerced
+
+
+def _check_range(key: str, value: Any, spec: _ParameterSpec) -> None:
+    """金融取值范围 guard。值非法直接 ValueError——sweep 不接受物理不可达参数。"""
+
+    numeric = value if isinstance(value, Decimal) else Decimal(value)
+    if spec.minimum is not None and numeric < spec.minimum:
+        raise ValueError(f"{key} candidate {value!r} < minimum {spec.minimum}")
+    if spec.minimum_exclusive is not None and numeric <= spec.minimum_exclusive:
+        raise ValueError(
+            f"{key} candidate {value!r} must be > {spec.minimum_exclusive}"
+        )
+    if spec.maximum is not None and numeric > spec.maximum:
+        raise ValueError(f"{key} candidate {value!r} > maximum {spec.maximum}")
+    if spec.maximum_exclusive is not None and numeric >= spec.maximum_exclusive:
+        raise ValueError(
+            f"{key} candidate {value!r} must be < {spec.maximum_exclusive}"
+        )
 
 
 def _resolve_decision(record: DecisionRecord) -> _Resolved | None:

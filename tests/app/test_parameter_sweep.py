@@ -110,14 +110,80 @@ def test_empty_value_list_raises() -> None:
 
 
 def test_grid_size_cap_enforced() -> None:
-    # 33 × 33 × 33 = 35937 > 1000
+    # 33 × 33 × 33 = 35937 > 1000；所有候选值都在金融允许范围内
     candidates = {
         "tail_outright_min_edge_bps": list(range(33)),
-        "tail_outright_max_entry_price": [0.1 * i for i in range(1, 34)],
+        "tail_outright_max_entry_price": [round(0.01 * i, 4) for i in range(1, 34)],
         "tail_outright_min_orderbook_depth_usdc": [float(i) for i in range(33)],
     }
     with pytest.raises(ValueError, match="too large"):
         build_parameter_sweep(decisions=(), settlements=(), candidates=candidates)
+
+
+# === F-2 范围 guard ===
+
+def test_range_guard_rejects_negative_min_edge_bps() -> None:
+    with pytest.raises(ValueError, match="tail_outright_min_edge_bps.*minimum"):
+        build_parameter_sweep(
+            decisions=(),
+            settlements=(),
+            candidates={"tail_outright_min_edge_bps": [-1]},
+        )
+
+
+def test_range_guard_rejects_max_entry_price_at_one() -> None:
+    with pytest.raises(ValueError, match="tail_outright_max_entry_price.*< 1"):
+        build_parameter_sweep(
+            decisions=(),
+            settlements=(),
+            candidates={"tail_outright_max_entry_price": ["1.0"]},
+        )
+
+
+def test_range_guard_rejects_max_entry_price_at_zero() -> None:
+    with pytest.raises(ValueError, match="tail_outright_max_entry_price.*> 0"):
+        build_parameter_sweep(
+            decisions=(),
+            settlements=(),
+            candidates={"tail_outright_max_entry_price": ["0"]},
+        )
+
+
+def test_range_guard_rejects_negative_max_entry_price() -> None:
+    with pytest.raises(ValueError, match="tail_outright_max_entry_price.*> 0"):
+        build_parameter_sweep(
+            decisions=(),
+            settlements=(),
+            candidates={"tail_outright_max_entry_price": ["-0.5"]},
+        )
+
+
+def test_range_guard_rejects_negative_min_orderbook_depth() -> None:
+    with pytest.raises(ValueError, match="tail_outright_min_orderbook_depth_usdc.*minimum"):
+        build_parameter_sweep(
+            decisions=(),
+            settlements=(),
+            candidates={"tail_outright_min_orderbook_depth_usdc": ["-1"]},
+        )
+
+
+def test_range_guard_rejects_entry_no_price_max_above_one() -> None:
+    with pytest.raises(ValueError, match="entry_no_price_max.*maximum"):
+        build_parameter_sweep(
+            decisions=(),
+            settlements=(),
+            candidates={"entry_no_price_max": ["1.0001"]},
+        )
+
+
+def test_range_guard_allows_entry_no_price_max_at_one() -> None:
+    # 端点 1 表示"不设上限"，是合法值
+    result = build_parameter_sweep(
+        decisions=(),
+        settlements=(),
+        candidates={"entry_no_price_max": ["1.0"]},
+    )
+    assert result["candidate_count"] == 1
 
 
 def test_int_coerce_failure_raises() -> None:

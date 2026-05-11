@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from polymarket_trader.api.deps import get_admin_service
 from polymarket_trader.app.admin_service import AdminService
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
+
+# 256KB 对 live_state 这种"赛况快照 + 比分 + 指标"已经富余；超过这个量级
+# 大概率是误填或攻击 payload。outbox / persistence 是异步副作用路径，超大
+# payload 会拖慢落库，间接影响审计可见性。
+_LIVE_STATE_MAX_BYTES = 256 * 1024
 
 
 class LiveStateRequest(BaseModel):
@@ -95,22 +100,31 @@ async def list_live_source_gaps(
 
 @router.post("/live-states")
 async def upsert_live_state(
-    request: LiveStateRequest,
+    body: LiveStateRequest,
+    http_request: Request,
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
-    if not any((request.condition_id, request.market_slug, request.event_slug)):
+    # Content-Length 提前拦截大 payload，避免 service / DB / outbox 被拖慢。
+    # FastAPI / uvicorn 没有内建 body size limit，必须在路由层做。
+    content_length = http_request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > _LIVE_STATE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"live_state payload too large: {content_length} bytes > {_LIVE_STATE_MAX_BYTES}",
+        )
+    if not any((body.condition_id, body.market_slug, body.event_slug)):
         raise HTTPException(
             status_code=422,
             detail="condition_id, market_slug, or event_slug is required",
         )
     return await service.upsert_live_state(
-        payload=request.payload,
-        signal_allowed=request.signal_allowed,
-        signal_reason=request.signal_reason,
-        condition_id=request.condition_id,
-        market_slug=request.market_slug,
-        event_slug=request.event_slug,
-        source=request.source,
+        payload=body.payload,
+        signal_allowed=body.signal_allowed,
+        signal_reason=body.signal_reason,
+        condition_id=body.condition_id,
+        market_slug=body.market_slug,
+        event_slug=body.event_slug,
+        source=body.source,
     )
 
 

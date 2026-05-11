@@ -80,6 +80,48 @@ def test_virtual_paper_trade_prioritizes_live_rejection_over_scheduled_single_ga
     assert result["reason"] == "outcome_not_locked"
 
 
+# === F-3 显式 market 找不到时不静默 fallback ===
+
+def test_explicit_market_slug_not_found_returns_not_found_without_fallback() -> None:
+    runtime = _runtime_with_real_like_candidate()
+
+    result = asyncio.run(
+        run_virtual_paper_trade(runtime, market_slug="does-not-exist-anywhere-9999")
+    )
+
+    assert result["status"] == "no_trade"
+    assert result["reason"] == "explicit_market_not_found"
+    # selection 必须明确给出"用户请求了什么"，便于分析师对照
+    selection = result["selection"]
+    assert selection["metadata"]["requested_market_slug"] == "does-not-exist-anywhere-9999"
+    # 不能 fallback：market_slug / condition_id 不能是注册表里的真实市场
+    assert selection["market_slug"] != "nhl-tb-mon-total-4-5"
+    # 没有真实订单签名发生
+    assert runtime.trading_client.signed_requests == []
+
+
+def test_explicit_condition_id_not_found_returns_not_found_without_fallback() -> None:
+    runtime = _runtime_with_real_like_candidate()
+
+    result = asyncio.run(
+        run_virtual_paper_trade(runtime, condition_id="0xdeadbeefnotaregisteredcondition")
+    )
+
+    assert result["status"] == "no_trade"
+    assert result["reason"] == "explicit_market_not_found"
+    assert result["selection"]["metadata"]["requested_condition_id"] == "0xdeadbeefnotaregisteredcondition"
+
+
+def test_no_explicit_request_still_falls_back_to_registry_scan() -> None:
+    # 三字段全 None 是 documented behavior：扫全部市场。F-3 修复不应影响这条路径。
+    runtime = _runtime_with_real_like_candidate()
+
+    result = asyncio.run(run_virtual_paper_trade(runtime))
+
+    # 注册表里有一个 candidate，仍应跑通模拟
+    assert result["status"] == "ok"
+
+
 class _MarketWs:
     def __init__(self, snapshots: dict[str, OrderbookSnapshot]) -> None:
         self._snapshots = snapshots

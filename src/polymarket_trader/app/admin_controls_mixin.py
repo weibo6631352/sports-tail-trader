@@ -289,33 +289,91 @@ class AdminControlsMixin:
     ) -> dict[str, Any]:
         """人工触发暂停自动交易。phase 立即切到 PAUSED，等用户 resume 才恢复。"""
 
+        from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
+
         supervisor = getattr(self.runtime, "supervisor", None)
         if supervisor is None:
             return {"status": "failed", "reason": "supervisor_unavailable"}
         normalized_reason = reason.strip() or "manual_pause"
+        phase_before = getattr(supervisor.snapshot().phase, "value", "unknown")
         supervisor.pause_trading(normalized_reason)
+        phase_after = getattr(supervisor.snapshot().phase, "value", "unknown")
+
+        # 主交易开关变更是高敏操作，必须落审计——CLAUDE.md §3 / §10
+        # 要求拒绝、降级、恢复动作可审计；event_bus 不可用时不应静默失败。
+        trace_id = uuid4().hex
+        event_bus = getattr(self.runtime, "event_bus", None)
+        if event_bus is not None:
+            await event_bus.publish(
+                OutboxPriority.P1,
+                DomainEvent(
+                    trace_id=trace_id,
+                    event_type=DomainEventType.TRADING_PAUSED,
+                    event_id=uuid4().hex,
+                    reason=normalized_reason,
+                    payload={
+                        "operator": operator,
+                        "reason": normalized_reason,
+                        "phase_before": phase_before,
+                        "phase_after": phase_after,
+                        "occurred_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                ),
+            )
         return {
             "status": "ok",
+            "trace_id": trace_id,
             "operator": operator,
             "reason": normalized_reason,
-            "phase": getattr(supervisor.snapshot().phase, "value", "unknown"),
+            "phase": phase_after,
+            "phase_before": phase_before,
             "manual_pause_reason": normalized_reason,
+            "audit_published": event_bus is not None,
         }
 
     async def resume_trading(self, *, operator: str = "manual") -> dict[str, Any]:
         """人工恢复自动交易。仅清除 manual_pause_reason 并回到 TRADING_ENABLED；其他降级原因仍生效。"""
 
+        from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
+
         supervisor = getattr(self.runtime, "supervisor", None)
         if supervisor is None:
             return {"status": "failed", "reason": "supervisor_unavailable"}
+        phase_before = getattr(supervisor.snapshot().phase, "value", "unknown")
+        previous_pause_reason = supervisor.snapshot().manual_pause_reason
         supervisor.resume_trading()
         snapshot = supervisor.snapshot()
+        phase_after = getattr(snapshot.phase, "value", "unknown")
+
+        trace_id = uuid4().hex
+        event_bus = getattr(self.runtime, "event_bus", None)
+        if event_bus is not None:
+            await event_bus.publish(
+                OutboxPriority.P1,
+                DomainEvent(
+                    trace_id=trace_id,
+                    event_type=DomainEventType.TRADING_RESUMED,
+                    event_id=uuid4().hex,
+                    reason="manual_resume",
+                    payload={
+                        "operator": operator,
+                        "phase_before": phase_before,
+                        "phase_after": phase_after,
+                        "previous_manual_pause_reason": previous_pause_reason,
+                        "degraded_reason": snapshot.degraded_reason,
+                        "occurred_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                ),
+            )
         return {
             "status": "ok",
+            "trace_id": trace_id,
             "operator": operator,
-            "phase": getattr(snapshot.phase, "value", "unknown"),
+            "phase": phase_after,
+            "phase_before": phase_before,
             "manual_pause_reason": snapshot.manual_pause_reason,
             "degraded_reason": snapshot.degraded_reason,
+            "audit_published": event_bus is not None,
         }
 
     async def cancel_order(

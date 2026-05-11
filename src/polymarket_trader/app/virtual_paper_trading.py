@@ -45,6 +45,10 @@ async def run_virtual_paper_trade(
 
     未指定 market/token 时，自动选择当前第一个真实 `auto_execute` 候选；如果没有，
     返回真实候选拒绝原因样本，不伪造行情或直播状态。
+
+    显式给了 ``condition_id`` / ``token_id`` / ``market_slug`` 任一非空字段但
+    注册表里查不到时，立刻返回 ``reason='explicit_market_not_found'``——绝
+    不退到"扫描全部市场"的 fallback，否则分析师以为在模拟 X 实际系统跑了 Y。
     """
 
     selection = await _select_candidate(
@@ -170,12 +174,36 @@ async def _select_candidate(
     market_slug: str | None,
 ) -> _CandidateSelection:
     account = _account_snapshot(runtime)
+    has_explicit_request = bool(condition_id or token_id or market_slug)
     explicit_market = _resolve_market(
         runtime,
         condition_id=condition_id,
         token_id=token_id,
         market_slug=market_slug,
     )
+    if has_explicit_request and explicit_market is None:
+        # 显式请求的 market / condition / token 注册表查不到。直接返回
+        # not_found 而不是退化到 _registry_markets() 全市场扫描——后者会
+        # 让分析师在不知情时基于错误的 baseline 做策略决策。
+        empty_market = _empty_market()
+        return _CandidateSelection(
+            market=empty_market,
+            token_id=token_id or "",
+            account=account,
+            metadata={
+                "requested_condition_id": condition_id,
+                "requested_token_id": token_id,
+                "requested_market_slug": market_slug,
+            },
+            plan=None,
+            reason="explicit_market_not_found",
+            opportunity_funnel=_empty_opportunity_funnel(
+                scan_scope="explicit",
+                source_market_count=0,
+                source_token_count=0,
+            ),
+            rejection_summary=_rejection_summary(()),
+        )
     source_markets = (explicit_market,) if explicit_market is not None else _registry_markets(runtime)
     opportunity_funnel = _empty_opportunity_funnel(
         scan_scope="explicit" if explicit_market is not None else "registry",

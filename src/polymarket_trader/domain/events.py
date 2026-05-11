@@ -75,6 +75,8 @@ class DomainEventType(StrEnum):
     RECONCILE_DIFF_DETECTED = "reconcile_diff_detected"
     RECONCILE_APPLIED = "reconcile_applied"
     TRADING_PAUSED_FOR_MARKET = "trading_paused_for_market"
+    TRADING_PAUSED = "trading_paused"
+    TRADING_RESUMED = "trading_resumed"
     UNEXPECTED_RESTING_ORDER_DETECTED = "unexpected_resting_order_detected"
     TRADE_MINED = "trade_mined"
     TRADE_CONFIRMED = "trade_confirmed"

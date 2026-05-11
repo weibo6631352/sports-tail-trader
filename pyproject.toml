@@ -11,6 +11,9 @@ requires-python = ">=3.12"
 dependencies = [
   "asyncpg>=0.29",
   "fastapi>=0.110",
+  # SQLAlchemy async（greenlet_spawn）在 macOS arm64 + Python 3.12 上 SQLAlchemy
+  # 不会传递安装 greenlet，缺它会让 initialize_database 立刻 ValueError。
+  "greenlet>=3.0",
   "httpx>=0.26",
   "pydantic>=2.6",
   "pydantic-settings>=2.2",

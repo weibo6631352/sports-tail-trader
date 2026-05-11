@@ -116,6 +116,68 @@ def test_market_filtered_out_event_is_persisted_for_audit() -> None:
     assert "raw_market" not in persisted.payload
 
 
+def test_trading_paused_event_is_persisted_with_projected_payload() -> None:
+    """主交易开关 pause/resume 必须落 outbox→audit_events，否则违反 CLAUDE.md §10。"""
+
+    outbox = _CollectingOutbox()
+    sink = build_domain_event_outbox_sink(outbox)
+    event = DomainEvent(
+        trace_id="trace-pause",
+        event_type=DomainEventType.TRADING_PAUSED,
+        event_id="event-pause-1",
+        reason="market_alarm",
+        payload={
+            "operator": "op",
+            "reason": "market_alarm",
+            "phase_before": "trading_enabled",
+            "phase_after": "paused",
+            "occurred_at": "2026-05-11T12:34:56+00:00",
+            "extra_unprojected_field": "must-be-dropped",
+        },
+    )
+
+    sink(1, event)
+
+    assert len(outbox.events) == 1
+    persisted = outbox.events[0]
+    assert persisted.event_type == DomainEventType.TRADING_PAUSED.value
+    assert persisted.reason == "market_alarm"
+    assert persisted.payload == {
+        "operator": "op",
+        "reason": "market_alarm",
+        "phase_before": "trading_enabled",
+        "phase_after": "paused",
+        "occurred_at": "2026-05-11T12:34:56+00:00",
+    }
+
+
+def test_trading_resumed_event_carries_previous_pause_reason() -> None:
+    outbox = _CollectingOutbox()
+    sink = build_domain_event_outbox_sink(outbox)
+    event = DomainEvent(
+        trace_id="trace-resume",
+        event_type=DomainEventType.TRADING_RESUMED,
+        event_id="event-resume-1",
+        reason="manual_resume",
+        payload={
+            "operator": "op",
+            "phase_before": "paused",
+            "phase_after": "trading_enabled",
+            "previous_manual_pause_reason": "market_alarm",
+            "degraded_reason": None,
+            "occurred_at": "2026-05-11T12:35:30+00:00",
+        },
+    )
+
+    sink(1, event)
+
+    assert len(outbox.events) == 1
+    persisted = outbox.events[0]
+    assert persisted.event_type == DomainEventType.TRADING_RESUMED.value
+    assert persisted.payload["previous_manual_pause_reason"] == "market_alarm"
+    assert persisted.payload["phase_after"] == "trading_enabled"
+
+
 def test_transaction_snapshot_event_is_persisted() -> None:
     outbox = _CollectingOutbox()
     sink = build_domain_event_outbox_sink(outbox)

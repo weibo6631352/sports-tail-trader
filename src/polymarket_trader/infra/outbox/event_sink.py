@@ -28,6 +28,9 @@ _PERSISTABLE_EVENT_TYPES = {
     DomainEventType.RISK_REJECTION_RECORDED.value,
     DomainEventType.MARKET_SETTLED.value,
     DomainEventType.PARAMETER_OVERRIDE_APPLIED.value,
+    # 主交易开关变更必须可审计——CLAUDE.md §10「拒绝、降级、恢复动作必须保留可审计原因」
+    DomainEventType.TRADING_PAUSED.value,
+    DomainEventType.TRADING_RESUMED.value,
 }
 
 _MARKET_EVENT_TYPES = {
@@ -169,6 +172,20 @@ def _project_payload(event_type: str, payload: Mapping[str, Any]) -> dict[str, A
             if key in payload:
                 settle_projected[key] = payload[key]
         return settle_projected
+    if event_type in (DomainEventType.TRADING_PAUSED.value, DomainEventType.TRADING_RESUMED.value):
+        trading_projected: dict[str, Any] = {}
+        for key in (
+            "operator",
+            "reason",
+            "phase_before",
+            "phase_after",
+            "previous_manual_pause_reason",
+            "degraded_reason",
+            "occurred_at",
+        ):
+            if key in payload:
+                trading_projected[key] = payload[key]
+        return trading_projected
     if event_type == DomainEventType.PARAMETER_OVERRIDE_APPLIED.value:
         param_projected: dict[str, Any] = {}
         for key in (

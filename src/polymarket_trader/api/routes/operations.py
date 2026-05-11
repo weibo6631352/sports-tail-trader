@@ -14,7 +14,9 @@ router = APIRouter(prefix="/operations", tags=["operations"])
 
 class ReconcileRequest(BaseModel):
     trace_id: str | None = None
-    condition_ids: list[str] = Field(default_factory=list)
+    # 上限 200 防 DoS：reconciler 在 batch 扫描里读热状态，违反 CLAUDE.md §7
+    # 「reconciler 不在批量扫描里长时间持有交易状态写锁」就会反向阻塞主链路。
+    condition_ids: list[str] = Field(default_factory=list, max_length=200)
 
 
 class ParameterSweepRequest(BaseModel):
@@ -26,7 +28,10 @@ class ParameterSweepRequest(BaseModel):
     """
 
     candidates: dict[str, list[Any]] = Field(default_factory=dict)
-    per_decision_usdc: float = Field(default=10.0, gt=0.0, le=100_000.0)
+    # ge=0.01 (1 美分) 防止 1e-300 / 1e-9 这种亚精度值传到 service：实盘最小
+    # 名义订单 ¢0.01，sweep 模拟仓位低于此值没有金融意义且会让 PnL 公式产生
+    # 极小或下溢的 size_shares。
+    per_decision_usdc: float = Field(default=10.0, ge=0.01, le=100_000.0)
     strategy_id: str | None = Field(default=None, min_length=1, max_length=64)
     since: int | None = Field(default=None, ge=0)
     until: int | None = Field(default=None, ge=0)
@@ -34,10 +39,18 @@ class ParameterSweepRequest(BaseModel):
     settlement_limit: int = Field(default=2000, ge=1, le=20_000)
 
 
+# Polymarket condition_id 是 32-byte hash, 0x 前缀 + 64 hex 字符。
+# token_id 是 78-位十进制大整数（uint256）。
+# 这两个正则是 Polymarket 协议天然给定的格式，不是策略层口味——任何不符合
+# 这个格式的字符串都不可能是真实市场 ID，应当 422 拦下。
+_CONDITION_ID_PATTERN = r"^0x[0-9a-fA-F]{64}$"
+_TOKEN_ID_PATTERN = r"^[0-9]+$"
+
+
 class VirtualPaperTradeRequest(BaseModel):
-    condition_id: str | None = None
-    token_id: str | None = None
-    market_slug: str | None = None
+    condition_id: str | None = Field(default=None, pattern=_CONDITION_ID_PATTERN)
+    token_id: str | None = Field(default=None, pattern=_TOKEN_ID_PATTERN, min_length=1, max_length=80)
+    market_slug: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class PauseTradingRequest(BaseModel):
