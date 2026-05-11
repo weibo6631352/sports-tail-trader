@@ -118,6 +118,36 @@ config = load_extension_config(MyStrategyConfig, config_path) or MyStrategyConfi
 
 `MyStrategyConfig` 是 frozen dataclass。加新字段直接给默认值，已有调用面不破。
 
+## 7.5 运行时参数 override（可选）
+
+如果某些阈值想让运维 / agent 通过 `/parameters` 端点 hot-tune（不重启生效），
+策略需要主动消费 `ports.parameter`：
+
+```python
+def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
+    port = self._ports.parameter  # ParameterPort | None
+    min_edge_bps = (
+        port.get("strategy", "min_edge_bps", default=self._config.min_edge_bps)
+        if port is not None
+        else self._config.min_edge_bps
+    )
+    # ... 用 min_edge_bps 做决策
+```
+
+要点：
+
+- **白名单注册**：调参键需先在 `src/polymarket_trader/app/parameter_store.py`
+  注册（含类型 coerce + 范围 validator），否则 `PUT /parameters` 返回 404。
+- **回退默认值必填**：``port.get(scope, key, default=...)`` 缺 `default` 时返
+  回 `None`，策略必须保证有 frozen config 兜底。
+- **不能跨重启存活**：override 是探索性的；要长期固化仍改 config 文件。
+- **不能在 `ExtensionPorts` 里塞写入入口**：策略只读，写入通过 admin API。
+
+默认扩展 `src/strategies/current/parameter_overrides.py` 提供 `effective_int`
+/ `effective_decimal` 帮手 + `active_ports_scope` ContextVar，让深层 helper（如
+trading/pricing.py 的 `_tail_price_cap`）不必把 `ports` 一路 plumb。新策略可
+照搬这套模式，也可直接调 `port.get(...)`。
+
 ## 8. 单测
 
 策略的单测可以直接用 `ExtensionContext` 构造场景，不需要起 framework 主链路：

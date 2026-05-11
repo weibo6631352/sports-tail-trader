@@ -129,12 +129,42 @@
 - 私钥、API secret、passphrase。
 - 未脱敏 raw response 中的敏感账户字段。
 
+## 运行时调参（不进 `.env`）
+
+启动期 `Settings` 与策略 frozen config 都是不可变的；探索性临时调参用
+`/parameters` 端点，走独立的 `ParameterStore` runtime override 层。
+
+- `GET /parameters` 列所有可调参数及当前 override 状态。
+- `PUT /parameters/{scope}/{key}` 设置 override；`scope` 是 `settings` 或
+  `strategy`。每次写入通过 `PARAMETER_OVERRIDE_APPLIED` 事件落 audit_events。
+- `DELETE /parameters/{scope}/{key}` 清除 override，回落 Settings / config 默认值。
+
+可调白名单（详见 `src/polymarket_trader/app/parameter_store.py`）：
+
+- `settings.{portfolio_budget_usdc, max_order_usdc, max_market_usdc,
+  max_total_usdc, max_open_orders, order_retry_limit}`
+- `strategy.{tail_outright_min_edge_bps, tail_outright_max_entry_price,
+  tail_outright_min_orderbook_depth_usdc, tail_outright_exit_edge_target,
+  tail_outright_min_profit_per_share, entry_no_price_max,
+  tail_moneyline_max_entry_price, tail_spreads_max_entry_price,
+  tail_min_liquidity_usdc}`
+
+边界：
+
+- Override **重启即丢**。Long-term 固化仍走 `.env` 改 `Settings` 或策略
+  config 文件后重启。
+- 密钥 / SecretStr 字段、连接串、`EXTENSION_MODULE` 等不在白名单——不能通过
+  API 改。
+- 策略侧消费 override 需要策略代码主动走 `ports.parameter`；具体写法见
+  [`strategy_authoring.md`](./strategy_authoring.md)。
+
 ## 新增配置时确认
 
 - 属于交易主链路、关键修复链路、后台维护链路还是异步支撑链路。
 - 默认值是什么，默认值是否安全。
 - 单位是什么，取值范围是什么。
-- 是否可以运行时热更新。
+- 是否需要进白名单接入 `/parameters` 运行时热更新（只有探索性调参才需要；
+  长期值仍走 `.env`）。
 - 是否需要写入 [`.env.full.example`](../.env.full.example)；如果属于最常用启动项，再同步写入 [`.env.example`](../.env.example)。
 - 如果只是策略规则，直接写 `EXTENSION_MODULE` 指向的策略包，不要新增框架环境变量。
 - 是否会改变资金暴露、订单行为或 reconcile 行为。

@@ -109,3 +109,40 @@
 2. 确认返回中的 `order` 是预期那张单。
 3. 确认 `replace_order_submitted` 返回新的订单结果。
 4. 若失败原因是 `price_not_aligned_to_tick_size`、`order_size_unknown` 或 `market_not_operable`，不要继续重试，先修正输入或等待状态恢复。
+
+## 风控阈值临时调整
+
+症状：
+- `/analytics/risk-rejections/aggregate` 显示某条规则在大量拒绝中（过严）。
+- 或 `/analytics/edge-realization` 显示当前 edge 阈值下样本量极少（过严）。
+- 或 `/portfolio/risk-metrics` 显示 drawdown 异常扩大（过松，需收紧）。
+- 或 `/analytics/missed-opportunities` 显示拒绝决策事后大量盈利（过严）。
+
+处置：
+1. 先停止扩大暴露：`POST /operations/pause-trading` 或调小 `max_order_usdc`。
+2. 用 `POST /operations/parameter-sweep` 离线评估候选阈值，看 best_by_pnl /
+   best_by_win_rate；注意响应里 `entry_price_cap_fallback_count` 非零时数字
+   会偏高。
+3. 经验证后用 `PUT /parameters/{scope}/{key}` 写 override，例如：
+   - 收紧：`PUT /parameters/strategy/tail_outright_min_edge_bps` 提高到更高 bps
+   - 放松液量：`PUT /parameters/strategy/tail_min_liquidity_usdc` 降低
+   - 收紧暴露：`PUT /parameters/settings/max_market_usdc` 降低
+4. 观察 `/analytics/risk-rejections/aggregate` 与 `/analytics/edge-realization`
+   验证阈值生效；override 重启即丢。
+5. 阈值要长期固化时**改 `.env` / `src/strategies/current/config.py` 后重启**，
+   并清掉 override（`DELETE /parameters/{scope}/{key}`），避免内存值与启动
+   配置长期分裂。
+
+## 市场结算无 ground truth
+
+症状：
+- `/analytics/calibration` 的 `with_outcome_count` 远低于 `total_samples`。
+- `/markets/{condition_id}/settlement` 对已结算市场返回 404。
+
+处置：
+1. 看 scheduler `settlement_scanner` 是否正常跑（`/runtime` 或日志）。
+2. 自动 scanner 拉不到时，运维手工 `POST /markets/settle` 录入；payload 含
+   `condition_id` / `winning_token_id` / `winning_outcome`。事件落 audit_events
+   后 calibration 端点立即可用。
+3. 若 Gamma 撞 rate limit（日志含 `settlement_scanner.gamma_filter_failed`），
+   降低 scheduler 频率或减少 `max_markets_per_run`。
