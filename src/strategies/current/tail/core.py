@@ -9,22 +9,32 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Mapping
 
-from .parsing import _datetime_text
-from .slug import _market_scope
-from .types import (
-    ExecutionPermission,
+from datetime import datetime
+
+from strategies.sports_framework import (
     LiveGameState,
     SportsMarketFamily,
     SportsMarketSide,
     SportsMarketSnapshot,
     SportsMarketType,
+    market_scope,
+)
+
+from .types import (
+    ExecutionPermission,
     SportsTailCandidate,
-    TailEvaluation,
     SportsTailOpportunityType,
-    TailPolicy,
     TailAction,
+    TailEvaluation,
+    TailPolicy,
     TailRejectReason,
 )
+
+
+def _datetime_text(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
 
 
 def _candidate(game: LiveGameState, market: SportsMarketSnapshot) -> SportsTailCandidate:
@@ -38,8 +48,8 @@ def _candidate(game: LiveGameState, market: SportsMarketSnapshot) -> SportsTailC
             "side": market.side.value,
             "line": str(market.line) if market.line is not None else None,
             "best_ask": str(market.best_ask) if market.best_ask is not None else None,
-            "scope_type": _market_scope(market).scope_type.value,
-            "scope_number": _market_scope(market).scope_number,
+            "scope_type": market_scope(market).scope_type.value,
+            "scope_number": market_scope(market).scope_number,
             "market_end_date": _datetime_text(market.market_end_date),
             "total_score": game.total_score,
             "seconds_remaining": game.seconds_remaining,

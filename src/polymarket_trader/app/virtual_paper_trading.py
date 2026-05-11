@@ -1,7 +1,8 @@
 """基于真实运行态数据的虚拟盘演练。
 
 虚拟盘只替换最后的订单提交端：market、orderbook、账户快照、直播状态 metadata、
-策略配置、风控和可用时的订单签名都来自当前运行态；真正 submit 时使用内存响应。
+策略配置、风控和可用时的订单签名都来自当前运行态；真正 submit 时由
+``app/paper`` 撮合引擎模拟 level-by-level 成交 + 官方 fee 公式 + fill 状态机。
 """
 
 from __future__ import annotations
@@ -9,20 +10,19 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 from decimal import Decimal
-import inspect
 from typing import Any, Mapping
 from uuid import uuid4
 
+from polymarket_trader.app.paper import PaperSubmitOnlyOrderClient, PaperVirtualLedger
 from polymarket_trader.app.trading_decision_service import EntryPlan, TradingDecisionService
 from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.order import OrderResultStatus, OrderSide
+from polymarket_trader.domain.order import OrderResultStatus
+from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.infra.outbox.local_queue import LocalOutbox
 from polymarket_trader.infra.polymarket.auth import PolymarketOrderExecutionClient
-from polymarket_trader.infra.polymarket.order_execution_types import OrderExecutionRequest
-from polymarket_trader.infra.polymarket.order_execution_types import OrderExecutionResponse
 from polymarket_trader.infra.polymarket.order_executor import (
     PolymarketOrderExecutor,
 )
@@ -68,7 +68,14 @@ async def run_virtual_paper_trade(
             }
         )
 
-    paper_client = PaperSubmitOnlyOrderClient(real_sign_client=_real_sign_client(runtime))
+    ledger = PaperVirtualLedger()
+    ledger.fund(selection.account.available_usdc)
+    paper_client = PaperSubmitOnlyOrderClient(
+        real_sign_client=_real_sign_client(runtime),
+        market_lookup=lambda token_id: _resolve_market_by_token(runtime, token_id),
+        orderbook_lookup=lambda token_id: _orderbook(runtime, token_id),
+        ledger=ledger,
+    )
     outbox = LocalOutbox(max_size=100)
     executor = PolymarketOrderExecutor(
         client=paper_client,
@@ -108,6 +115,7 @@ async def run_virtual_paper_trade(
             paper_client=paper_client,
             outbox=outbox,
             account_store=account_store,
+            ledger=ledger,
         )
     finally:
         executor.close()
@@ -282,91 +290,6 @@ def _build_plan(
     )
 
 
-class PaperSubmitOnlyOrderClient:
-    """真实构造/签名订单，但把最后提交付款步骤替换为内存成交响应。"""
-
-    def __init__(self, *, real_sign_client: Any | None = None) -> None:
-        self.requests: list[tuple[str, OrderExecutionRequest]] = []
-        self._real_sign_client = real_sign_client
-
-    @property
-    def signing_source(self) -> str:
-        if self._real_sign_client is None:
-            return "paper_fallback"
-        return "real_trading_client"
-
-    async def sign_order(self, request: OrderExecutionRequest) -> OrderExecutionResponse:
-        """尽量沿用生产签名流程；缺少交易客户端时才退回本地虚拟签名。"""
-
-        self.requests.append(("sign", request))
-        sign_order = None if self._real_sign_client is None else getattr(
-            self._real_sign_client,
-            "sign_order",
-            None,
-        )
-        if callable(sign_order):
-            return await _maybe_await(sign_order(request))
-        return OrderExecutionResponse(
-            status="signed",
-            raw_response={
-                "signed": True,
-                "paper_fallback": True,
-                "idempotency_key": request.idempotency_key,
-            },
-            reason="paper_signed_without_live_trading_client",
-        )
-
-    async def submit_order(self, request: OrderExecutionRequest) -> OrderExecutionResponse:
-        """虚拟盘的唯一替换点：不调用 Polymarket post_signed_order。"""
-
-        self.requests.append(("submit", request))
-        if request.side == OrderSide.BUY:
-            return OrderExecutionResponse(
-                status=OrderResultStatus.FULL_FILL,
-                order_id=f"paper-buy-{request.trace_id}",
-                trade_id=f"paper-trade-{request.trace_id}",
-                spent_usdc=request.amount_usdc,
-                raw_response={
-                    "virtual": True,
-                    "side": "BUY",
-                    "source": "real_runtime",
-                    "boundary": "order_submission_payment",
-                },
-                reason="paper_buy_full_fill",
-            )
-        return OrderExecutionResponse(
-            status=OrderResultStatus.LIVE,
-            order_id=f"paper-sell-{request.trace_id}",
-            remaining_shares=request.size_shares,
-            raw_response={
-                "virtual": True,
-                "side": "SELL",
-                "source": "real_runtime",
-                "boundary": "order_submission_payment",
-            },
-            reason="paper_sell_live",
-        )
-
-    async def cancel_order(self, request: OrderExecutionRequest) -> OrderExecutionResponse:
-        self.requests.append(("cancel", request))
-        return OrderExecutionResponse(
-            status=OrderResultStatus.CANCELLED,
-            order_id=request.order_id,
-            raw_response={"virtual": True, "action": "cancel"},
-            reason="paper_cancelled",
-        )
-
-    async def replace_order(self, request: OrderExecutionRequest) -> OrderExecutionResponse:
-        self.requests.append(("replace", request))
-        return OrderExecutionResponse(
-            status=OrderResultStatus.LIVE,
-            order_id=f"paper-replace-{request.trace_id}",
-            remaining_shares=request.size_shares,
-            raw_response={"virtual": True, "action": "replace"},
-            reason="paper_replaced",
-        )
-
-
 def _result_payload(
     *,
     result: TradingDecisionWorkerResult | None,
@@ -375,6 +298,7 @@ def _result_payload(
     paper_client: PaperSubmitOnlyOrderClient,
     outbox: LocalOutbox,
     account_store: AccountStateStore,
+    ledger: PaperVirtualLedger,
 ) -> dict[str, Any]:
     plan = None if result is None else result.plan
     review = None if result is None else result.review
@@ -420,7 +344,44 @@ def _result_payload(
                 entry_order=entry_order,
                 follow_up_intent=None if result is None or not result.follow_up_intents else result.follow_up_intents[0],
                 follow_up_order=follow_up_order,
+                ledger=ledger,
             ),
+            "paper_ledger": {
+                "available_usdc": _decimal_text(ledger.available_usdc),
+                "fees_accrued_usdc": _decimal_text(ledger.fees_accrued_usdc),
+                "positions": {token: _decimal_text(shares) for token, shares in ledger.positions.items()},
+                "cost_basis_usdc": {
+                    token: _decimal_text(cost) for token, cost in ledger.cost_basis_usdc.items()
+                },
+            },
+            "paper_simulations": [
+                {
+                    "trace_id": trace_id,
+                    "status": outcome.response.status if isinstance(outcome.response.status, str)
+                    else getattr(outcome.response.status, "value", None),
+                    "reason": outcome.response.reason,
+                    "matched_shares": _decimal_text(outcome.response.matched_shares),
+                    "spent_usdc": _decimal_text(outcome.response.spent_usdc),
+                    "fee_usdc": None if outcome.fee_quote is None else _decimal_text(outcome.fee_quote.fee_usdc),
+                    "fee_shares": (
+                        None if outcome.fee_quote is None or outcome.fee_quote.fee_shares is None
+                        else _decimal_text(outcome.fee_quote.fee_shares)
+                    ),
+                    "consumed_levels": (
+                        []
+                        if outcome.match_result is None
+                        else [
+                            {
+                                "price": _decimal_text(level.price),
+                                "shares": _decimal_text(level.shares),
+                                "notional_usdc": _decimal_text(level.notional_usdc),
+                            }
+                            for level in outcome.match_result.consumed_levels
+                        ]
+                    ),
+                }
+                for trace_id, outcome in paper_client.simulations
+            ],
             "summary": {
                 "plan_ready": None if plan is None else plan.ready_to_trade,
                 "entry_action": None if plan is None or plan.summary is None else (plan.summary.action or None),
@@ -709,8 +670,9 @@ def _empty_paper_pnl() -> dict[str, Any]:
         "exit_price": None,
         "exit_order_status": None,
         "projected_exit_value_usdc": None,
-        "projected_gross_pnl_usdc": None,
+        "projected_net_pnl_usdc": None,
         "projected_return_pct": None,
+        "fees_paid_usdc": None,
         "warning": "no_virtual_entry_order",
     }
 
@@ -720,17 +682,27 @@ def _paper_pnl_payload(
     entry_order: Any | None,
     follow_up_intent: Any | None,
     follow_up_order: Any | None,
+    ledger: PaperVirtualLedger,
 ) -> dict[str, Any]:
+    """计算虚拟盘 P&L。
+
+    BUY 实际花费来自撮合 raw_response 中的 ``gross_spent_usdc``（含 fee 之前的口袋
+    花费）；账户净持有份额 = 撮合份额 - fee_shares，已落到 ledger。SELL 仍使用
+    follow-up limit 价做投影（GTC 未实际成交），fee 仅含 buy 侧。
+    """
+
     if entry_order is None:
         return _empty_paper_pnl()
     entry_spent = Decimal(str(getattr(entry_order, "spent_usdc", "0") or "0"))
+    # entry_shares 已是 net of buy-side share fee（fill_engine 中 matched_shares 扣过）
     entry_shares = Decimal(str(getattr(entry_order, "matched_shares", "0") or "0"))
+    fees_paid = ledger.fees_accrued_usdc
     if follow_up_intent is None:
         projected_exit_value = entry_shares
         projected_pnl = projected_exit_value - entry_spent
         projected_return_pct = Decimal("0") if entry_spent <= Decimal("0") else projected_pnl / entry_spent * Decimal("100")
         return {
-            "basis": "entry_fill_waiting_for_settlement_gross_no_fees",
+            "basis": "entry_fill_waiting_for_settlement_net_after_taker_fees",
             "realized": False,
             "profitable": projected_pnl > Decimal("0"),
             "entry_price": _decimal_text(getattr(entry_order, "price", None)),
@@ -739,8 +711,9 @@ def _paper_pnl_payload(
             "exit_price": _decimal_text(Decimal("1")),
             "exit_order_status": None,
             "projected_exit_value_usdc": _decimal_text(projected_exit_value),
-            "projected_gross_pnl_usdc": _decimal_text(projected_pnl),
+            "projected_net_pnl_usdc": _decimal_text(projected_pnl),
             "projected_return_pct": _decimal_text(projected_return_pct),
+            "fees_paid_usdc": _decimal_text(fees_paid),
             "warning": "projected_settlement_profit_not_realized_until_resolution",
         }
     exit_price = Decimal(str(getattr(follow_up_intent, "price", "0") or "0"))
@@ -748,7 +721,7 @@ def _paper_pnl_payload(
     projected_pnl = projected_exit_value - entry_spent
     projected_return_pct = Decimal("0") if entry_spent <= Decimal("0") else projected_pnl / entry_spent * Decimal("100")
     return {
-        "basis": "entry_fill_vs_follow_up_limit_gross_no_fees",
+        "basis": "entry_fill_vs_follow_up_limit_net_after_taker_fees",
         "realized": False,
         "profitable": projected_pnl > Decimal("0"),
         "entry_price": _decimal_text(getattr(entry_order, "price", None)),
@@ -757,8 +730,9 @@ def _paper_pnl_payload(
         "exit_price": _decimal_text(exit_price),
         "exit_order_status": None if follow_up_order is None else follow_up_order.status,
         "projected_exit_value_usdc": _decimal_text(projected_exit_value),
-        "projected_gross_pnl_usdc": _decimal_text(projected_pnl),
+        "projected_net_pnl_usdc": _decimal_text(projected_pnl),
         "projected_return_pct": _decimal_text(projected_return_pct),
+        "fees_paid_usdc": _decimal_text(fees_paid),
         "warning": "projected_limit_profit_not_realized_until_exit_fill_or_settlement",
     }
 
@@ -827,12 +801,19 @@ def _resolve_market(
     return None
 
 
-def _orderbook(runtime: Any, token_id: str) -> Any | None:
+def _orderbook(runtime: Any, token_id: str) -> OrderbookSnapshot | None:
     worker = getattr(runtime, "market_ws_worker", None)
     snapshot = None if worker is None else getattr(worker, "snapshot", None)
     if not callable(snapshot):
         return None
     return snapshot(token_id)
+
+
+def _resolve_market_by_token(runtime: Any, token_id: str) -> Market | None:
+    registry = getattr(runtime, "registry", None)
+    if registry is None:
+        return None
+    return registry.get_by_token_id(token_id)
 
 
 def _entry_metadata_for_market(runtime: Any, market: Market) -> dict[str, Any]:
@@ -871,12 +852,6 @@ def _real_sign_client(runtime: Any) -> PolymarketOrderExecutionClient | None:
     if trading_client is None:
         return None
     return PolymarketOrderExecutionClient(trading_client)
-
-
-async def _maybe_await(value: Any) -> Any:
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 def _settings_decimal(runtime: Any, name: str) -> Decimal:

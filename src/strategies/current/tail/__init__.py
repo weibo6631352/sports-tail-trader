@@ -1,20 +1,17 @@
 """体育直播扫尾策略包。
 
-拆分为 types/parsing/leagues/slug/core/mlb/tennis/evaluator 等子模块；
-``__init__`` 统一对外暴露公开类型和评估入口，调用方按
-``from strategies.current.tail import X`` 使用即可。
+通用体育能力（LiveGameState / SportsMarket* / 联赛识别 / 通用 slug 解析）已上提到
+``strategies.sports_framework``；本包内只承载扫尾专属语义（TailPolicy /
+TailEvaluation / 评估器分派 / MLB / Tennis 私有规则）。
+
+为保持外部调用方零改动，``__init__`` 同时 re-export 通用与专属符号；
+``from strategies.current.tail import X`` 仍按以前用法即可。
 """
 
 from __future__ import annotations
 
-from .evaluator import (
-    evaluate_scale_in_opportunity,
-    evaluate_tail_opportunity,
-)
-from .parsing import live_game_state_from_metadata
-from .types import (
-    BaseballGameState,
-    ExecutionPermission,
+from polymarket_trader.domain.sports_live import BaseballGameState
+from strategies.sports_framework import (
     LiveGameState,
     LiveGameStatus,
     SportsMarketFamily,
@@ -23,13 +20,22 @@ from .types import (
     SportsMarketSide,
     SportsMarketSnapshot,
     SportsMarketType,
-    SportsTailCandidate,
-    TailEvaluation,
-    SportsTailOpportunityType,
-    TailPolicy,
-    TailAction,
-    TailRejectReason,
     TennisGameState,
+    live_game_state_from_metadata,
+)
+
+from .evaluator import (
+    evaluate_scale_in_opportunity,
+    evaluate_tail_opportunity,
+)
+from .types import (
+    ExecutionPermission,
+    SportsTailCandidate,
+    SportsTailOpportunityType,
+    TailAction,
+    TailEvaluation,
+    TailPolicy,
+    TailRejectReason,
 )
 
 __all__ = [
@@ -44,10 +50,10 @@ __all__ = [
     "SportsMarketSnapshot",
     "SportsMarketType",
     "SportsTailCandidate",
-    "TailEvaluation",
     "SportsTailOpportunityType",
-    "TailPolicy",
     "TailAction",
+    "TailEvaluation",
+    "TailPolicy",
     "TailRejectReason",
     "TennisGameState",
     "evaluate_scale_in_opportunity",

@@ -47,10 +47,12 @@ def test_virtual_paper_trade_uses_real_runtime_and_only_virtualizes_final_submit
     assert result["summary"]["follow_up_order_status"] == "live"
     assert result["opportunity_funnel"]["auto_execute_count"] == 1
     assert result["rejection_summary"]["total"] == 0
-    assert result["paper_pnl"]["basis"] == "entry_fill_vs_follow_up_limit_gross_no_fees"
+    assert result["paper_pnl"]["basis"] == "entry_fill_vs_follow_up_limit_net_after_taker_fees"
     assert result["paper_pnl"]["realized"] is False
     assert result["paper_pnl"]["profitable"] is True
-    assert result["paper_pnl"]["projected_gross_pnl_usdc"] == "0.102040816326530612"
+    assert result["paper_pnl"]["projected_net_pnl_usdc"] == "0.102040816326530612"
+    # 测试用 Market 未配置 fee_rate_bps，所以 fee 为 0；Decimal("0").quantize 序列化为 "0E-18"
+    assert Decimal(result["paper_pnl"]["fees_paid_usdc"]) == Decimal("0")
 
 
 def test_virtual_paper_trade_does_not_fabricate_trade_without_live_metadata() -> None:

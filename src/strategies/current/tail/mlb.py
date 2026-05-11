@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from .core import _accept, _reject
-from .types import (
-    BaseballGameState,
+from polymarket_trader.domain.sports_live import BaseballGameState
+from strategies.sports_framework import (
     LiveGameState,
     SportsMarketSide,
     SportsMarketSnapshot,
     SportsMarketType,
+)
+
+from .core import _accept, _reject
+from .types import (
     SportsTailCandidate,
     TailEvaluation,
     TailPolicy,

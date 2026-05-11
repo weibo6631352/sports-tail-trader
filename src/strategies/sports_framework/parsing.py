@@ -1,24 +1,25 @@
-"""把外部 metadata（直播源、运行时入参）解析成策略侧 ``LiveGameState``。"""
+"""把外部 metadata（直播源、运行时入参）解析成策略侧 ``LiveGameState``。
+
+``baseball_state`` 直接构造 ``polymarket_trader.domain.sports_live.BaseballGameState``，
+与 infra 归一化保持单一类型源。
+"""
 
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Mapping
 
-from .types import (
-    BaseballGameState,
-    LiveGameState,
-    LiveGameStatus,
-    TennisGameState,
-)
+from polymarket_trader.domain.sports_live import BaseballGameState
+
+from .types import LiveGameState, LiveGameStatus, TennisGameState
 
 
 def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState | None:
     """从策略上下文 metadata 中读取直播比赛状态。
 
     支持两种形态：
-    - `metadata["live_game"]` 是映射对象；
-    - 直接在 metadata 顶层提供 `league/home_score/away_score/status` 等字段。
+    - ``metadata["live_game"]`` 是映射对象；
+    - 直接在 metadata 顶层提供 ``league/home_score/away_score/status`` 等字段。
     """
 
     raw_game = metadata.get("live_game")
@@ -48,12 +49,6 @@ def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState 
         baseball_state=_baseball_state(raw_game.get("baseball_state")),
         tennis_state=_tennis_state(raw_game.get("tennis_state")),
     )
-
-
-def _datetime_text(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return value.isoformat()
 
 
 def _game_status(value: object) -> LiveGameStatus:
@@ -123,8 +118,6 @@ def _tennis_state(value: object) -> TennisGameState | None:
 
 
 def _tennis_set_scores(value: object) -> tuple[tuple[int, int], ...]:
-    """解析直播源透传的每盘局分。"""
-
     if not isinstance(value, (tuple, list)):
         return ()
     scores: list[tuple[int, int]] = []

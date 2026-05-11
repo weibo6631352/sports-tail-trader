@@ -8,6 +8,14 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from strategies.sports_framework import (
+    SportsMarketScopeType,
+    SportsMarketSide,
+    SportsMarketSnapshot,
+    SportsMarketType,
+    TennisGameState,
+)
+
 from .core import _accept, _reject
 from .slug import (
     _is_tennis_set_winner_market,
@@ -15,16 +23,11 @@ from .slug import (
     _tennis_total_scope,
 )
 from .types import (
-    SportsMarketScopeType,
-    SportsMarketSide,
-    SportsMarketSnapshot,
-    SportsMarketType,
     SportsTailCandidate,
-    TailEvaluation,
     SportsTailOpportunityType,
+    TailEvaluation,
     TailPolicy,
     TailRejectReason,
-    TennisGameState,
 )
 
 

@@ -12,6 +12,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from strategies.sports_framework import (
+    LiveGameState,
+    LiveGameStatus,
+    SportsMarketSnapshot,
+    SportsMarketType,
+    is_mlb_game,
+    is_nfl_game,
+    is_tennis_game,
+)
+
 from .core import (
     _accept,
     _candidate,
@@ -28,7 +38,6 @@ from .core import (
     _reject,
     _standard_tail_state_reached,
 )
-from .leagues import _is_mlb_game, _is_nfl_game, _is_tennis_game
 from .mlb import (
     _evaluate_mlb_moneyline,
     _evaluate_mlb_spreads,
@@ -46,13 +55,9 @@ from .tennis import (
 )
 from .types import (
     ExecutionPermission,
-    LiveGameState,
-    LiveGameStatus,
-    SportsMarketSnapshot,
-    SportsMarketType,
     SportsTailCandidate,
-    TailEvaluation,
     SportsTailOpportunityType,
+    TailEvaluation,
     TailPolicy,
     TailRejectReason,
 )
@@ -101,7 +106,7 @@ def evaluate_tail_opportunity(
     if common_reject_reason:
         return _reject(candidate, common_reject_reason.value)
 
-    if _is_mlb_game(game):
+    if is_mlb_game(game):
         if market.market_type == SportsMarketType.TOTALS:
             return _evaluate_mlb_totals(candidate, policy)
         if market.market_type == SportsMarketType.MONEYLINE:
@@ -110,13 +115,13 @@ def evaluate_tail_opportunity(
             return _evaluate_mlb_spreads(candidate, policy)
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
 
-    if _is_nfl_game(game):
+    if is_nfl_game(game):
         return _evaluate_nfl_manual_review(candidate, policy)
 
     if market.market_type == SportsMarketType.BINARY_PROP:
         return _accept(candidate, "binary_prop_requires_specific_model", ExecutionPermission.RECORD_ONLY)
 
-    if _is_tennis_game(game):
+    if is_tennis_game(game):
         if market.market_type == SportsMarketType.TOTALS:
             return _evaluate_tennis_totals(candidate, policy)
         if market.market_type == SportsMarketType.MONEYLINE:
@@ -186,7 +191,7 @@ def evaluate_scale_in_opportunity(
     if common_reject_reason:
         return _reject(candidate, common_reject_reason.value)
 
-    if _is_tennis_game(game):
+    if is_tennis_game(game):
         return _evaluate_tennis_scale_in(candidate, policy)
     if market.market_type == SportsMarketType.TOTALS:
         return _evaluate_totals_scale_in(candidate, policy)
@@ -207,7 +212,7 @@ def _evaluate_ended_not_closed(
     """用最终比分判断已结束但未封盘 market 的确定性方向。"""
 
     market = candidate.market
-    if _is_tennis_game(candidate.game):
+    if is_tennis_game(candidate.game):
         return _evaluate_ended_tennis(candidate, policy)
     if market.market_type == SportsMarketType.TOTALS:
         return _evaluate_ended_totals(candidate, policy)
@@ -283,7 +288,7 @@ def _max_entry_price(
     policy: TailPolicy,
 ) -> Decimal:
     if (
-        _is_tennis_game(game)
+        is_tennis_game(game)
         and _is_tennis_set_winner_market(market)
         and game.tennis_state is not None
         and _tennis_set_winner_completed_for_side(game.tennis_state, market)
@@ -311,9 +316,9 @@ def _is_stale(
     if observed_at.tzinfo is None:
         observed_at = observed_at.replace(tzinfo=timezone.utc)
     age_seconds = (current_time - observed_at).total_seconds()
-    if _is_tennis_game(game):
+    if is_tennis_game(game):
         max_age_seconds = policy.tennis_max_game_state_age_seconds
-    elif _is_mlb_game(game) and game.baseball_state is not None:
+    elif is_mlb_game(game) and game.baseball_state is not None:
         max_age_seconds = policy.baseball_max_game_state_age_seconds
     else:
         max_age_seconds = policy.max_game_state_age_seconds
@@ -357,9 +362,9 @@ def _can_bypass_market_end_window(
 
     if game.status != LiveGameStatus.LIVE:
         return False
-    if _is_tennis_game(game):
+    if is_tennis_game(game):
         return _tennis_tail_state_reached(game, market)
-    if _is_mlb_game(game):
+    if is_mlb_game(game):
         # MLB/KBO 等棒球市场的 Gamma endDate 常是结算展示日期，不是比赛封盘时间。
         # 已拿到结构化局面时，应由局数、出局数、垒上状态和分差决定是否可入场。
         if game.baseball_state is not None:

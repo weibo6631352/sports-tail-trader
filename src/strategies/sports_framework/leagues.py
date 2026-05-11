@@ -5,15 +5,21 @@ from __future__ import annotations
 from .types import LiveGameState
 
 
-def _is_mlb_game(game: LiveGameState) -> bool:
+def is_mlb_game(game: LiveGameState) -> bool:
+    """识别 MLB / KBO 等棒球类联赛。"""
+
     league = game.league.strip().lower()
     return league in {"mlb", "kbo", "baseball", "korean baseball", "korea baseball organization"}
 
 
-def _is_nfl_game(game: LiveGameState) -> bool:
+def is_nfl_game(game: LiveGameState) -> bool:
+    """识别 NFL / 美式橄榄球。"""
+
     return game.league.strip().lower() in {"nfl", "american football"}
 
 
-def _is_tennis_game(game: LiveGameState) -> bool:
+def is_tennis_game(game: LiveGameState) -> bool:
+    """识别网球类联赛（ATP / WTA / 通用 tennis 字样或带 tennis_state）。"""
+
     league = game.league.strip().lower()
     return game.tennis_state is not None or "tennis" in league or league in {"atp", "wta"}
