@@ -56,6 +56,27 @@ require_command() {
   fi
 }
 
+# 项目要求 Python >= 3.12（见 pyproject.toml `requires-python`），但
+# 在 macOS 上 `python3` 默认指向系统自带的 3.9，会让后续 `pip install -e .`
+# 因为 PEP 660 editable 支持缺失而失败。这里优先选择显式版本号；只有
+# 都不在 PATH 时才退化到 `python3`，并且仍要求其版本不低于 3.12。
+select_python_interpreter() {
+  local candidates=(python3.14 python3.13 python3.12)
+  for candidate in "${candidates[@]}"; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  if command -v python3 >/dev/null 2>&1 \
+      && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null; then
+    printf 'python3'
+    return 0
+  fi
+  printf '[start_all] 未找到满足 >=3.12 的 Python (依次尝试 %s 与 python3)\n' "${candidates[*]}" >&2
+  exit 1
+}
+
 find_pg_command() {
   local command_name="$1"
   local bin_dir
@@ -112,7 +133,8 @@ ensure_runtime_python() {
   local expected_mode
   local install_target
 
-  require_command python3
+  local python_interpreter
+  python_interpreter="$(select_python_interpreter)"
   expected_mode="repo"
   if [[ "$PACKAGE_MODE" -eq 1 ]]; then
     expected_mode="bundle"
@@ -129,8 +151,8 @@ ensure_runtime_python() {
   mkdir -p "$RUNTIME_DIR"
   : > "$RUNTIME_INSTALL_LOG"
 
-  log "准备 Python 运行环境"
-  python3 -m venv "$RUNTIME_VENV_DIR" >>"$RUNTIME_INSTALL_LOG" 2>&1
+  log "准备 Python 运行环境 (${python_interpreter})"
+  "$python_interpreter" -m venv "$RUNTIME_VENV_DIR" >>"$RUNTIME_INSTALL_LOG" 2>&1
 
   if [[ "$PACKAGE_MODE" -eq 1 ]]; then
     install_target="本地 wheels"
