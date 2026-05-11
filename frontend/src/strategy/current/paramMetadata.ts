@@ -99,6 +99,18 @@ const META: Record<string, ParamMetadata> = {
     group: '通用 tail 流动性',
     inputHint: 'usdc',
   },
+  'strategy.tail_outright_budget_usdc': {
+    risk: 'high',
+    group: 'Outright 预算',
+    inputHint: 'usdc',
+    hint: 'Outright 家族总预算（USDC）；默认 0 = 全部 outright 拒绝（仅审计）。启用自动交易需 ≥ tail_outright_max_per_market_usdc。',
+  },
+  'strategy.tail_stale_no_live_state_seconds': {
+    risk: 'medium',
+    group: '直播源诊断',
+    inputHint: 'integer',
+    hint: '赛事开始后无直播状态超此秒数 → 主动 pause stale market。默认 86400(24h)；0 = 关闭。',
+  },
 }
 
 export function getParamMetadata(scope: string, key: string): ParamMetadata {
