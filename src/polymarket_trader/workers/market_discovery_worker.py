@@ -24,10 +24,12 @@ _normalize_payload = market_discovery_adapter.normalize_payload
 _payload_signature = market_discovery_adapter.payload_signature
 
 # Gamma 长期翻页 + WS new_market 会持续推新 condition_id；缓存必须有上界，否则
-# 进程驻留期内单调增长（§6 队列/缓存容量上限）。10000 远超目前体育市场池规模，
+# 进程驻留期内单调增长（§6 队列/缓存容量上限）。100000 远超目前体育市场池规模，
 # 触顶意味着发现源出现异常或体育市场极度泛滥，应触发告警；丢弃最老一项即可，
 # 因为权威源仍是 MarketService.registry，缓存只用来去重 audit 噪声。
-_MAX_CACHED_MARKETS = 10_000
+# 容量从 10000 提到 100000，避免在多查询轮转 + 长期发现窗口里被驱逐后，把
+# 同一市场误识别为"首次发现"再次发 MARKET_DISCOVERED（N8）。
+_MAX_CACHED_MARKETS = 100_000
 
 
 def _lru_set(cache: "OrderedDict[str, RawMarketEvent]", key: str, value: RawMarketEvent) -> None:
@@ -223,9 +225,23 @@ class MarketDiscoveryWorker:
         if unchanged_payload and previous_market == current_market:
             return None
 
+        # 同一 market 只能 emit 一次 MARKET_DISCOVERED；后续即便 registry 短暂丢失
+        # existing_market（比如 reconcile 抹掉再补回），只要 worker 自己曾经看过，
+        # 就降级为 MARKET_UPDATED，避免 audit_events 表里同一 condition_id 反复
+        # 落 market_discovered（N8 实测 41049 条 vs 3586 markets）。
+        event_type = outcome.event.event_type
+        discovery_kind = outcome.discovery_kind
+        if (
+            previous is not None
+            and outcome.accepted
+            and event_type == DomainEventType.MARKET_DISCOVERED
+        ):
+            event_type = DomainEventType.MARKET_UPDATED
+            discovery_kind = DomainEventType.MARKET_UPDATED.value
+
         event = MarketDiscoveryEvent(
             trace_id=outcome.trace_id,
-            event_type=outcome.event.event_type,
+            event_type=event_type,
             event_id=outcome.event.event_id,
             market_slug=outcome.event.market_slug,
             event_slug=outcome.event.event_slug,
@@ -248,7 +264,7 @@ class MarketDiscoveryWorker:
                     if outcome.universe_decision is not None
                     else None
                 ),
-                "discovery_kind": outcome.discovery_kind,
+                "discovery_kind": discovery_kind,
                 "market": outcome.event.payload.get("market"),
                 "tracked_market": outcome.event.payload.get("tracked_market"),
                 "subscription_request": outcome.subscription_request,

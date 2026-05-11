@@ -75,6 +75,10 @@ class MarketWsSubscriptionStatus:
 class MarketWsWorkerStatus:
     tracked_market_count: int
     subscription_count: int
+    # connected 反映 WS lifecycle 真实状态：握手成功后 on_connect 置 True，
+    # on_disconnect/on_reconnect 置 False。worker 在 starting 阶段从未握手时
+    # 必须为 False，否则 supervisor.readiness 会误把"未连接"当成"连接已就绪"。
+    connected: bool
     tracked_token_ids: tuple[str, ...]
     subscribed_token_ids: tuple[str, ...]
     resolved_token_ids: tuple[str, ...]
@@ -121,6 +125,9 @@ class MarketWsWorker:
         self._last_message_at: datetime | None = None
         self._last_rest_snapshot_at: datetime | None = None
         self._last_error: str | None = None
+        # ws_loops 的 on_connect/on_disconnect/on_reconnect lifecycle hook 维护
+        # 这个标志。未握手前一直为 False，避免"无 last_error 即视为已连接"误报。
+        self._is_connected: bool = False
 
     def track_market(self, market: Market) -> None:
         tracked_token_ids = market.token_ids
@@ -317,9 +324,16 @@ class MarketWsWorker:
     def status_snapshot(self, *, include_subscriptions: bool = True) -> MarketWsWorkerStatus:
         if not include_subscriptions:
             recent_results = tuple(self._recent_results)
+            # tracked_market_count 是已注册关注的 token 总数；
+            # subscription_count 只计算真正通过 WS 订阅成功（state.subscribed_at 非空）的 token，
+            # 否则 metrics 端 subscribed_count 会被"仅注册未订阅"的 token 污染（F6）。
+            subscription_count = sum(
+                1 for state in self._states.values() if state.subscribed_at is not None
+            )
             return MarketWsWorkerStatus(
                 tracked_market_count=len(self._tracked_markets),
-                subscription_count=len(self._tracked_markets),
+                subscription_count=subscription_count,
+                connected=self._is_connected,
                 tracked_token_ids=(),
                 subscribed_token_ids=(),
                 resolved_token_ids=(),
@@ -385,6 +399,7 @@ class MarketWsWorker:
         return MarketWsWorkerStatus(
             tracked_market_count=len(tracked_token_ids),
             subscription_count=len(subscribed_token_ids),
+            connected=self._is_connected,
             tracked_token_ids=tracked_token_ids,
             subscribed_token_ids=tuple(subscribed_token_ids),
             resolved_token_ids=tuple(resolved_token_ids),
@@ -408,6 +423,15 @@ class MarketWsWorker:
         """连接恢复或收到有效盘口后清除全局错误，避免陈旧错误阻断 readiness。"""
 
         self._last_error = None
+
+    def set_connection_state(self, connected: bool) -> None:
+        """由 ws_loops 在 lifecycle hook 中切换真实连接状态。
+
+        readiness 计算严格依赖这个标志：starting 阶段未握手时必须为 False，
+        否则 supervisor 会把"未连接"当成"已连接"误开闸（CLAUDE.md §10）。
+        """
+
+        self._is_connected = bool(connected)
 
     def buyable_depth(self, token_id: str, price_limit: Decimal | None = None) -> Decimal:
         state = self._states.get(token_id)

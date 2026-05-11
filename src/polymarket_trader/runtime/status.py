@@ -59,6 +59,9 @@ class SchedulerJob:
     tags: tuple[str, ...] = ()
     last_started_at: datetime | None = None
     last_finished_at: datetime | None = None
+    # 直接由 scheduler 在每次运行结束时计算 finished-started，避免外部观测者用
+    # "上一轮 finished - 当前轮 started" 算出负值（N9）。
+    last_duration_ms: float | None = None
     next_run_at: datetime | None = None
     last_error: str | None = None
 

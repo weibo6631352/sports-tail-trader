@@ -297,9 +297,10 @@ class Supervisor:
         persistence: Mapping[str, Any],
     ) -> ReadinessSnapshot:
         config_ready = _bool(settings_readiness, "ready_to_trade")
+        # MarketWsWorkerStatus.connected 由 ws_loops lifecycle hook 维护，
+        # starting 阶段未握手时严格为 False；这里不再 fallback 到 "无 last_error"
+        # 推断，否则会复现 N12 的"假性 connected"（CLAUDE.md §10 可审计原因）。
         market_ws_connected = _bool(market_ws, "connected")
-        if "connected" not in market_ws:
-            market_ws_connected = market_ws.get("last_error") in {None, ""}
         user_ws_connected = _bool(user_ws, "connected", _bool(account_snapshot, "user_ws_connected"))
         last_reconcile_at = _datetime(account_snapshot, "last_reconcile_at") or _datetime(
             reconcile,

@@ -69,6 +69,43 @@ def test_discovery_state_restarts_at_front_when_live_queries_are_added() -> None
     assert state.next_query(live_queries).name == "live_game:tennis:1:erhard nedic"
 
 
+def test_record_page_does_not_reset_consecutive_failures_until_round_finishes() -> None:
+    """F5：单页成功不清零失败计数；只有 finish_round 算"整轮稳定"才清零。
+
+    旧实现每个 success page 都执行 ``consecutive_failures = 0``，结果
+    "失败 → success → 再失败" 序列里指数回退计数器永远停在 1，永远只回退 5s，
+    实际从未升到 10/20/40/60s。这违反 N7 指数回退设计意图。
+    """
+
+    state = discovery_runner.FullMarketDiscoveryState()
+
+    # 模拟连续失败累积。
+    state.record_failure("gamma timeout")
+    state.record_failure("gamma timeout")
+    assert state.consecutive_failures == 2
+    # 第二次失败时按指数回退应该 ≥ 10s，而不是基础 5s。
+    assert discovery_runner._retry_backoff_seconds(state.consecutive_failures) == 10
+
+    # 中间夹一次单页 success 不应该清零失败计数。
+    state.record_page(
+        query_name="q1",
+        total_queries=2,
+        page_size=5,
+        next_cursor="cursor-1",
+    )
+    assert state.consecutive_failures == 2, "单页 success 不能让回退器重置（F5）"
+
+    # 再失败一次：回退应该继续升级到 20s。
+    state.record_failure("gamma timeout")
+    assert state.consecutive_failures == 3
+    assert discovery_runner._retry_backoff_seconds(state.consecutive_failures) == 20
+
+    # 只有整轮完成才认为系统稳定，清零计数器。
+    state.completed_query_names = {"q1", "q2"}
+    state.finish_round()
+    assert state.consecutive_failures == 0
+
+
 def test_live_event_expansion_uses_stale_live_metadata_event_slugs() -> None:
     now = datetime(2026, 4, 29, 9, 20, tzinfo=timezone.utc)
     state = discovery_runner.FullMarketDiscoveryState()
