@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
+from polymarket_trader.app.admin_query.runtime import AdminRuntimeQueryMixin
 
-class AdminQueryMixin:
+
+class AdminQueryMixin(AdminRuntimeQueryMixin):
     """admin 只读查询方法聚合。
 
     每次抽取一个子 mixin 时，将其加入到本类的基类元组；当前为骨架，
