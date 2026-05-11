@@ -25,10 +25,12 @@ from typing import Any, Awaitable, Callable, Iterable, Mapping
 from uuid import uuid4
 
 from polymarket_trader.domain.events import (
+    AuditEvent,
     DomainEvent,
     DomainEventType,
     OutboxPriority,
 )
+from polymarket_trader.infra.db import RepositoryPage
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +53,9 @@ class _ResolvedMarket:
 
 GammaMarketByConditionLookup = Callable[[str], Awaitable[Any | None]]
 PositionsProvider = Callable[[], Iterable[Any]]
-AuditEventsQuery = Callable[..., Awaitable[Any]]
+# AuditEventRepository.list_audit_events_snapshot 返回 RepositoryPage[AuditEvent]——
+# 收紧契约让 callsite 不需要 hasattr/dict 兼容兜底（之前 Any 的双形态歧义）。
+AuditEventsQuery = Callable[..., Awaitable[RepositoryPage[AuditEvent]]]
 EventBus = Any  # 与 main.RuntimeComponents.event_bus 一致
 
 
@@ -137,8 +141,7 @@ class SettlementScannerService:
             event_title=DomainEventType.MARKET_SETTLED.value,
             condition_id=condition_id,
         )
-        items = page.items if hasattr(page, "items") else page.get("items", ())
-        return bool(items)
+        return bool(page.items)
 
     async def _lookup_resolution(self, condition_id: str) -> _ResolvedMarket | None:
         payload = await self._lookup_by_condition(condition_id)

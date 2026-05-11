@@ -6,11 +6,14 @@ import logging
 from typing import Any, Mapping
 
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
+from polymarket_trader.config import Settings
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.runtime.event_bus import QueueDepthSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
+from polymarket_trader.runtime.status import RuntimeSnapshot
 from polymarket_trader.serialization import utc_now
+from polymarket_trader.workers.sports_live_state_worker import SportsLiveSyncResult
 
 logger = logging.getLogger(__name__)
 _RUNTIME_MARKET_SAMPLE_LIMIT = 20
@@ -141,7 +144,9 @@ class AdminRuntimeView:
         if not callable(snapshot):
             return {}
         value = snapshot()
-        payload = value.as_dict() if hasattr(value, "as_dict") else jsonable(value)
+        # 生产路径返回 RuntimeSnapshot dataclass；少数 test stub 可能返裸 mapping，
+        # 后者用 jsonable 兜底——isinstance narrow 替代 hasattr 反射。
+        payload = value.as_dict() if isinstance(value, RuntimeSnapshot) else jsonable(value)
         return dict(payload) if isinstance(payload, Mapping) else {}
 
     def _readiness_payload(self, supervisor: Mapping[str, Any]) -> dict[str, Any]:
@@ -281,7 +286,9 @@ class AdminRuntimeView:
         settings = self._settings()
         if settings is None:
             return {}
-        if hasattr(settings, "sanitized_dump"):
+        # 生产路径 settings 是 polymarket_trader.config.Settings（含 sanitized_dump
+        # 脱敏 secret 字段）。test stub 可能传 SimpleNamespace → 走 jsonable 兜底。
+        if isinstance(settings, Settings):
             return settings.sanitized_dump()
         return jsonable(settings)
 
@@ -430,7 +437,8 @@ class AdminRuntimeView:
         worker = getattr(self.runtime, "sports_live_state_worker", None)
         if worker is not None and callable(getattr(worker, "status_snapshot", None)):
             status = worker.status_snapshot()
-            if hasattr(status, "as_dict"):
+            # 生产路径返回 SportsLiveSyncResult dataclass；test stub 走 jsonable 兜底。
+            if isinstance(status, SportsLiveSyncResult):
                 return status.as_dict()
             payload = jsonable(status)
             return dict(payload) if isinstance(payload, Mapping) else {"value": payload}
