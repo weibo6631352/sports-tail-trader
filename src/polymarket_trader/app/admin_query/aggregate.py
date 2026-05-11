@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
+from polymarket_trader.app.admin_query.market import AdminMarketQueryMixin
 from polymarket_trader.app.admin_query.runtime import AdminRuntimeQueryMixin
 from polymarket_trader.app.admin_query.sports import AdminSportsQueryMixin
 
 
 class AdminQueryMixin(
     AdminRuntimeQueryMixin,
+    AdminMarketQueryMixin,
     AdminSportsQueryMixin,
 ):
     """admin 只读查询方法聚合。
