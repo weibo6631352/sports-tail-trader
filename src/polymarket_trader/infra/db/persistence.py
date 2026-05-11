@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.allocation import Allocation
+from polymarket_trader.domain.decisions import DecisionRecord
 from polymarket_trader.domain.events import AuditEvent, Fill, OutboxEvent
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
@@ -17,6 +18,7 @@ from polymarket_trader.infra.db.record_mappers import (
     account_snapshot_from_record,
     allocation_from_record,
     audit_event_from_record,
+    decision_record_from_record,
     fill_from_record,
     market_from_record,
     order_from_record,
@@ -28,6 +30,7 @@ from polymarket_trader.infra.db.repositories import (
     AccountSnapshotRepository,
     AllocationRepository,
     AuditEventRepository,
+    DecisionRecordRepository,
     FillRepository,
     MarketRepository,
     OrderRepository,
@@ -47,6 +50,7 @@ class _RepositoryGroup:
     order: OrderRepository
     fill: FillRepository
     position: PositionRepository
+    decision: DecisionRecordRepository
     outbox: OutboxEventRepository
 
 
@@ -255,6 +259,22 @@ class DatabasePersistenceRepository:
 
         return await self._with_repositories(write)
 
+    async def save_decision_record(self, record: Mapping[str, Any]) -> int:
+        return await self.save_decision_records([record])
+
+    async def save_decision_records(self, records: Sequence[Mapping[str, Any]]) -> int:
+        decisions: list[DecisionRecord] = []
+        for record in records:
+            decision = decision_record_from_record(record)
+            if decision is None:
+                continue
+            decisions.append(decision)
+        if not decisions:
+            return 0
+        return await self._with_repositories(
+            lambda repos: repos.decision.save_decision_records(decisions)
+        )
+
     async def save_outbox_event(self, record: Mapping[str, Any]) -> int:
         return await self.save_outbox_events([record])
 
@@ -284,6 +304,7 @@ class DatabasePersistenceRepository:
                 order=OrderRepository(session),
                 fill=FillRepository(session),
                 position=PositionRepository(session),
+                decision=DecisionRecordRepository(session),
                 outbox=OutboxEventRepository(session),
             )
             result = await callback(repositories)

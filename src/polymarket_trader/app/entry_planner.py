@@ -17,11 +17,13 @@ from polymarket_trader.extension_api import (
     ExtensionHooks,
     MarketTokenView,
 )
+from polymarket_trader.app.decision_recorder import (
+    DecisionEventRecorder,
+    build_decision_record_from_hook,
+)
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
-from polymarket_trader.extension_api.recorder import DecisionRecorder
 from polymarket_trader.extension_api.summary import StrategySummary
 from polymarket_trader.observability.trace import ensure_trace_id
-from polymarket_trader.runtime.decision_recorder import build_decision_record
 from polymarket_trader.runtime.registry import MarketRegistry
 
 OrderbookReader = Callable[[str], OrderbookSnapshot | None]
@@ -34,7 +36,7 @@ class EntryPlanner:
         extension_hooks: ExtensionHooks,
         registry: MarketRegistry | None = None,
         orderbook_reader: OrderbookReader | None = None,
-        decision_recorder: DecisionRecorder | None = None,
+        decision_recorder: DecisionEventRecorder | None = None,
     ) -> None:
         self._extension_hooks = extension_hooks
         self._registry = registry
@@ -430,7 +432,7 @@ class EntryPlanner:
     ) -> None:
         if self._decision_recorder is None:
             return
-        record = build_decision_record(
+        record = build_decision_record_from_hook(
             hook_name=hook_name,
             trace_id=context.trace_id,
             context=context,
@@ -439,10 +441,11 @@ class EntryPlanner:
             token_id=context.token_id,
             market_slug=context.market.market_slug if context.market is not None else None,
         )
-        try:
-            self._decision_recorder.record(record)
-        except Exception:
+        if record is None:
             return
+        # DecisionEventRecorder.record 内部已经吞掉所有异常并仅做 outbox.put_nowait，
+        # 不会反向阻塞决策返回；这里不再额外 try/except。
+        self._decision_recorder.record(record)
 
 
 def _entry_account_inputs(

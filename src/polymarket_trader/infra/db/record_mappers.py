@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 
 from polymarket_trader.domain.account import AccountSnapshot, MarketPause
 from polymarket_trader.domain.allocation import Allocation
+from polymarket_trader.domain.decisions import DecisionRecord
 from polymarket_trader.domain.events import AuditEvent, Fill, OutboxEvent
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.order import Order, OrderSide, OrderStatus, OrderType
@@ -514,6 +515,31 @@ def allocation_from_record(record: Mapping[str, Any]) -> Allocation | None:
         reason=_text(record.get("reason")) or "",
         idempotency_key=_text(record.get("idempotency_key")),
         release_reason=_text(record.get("release_reason")) or "",
+    )
+
+
+def decision_record_from_record(record: Mapping[str, Any]) -> DecisionRecord | None:
+    trace_id = _text(record.get("trace_id"))
+    condition_id = _text(record.get("condition_id"))
+    record_id = _text(record.get("record_id"))
+    if trace_id is None or condition_id is None or record_id is None:
+        _log_skip("decision", record, "missing trace_id/condition_id/record_id")
+        return None
+    decision_input = _mapping(record.get("decision_input")) or {}
+    decision_output = _mapping(record.get("decision_output")) or {}
+    accepted = bool(record.get("accepted") or False)
+    return DecisionRecord(
+        record_id=record_id,
+        trace_id=trace_id,
+        condition_id=condition_id,
+        hook_name=_text(record.get("hook_name")) or "",
+        token_id=_text(record.get("token_id")),
+        market_slug=_text(record.get("market_slug")),
+        decision_input=decision_input,
+        decision_output=decision_output,
+        accepted=accepted,
+        reason=_text(record.get("reason")),
+        created_at=_datetime(record.get("created_at"), _utc_now()) or _utc_now(),
     )
 
 

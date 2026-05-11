@@ -3,6 +3,10 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Iterable, Mapping
 
+from polymarket_trader.app.decision_recorder import (
+    DecisionEventRecorder,
+    build_decision_record_from_hook,
+)
 from polymarket_trader.app.extension_intent_builder import decision_to_managed_intent
 from polymarket_trader.app.entry_plan import EntryPlan
 from polymarket_trader.app.entry_planner import OrderbookReader, EntryPlanner
@@ -13,8 +17,6 @@ from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.extension_api import ExtensionContext, ExtensionDecision, ExtensionHooks
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
-from polymarket_trader.extension_api.recorder import DecisionRecorder
-from polymarket_trader.runtime.decision_recorder import build_decision_record
 from polymarket_trader.runtime.registry import MarketRegistry
 
 
@@ -27,7 +29,7 @@ class TradingDecisionService:
         extension_hooks: ExtensionHooks,
         registry: MarketRegistry | None = None,
         orderbook_reader: OrderbookReader | None = None,
-        decision_recorder: DecisionRecorder | None = None,
+        decision_recorder: DecisionEventRecorder | None = None,
     ) -> None:
         self._extension_hooks = extension_hooks
         self._registry = registry
@@ -102,7 +104,7 @@ class TradingDecisionService:
     ) -> None:
         if self._decision_recorder is None:
             return
-        record = build_decision_record(
+        record = build_decision_record_from_hook(
             hook_name=hook_name,
             trace_id=context.trace_id,
             context=context,
@@ -111,11 +113,11 @@ class TradingDecisionService:
             token_id=context.token_id,
             market_slug=context.market.market_slug if context.market is not None else None,
         )
-        try:
-            self._decision_recorder.record(record)
-        except Exception:
-            # 录制失败不能影响主链路决策返回。
+        if record is None:
             return
+        # DecisionEventRecorder.record 内部把异常吞掉并仅做 outbox.put_nowait，
+        # 决策返回不会被反向阻塞，这里不再额外 try/except。
+        self._decision_recorder.record(record)
 
     def resolve_market(
         self,

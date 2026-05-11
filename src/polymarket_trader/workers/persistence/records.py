@@ -38,6 +38,7 @@ _FILL_EVENT_TYPES = {
     DomainEventType.TRADE_CONFIRMED.value,
 }
 _POSITION_EVENT_TYPES = {DomainEventType.POSITION_UPDATED.value}
+_DECISION_EVENT_TYPES = {DomainEventType.DECISION_RECORDED.value}
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +67,16 @@ class PersistenceRecordBuilder:
         event_type = _event_type_text(event)
         payload = dict(event.payload)
 
+        # DECISION_RECORDED 是策略 hook 录制，专写 ``decision_records`` 表；
+        # 它的 input/output payload 体积可观且语义与 audit / order 完全不重叠，
+        # 因此独立成 kind，不再投到 audit_events，避免 audit 表被复盘数据稀释。
+        if event_type in _DECISION_EVENT_TYPES:
+            decision_record = self._build_decision_record(event, payload)
+            if decision_record is not None:
+                records.append(("decision", decision_record))
+            records.append(("outbox", self._build_outbox_record(event, payload)))
+            return records
+
         records.append(("audit", self._build_audit_record(event, payload)))
         for record in self._build_allocation_records(event, payload):
             records.append(("allocation", record))
@@ -91,6 +102,29 @@ class PersistenceRecordBuilder:
 
         records.append(("outbox", self._build_outbox_record(event, payload)))
         return records
+
+    def _build_decision_record(
+        self,
+        event: OutboxEvent,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        record_id = _first(payload, "record_id") or event.event_id
+        if record_id is None:
+            return None
+        return {
+            "idempotency_key": _kind_idempotency_key("decision", event),
+            "record_id": str(record_id),
+            "trace_id": event.trace_id,
+            "hook_name": _first(payload, "hook_name"),
+            "condition_id": event.condition_id or _first(payload, "condition_id"),
+            "token_id": event.token_id or _first(payload, "token_id"),
+            "market_slug": event.market_slug or _first(payload, "market_slug"),
+            "decision_input": jsonable(_first(payload, "decision_input") or {}),
+            "decision_output": jsonable(_first(payload, "decision_output") or {}),
+            "accepted": bool(_first(payload, "accepted") or False),
+            "reason": event.reason if event.reason is not None else _first(payload, "reason"),
+            "created_at": jsonable(event.created_at),
+        }
 
     def _build_audit_record(self, event: OutboxEvent, payload: Mapping[str, Any]) -> dict[str, Any]:
         audit_payload = dict(payload)

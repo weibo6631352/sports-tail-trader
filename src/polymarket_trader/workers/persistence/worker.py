@@ -64,6 +64,10 @@ class PersistenceRepository(Protocol):
 
     async def save_allocations(self, records: Sequence[Mapping[str, Any]]) -> Any: ...
 
+    async def save_decision_record(self, record: Mapping[str, Any]) -> Any: ...
+
+    async def save_decision_records(self, records: Sequence[Mapping[str, Any]]) -> Any: ...
+
     async def save_outbox_event(self, record: Mapping[str, Any]) -> Any: ...
 
     async def save_outbox_events(self, records: Sequence[Mapping[str, Any]]) -> Any: ...
@@ -300,7 +304,17 @@ class PersistenceWorker:
         success_record_counts: Counter[str] = Counter()
         failed_events: dict[str, str] = {}
         route_write_counts: Counter[str] = Counter()
-        route_order = ("audit", "market", "orderbook", "order", "fill", "position", "allocation", "outbox")
+        route_order = (
+            "audit",
+            "market",
+            "orderbook",
+            "order",
+            "fill",
+            "position",
+            "allocation",
+            "decision",
+            "outbox",
+        )
 
         for kind in route_order:
             kind_items = [item for item in planned_records if item.kind == kind]
@@ -490,6 +504,7 @@ class PersistenceWorker:
             "fill": ("save_fills", "save_fill"),
             "position": ("save_positions", "save_position"),
             "allocation": ("save_allocations", "save_allocation"),
+            "decision": ("save_decision_records", "save_decision_record"),
             "outbox": ("save_outbox_events", "save_outbox_event"),
         }
         candidates = method_names.get(kind)

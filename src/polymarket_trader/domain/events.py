@@ -78,6 +78,7 @@ class DomainEventType(StrEnum):
     UNEXPECTED_RESTING_ORDER_DETECTED = "unexpected_resting_order_detected"
     TRADE_MINED = "trade_mined"
     TRADE_CONFIRMED = "trade_confirmed"
+    DECISION_RECORDED = "decision_recorded"
     RETRY = "retry"
     SKIPPED = "skipped"
     ERROR = "error"

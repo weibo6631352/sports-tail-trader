@@ -17,6 +17,7 @@ from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.infra.db import (
     AllocationRepository,
     AuditEventRepository,
+    DecisionRecordRepository,
     FillRepository,
     MarketRepository,
     OrderRepository,
@@ -45,6 +46,7 @@ class _RepositoryGroup:
     fill: FillRepository
     position: PositionRepository
     allocation: AllocationRepository
+    decision: DecisionRecordRepository
     outbox: OutboxEventRepository
 
 

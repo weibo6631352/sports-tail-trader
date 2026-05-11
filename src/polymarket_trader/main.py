@@ -75,7 +75,7 @@ from polymarket_trader.runtime.discovery_runner import (
     MARKET_DISCOVERY_TICK_SECONDS,
     run_market_discovery_scan,
 )
-from polymarket_trader.runtime.decision_recorder import InMemoryDecisionRecorder
+from polymarket_trader.app.decision_recorder import DecisionEventRecorder
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
 from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics as _sync_runtime_metrics
@@ -147,7 +147,6 @@ class RuntimeComponents:
     maintenance_process_pool: ProcessPoolExecutor
     background_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
     admin_service: object | None = None
-    decision_recorder: InMemoryDecisionRecorder | None = None
     sse_subscription_registry: SseSubscriptionRegistry | None = None
     bootstrap_summary: dict[str, Any] = field(default_factory=dict)
 
@@ -352,7 +351,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         market_tracker=market_ws_worker,
         account_snapshot_provider=account_state_store.snapshot,
     )
-    decision_recorder = InMemoryDecisionRecorder()
+    decision_recorder = DecisionEventRecorder(outbox=outbox)
     trading_decision_service = TradingDecisionService(
         extension_hooks=extension.hooks,
         registry=registry,
@@ -494,7 +493,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         trading_decision_service=trading_decision_service,
         trading_service=trading_service,
         trading_decision_worker=trading_decision_worker,
-        decision_recorder=decision_recorder,
         reconcile_service=reconcile_service,
         reconcile_worker=reconcile_worker,
         scheduler=scheduler,

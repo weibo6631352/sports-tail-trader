@@ -189,7 +189,8 @@ _README_TEMPLATE = """# {display} 策略骨架
 orderbook 计算 / Decimal 取整 / 仓位投影 / 幂等 key / 市场过滤 DSL / 时间窗。
 
 ## 复盘
-framework 会通过 `InMemoryDecisionRecorder` 记录每次 hook 调用；
+framework 会通过 outbox 把每次 hook 调用以 `DECISION_RECORDED` 事件落到
+`decision_records` 表；admin GET `/admin/decisions/dump` 暴露查询接口，
 对比新旧决策用 `polymarket_trader.app.replay_harness.replay_records`。
 """
 

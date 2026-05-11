@@ -31,11 +31,6 @@ from polymarket_trader.extension_api.lifecycle import (
 )
 from polymarket_trader.extension_api.live_state import LiveStateMatch
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
-from polymarket_trader.extension_api.recorder import (
-    DecisionRecord,
-    DecisionRecorder,
-    dump_records_to_jsonl,
-)
 from polymarket_trader.extension_api.manifest import (
     BusinessExtension,
     ConfigValidator,
@@ -70,8 +65,6 @@ __all__ = (
     "ConfigReadPort",
     "ConfigValidator",
     "DecisionKind",
-    "DecisionRecord",
-    "DecisionRecorder",
     "DomainEventType",
     "DiscoveryQuery",
     "EntryCandidate",
@@ -106,7 +99,6 @@ __all__ = (
     "TelemetryEvent",
     "TelemetryPort",
     "UniverseDecision",
-    "dump_records_to_jsonl",
     "load_extension_config",
     "load_mapping_file",
     "toolkit",

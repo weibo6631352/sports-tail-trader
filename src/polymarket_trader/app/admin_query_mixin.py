@@ -34,10 +34,29 @@ from polymarket_trader.app.admin_service_helpers import (
     _sort_markets,
 )
 from polymarket_trader.app.trade_replay import TradeReplayFilters, build_trade_replay_records
+from polymarket_trader.domain.decisions import DecisionRecord
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
 from polymarket_trader.infra.polymarket import PolymarketClientError
+
+
+def _decision_record_payload(record: DecisionRecord) -> dict[str, Any]:
+    """决策录制行的 admin 视图——保持字段命名与 DB 列对齐。"""
+
+    return {
+        "record_id": record.record_id,
+        "trace_id": record.trace_id,
+        "hook_name": record.hook_name or None,
+        "condition_id": record.condition_id,
+        "token_id": record.token_id,
+        "market_slug": record.market_slug,
+        "decision_input": dict(record.decision_input),
+        "decision_output": dict(record.decision_output),
+        "accepted": record.accepted,
+        "reason": record.reason,
+        "created_at": jsonable(record.created_at),
+    }
 
 
 class AdminQueryMixin:
@@ -645,32 +664,38 @@ class AdminQueryMixin:
     def metrics_snapshot(self) -> dict[str, Any]:
         return self._runtime_view().metrics_snapshot()
 
-    def dump_decision_records(self) -> dict[str, Any]:
-        """暴露当前进程 ``InMemoryDecisionRecorder`` 最近决策。
+    async def list_decisions(
+        self,
+        *,
+        limit: int = 1000,
+        offset: int = 0,
+        trace_id: str | None = None,
+        condition_id: str | None = None,
+        accepted: bool | None = None,
+        time_range: TimeRange | None = None,
+    ) -> dict[str, Any]:
+        """暴露 ``decision_records`` 表（策略 hook 决策录制）。
 
-        给 ``polymarket_trader.tools.replay_decisions dump-recorder`` CLI 抓取。
+        DB 是决策历史唯一真相来源——内存 ring buffer 已删除，无 DB 时返回空集，
+        不再退化到本地缓存，避免实盘场景"看似还能 dump 但少了几小时事件"的歧义。
         """
 
-        recorder = getattr(self.runtime, "decision_recorder", None)
-        if recorder is None:
-            return {"records": []}
-        snapshot = recorder.snapshot()
-        records = []
-        for record in snapshot:
-            records.append(
-                {
-                    "hook_name": record.hook_name,
-                    "trace_id": record.trace_id,
-                    "recorded_at": record.recorded_at.isoformat(),
-                    "condition_id": record.condition_id,
-                    "token_id": record.token_id,
-                    "market_slug": record.market_slug,
-                    "context_payload": dict(record.context_payload),
-                    "decision_payload": dict(record.decision_payload),
-                    "extras": dict(record.extras),
-                }
+        if not self._has_db_session_factory():
+            page: RepositoryPage[Any] = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
+            return page_payload(page, serializer=_decision_record_payload)
+
+        async def _query(repos: _RepositoryGroup) -> RepositoryPage[Any]:
+            return await repos.decision.list_decisions_snapshot(
+                limit=limit,
+                offset=offset,
+                trace_id=trace_id,
+                condition_id=condition_id,
+                accepted=accepted,
+                time_range=time_range,
             )
-        return {"records": records}
+
+        page = await self._with_repositories(_query)
+        return page_payload(page, serializer=_decision_record_payload)
 
 
     async def list_sports_live_states(

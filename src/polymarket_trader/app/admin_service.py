@@ -30,6 +30,7 @@ from polymarket_trader.workers.trading_decision import (
 from polymarket_trader.infra.db import (
     AllocationRepository,
     AuditEventRepository,
+    DecisionRecordRepository,
     FillRepository,
     MarketRepository,
     OrderRepository,
@@ -344,6 +345,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
                 fill=FillRepository(session),
                 position=PositionRepository(session),
                 allocation=AllocationRepository(session),
+                decision=DecisionRecordRepository(session),
                 outbox=OutboxEventRepository(session),
             )
             return await callback(repositories)
