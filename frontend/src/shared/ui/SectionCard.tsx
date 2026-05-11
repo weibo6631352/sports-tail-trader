@@ -1,28 +1,36 @@
+import { Card, Group, Stack, Text, type CardProps } from '@mantine/core'
 import type { ReactNode } from 'react'
 
-interface SectionCardProps {
-  title: string
-  subtitle?: string
+type Props = CardProps & {
+  title?: ReactNode
+  description?: ReactNode
   actions?: ReactNode
   children: ReactNode
 }
 
-export const SectionCard = ({
-  title,
-  subtitle,
-  actions,
-  children,
-}: SectionCardProps) => {
+export function SectionCard({ title, description, actions, children, ...rest }: Props) {
   return (
-    <section className="section-card">
-      <div className="section-card__header">
-        <div>
-          <h2>{title}</h2>
-          {subtitle ? <p>{subtitle}</p> : null}
-        </div>
-        {actions ? <div className="section-card__actions">{actions}</div> : null}
-      </div>
-      <div className="section-card__body">{children}</div>
-    </section>
+    <Card padding="md" radius="md" {...rest}>
+      {(title || actions) && (
+        <Group justify="space-between" align="flex-start" mb="sm" wrap="nowrap">
+          <Stack gap={2}>
+            {title ? (
+              typeof title === 'string' ? (
+                <Text fw={600}>{title}</Text>
+              ) : (
+                title
+              )
+            ) : null}
+            {description ? (
+              <Text c="dimmed" size="xs">
+                {description}
+              </Text>
+            ) : null}
+          </Stack>
+          {actions}
+        </Group>
+      )}
+      {children}
+    </Card>
   )
 }

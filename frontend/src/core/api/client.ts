@@ -1,100 +1,107 @@
-import { appEnv } from '../config/env'
+import { ApiError } from './errors'
 
-export class ApiError extends Error {
-  status: number
-  detail: unknown
+const API_BASE = '/api'
 
-  constructor(message: string, status: number, detail: unknown) {
-    super(message)
-    this.name = 'ApiError'
-    this.status = status
-    this.detail = detail
+export type QueryValue = string | number | boolean | null | undefined
+export type QueryParams = Record<string, QueryValue | QueryValue[]>
+
+/**
+ * 所有 HTTP 方法统一对象参数：未来给任何方法加 params / signal / headers 时
+ * 不需要改签名，callsite 也不会因位置参数搬位而摔。
+ */
+export type RequestOptions = {
+  params?: QueryParams
+  body?: unknown
+  signal?: AbortSignal
+}
+
+function buildUrl(path: string, params?: QueryParams): string {
+  const url = `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`
+  if (!params) return url
+  const query = new URLSearchParams()
+  for (const [key, raw] of Object.entries(params)) {
+    if (raw === undefined || raw === null) continue
+    if (Array.isArray(raw)) {
+      for (const v of raw) {
+        if (v === undefined || v === null) continue
+        query.append(key, String(v))
+      }
+    } else {
+      query.append(key, String(raw))
+    }
   }
+  const qs = query.toString()
+  return qs ? `${url}?${qs}` : url
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null
-}
-
-const buildUrl = (path: string): string => `${appEnv.apiBaseUrl}${path}`
-
-export const buildSearch = (params: Record<string, unknown>): string => {
-  const search = new URLSearchParams()
-  Object.entries(params).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === '') {
-      return
+async function parseError(response: Response, url: string): Promise<ApiError> {
+  let detail: unknown = null
+  let message = response.statusText || 'request failed'
+  const contentType = response.headers.get('content-type') ?? ''
+  try {
+    if (contentType.includes('application/json')) {
+      const body = await response.json()
+      detail = body
+      if (body && typeof body === 'object' && 'detail' in (body as Record<string, unknown>)) {
+        const inner = (body as Record<string, unknown>).detail
+        if (typeof inner === 'string') message = inner
+      }
+    } else {
+      const text = await response.text()
+      detail = text
+      if (text) message = text.slice(0, 200)
     }
-    if (Array.isArray(value)) {
-      value.forEach((item) => search.append(key, String(item)))
-      return
-    }
-    search.set(key, String(value))
+  } catch {
+    // 服务端返回了无法解析的体，保留 statusText 兜底信息。
+  }
+  const retryAfter = response.headers.get('retry-after')
+  const retryAfterSeconds = retryAfter ? Number(retryAfter) : null
+  return new ApiError({
+    status: response.status,
+    detail,
+    message,
+    url,
+    retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : null,
   })
-  const serialized = search.toString()
-  return serialized ? `?${serialized}` : ''
 }
 
-const parseErrorDetail = async (response: Response): Promise<unknown> => {
+async function request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
+  const url = buildUrl(path, options.params)
+  const headers: Record<string, string> = {}
+  let body: BodyInit | undefined
+  if (options.body !== undefined) {
+    headers['content-type'] = 'application/json'
+    body = JSON.stringify(options.body)
+  }
+  const response = await fetch(url, { method, headers, body, signal: options.signal })
+  if (!response.ok) throw await parseError(response, url)
+  if (response.status === 204) return undefined as T
   const contentType = response.headers.get('content-type') ?? ''
   if (contentType.includes('application/json')) {
-    return response.json()
+    return (await response.json()) as T
   }
-  return response.text()
-}
-
-export const formatApiError = (error: unknown): string => {
-  if (error instanceof ApiError) {
-    if (isRecord(error.detail)) {
-      const nestedDetail = error.detail.detail
-      if (typeof nestedDetail === 'string' && nestedDetail.trim() !== '') {
-        return nestedDetail
-      }
-      if (Array.isArray(nestedDetail)) {
-        const messages = nestedDetail
-          .map((item) => {
-            if (isRecord(item) && typeof item.msg === 'string') {
-              return item.msg
-            }
-            return null
-          })
-          .filter((message): message is string => Boolean(message))
-        if (messages.length > 0) {
-          return messages.join('；')
-        }
-      }
-    }
-    return `${error.message} (${error.status})`
-  }
-  if (error instanceof Error) {
-    return error.message
-  }
-  return '请求失败，请检查服务端日志。'
+  return (await response.text()) as unknown as T
 }
 
 export const apiClient = {
-  async get<T>(path: string): Promise<T> {
-    const response = await fetch(buildUrl(path), {
-      headers: {
-        Accept: 'application/json',
-      },
-    })
-    if (!response.ok) {
-      throw new ApiError(`GET ${path} failed`, response.status, await parseErrorDetail(response))
-    }
-    return response.json() as Promise<T>
+  get<T>(path: string, options: RequestOptions = {}): Promise<T> {
+    return request<T>('GET', path, options)
   },
-  async post<T>(path: string, body: unknown): Promise<T> {
-    const response = await fetch(buildUrl(path), {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    })
-    if (!response.ok) {
-      throw new ApiError(`POST ${path} failed`, response.status, await parseErrorDetail(response))
-    }
-    return response.json() as Promise<T>
+  post<T>(path: string, options: RequestOptions = {}): Promise<T> {
+    return request<T>('POST', path, options)
   },
+  put<T>(path: string, options: RequestOptions = {}): Promise<T> {
+    return request<T>('PUT', path, options)
+  },
+  // 命名为 del 避开 JS 关键字；后端 /parameters/{scope}/{key} 用 DELETE + body。
+  del<T>(path: string, options: RequestOptions = {}): Promise<T> {
+    return request<T>('DELETE', path, options)
+  },
+}
+
+export function buildExportDownloadUrl(
+  resource: 'orders' | 'fills' | 'audit_events',
+  params: { format: 'csv' | 'jsonl'; since?: number; until?: number; limit?: number },
+): string {
+  return buildUrl(`/exports/${resource}`, params)
 }

@@ -1,10 +1,28 @@
-export type Tone = 'neutral' | 'success' | 'warning' | 'danger'
+import { Badge, type BadgeProps } from '@mantine/core'
 
-interface StatusPillProps {
-  label: string
-  tone?: Tone
+type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral' | 'accent'
+
+const toneToColor: Record<Tone, BadgeProps['color']> = {
+  success: 'teal',
+  warning: 'yellow',
+  danger: 'red',
+  info: 'blue',
+  neutral: 'gray',
+  accent: 'accent',
 }
 
-export const StatusPill = ({ label, tone = 'neutral' }: StatusPillProps) => {
-  return <span className={`status-pill status-pill--${tone}`}>{label}</span>
+type Props = {
+  tone?: Tone
+  children: React.ReactNode
+  size?: BadgeProps['size']
+  variant?: BadgeProps['variant']
+  title?: string
+}
+
+export function StatusPill({ tone = 'neutral', size = 'sm', variant = 'light', children, title }: Props) {
+  return (
+    <Badge color={toneToColor[tone]} size={size} variant={variant} title={title}>
+      {children}
+    </Badge>
+  )
 }
