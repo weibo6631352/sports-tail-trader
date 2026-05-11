@@ -100,22 +100,10 @@ toolkit.is_within_tail_window(market, horizon=timedelta(minutes=10))
 
 ## 6. 复盘工作流
 
-framework 默认装配 `InMemoryDecisionRecorder`，记录每次 `decide_entry` / `decide_exit` / `decide_follow_up` 调用：
+framework 默认装配 `DecisionEventRecorder`：每次 `decide_entry` / `decide_exit` / `decide_follow_up` 调用同步投到 outbox，`PersistenceWorker` 异步落到 `decision_records` 表。
 
-```bash
-# 1. dump 当前进程的最近 N 次决策（admin / 调试入口触发）
-#    runtime.decision_recorder.snapshot() → tuple[DecisionRecord, ...]
-#    dump_records_to_jsonl(records, Path("/tmp/decisions.jsonl"))
-
-# 2. 离线 tail 决策
-python -m polymarket_trader.tools.replay_decisions tail /tmp/decisions.jsonl --hook decide_entry
-
-# 3. 用新代码重跑历史输入对比
-python -m polymarket_trader.tools.replay_decisions replay /tmp/decisions.jsonl \
-    --replay-callable mymodule:replay_fn --show-changes
-```
-
-`replay_fn(record)` 返回新决策的 dict，framework 自动分类 diff：UNCHANGED / REASON_CHANGED / ACTION_CHANGED / PRICE_CHANGED / AMOUNT_CHANGED / OTHER。
+- 查询历史决策：`GET /admin/decisions/dump`，支持 `trace_id` / `condition_id` / `strategy_id` / `accepted` / `since` / `until` 过滤。
+- 离线 replay：在测试或调试脚本里实例化 `polymarket_trader.app.replay_harness.ReplayHarness`，灌入历史 record + 新 hooks，得到每条 record 的 `ReplayDiff`，分类有 UNCHANGED / REASON_CHANGED / ACTION_CHANGED / PRICE_CHANGED / AMOUNT_CHANGED / OTHER。
 
 ## 7. 配置加载
 

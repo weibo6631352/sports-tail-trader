@@ -48,5 +48,5 @@ route -> AdminService -> TradingService -> OrderExecutor
 
 ## 路由清单
 
-- 对外 HTTP 路由、请求参数和响应结构以 [docs/api.md](../../../docs/api.md) 为准。
+- 对外 HTTP 路由、请求参数和响应结构以 FastAPI 自动生成的 `/openapi.json` 与 `/docs`（Swagger UI）为准。
 - 本 README 只维护接口层职责、依赖边界和调用链，不重复展开完整路由表。
