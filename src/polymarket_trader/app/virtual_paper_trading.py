@@ -602,12 +602,16 @@ def _sample_rejections(rejections: tuple[dict[str, Any], ...]) -> tuple[dict[str
     return tuple(samples)
 
 
+def _family_rank(family: str) -> int:
+    """虚拟盘排序：single_game 最优先，其他家族次之，未知家族最后。"""
+    return 0 if family == "single_game" else (1 if family else 2)
+
+
 def _rejection_rank(rejection: Mapping[str, Any]) -> tuple[int, int, int, str]:
     family = str(rejection.get("market_family") or "")
     game_status = str(rejection.get("game_status") or "")
     reason = str(rejection.get("reason") or "")
-    family_rank = 0 if family == "single_game" else (1 if family else 2)
-    return (family_rank, _game_status_rank(game_status), _reason_diagnostic_rank(reason), reason)
+    return (_family_rank(family), _game_status_rank(game_status), _reason_diagnostic_rank(reason), reason)
 
 
 def _selection_is_better(candidate: _CandidateSelection, current: _CandidateSelection | None) -> bool:
@@ -622,8 +626,7 @@ def _selection_rank(selection: _CandidateSelection) -> tuple[int, int, int, str]
     family = str(extras.get("market_family") or "")
     game_status = str(extras.get("game_status") or "")
     reason = str(selection.reason or "")
-    family_rank = 0 if family == "single_game" else (1 if family else 2)
-    return (family_rank, _game_status_rank(game_status), _reason_diagnostic_rank(reason), reason)
+    return (_family_rank(family), _game_status_rank(game_status), _reason_diagnostic_rank(reason), reason)
 
 
 def _game_status_rank(game_status: str) -> int:
