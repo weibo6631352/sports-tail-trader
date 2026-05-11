@@ -32,6 +32,51 @@ def test_market_ws_status_can_return_lightweight_summary() -> None:
     assert status.subscriptions == ()
 
 
+def test_market_ws_status_connected_reflects_lifecycle_not_absence_of_error() -> None:
+    """N12：worker 在 starting 阶段从未握手时，connected 必须为 False。
+
+    旧逻辑用 ``last_error is None`` 推断 connected，导致 starting 阶段没有错误
+    时被误判为已连接。修复后 connected 严格跟随 ``set_connection_state``：
+    on_connect 才会置 True，任何 disconnect/reconnect 立刻置 False。
+    """
+
+    worker = MarketWsWorker()
+    worker.track_market(_market())
+
+    # starting 阶段：尚未握手，即便没有 last_error 也不能视为已连接。
+    status = worker.status_snapshot(include_subscriptions=False)
+    assert status.last_error is None
+    assert status.connected is False
+
+    worker.set_connection_state(True)
+    assert worker.status_snapshot(include_subscriptions=False).connected is True
+    assert worker.status_snapshot(include_subscriptions=True).connected is True
+
+    worker.set_connection_state(False)
+    assert worker.status_snapshot(include_subscriptions=False).connected is False
+
+
+def test_market_ws_status_subscription_count_excludes_unsubscribed_tracked_markets() -> None:
+    """F6：track_market 但未发起 WS 订阅时，subscription_count 不应包含这些 token。
+
+    旧实现把 ``len(_tracked_markets)`` 当 subscribed_count 暴露给 metrics，
+    "已 track 但未真正订阅" 的 token 会污染下游 ws_states.subscribed_count。
+    """
+
+    worker = MarketWsWorker()
+    worker.track_market(_market(index=1))
+    worker.track_market(_market(index=2))
+
+    status_before = worker.status_snapshot(include_subscriptions=False)
+    assert status_before.tracked_market_count == 4
+    assert status_before.subscription_count == 0
+
+    worker.build_subscription_request(("token-1-yes", "token-1-no"))
+    status_after = worker.status_snapshot(include_subscriptions=False)
+    assert status_after.tracked_market_count == 4
+    assert status_after.subscription_count == 2
+
+
 def test_user_ws_status_can_return_lightweight_summary() -> None:
     worker = UserWsWorker(strategy_id="sports_tail", )
     worker.build_subscription_request(

@@ -33,7 +33,8 @@ def sync_runtime_metrics(runtime: Any) -> None:
         market_last_event = market_ws.last_result.event_types[-1]
     runtime.metrics.set_ws_state(
         "market_ws",
-        connected=market_ws.last_error is None,
+        connected=market_ws.connected,
+        tracked_count=market_ws.tracked_market_count,
         subscribed_count=market_ws.subscription_count,
         last_message_at=market_ws.last_message_at,
         last_event_type=market_last_event,
@@ -44,6 +45,7 @@ def sync_runtime_metrics(runtime: Any) -> None:
     runtime.metrics.set_ws_state(
         "user_ws",
         connected=user_ws.connected,
+        tracked_count=user_ws.subscription_count,
         subscribed_count=user_ws.subscription_count,
         last_message_at=user_ws.last_message_at,
         last_event_type=None if user_ws.last_result is None else user_ws.last_result.message_type,

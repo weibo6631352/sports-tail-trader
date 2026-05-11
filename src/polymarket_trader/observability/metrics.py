@@ -101,6 +101,10 @@ class QueueDepthSnapshot(JsonSerializable):
 class WebSocketStateSnapshot(JsonSerializable):
     name: str
     connected: bool
+    # tracked_count 是已注册关注的 token 数（含尚未通过 WS 订阅成功的）；
+    # subscribed_count 是真正通过 WS 完成订阅的 token 数。
+    # 两者拆开避免下游把 "已 track 但未订阅" 误认为已订阅（F6）。
+    tracked_count: int
     subscribed_count: int
     last_message_at: datetime | None
     last_message_lag_ms: float | None
@@ -259,6 +263,7 @@ class MetricsRegistry:
         name: str,
         *,
         connected: bool,
+        tracked_count: int = 0,
         subscribed_count: int = 0,
         last_message_at: datetime | None = None,
         last_message_lag_ms: float | None = None,
@@ -270,6 +275,7 @@ class MetricsRegistry:
         snapshot = WebSocketStateSnapshot(
             name=str(name),
             connected=bool(connected),
+            tracked_count=max(0, int(tracked_count)),
             subscribed_count=max(0, int(subscribed_count)),
             last_message_at=_normalize_datetime(last_message_at) if last_message_at else None,
             last_message_lag_ms=None if last_message_lag_ms is None else float(last_message_lag_ms),

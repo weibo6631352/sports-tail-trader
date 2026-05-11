@@ -119,6 +119,15 @@ _register(ParameterSpec(
     description="订单重试上限",
     coerce=_coerce_positive_int,
 ))
+_register(ParameterSpec(
+    scope="settings",
+    key="audit_retention_days",
+    description=(
+        "audit_events 保留天数。daily purge job 删除 created_at < now - N days 的 row。"
+        "默认 14；改 0 等于禁用 retention（不推荐，仅用于离线分析临时保留全量历史）。"
+    ),
+    coerce=_coerce_positive_int,
+))
 
 # 策略级阈值。键名对齐 CurrentStrategyConfig 实际字段——agent 调参时清楚知道
 # 自己在调哪一个 frozen 字段的 runtime 覆盖。

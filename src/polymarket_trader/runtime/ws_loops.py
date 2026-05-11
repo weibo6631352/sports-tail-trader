@@ -228,6 +228,7 @@ async def stream_market_ws_messages(
 ) -> None:
     async def on_connect(attempt: int) -> None:
         runtime.market_ws_worker.clear_error()
+        runtime.market_ws_worker.set_connection_state(True)
         runtime.supervisor.heartbeat_worker(
             "market_ws",
             state=WorkerLifecycleState.RUNNING,
@@ -237,6 +238,7 @@ async def stream_market_ws_messages(
         sync_runtime_metrics(runtime)
 
     async def on_disconnect(attempt: int) -> None:
+        runtime.market_ws_worker.set_connection_state(False)
         runtime.supervisor.heartbeat_worker(
             "market_ws",
             state=WorkerLifecycleState.PAUSED,
@@ -247,6 +249,7 @@ async def stream_market_ws_messages(
 
     async def on_reconnect(attempt: int, exc: Exception) -> None:
         runtime.market_ws_worker.record_error(str(exc))
+        runtime.market_ws_worker.set_connection_state(False)
         runtime.supervisor.heartbeat_worker(
             "market_ws",
             state=WorkerLifecycleState.DEGRADED,

@@ -142,7 +142,7 @@
 可调白名单（详见 `src/polymarket_trader/app/parameter_store.py`）：
 
 - `settings.{portfolio_budget_usdc, max_order_usdc, max_market_usdc,
-  max_total_usdc, max_open_orders, order_retry_limit}`
+  max_total_usdc, max_open_orders, order_retry_limit, audit_retention_days}`
 - `strategy.{tail_outright_min_edge_bps, tail_outright_max_entry_price,
   tail_outright_min_orderbook_depth_usdc, tail_outright_exit_edge_target,
   tail_outright_min_profit_per_share, entry_no_price_max,

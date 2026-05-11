@@ -42,7 +42,7 @@ from polymarket_trader.infra.db import (
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.app.admin_controls_mixin import AdminControlsMixin
-from polymarket_trader.app.admin_query_mixin import AdminQueryMixin
+from polymarket_trader.app.admin_query import AdminQueryMixin
 
 
 @dataclass(frozen=True, slots=True)

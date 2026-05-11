@@ -120,7 +120,9 @@ class FullMarketDiscoveryState:
             self.query_cursors[query_name] = next_cursor
         self.after_cursor = next_cursor or next(iter(self.query_cursors.values()), None)
         self.last_error = None
-        self.consecutive_failures = 0
+        # 单页成功不清零 consecutive_failures：一轮 discovery 跨多次失败/恢复时，
+        # 中间夹一次 success 会让指数回退计数器永远停在 1（永远只回退 5s），
+        # 实际从未升到 10/20/40/60s。只在 finish_round 才认为整轮稳定，重置计数（F5）。
         return len(self.completed_query_names) >= max(1, int(total_queries))
 
     def finish_round(self) -> None:
@@ -135,6 +137,7 @@ class FullMarketDiscoveryState:
         self.round_started_at = None
         self.pages_scanned_in_round = 0
         self.markets_seen_in_round = 0
+        self.consecutive_failures = 0
 
     def finish_tick(self) -> None:
         self.last_tick_completed_at = _utc_now()

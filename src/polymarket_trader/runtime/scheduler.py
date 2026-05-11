@@ -28,6 +28,7 @@ class _JobState:
     run_count: int = 0
     last_started_at: datetime | None = None
     last_finished_at: datetime | None = None
+    last_duration_ms: float | None = None
     next_run_at: datetime | None = None
     last_error: str | None = None
     task: asyncio.Task[None] | None = None
@@ -45,6 +46,7 @@ class _JobState:
             tags=self.tags,
             last_started_at=self.last_started_at,
             last_finished_at=self.last_finished_at,
+            last_duration_ms=self.last_duration_ms,
             next_run_at=self.next_run_at,
             last_error=self.last_error,
         )
@@ -178,7 +180,8 @@ class Scheduler:
 
     async def _run_once(self, state: _JobState) -> None:
         state.running = True
-        state.last_started_at = _utc_now()
+        started_at = _utc_now()
+        state.last_started_at = started_at
         state.last_error = None
         try:
             await state.job()
@@ -189,7 +192,12 @@ class Scheduler:
         finally:
             state.run_count += 1
             state.running = False
-            state.last_finished_at = _utc_now()
+            finished_at = _utc_now()
+            state.last_finished_at = finished_at
+            # 直接记录当前这次运行的真实耗时；外部观测必须读这个字段，不能用
+            # (last_finished_at - last_started_at) 算——并发触发或 start 已被下一
+            # 轮覆盖时差值会是负数（N9）。
+            state.last_duration_ms = (finished_at - started_at).total_seconds() * 1000.0
 
     async def _wait_for_wake(self, state: _JobState, *, timeout_s: float | None) -> None:
         state.wake.clear()
