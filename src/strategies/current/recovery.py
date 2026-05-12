@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_CEILING
 
 from polymarket_trader.domain.market import TradingStatus
-from polymarket_trader.domain.order import OrderSide, OrderType
+from polymarket_trader.domain.order import Order, OrderSide, OrderType
+from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.extension_api import RecoveryDecision, ExtensionContext, ExtensionDecision
 
 from strategies.current.config import CurrentStrategyConfig
@@ -195,10 +196,10 @@ def _is_open_exit_order(order) -> bool:
     return order.side == OrderSide.SELL and order.open
 
 
-def _is_profit_take_exit_order(order) -> bool:
+def _is_profit_take_exit_order(order: Order) -> bool:
     """识别策略恢复侧或入场后跟单生成的 profit-take SELL。"""
 
-    return str(getattr(order, "reason", "") or "") in {"strategy_profit_take", "recovery_profit_take"}
+    return order.reason in {"strategy_profit_take", "recovery_profit_take"}
 
 
 def _open_order_shares(order) -> Decimal:
@@ -389,11 +390,11 @@ def _live_state_age_seconds(context: ExtensionContext, observed_at: datetime) ->
     return (current_time.astimezone(timezone.utc) - observed_at.astimezone(timezone.utc)).total_seconds()
 
 
-def _max_live_state_age_seconds(config: CurrentStrategyConfig, game) -> int:
+def _max_live_state_age_seconds(config: CurrentStrategyConfig, game: LiveEvent) -> int:
     """按运动项目选择恢复侧的新鲜度窗口。"""
 
-    league = str(getattr(game, "league", "") or "").strip().lower()
-    if getattr(game, "tennis_state", None) is not None or "tennis" in league or league in {"atp", "wta"}:
+    league = game.league.strip().lower()
+    if game.tennis_state is not None or "tennis" in league or league in {"atp", "wta"}:
         return config.tail_tennis_max_game_state_age_seconds
     return config.tail_max_game_state_age_seconds
 

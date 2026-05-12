@@ -192,7 +192,7 @@ class CurrentStrategy:
         any_auto = any(
             permission.value == "auto_execute" for permission in auto_permissions.values()
         )
-        if any_auto and getattr(settings, "portfolio_budget_usdc", Decimal("0")) <= Decimal("0"):
+        if any_auto and settings.portfolio_budget_usdc <= Decimal("0"):
             issues.append(
                 ConfigIssue(
                     field="portfolio_budget_usdc",
@@ -268,7 +268,7 @@ class CurrentStrategy:
         outright_permission = self._config.tail_outright_execution_permission.value
         outright_budget = self._config.tail_outright_budget_usdc
         if outright_permission == "auto_execute" and outright_budget > Decimal("0"):
-            if not getattr(settings, "sports_season_state_enabled", False):
+            if not settings.sports_season_state_enabled:
                 issues.append(
                     ConfigIssue(
                         field="sports_season_state_enabled",
@@ -279,7 +279,7 @@ class CurrentStrategy:
                         ),
                     )
                 )
-            api_key = getattr(settings, "sports_season_odds_api_key", None)
+            api_key = settings.sports_season_odds_api_key
             if api_key is None:
                 issues.append(
                     ConfigIssue(
@@ -418,7 +418,7 @@ class CurrentStrategy:
             return ExtensionDecision.skip(reason="outright_missing_market")
         snapshot = season_odds_from_metadata(context.metadata or {})
         token_views = tuple(context.market_token_views or ())
-        outcomes = tuple(getattr(market, "outcomes", ()) or ())
+        outcomes = market.outcomes
         if not token_views and not outcomes:
             return ExtensionDecision.skip(
                 reason="outright_missing_outcomes",
@@ -427,7 +427,7 @@ class CurrentStrategy:
         # 框架真正驱动时 token_views 必填；测试场景下可能只给 outcomes，做兜底。
         if not token_views:
             token_views = tuple(
-                _MockTokenView(token_id=str(getattr(o, "token_id", "") or ""), outcome=getattr(o, "outcome", "") or "")
+                _MockTokenView(token_id=o.token_id, outcome=o.outcome)
                 for o in outcomes
             )
         config = self._config
@@ -442,8 +442,8 @@ class CurrentStrategy:
         best_accept: tuple[Any, Any] | None = None  # (evaluation, token_view)
         first_reject: Any | None = None
         for token_view in token_views:
-            orderbook = getattr(token_view, "orderbook", None)
-            best_ask = getattr(orderbook, "best_ask", None) if orderbook is not None else None
+            orderbook = token_view.orderbook
+            best_ask = orderbook.best_ask if orderbook is not None else None
             # missing_best_ask fallback：盘口有 best_bid + tick_size 时用 bid+tick 估算
             # 一个"理论可成交 ask"，让 evaluator 仍然能跑出 fair_value 与估算 ask 的对比
             # 并产生 RECORD_ONLY 决策——下单不允许，但分析路径不再 silent drop（§10
@@ -475,8 +475,8 @@ class CurrentStrategy:
                 snapshot=snapshot,
                 market_slug=market.market_slug,
                 condition_id=market.condition_id,
-                outcome_label=getattr(token_view, "outcome", "") or "",
-                token_id=getattr(token_view, "token_id", ""),
+                outcome_label=token_view.outcome,
+                token_id=token_view.token_id,
                 best_ask=best_ask,
                 buyable_liquidity_usdc=buyable_usdc,
                 now=now,
@@ -557,7 +557,7 @@ class CurrentStrategy:
             )
         # outright 风控前置（horizon / 相关性 / per-market / total）。框架 RiskManager
         # 是最终门禁，这里负责给出 outright-specific 拒绝原因便于审计。
-        market_end_at = getattr(market, "end_date", None)
+        market_end_at = market.end_date
         # 已有敞口可能由 framework 通过 context.metadata 透出；缺失视为 0。
         ctx_meta = context.metadata or {}
         existing_outright_exposure = _decimal_from_metadata(ctx_meta.get("outright_total_exposure_usdc")) or Decimal("0")
@@ -775,7 +775,7 @@ class CurrentStrategy:
             self._live_event_filter_cache_events_id = events_id
             self._live_event_filter_cache.clear()
         sport_codes = tuple(sorted(_market_sport_codes(market)))
-        market_start = _ensure_utc(getattr(market, "game_start_time", None))
+        market_start = _ensure_utc(market.game_start_time)
         cache_key = (sport_codes, None if market_start is None else market_start.isoformat())
         cached = self._live_event_filter_cache.get(cache_key)
         if cached is not None:
@@ -924,10 +924,10 @@ def _market_tail_window_bypass_reason(
 def _market_can_lock_before_tail_window(market: Market, event: LiveEvent, descriptor: Any) -> bool:
     """判断 market 是否存在不依赖比赛封盘时间的数学锁定机会。"""
 
-    status = str(getattr(event.status, "value", event.status)).lower()
+    status = event.status.value.lower()
     if status != "live":
         return False
-    market_type = getattr(descriptor.market_type, "value", descriptor.market_type)
+    market_type = descriptor.market_type
     if market_type == "totals":
         return _totals_market_is_already_over(market, event, descriptor)
     if market_type != "moneyline" or not _is_tennis_set_winner_market(market):
@@ -948,10 +948,10 @@ def _market_has_live_tail_state(
 ) -> bool:
     """判断直播状态是否已达到策略尾盘条件，但结果尚未完全数学锁定。"""
 
-    status = str(getattr(event.status, "value", event.status)).lower()
+    status = event.status.value.lower()
     if status != "live":
         return False
-    market_type = getattr(descriptor.market_type, "value", descriptor.market_type)
+    market_type = descriptor.market_type
     state = event.tennis_state
     if state is not None:
         if market_type == "moneyline":

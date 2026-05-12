@@ -16,6 +16,7 @@ from polymarket_trader.extension_api import ExtensionContext
 from strategies.current.allocation import AllocationMarketSnapshot
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.risk import check_tail_entry_risk
+from strategies.current.trading.helpers import fill_notional_usdc
 
 
 def _apply_tail_risk_limits(
@@ -118,35 +119,19 @@ def _buy_fill_summary(
 ) -> tuple[int, Decimal]:
     """统计当前 token 的 BUY 成交次数和首笔入场金额，用于限制加仓。"""
 
-    fills = tuple(getattr(context.account_snapshot, "fills", ()) or ())
+    account = context.account_snapshot
+    fills = account.fills if account is not None else ()
     buy_fills = [
         fill
         for fill in fills
-        if getattr(fill, "condition_id", None) == snapshot.condition_id
-        and getattr(fill, "token_id", None) == snapshot.token_id
-        and str(getattr(fill, "side", "") or "").upper() == "BUY"
+        if fill.condition_id == snapshot.condition_id
+        and fill.token_id == snapshot.token_id
+        and (fill.side or "").upper() == "BUY"
     ]
     if not buy_fills:
         fallback_notional = Decimal("0") if snapshot.position is None else snapshot.position.cost_usdc
         return (1 if snapshot.position is not None else 0), fallback_notional
-    first_notional = _fill_notional_usdc(buy_fills[0])
+    first_notional = fill_notional_usdc(buy_fills[0])
     if first_notional <= Decimal("0") and snapshot.position is not None:
         first_notional = snapshot.position.cost_usdc
     return len(buy_fills), first_notional
-
-
-def _fill_notional_usdc(fill: object) -> Decimal:
-    notional = getattr(fill, "notional_usdc", None)
-    if notional is not None:
-        try:
-            return Decimal(str(notional))
-        except Exception:
-            return Decimal("0")
-    price = getattr(fill, "price", None)
-    size = getattr(fill, "size", None)
-    if price is None or size is None:
-        return Decimal("0")
-    try:
-        return Decimal(str(price)) * Decimal(str(size))
-    except Exception:
-        return Decimal("0")

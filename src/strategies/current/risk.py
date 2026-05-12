@@ -13,9 +13,11 @@ from typing import Mapping
 
 from polymarket_trader.domain.allocation import current_exposure_usdc
 from polymarket_trader.domain.market import Market
+from polymarket_trader.extension_api.context import AccountSnapshotView
 
 from strategies.current.allocation import AllocationMarketSnapshot
 from strategies.current.config import CurrentStrategyConfig
+from strategies.current.trading.helpers import fill_notional_usdc
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,7 +197,7 @@ def _league_exposure_usdc(
 def _daily_entry_usdc(
     metadata: Mapping[str, object],
     *,
-    account_snapshot: object | None,
+    account_snapshot: AccountSnapshotView | None,
     candidate_snapshots: tuple[AllocationMarketSnapshot, ...],
     focus_market: Market,
     now: datetime | None,
@@ -215,7 +217,7 @@ def _daily_entry_usdc(
     )
     if explicit is not None:
         return explicit
-    fills = tuple(getattr(account_snapshot, "fills", ()) or ()) if account_snapshot is not None else ()
+    fills = account_snapshot.fills if account_snapshot is not None else ()
     if not fills:
         return Decimal("0")
 
@@ -224,32 +226,15 @@ def _daily_entry_usdc(
     tail_condition_ids.update(snapshot.condition_id for snapshot in candidate_snapshots)
     total = Decimal("0")
     for fill in fills:
-        if getattr(fill, "condition_id", None) not in tail_condition_ids:
+        if fill.condition_id not in tail_condition_ids:
             continue
-        if str(getattr(fill, "side", "") or "").upper() != "BUY":
+        if (fill.side or "").upper() != "BUY":
             continue
-        fill_time = getattr(fill, "confirmed_at", None) or getattr(fill, "created_at", None)
+        fill_time = fill.confirmed_at or fill.created_at
         if _utc_date(fill_time) != today:
             continue
-        total += _fill_notional_usdc(fill)
+        total += fill_notional_usdc(fill)
     return total
-
-
-def _fill_notional_usdc(fill: object) -> Decimal:
-    notional = getattr(fill, "notional_usdc", None)
-    if notional is not None:
-        try:
-            return Decimal(str(notional))
-        except Exception:
-            return Decimal("0")
-    price = getattr(fill, "price", None)
-    size = getattr(fill, "size", None)
-    if price is None or size is None:
-        return Decimal("0")
-    try:
-        return Decimal(str(price)) * Decimal(str(size))
-    except Exception:
-        return Decimal("0")
 
 
 def _utc_date(value: datetime | None) -> object:

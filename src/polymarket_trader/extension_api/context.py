@@ -7,6 +7,7 @@ from typing import Any, Mapping, Protocol
 
 from polymarket_trader.domain.allocation import Allocation, AllocationPlan
 from polymarket_trader.domain.account import MarketPause
+from polymarket_trader.domain.events import Fill
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order, OrderResult
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
@@ -39,6 +40,9 @@ class AccountSnapshotView(Protocol):
 
     @property
     def last_reconcile_at(self) -> datetime | None: ...
+
+    @property
+    def fills(self) -> tuple[Fill, ...]: ...
 
     def get_position(self, condition_id: str, token_id: str) -> Position | None: ...
 

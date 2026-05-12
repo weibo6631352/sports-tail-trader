@@ -1,10 +1,11 @@
-"""通用辅助：从 ExtensionContext.metadata 中读 Decimal / 文本。"""
+"""通用辅助：从 ExtensionContext.metadata 中读 Decimal / 文本；Fill 金额计算。"""
 
 from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any
 
+from polymarket_trader.domain.events import Fill
 from polymarket_trader.extension_api import ExtensionContext
 
 
@@ -52,6 +53,21 @@ def bid_plus_tick_fallback_metadata(
         "tick_size": str(tick_size),
         "fallback_ask": str(fallback_ask),
     }
+
+
+def fill_notional_usdc(fill: Fill) -> Decimal:
+    """Fill の約定名義金額（USDC）を返す。notional_usdc があればそれを使い、なければ price×size。"""
+    if fill.notional_usdc is not None:
+        try:
+            return Decimal(str(fill.notional_usdc))
+        except Exception:
+            return Decimal("0")
+    if fill.price is None or fill.size is None:
+        return Decimal("0")
+    try:
+        return fill.price * fill.size
+    except Exception:
+        return Decimal("0")
 
 
 def _metadata_decimal(context: ExtensionContext, *keys: str) -> Decimal | None:
