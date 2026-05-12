@@ -475,14 +475,14 @@ def _resolve_bankroll(
 ) -> Decimal:
     """Effective bankroll = ``min(链上 available, .env soft cap)``。
 
-    available 缺失（早期启动 / paper / replay）时退化为 portfolio_budget_usdc
-    保持向后兼容。负值兜底到 0——Kelly 公式遇到 bankroll<=0 自动 reject。
+    ``available_usdc=None`` 直接返回 0——让 Kelly reject ``bankroll_non_positive``，
+    避免"reconcile 没跑就用 .env 配置 sized 出超链上余额的 intent"。Paper / replay
+    路径必须显式传 available_usdc。负值同样兜底到 0。
     """
 
     if available_usdc is None:
-        bankroll = portfolio_budget_usdc
-    else:
-        bankroll = min(available_usdc, portfolio_budget_usdc)
+        return Decimal("0")
+    bankroll = min(available_usdc, portfolio_budget_usdc)
     if bankroll < Decimal("0"):
         return Decimal("0")
     return bankroll

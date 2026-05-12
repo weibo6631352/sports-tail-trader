@@ -62,6 +62,11 @@ _ONE = Decimal("1")
 # Polymarket 主流市场 tick=0.01；少数 0.001 但 Kelly 不为这种边缘 tick 单独建模。
 _PRICE_MIN = Decimal("0.01")
 _PRICE_MAX = Decimal("0.99")
+# Polymarket fee rate 单位陷阱：参数 / 列名都叫 ``fee_rate_bps`` 但**实际是
+# per-mille (denominator=1000)**——3% 费率存为 ``30``。与 ``domain/fees.py``
+# 和 ``infra/polymarket/schemas/_helpers.py:_coerce_fee_rate_units`` 一致。
+# 真 bps（per-10000）会让 fee 少扣 10×，造成 Kelly 虚假 edge。改名风险大
+# (跨模块 ripple)，所以 docstring + comment 强标注。
 _FEE_RATE_DENOMINATOR = Decimal("1000")
 
 
@@ -297,8 +302,8 @@ def _fee_per_share_usdc(
 ) -> Decimal:
     """Polymarket 每股手续费：``(rate / 1000) × c × (1 - c)``。
 
-    与 ``domain/fees.py:calculate_trade_fee`` 公式一致——见 fees.py docstring 中
-    "rate denominator 1000" 的来源说明。
+    ``fee_rate_bps`` 名字误导——实际单位是 **per-mille**（见 ``_FEE_RATE_DENOMINATOR``
+    顶部注释）。与 ``domain/fees.py:calculate_trade_fee`` 同口径。
     """
 
     if not fees_enabled or fee_rate_bps <= 0:

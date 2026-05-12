@@ -84,15 +84,32 @@ def serialize_allocation_plan(plan: EntryPlan) -> dict[str, object]:
 def serialize_allocation(plan: EntryPlan) -> dict[str, object] | None:
     if plan.allocation is None:
         return None
-    return {
-        "condition_id": plan.allocation.condition_id,
-        "target_budget_usdc": str(plan.allocation.target_budget_usdc),
-        "buy_budget_usdc": str(plan.allocation.buy_budget_usdc),
-        "current_exposure_usdc": str(plan.allocation.current_exposure_usdc),
-        "released_budget_usdc": str(plan.allocation.released_budget_usdc),
-        "reason": plan.allocation.reason,
-        "release_reason": plan.allocation.release_reason,
+    a = plan.allocation
+    payload: dict[str, object] = {
+        "condition_id": a.condition_id,
+        "target_budget_usdc": str(a.target_budget_usdc),
+        "buy_budget_usdc": str(a.buy_budget_usdc),
+        "current_exposure_usdc": str(a.current_exposure_usdc),
+        "released_budget_usdc": str(a.released_budget_usdc),
+        "reason": a.reason,
+        "release_reason": a.release_reason,
     }
+    # Kelly 审计字段——下完单想复盘"为什么 stake=2、edge=3%、capped_by=...
+    # round-up over-bet"必须从这里能查到。全 optional：策略可不出 Kelly 元数据
+    # 时全部缺省，序列化只 emit 非 None 的字段保持 payload 紧凑。
+    for key in (
+        "prob_p", "prob_confidence", "price_c",
+        "edge_net", "edge_gross", "fee_per_share_usdc",
+        "kelly_f_star", "effective_kelly_fraction", "effective_min_stake_usdc",
+    ):
+        value = getattr(a, key)
+        if value is not None:
+            payload[key] = str(value)
+    if a.capped_by is not None:
+        payload["capped_by"] = a.capped_by
+    if a.is_round_up_overbet:
+        payload["is_round_up_overbet"] = True
+    return payload
 
 
 def serialize_plan_metadata(plan: EntryPlan) -> dict[str, object]:

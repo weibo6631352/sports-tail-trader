@@ -69,20 +69,40 @@ class AllocationModel(Base, TimestampMixin):
         raw_payload: JsonMapping | None = None,
     ) -> "AllocationModel":
         allocation_key = allocation.idempotency_key or "|".join([trace_id, allocation.condition_id])
-        payload = _json_mapping(raw_payload) if raw_payload is not None else {
-            "strategy_id": allocation.strategy_id,
-            "trace_id": trace_id,
-            "condition_id": allocation.condition_id,
-            "market_slug": allocation.market_slug,
-            "token_id": allocation.token_id,
-            "target_budget_usdc": str(allocation.target_budget_usdc),
-            "buy_budget_usdc": str(allocation.buy_budget_usdc),
-            "current_exposure_usdc": str(allocation.current_exposure_usdc),
-            "released_budget_usdc": str(allocation.released_budget_usdc),
-            "reason": allocation.reason,
-            "release_reason": allocation.release_reason,
-            "idempotency_key": allocation.idempotency_key,
-        }
+        # Kelly 审计字段不进列（避免 schema 漂移），统一进 raw_payload；to_domain 反读。
+        kelly_payload: dict[str, Any] = {}
+        for key in (
+            "prob_p", "prob_confidence", "price_c",
+            "edge_net", "edge_gross", "fee_per_share_usdc",
+            "kelly_f_star", "effective_kelly_fraction", "effective_min_stake_usdc",
+        ):
+            value = getattr(allocation, key)
+            if value is not None:
+                kelly_payload[key] = str(value)
+        if allocation.capped_by is not None:
+            kelly_payload["capped_by"] = allocation.capped_by
+        if allocation.is_round_up_overbet:
+            kelly_payload["is_round_up_overbet"] = True
+
+        if raw_payload is not None:
+            payload = dict(_json_mapping(raw_payload))
+        else:
+            payload = {
+                "strategy_id": allocation.strategy_id,
+                "trace_id": trace_id,
+                "condition_id": allocation.condition_id,
+                "market_slug": allocation.market_slug,
+                "token_id": allocation.token_id,
+                "target_budget_usdc": str(allocation.target_budget_usdc),
+                "buy_budget_usdc": str(allocation.buy_budget_usdc),
+                "current_exposure_usdc": str(allocation.current_exposure_usdc),
+                "released_budget_usdc": str(allocation.released_budget_usdc),
+                "reason": allocation.reason,
+                "release_reason": allocation.release_reason,
+                "idempotency_key": allocation.idempotency_key,
+            }
+        if kelly_payload:
+            payload["kelly"] = kelly_payload
         return cls(
             allocation_key=allocation_key,
             strategy_id=allocation.strategy_id,
@@ -101,6 +121,20 @@ class AllocationModel(Base, TimestampMixin):
         )
 
     def to_domain(self) -> Allocation:
+        kelly = self.raw_payload.get("kelly") if isinstance(self.raw_payload, dict) else None
+        kelly_fields: dict[str, Any] = {}
+        if isinstance(kelly, dict):
+            for key in (
+                "prob_p", "prob_confidence", "price_c",
+                "edge_net", "edge_gross", "fee_per_share_usdc",
+                "kelly_f_star", "effective_kelly_fraction", "effective_min_stake_usdc",
+            ):
+                raw_value = kelly.get(key)
+                kelly_fields[key] = _decimal(raw_value) if raw_value is not None else None
+            kelly_fields["capped_by"] = kelly.get("capped_by")
+            kelly_fields["is_round_up_overbet"] = bool(kelly.get("is_round_up_overbet") or False)
+        else:
+            kelly_fields["is_round_up_overbet"] = False
         return Allocation(
             strategy_id=self.strategy_id,
             condition_id=self.condition_id,
@@ -113,6 +147,7 @@ class AllocationModel(Base, TimestampMixin):
             reason=self.reason,
             idempotency_key=self.idempotency_key,
             release_reason=self.release_reason,
+            **kelly_fields,
         )
 
 

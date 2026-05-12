@@ -53,6 +53,18 @@ class AccountStateStore:
     def snapshot(self) -> AccountSnapshot:
         return self._snapshot
 
+    def restore_peak_bankroll(self, peak_usdc: Decimal) -> None:
+        """重启时从最新 account_snapshots 行恢复历史 peak。
+
+        ``_publish_snapshot_locked`` 用 ``max(loaded_peak, current)`` 维护单调，
+        所以这里只设 in-memory 起始值；下一次 ``update_balances`` 会触发 publish
+        并重算 peak。仅在启动期被 main.py 调用一次。
+        """
+
+        with self._lock:
+            if peak_usdc > self._peak_bankroll_usdc:
+                self._peak_bankroll_usdc = peak_usdc
+
     def update_balances(
         self,
         *,
@@ -174,8 +186,9 @@ class AccountStateStore:
 
     def _publish_snapshot_locked(self) -> AccountSnapshot:
         # peak_bankroll_usdc 单调上升——drawdown lockout 把 peak 当作历史最高水位。
-        # 这里复用 AccountSnapshot.available_usdc 的口径（min(balance, allowance) -
-        # open_buy_reserved_usdc）以保持下游 bankroll 计算一致。
+        # 锚定在 **equity = available_usdc + Σ(position MTM)** 而非纯 USDC，避免
+        # "高仓位利用率 + 部分亏损平仓 → available 跌穿 50% peak 误锁仓位"。仓位
+        # 缺 current_value 时按 cost_usdc 兜底（保守，宁高估 peak 也不低估）。
         provisional = AccountSnapshot(
             balance_usdc=self._balance_usdc,
             allowance_usdc=self._allowance_usdc,
@@ -187,9 +200,13 @@ class AccountStateStore:
             market_pauses=tuple(self._market_pauses.values()),
             last_reconcile_at=self._last_reconcile_at,
         )
-        current_bankroll = provisional.available_usdc
-        if current_bankroll > self._peak_bankroll_usdc:
-            self._peak_bankroll_usdc = current_bankroll
+        current_equity = provisional.available_usdc
+        for position in provisional.positions:
+            mtm = position.current_value if position.current_value is not None else position.cost_usdc
+            if mtm > Decimal("0"):
+                current_equity += mtm
+        if current_equity > self._peak_bankroll_usdc:
+            self._peak_bankroll_usdc = current_equity
         snapshot = replace(provisional, peak_bankroll_usdc=self._peak_bankroll_usdc)
         self._snapshot = snapshot
         return snapshot

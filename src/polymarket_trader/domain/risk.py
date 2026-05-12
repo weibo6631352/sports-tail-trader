@@ -46,6 +46,10 @@ class RiskManager:
         orderbook: OrderbookSnapshot | None = None,
         position: Position | None = None,
         open_orders: Iterable[Order] = (),
+        # 同 condition 的全部 open orders / positions（跨 token），用于 NEG_RISK 互斥
+        # 检测。caller 缺省时此检测跳过。
+        condition_open_orders: Iterable[Order] = (),
+        condition_positions: Iterable[Position] = (),
         allocation_plan: AllocationPlan | None = None,
         classification_passed: bool | None = None,
         classification_reason: str | None = None,
@@ -65,10 +69,13 @@ class RiskManager:
         # Kelly 风控参数：bankroll 来自 ``min(account.available, settings.portfolio_budget)``；
         # max_position_fraction 替代旧 max_order/market/total_usdc 的三层硬上限；
         # round_up_max_overbet_ratio 同步放宽 RiskManager 的 effective cap，避免
-        # 与 Kelly 引擎的 round-up 路径不一致；peak / drawdown_halt 实现 §5 drawdown lockout。
+        # 与 Kelly 引擎的 round-up 路径不一致；peak / current_equity / drawdown_halt 实现
+        # §5 drawdown lockout——比较 **equity** 而非 bankroll，否则高仓位利用率 +
+        # 部分亏损平仓会误锁（详见 domain/account.py:equity_usdc）。
         bankroll_usdc: Decimal | None = None,
         kelly_max_position_fraction: Decimal | None = None,
         kelly_round_up_max_overbet_ratio: Decimal | None = None,
+        current_equity_usdc: Decimal | None = None,
         peak_bankroll_usdc: Decimal | None = None,
         kelly_drawdown_halt_fraction: Decimal | None = None,
         min_order_size: Decimal | None = None,
@@ -151,8 +158,19 @@ class RiskManager:
             bankroll_usdc=bankroll_usdc,
             kelly_max_position_fraction=kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
+            current_equity_usdc=current_equity_usdc,
             peak_bankroll_usdc=peak_bankroll_usdc,
             kelly_drawdown_halt_fraction=kelly_drawdown_halt_fraction,
+        )
+        if decision is not None:
+            return decision
+
+        decision = self._check_neg_risk_isolation(
+            intent,
+            checks,
+            market=market,
+            condition_open_orders=tuple(condition_open_orders),
+            condition_positions=tuple(condition_positions),
         )
         if decision is not None:
             return decision
@@ -477,6 +495,7 @@ class RiskManager:
         bankroll_usdc: Decimal | None,
         kelly_max_position_fraction: Decimal | None,
         kelly_round_up_max_overbet_ratio: Decimal | None,
+        current_equity_usdc: Decimal | None,
         peak_bankroll_usdc: Decimal | None,
         kelly_drawdown_halt_fraction: Decimal | None,
     ) -> RiskDecision | None:
@@ -492,24 +511,31 @@ class RiskManager:
         防止策略侧旁路 Kelly 公式直接送 over-bet 的 intent。
         """
 
-        # drawdown lockout 在 BUY/SELL 之前就要拒，否则 SELL 可能放大问题。
+        # drawdown lockout：比较 **equity** 与 peak equity，而非 bankroll vs peak。
+        # 高仓位利用率 + 部分亏损平仓 → free cash 跌穿 50% peak 但 equity 仍健康——
+        # 此时不应误锁。BUY/SELL 之前就要拒，否则 SELL 可能放大问题。
+        equity_for_check = (
+            current_equity_usdc
+            if current_equity_usdc is not None
+            else bankroll_usdc
+        )
         if (
             kelly_drawdown_halt_fraction is not None
             and kelly_drawdown_halt_fraction > Decimal("0")
             and peak_bankroll_usdc is not None
             and peak_bankroll_usdc > Decimal("0")
-            and bankroll_usdc is not None
+            and equity_for_check is not None
         ):
             halt_threshold = peak_bankroll_usdc * kelly_drawdown_halt_fraction
-            if bankroll_usdc < halt_threshold and intent.side == OrderSide.BUY:
+            if equity_for_check < halt_threshold and intent.side == OrderSide.BUY:
                 return self._fail(
                     trace_id=intent.trace_id,
                     checks=checks,
                     name="drawdown_lockout_gate",
                     reason="drawdown_lockout_active",
-                    field="bankroll.drawdown",
+                    field="equity.drawdown",
                     value={
-                        "bankroll_usdc": bankroll_usdc,
+                        "current_equity_usdc": equity_for_check,
                         "peak_bankroll_usdc": peak_bankroll_usdc,
                         "halt_threshold": halt_threshold,
                         "halt_fraction": kelly_drawdown_halt_fraction,
@@ -585,6 +611,89 @@ class RiskManager:
                 suggested_action="reduce_size",
                 retryable=False,
             )
+        return None
+
+    def _check_neg_risk_isolation(
+        self,
+        intent: OrderIntent,
+        checks: list[RiskCheck],
+        *,
+        market: Market | None,
+        condition_open_orders: tuple[Order, ...],
+        condition_positions: tuple[Position, ...],
+    ) -> RiskDecision | None:
+        """NEG_RISK 多 outcome 互斥市场守门：拒绝同 condition 跨 token 多仓位。
+
+        Polymarket NEG_RISK adapter 把多结果事件拆成 N 个 binary market（不同
+        condition_id 共享 ``neg_risk_market_id``）；同 condition 跨 token 同时
+        持仓时 Kelly 假设独立，会重复曝光信号。无 ``neg_risk_market_id`` 字段时
+        无法做跨 condition 聚合（P2 待补），先按"同 condition 跨 token 任一已开
+        BUY/持仓直接拒新 BUY"的保守策略。binary YES↔NO 之间也被这条挡——刻意为之，
+        避免 hedge 占满 cap。需要明确开启 hedge 时另走 Admin 路径。
+        """
+
+        if intent.side != OrderSide.BUY:
+            return None
+        if market is None or not market.neg_risk:
+            return None
+
+        for order in condition_open_orders:
+            if (
+                order.condition_id == intent.condition_id
+                and order.token_id != intent.token_id
+                and order.side == OrderSide.BUY
+                and order.status not in {
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REJECTED,
+                    OrderStatus.FAILED,
+                    OrderStatus.NO_FILL,
+                    OrderStatus.MATCHED,
+                }
+            ):
+                return self._fail(
+                    trace_id=intent.trace_id,
+                    checks=checks,
+                    name="neg_risk_isolation_gate",
+                    reason="neg_risk_cross_token_open_order",
+                    field="open_orders",
+                    value={
+                        "condition_id": intent.condition_id,
+                        "intent_token_id": intent.token_id,
+                        "conflict_token_id": order.token_id,
+                        "conflict_order_id": order.order_id,
+                    },
+                    suggested_action="cancel_other_token_first",
+                    retryable=False,
+                )
+        for pos in condition_positions:
+            if (
+                pos.condition_id == intent.condition_id
+                and pos.token_id != intent.token_id
+                and pos.shares > Decimal("0")
+            ):
+                return self._fail(
+                    trace_id=intent.trace_id,
+                    checks=checks,
+                    name="neg_risk_isolation_gate",
+                    reason="neg_risk_cross_token_position",
+                    field="position",
+                    value={
+                        "condition_id": intent.condition_id,
+                        "intent_token_id": intent.token_id,
+                        "conflict_token_id": pos.token_id,
+                        "conflict_shares": pos.shares,
+                    },
+                    suggested_action="exit_other_token_first",
+                    retryable=False,
+                )
+        checks.append(
+            RiskCheck(
+                name="neg_risk_isolation_gate",
+                passed=True,
+                field="market.neg_risk",
+                value=True,
+            )
+        )
         return None
 
     def _check_operational_limits(

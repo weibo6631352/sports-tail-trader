@@ -510,6 +510,9 @@ def allocation_from_record(record: Mapping[str, Any]) -> Allocation | None:
     if condition_id is None or strategy_id is None:
         _log_skip("allocation", record, "missing condition_id/strategy_id")
         return None
+    # Kelly 审计字段在 outbox payload 顶层（serialize_allocation 直接放）；
+    # AllocationModel.to_domain 从 raw_payload.kelly 子键读——这里两者都兼容。
+    kelly_root = record.get("kelly") if isinstance(record.get("kelly"), Mapping) else record
     return Allocation(
         strategy_id=strategy_id,
         condition_id=condition_id,
@@ -522,6 +525,17 @@ def allocation_from_record(record: Mapping[str, Any]) -> Allocation | None:
         reason=_text(record.get("reason")) or "",
         idempotency_key=_text(record.get("idempotency_key")),
         release_reason=_text(record.get("release_reason")) or "",
+        prob_p=_decimal(kelly_root.get("prob_p")),
+        prob_confidence=_decimal(kelly_root.get("prob_confidence")),
+        price_c=_decimal(kelly_root.get("price_c")),
+        edge_net=_decimal(kelly_root.get("edge_net")),
+        edge_gross=_decimal(kelly_root.get("edge_gross")),
+        fee_per_share_usdc=_decimal(kelly_root.get("fee_per_share_usdc")),
+        kelly_f_star=_decimal(kelly_root.get("kelly_f_star")),
+        effective_kelly_fraction=_decimal(kelly_root.get("effective_kelly_fraction")),
+        effective_min_stake_usdc=_decimal(kelly_root.get("effective_min_stake_usdc")),
+        capped_by=_text(kelly_root.get("capped_by")),
+        is_round_up_overbet=bool(kelly_root.get("is_round_up_overbet") or False),
     )
 
 

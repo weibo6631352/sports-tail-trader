@@ -123,6 +123,22 @@ class AccountSnapshot:
             return Decimal("0")
         return available
 
+    @property
+    def equity_usdc(self) -> Decimal:
+        """组合权益 = 可用 USDC + Σ(持仓 mark-to-market)。
+
+        Kelly drawdown lockout 用 ``equity / peak_equity`` 比值判断是否停仓——
+        而非纯 USDC，否则"高仓位利用率 + 部分亏损平仓"会误锁。仓位缺 current_value
+        时按 cost_usdc 兜底（保守，宁高估 equity 也不低估）。
+        """
+
+        total = self.available_usdc
+        for position in self.positions:
+            mtm = position.current_value if position.current_value is not None else position.cost_usdc
+            if mtm > Decimal("0"):
+                total += mtm
+        return total
+
     def get_position(self, condition_id: str, token_id: str) -> Position | None:
         for position in self.positions:
             if position.condition_id == condition_id and position.token_id == token_id:

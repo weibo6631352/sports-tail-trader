@@ -48,6 +48,15 @@ class AccountSnapshotModel(Base, TimestampMixin):
     balance_usdc: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False, default=Decimal("0"))
     allowance_usdc: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False, default=Decimal("0"))
     net_value_usdc: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False, default=Decimal("0"))
+    # peak_bankroll_usdc：历史最高观测 bankroll，用于 Kelly drawdown lockout。
+    # 单调上升，重启时需从最新 snapshot LOAD 回 AccountStateStore——否则会被
+    # placeholder 0 锚住，亏损中重启等于自动解锁。
+    peak_bankroll_usdc: Mapped[Decimal] = mapped_column(
+        Numeric(38, 18),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0"),
+    )
     user_ws_connected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     allow_new_entries: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     market_pauses: Mapped[list[dict[str, Any]]] = mapped_column(
@@ -92,6 +101,7 @@ class AccountSnapshotModel(Base, TimestampMixin):
             "balance_usdc": str(snapshot.balance_usdc),
             "allowance_usdc": str(snapshot.allowance_usdc),
             "net_value_usdc": str(net_value),
+            "peak_bankroll_usdc": str(snapshot.peak_bankroll_usdc),
             "user_ws_connected": snapshot.user_ws_connected,
             "allow_new_entries": snapshot.allow_new_entries,
             "market_pauses": [pause.as_payload() for pause in snapshot.market_pauses],
@@ -104,6 +114,7 @@ class AccountSnapshotModel(Base, TimestampMixin):
             balance_usdc=snapshot.balance_usdc,
             allowance_usdc=snapshot.allowance_usdc,
             net_value_usdc=net_value,
+            peak_bankroll_usdc=snapshot.peak_bankroll_usdc,
             user_ws_connected=snapshot.user_ws_connected,
             allow_new_entries=snapshot.allow_new_entries,
             market_pauses=_market_pause_payloads(snapshot.market_pauses),
@@ -115,6 +126,7 @@ class AccountSnapshotModel(Base, TimestampMixin):
         return AccountSnapshot(
             balance_usdc=_decimal(self.balance_usdc) or Decimal("0"),
             allowance_usdc=_decimal(self.allowance_usdc) or Decimal("0"),
+            peak_bankroll_usdc=_decimal(self.peak_bankroll_usdc) or Decimal("0"),
             user_ws_connected=bool(self.user_ws_connected),
             allow_new_entries=bool(self.allow_new_entries),
             market_pauses=_market_pauses_from_payload(self.market_pauses),

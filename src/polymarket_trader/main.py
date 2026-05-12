@@ -914,6 +914,10 @@ async def _load_reference_state(runtime: RuntimeComponents) -> dict[str, int]:
             open_orders = await OrderRepository(session).list_open_orders_snapshot(limit=500, offset=0)
             fills = await FillRepository(session).list_fills_snapshot(limit=500, offset=0)
         if account_snapshot is not None:
+            # peak 必须先恢复——否则 update_balances 触发的 publish 会用 in-memory 0
+            # 当 baseline，把"重启前历史 peak 1500，当前 600"误算成 peak=600，drawdown
+            # lockout 永远不触发。先 restore 再 update_balances，publish 时取 max。
+            runtime.account_state_store.restore_peak_bankroll(account_snapshot.peak_bankroll_usdc)
             _restore_account_reference_state(
                 runtime,
                 balance_usdc=account_snapshot.balance_usdc,

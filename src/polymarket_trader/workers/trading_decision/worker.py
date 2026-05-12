@@ -340,6 +340,8 @@ class TradingDecisionWorker:
             orderbook=plan.orderbook,
             position=focus_position,
             open_orders=focus_open_orders,
+            condition_open_orders=_condition_orders(snapshot, plan.market.condition_id),
+            condition_positions=_condition_positions(snapshot, plan.market.condition_id),
             allocation_plan=plan.allocation_plan,
             classification_passed=True,
             balance_usdc=self._balance_usdc if self._balance_usdc is not None else snapshot_available_usdc(snapshot),
@@ -352,6 +354,7 @@ class TradingDecisionWorker:
             ),
             kelly_max_position_fraction=self._kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
+            current_equity_usdc=(snapshot.equity_usdc if snapshot is not None else None),
             peak_bankroll_usdc=(snapshot.peak_bankroll_usdc if snapshot is not None else None),
             kelly_drawdown_halt_fraction=self._kelly_drawdown_halt_fraction,
             order_retry_limit=self._order_retry_limit,
@@ -882,6 +885,8 @@ class TradingDecisionWorker:
                 if snapshot is not None
                 else ()
             ),
+            condition_open_orders=_condition_orders(snapshot, intent.condition_id),
+            condition_positions=_condition_positions(snapshot, intent.condition_id),
             classification_passed=True,
             balance_usdc=self._balance_usdc if self._balance_usdc is not None else snapshot_available_usdc(snapshot),
             allowance_usdc=(
@@ -893,6 +898,7 @@ class TradingDecisionWorker:
             ),
             kelly_max_position_fraction=self._kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
+            current_equity_usdc=(snapshot.equity_usdc if snapshot is not None else None),
             peak_bankroll_usdc=(snapshot.peak_bankroll_usdc if snapshot is not None else None),
             kelly_drawdown_halt_fraction=self._kelly_drawdown_halt_fraction,
             order_retry_limit=self._order_retry_limit,
@@ -960,6 +966,28 @@ def _match_open_orders(
         for order in open_orders
         if order.condition_id == condition_id and order.token_id == token_id
     )
+
+
+def _condition_orders(
+    snapshot: AccountSnapshot | None,
+    condition_id: str | None,
+) -> tuple[Order, ...]:
+    """同 condition_id 的全部 open orders（跨 token），用于 NEG_RISK 互斥检测。"""
+
+    if snapshot is None or not condition_id:
+        return ()
+    return tuple(order for order in snapshot.open_orders if order.condition_id == condition_id)
+
+
+def _condition_positions(
+    snapshot: AccountSnapshot | None,
+    condition_id: str | None,
+) -> tuple[Position, ...]:
+    """同 condition_id 的全部持仓（跨 token），用于 NEG_RISK 互斥检测。"""
+
+    if snapshot is None or not condition_id:
+        return ()
+    return tuple(p for p in snapshot.positions if p.condition_id == condition_id)
 
 
 def _resolve_bankroll_for_review(
