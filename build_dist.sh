@@ -9,7 +9,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 DIST_DIR="$FRONTEND_DIR/dist"
 PACKAGE_ROOT="$ROOT_DIR/.dist-packages"
-BUNDLE_NAME="fdv-runtime"
+BUNDLE_NAME="trader-runtime"
 BUNDLE_DIR="$PACKAGE_ROOT/$BUNDLE_NAME"
 WHEEL_DIR="$BUNDLE_DIR/wheels"
 CONFIG_DIR="$BUNDLE_DIR/config"
@@ -96,8 +96,8 @@ build_backend_wheels() {
 
 write_bundle_readme() {
   cat > "$BUNDLE_DIR/README.txt" <<'EOF'
-FDV Runtime Bundle
-==================
+Trader Runtime Bundle
+=====================
 
 使用方式:
 1. 按需编辑 config/.env
