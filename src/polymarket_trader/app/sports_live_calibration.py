@@ -128,8 +128,8 @@ class SportsLiveCalibrationReport:
 async def run_calibration(
     *,
     aggregate_client: SportsLiveAggregateClient,
-    markets: Sequence[Market],
-    match_live_event: LiveMatchFunction,
+    markets: Sequence[Market] = (),
+    match_live_event: LiveMatchFunction | None = None,
     rounds: int = 1,
     silent_gap_threshold: float = 0.5,
     league_filter: Sequence[str] | None = None,
@@ -140,7 +140,11 @@ async def run_calibration(
     实际生产中通常 rounds=1（即时快照）；调试时可以跑多轮验证稳定性。
 
     ``silent_gap_threshold`` 是 ``matched / candidate`` 命中率下限。低于此值
-    视为 silent_gap 警告（"识别失败导致看似无直播源"）。"""
+    视为 silent_gap 警告（"识别失败导致看似无直播源"）。
+
+    ``markets`` 与 ``match_live_event`` 都为可选。两者缺一即视为 aggregate-only 模式：
+    跳过 market-matching loop 与 low_match_rate 检测，但仍计算 source × league 矩阵、
+    ID 合并率、source_silent_with_peers_active 等 aggregate-level 指标。"""
 
     if rounds <= 0:
         rounds = 1
@@ -260,26 +264,30 @@ async def run_calibration(
     else:
         conflict_rate = 0.0
 
-    # market 匹配
+    # market 匹配：仅在 markets 非空且提供 match 函数时执行；否则 aggregate-only 模式。
     matched = 0
     unmatched: list[CalibrationUnmatchedMarket] = []
-    for market in markets:
-        match = match_live_event(market, candidate_events)
-        if match is None:
-            unmatched.append(
-                CalibrationUnmatchedMarket(
-                    condition_id=market.condition_id,
-                    market_slug=market.market_slug,
-                    reason="no_live_event_matched",
+    matching_enabled = bool(markets) and match_live_event is not None
+    if matching_enabled:
+        assert match_live_event is not None  # narrow for type-checkers
+        for market in markets:
+            match = match_live_event(market, candidate_events)
+            if match is None:
+                unmatched.append(
+                    CalibrationUnmatchedMarket(
+                        condition_id=market.condition_id,
+                        market_slug=market.market_slug,
+                        reason="no_live_event_matched",
+                    )
                 )
-            )
-            continue
-        matched += 1
+                continue
+            matched += 1
 
-    # silent_gap detection
+    # silent_gap detection: low_match_rate 仅在启用 market-matching 时检测，
+    # 避免 aggregate-only 模式下误报"全部市场未匹配"。
     silent_gaps: list[CalibrationSilentGap] = []
     candidate_count = len(markets)
-    if candidate_count > 0:
+    if matching_enabled and candidate_count > 0:
         match_rate = matched / candidate_count
         if match_rate < silent_gap_threshold:
             silent_gaps.append(
@@ -338,8 +346,8 @@ async def run_calibration(
 def run_calibration_sync(
     *,
     aggregate_client: SportsLiveAggregateClient,
-    markets: Sequence[Market],
-    match_live_event: LiveMatchFunction,
+    markets: Sequence[Market] = (),
+    match_live_event: LiveMatchFunction | None = None,
     rounds: int = 1,
     silent_gap_threshold: float = 0.5,
     league_filter: Sequence[str] | None = None,

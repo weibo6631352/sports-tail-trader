@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
 
 from polymarket_trader.app.sports_live_calibration import (
@@ -17,6 +18,7 @@ from polymarket_trader.domain.sports_live import (
     SportsLiveSnapshot,
 )
 from polymarket_trader.infra.sports.aggregate_client import SportsLiveAggregateClient
+from polymarket_trader.tools.sports_live_calibration import load_markets_from_fixture
 
 
 _OBSERVED = datetime(2026, 5, 11, tzinfo=timezone.utc)
@@ -144,6 +146,69 @@ def test_calibration_emits_silent_gap_when_match_rate_below_threshold() -> None:
     assert report.matched_markets == 0
     gap_codes = {g.code for g in report.silent_gaps}
     assert "low_match_rate" in gap_codes
+
+
+def test_aggregate_only_mode_skips_match_loop_without_low_match_rate_alarm() -> None:
+    """无 markets / match_fn 时跳过 match loop；low_match_rate 不应误报。
+
+    Aggregate-only 模式（CLI 不传 --markets-fixture 时）保留 source × league
+    指标、ID 合并率、source_silent_with_peers_active 检测；但不应假装跑了
+    market matching 然后报"全部未匹配"。
+    """
+    espn = _team_event(source="espn", league="NBA", external_id=None)
+
+    async def provider() -> SportsLiveSnapshot:
+        return SportsLiveSnapshot(source="sports_live_aggregate", observed_at=_OBSERVED, events=(espn,))
+
+    client = SportsLiveAggregateClient(
+        providers=(("espn", provider),),
+        now_provider=lambda: _OBSERVED,
+    )
+
+    report = asyncio.run(
+        run_calibration(
+            aggregate_client=client,
+            silent_gap_threshold=0.5,
+        )
+    )
+    assert report.candidate_markets == 0
+    assert report.matched_markets == 0
+    gap_codes = {g.code for g in report.silent_gaps}
+    assert "low_match_rate" not in gap_codes  # 无 markets 不应触发 low_match_rate
+    # source-level 指标仍存在
+    assert any(m.source == "espn" for m in report.source_metrics)
+
+
+def test_load_markets_from_fixture_parses_minimal_schema(tmp_path) -> None:
+    """fixture loader 支持最小字段：condition_id / slug / question / outcomes。"""
+    fixture_path = tmp_path / "markets.json"
+    fixture_path.write_text(
+        json.dumps(
+            [
+                {
+                    "condition_id": "0xabc",
+                    "market_slug": "nba-magic-pistons-2026-05-12",
+                    "market_question": "Will the Magic beat the Pistons?",
+                    "event_title": "Magic @ Pistons",
+                    "event_slug": "magic-pistons-2026-05-12",
+                    "category": "Sports",
+                    "tags": ["NBA", "Basketball"],
+                    "outcomes": [
+                        {"token_id": "h", "outcome": "Orlando Magic"},
+                        {"token_id": "a", "outcome": "Detroit Pistons"},
+                    ],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    markets = load_markets_from_fixture(fixture_path)
+    assert len(markets) == 1
+    assert markets[0].condition_id == "0xabc"
+    assert markets[0].market_slug == "nba-magic-pistons-2026-05-12"
+    assert markets[0].tags == ("NBA", "Basketball")
+    assert len(markets[0].outcomes) == 2
+    assert markets[0].trading_status == TradingStatus.ELIGIBLE  # 默认值
 
 
 def test_calibration_detects_silent_source_when_peers_active() -> None:

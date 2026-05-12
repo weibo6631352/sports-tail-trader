@@ -1,14 +1,41 @@
 """CLI 入口：跑体育直播源校准 harness。
 
-用法：
-    python -m polymarket_trader.tools.sports_live_calibration \\
-        --sources espn,nba \\
-        --leagues NBA,NHL \\
-        --output report.json
+两种用法：
 
-不启动交易主链路；不下单。读取当前 Settings 装配 aggregate_client + market_registry
-快照（或本地 fixture），跑一次 list_events + best_live_match 并把 JSON 报告
-写到 ``--output``（缺省时打印到 stdout）。
+1. **Aggregate-only**：只校准直播源拉取/融合/去重链路，不需要 market 数据。
+   ::
+
+       python -m polymarket_trader.tools.sports_live_calibration \\
+           --sources espn,nba --leagues NBA,NHL --output report.json
+
+2. **With markets**：通过 ``--markets-fixture`` 传入本地 JSON 样本，CLI 用策略
+   ``best_live_match`` 计算 per-market 匹配率与 unmatched 原因。
+   ::
+
+       python -m polymarket_trader.tools.sports_live_calibration \\
+           --markets-fixture tests/fixtures/sports_live/markets_sample.json \\
+           --output report.json
+
+fixture JSON schema（最小字段；其余 Market 字段用默认值即可）::
+
+    [
+      {
+        "condition_id": "0xabc...",
+        "market_slug": "nba-magic-pistons-2026-05-12",
+        "market_question": "Will the Magic beat the Pistons?",
+        "event_title": "Magic @ Pistons",
+        "event_slug": "magic-pistons-2026-05-12",
+        "category": "Sports",
+        "tags": ["NBA", "Basketball"],
+        "outcomes": [
+          {"token_id": "h", "outcome": "Orlando Magic"},
+          {"token_id": "a", "outcome": "Detroit Pistons"}
+        ]
+      }
+    ]
+
+不启动交易主链路；不下单。读取当前 Settings 装配 aggregate_client，跑一次或多次
+``list_events`` + 可选 ``best_live_match`` 并把 JSON 报告写到 ``--output``。
 
 CLAUDE.md §1：本工具是离线 dev/runbook 工具；不参与 P0 交易热路径。
 """
@@ -20,6 +47,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from polymarket_trader.app.sports_live_calibration import (
@@ -27,9 +55,12 @@ from polymarket_trader.app.sports_live_calibration import (
     run_calibration,
 )
 from polymarket_trader.config import load_settings
-from polymarket_trader.domain.market import Market
+from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
+from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.infra.sports.aggregate_client import SportsLiveAggregateClient
 from polymarket_trader.main import _build_sports_live_state_client
+
+from strategies.current.live_state import best_live_match
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -63,6 +94,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Match-rate floor below which a silent_gap warning is raised (default 0.5).",
     )
     parser.add_argument(
+        "--markets-fixture",
+        default=None,
+        help=(
+            "Path to a JSON file of market fixtures (see module docstring). "
+            "Omitted = aggregate-only mode (no per-market matching)."
+        ),
+    )
+    parser.add_argument(
         "--output",
         default="-",
         help="Output JSON file path; '-' (default) writes to stdout.",
@@ -70,13 +109,48 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _markets_from_runtime() -> tuple[Market, ...]:
-    """读取当前 runtime 注册表中的 market 快照；如无 runtime，返回空 tuple。
+def load_markets_from_fixture(path: str | Path) -> tuple[Market, ...]:
+    """从 JSON fixture 加载 minimal Market 列表。
 
-    这里刻意不去启动 trading 主链路；调用方可以扩展为加载 fixture。
+    只读 calibration 必需字段（condition_id / slug / question / event / category /
+    tags / outcomes）；其他字段用 Market dataclass 默认值。Schema 见模块 docstring。
     """
 
-    return ()
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise ValueError(
+            f"markets fixture {path!s} must be a JSON list of market objects"
+        )
+    markets: list[Market] = []
+    for index, raw in enumerate(data):
+        if not isinstance(raw, dict):
+            raise ValueError(f"markets fixture entry #{index} must be an object")
+        outcomes_raw = raw.get("outcomes") or ()
+        outcomes = tuple(
+            MarketOutcome(token_id=str(o["token_id"]), outcome=str(o["outcome"]))
+            for o in outcomes_raw
+            if isinstance(o, dict) and "token_id" in o and "outcome" in o
+        )
+        markets.append(
+            Market(
+                condition_id=str(raw["condition_id"]),
+                market_slug=str(raw["market_slug"]),
+                market_name=raw.get("market_name"),
+                market_question=raw.get("market_question"),
+                event_id=raw.get("event_id"),
+                event_title=raw.get("event_title"),
+                event_slug=raw.get("event_slug"),
+                category=raw.get("category"),
+                tags=tuple(raw.get("tags") or ()),
+                outcomes=outcomes,
+                trading_status=TradingStatus(raw.get("trading_status", "eligible")),
+            )
+        )
+    return tuple(markets)
+
+
+def _strategy_match(market: Market, events: tuple[LiveEvent, ...]) -> Any:
+    return best_live_match(market, events)
 
 
 async def _amain(argv: Sequence[str] | None = None) -> int:
@@ -85,18 +159,19 @@ async def _amain(argv: Sequence[str] | None = None) -> int:
     source_filter = [s.strip() for s in args.sources.split(",") if s.strip()]
     league_filter = [s.strip().upper() for s in args.leagues.split(",") if s.strip()]
     aggregate_client: SportsLiveAggregateClient = _build_sports_live_state_client(settings)
-    markets = _markets_from_runtime()
 
-    def _stub_match(market: Market, events: tuple[Any, ...]) -> Any:
-        # 校准 harness 默认不传策略匹配函数；只统计 aggregate 层指标。
-        # 调用方有需要时可以扩展 CLI 注入策略 hook。
-        return None
+    if args.markets_fixture:
+        markets: tuple[Market, ...] = load_markets_from_fixture(args.markets_fixture)
+        match_fn: Any = _strategy_match
+    else:
+        markets = ()
+        match_fn = None
 
     try:
         report: SportsLiveCalibrationReport = await run_calibration(
             aggregate_client=aggregate_client,
             markets=markets,
-            match_live_event=_stub_match,
+            match_live_event=match_fn,
             rounds=max(1, int(args.rounds)),
             silent_gap_threshold=float(args.silent_gap_threshold),
             league_filter=league_filter or None,
