@@ -20,7 +20,7 @@ from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.extension_api import load_mapping_file
 from polymarket_trader.infra.sports import parse_espn_scoreboard_payload
 from polymarket_trader.serialization import jsonable
-from strategies.current.live_state import best_live_match, live_game_metadata
+from strategies.current.live_state import best_live_match, live_event_metadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,9 +51,9 @@ class SportsLiveSampleReport:
 
     source: str
     league: str
-    games_seen: int
+    events_seen: int
     markets_checked: int
-    expected_games_checked: int
+    expected_events_checked: int
     expected_matches_checked: int
     matches: tuple[dict[str, Any], ...]
     failures: tuple[SportsLiveSampleFailure, ...]
@@ -71,9 +71,9 @@ class SportsLiveSampleReport:
             "passed": self.passed,
             "source": self.source,
             "league": self.league,
-            "games_seen": self.games_seen,
+            "events_seen": self.events_seen,
             "markets_checked": self.markets_checked,
-            "expected_games_checked": self.expected_games_checked,
+            "expected_events_checked": self.expected_events_checked,
             "expected_matches_checked": self.expected_matches_checked,
             "matches": jsonable(self.matches),
             "failures": [failure.as_payload() for failure in self.failures],
@@ -126,18 +126,18 @@ def validate_sports_live_sample(sample: Mapping[str, Any]) -> SportsLiveSampleRe
         scoreboard = {}
 
     observed_at = _datetime_value(sample.get("observed_at")) or datetime.now(timezone.utc)
-    games = parse_espn_scoreboard_payload(scoreboard, league=league or "nba", observed_at=observed_at)
+    events = parse_espn_scoreboard_payload(scoreboard, league=league or "nba", observed_at=observed_at)
     markets = tuple(_load_market(item) for item in _mapping_list(sample.get("markets")))
-    matches = tuple(_match_payload(match) for market in markets if (match := best_live_match(market, games)))
+    matches = tuple(_match_payload(match) for market in markets if (match := best_live_match(market, events)))
 
-    failures.extend(_validate_expected_games(sample, games))
-    failures.extend(_validate_expected_matches(sample, markets=markets, games=games))
+    failures.extend(_validate_expected_events(sample, events))
+    failures.extend(_validate_expected_matches(sample, markets=markets, events=events))
     return SportsLiveSampleReport(
         source=source,
         league=league,
-        games_seen=len(games),
+        events_seen=len(events),
         markets_checked=len(markets),
-        expected_games_checked=len(_mapping_list(sample.get("expected_games"))),
+        expected_events_checked=len(_mapping_list(sample.get("expected_events"))),
         expected_matches_checked=len(_mapping_list(sample.get("expected_matches"))),
         matches=matches,
         failures=tuple(failures),
@@ -150,31 +150,31 @@ def validate_sports_live_sample_file(path: str) -> SportsLiveSampleReport:
     return validate_sports_live_sample(load_mapping_file(path))
 
 
-def _validate_expected_games(
+def _validate_expected_events(
     sample: Mapping[str, Any],
-    games: Sequence[Any],
+    events: Sequence[Any],
 ) -> tuple[SportsLiveSampleFailure, ...]:
     failures: list[SportsLiveSampleFailure] = []
-    by_event_id = {game.source_event_id: game for game in games}
-    for index, expected in enumerate(_mapping_list(sample.get("expected_games"))):
-        path = f"expected_games[{index}]"
+    by_event_id = {event.source_event_id: event for event in events}
+    for index, expected in enumerate(_mapping_list(sample.get("expected_events"))):
+        path = f"expected_events[{index}]"
         source_event_id = _text(expected.get("source_event_id"))
         if not source_event_id:
-            failures.append(_failure("missing_source_event_id", path, "expected game 缺少 source_event_id。"))
+            failures.append(_failure("missing_source_event_id", path, "expected event 缺少 source_event_id。"))
             continue
-        game = by_event_id.get(source_event_id)
-        if game is None:
+        event = by_event_id.get(source_event_id)
+        if event is None:
             failures.append(
                 _failure(
-                    "game_not_found",
+                    "event_not_found",
                     path,
-                    "ESPN payload 中没有找到期望比赛。",
+                    "ESPN payload 中没有找到期望事件。",
                     expected=source_event_id,
                     actual=tuple(by_event_id),
                 )
             )
             continue
-        actual = live_game_metadata(game)
+        actual = live_event_metadata(event)
         for field in (
             "status",
             "period",
@@ -190,7 +190,7 @@ def _validate_expected_games(
             if actual.get(field) != expected.get(field):
                 failures.append(
                     _failure(
-                        "game_field_mismatch",
+                        "event_field_mismatch",
                         f"{path}.{field}",
                         "ESPN 状态字段归一化结果与样本期望不一致。",
                         expected=expected.get(field),
@@ -204,7 +204,7 @@ def _validate_expected_matches(
     sample: Mapping[str, Any],
     *,
     markets: Sequence[Market],
-    games: Sequence[Any],
+    events: Sequence[Any],
 ) -> tuple[SportsLiveSampleFailure, ...]:
     failures: list[SportsLiveSampleFailure] = []
     by_condition = {market.condition_id: market for market in markets}
@@ -226,19 +226,19 @@ def _validate_expected_matches(
                 )
             )
             continue
-        match = best_live_match(market, tuple(games))
+        match = best_live_match(market, tuple(events))
         if match is None:
-            failures.append(_failure("match_not_found", path, "market 未匹配到任何 ESPN 比赛。"))
+            failures.append(_failure("match_not_found", path, "market 未匹配到任何 ESPN 事件。"))
             continue
         expected_event_id = _text(expected.get("source_event_id"))
-        if expected_event_id and match.game.source_event_id != expected_event_id:
+        if expected_event_id and match.event.source_event_id != expected_event_id:
             failures.append(
                 _failure(
                     "match_event_mismatch",
                     f"{path}.source_event_id",
                     "market 匹配到了非预期 ESPN event。",
                     expected=expected_event_id,
-                    actual=match.game.source_event_id,
+                    actual=match.event.source_event_id,
                 )
             )
         min_score = _optional_int(expected.get("min_score"))
@@ -307,15 +307,18 @@ def _match_payload(match: Any) -> dict[str, Any]:
         "condition_id": match.market.condition_id,
         "market_slug": match.market.market_slug,
         "event_slug": match.market.event_slug,
-        "source": match.game.source,
-        "source_event_id": match.game.source_event_id,
-        "league": match.game.league,
-        "status": match.game.status.value,
-        "period": match.game.period,
-        "seconds_remaining": match.game.seconds_remaining,
+        "source": match.event.source,
+        "source_event_id": match.event.source_event_id,
+        "league": match.event.league,
+        "status": match.event.status.value,
+        "period": match.event.period,
+        "seconds_remaining": match.event.seconds_remaining,
         "score": match.score,
         "matched_home_alias": match.matched_home_alias,
         "matched_away_alias": match.matched_away_alias,
+        "primary_source": match.primary_source,
+        "contributing_sources": list(match.contributing_sources),
+        "confidence": match.confidence,
     }
 
 

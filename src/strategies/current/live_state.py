@@ -2,6 +2,9 @@
 
 本模块只处理策略消费的 metadata 形态和 market 文本匹配语义。框架 worker
 只调用这些纯函数，不在运行时层硬编码当前策略阈值或盘口判断。
+
+匹配按 ``LiveEvent.kind`` 分支：team_match 走原有 home/away 别名匹配，
+race 走 leader_driver / top-3 driver / event_name 关键字命中。
 """
 
 from __future__ import annotations
@@ -13,7 +16,11 @@ import unicodedata
 from typing import Any
 
 from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.sports_live import SportsLiveGame, SportsLiveGameStatus
+from polymarket_trader.domain.sports_live import (
+    LiveEvent,
+    LiveEventKind,
+    SportsLiveGameStatus,
+)
 from polymarket_trader.extension_api.live_state import LiveStateMatch
 
 _GENERIC_ALIAS_TOKENS = {
@@ -50,203 +57,354 @@ _GENERIC_ALIAS_TOKENS = {
     "women",
 }
 _TEAM_EVENT_START_TOLERANCE = timedelta(hours=3)
+# 网球资格赛/小赛会的页面时间和直播源时间可能跨日重排；跨源 24h 兜底（保留原逻辑）。
 _TENNIS_EVENT_START_TOLERANCE = timedelta(hours=24)
+
+# confidence 归一化基准：score 来自 alias 长度累加（典型对阵 5–25）。
+# 30 作为分母把"双方都中长名 + 完整别名"映射到约 1.0；溢出 clamp 到 1.0。
+_CONFIDENCE_SCORE_SCALE = 30.0
+# RACE kind 匹配天然弱于 team-pair（leader 文本短、易撞名）→ 0.7 折扣压低优先级。
+_RACE_CONFIDENCE_DISCOUNT = 0.7
+# RACE 文本命中权重；每命中一个 leader / driver / event 关键字加分，最终归一到 confidence。
+_RACE_LEADER_DRIVER_SCORE = 12
+_RACE_TOP3_DRIVER_SCORE = 6
+_RACE_EVENT_NAME_SCORE = 4
 
 
 @dataclass(frozen=True, slots=True)
 class LiveMarketMatch:
-    """外部比赛与 Polymarket market 的文本匹配结果。"""
+    """外部 LiveEvent 与 Polymarket market 的文本匹配结果。
+
+    ``primary_source`` / ``contributing_sources`` / ``confidence`` 把"该 market
+    实际匹配到的源"作为一等可观测信息（缺口 1：per-market 源选择可观测性）。
+    """
 
     market: Market
-    game: SportsLiveGame
+    event: LiveEvent
     score: int
     matched_home_alias: str
     matched_away_alias: str
+    kind: LiveEventKind = LiveEventKind.TEAM_MATCH
+
+    @property
+    def primary_source(self) -> str:
+        return self.event.source
+
+    @property
+    def contributing_sources(self) -> tuple[str, ...]:
+        return tuple(self.event.contributing_sources)
+
+    @property
+    def confidence(self) -> float:
+        # 把 score 归一化到 [0, 1] 区间，再按 kind 折扣。score 主要来自 alias 长度，
+        # 不同 sport 之间难以严格统一，但 [0, 1] 化后足够 admin / 校准 harness 比较。
+        base = min(1.0, max(0.0, self.score / _CONFIDENCE_SCORE_SCALE))
+        if self.kind == LiveEventKind.RACE:
+            return base * _RACE_CONFIDENCE_DISCOUNT
+        return base
 
     def metadata(self) -> dict[str, Any]:
         """返回当前策略读取的入场 metadata。"""
 
         return {
-            "live_game": live_game_metadata(self.game),
+            "live_game": live_event_metadata(self.event),
             "live_match": {
-                "source": self.game.source,
-                "source_event_id": self.game.source_event_id,
+                "source": self.event.source,
+                "source_event_id": self.event.source_event_id,
                 "score": self.score,
                 "matched_home_alias": self.matched_home_alias,
                 "matched_away_alias": self.matched_away_alias,
+                "kind": self.kind.value,
+                "primary_source": self.primary_source,
+                "contributing_sources": list(self.contributing_sources),
+                "confidence": self.confidence,
             },
         }
 
 
-def live_game_metadata(game: SportsLiveGame) -> dict[str, Any]:
-    """把通用直播比赛状态转换成体育扫尾策略的稳定 metadata。"""
+def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
+    """把通用直播事件转换成体育扫尾策略的稳定 metadata。
 
+    team_match：导出 home/away 分数；
+    race：导出 race_state（leader / laps / 状态旗）+ top-3 drivers；
+    所有源融合后产生的 source_conflicts 作为一等字段（不再读 source_payload dict）。
+    """
+
+    home = event.home
+    away = event.away
     return {
-        "league": game.league,
-        "home_name": game.home.name,
-        "away_name": game.away.name,
-        "home_score": game.home.score,
-        "away_score": game.away.score,
-        "period": game.period,
-        "seconds_remaining": game.seconds_remaining,
-        "status": game.status.value,
-        "observed_at": None if game.observed_at is None else game.observed_at.isoformat(),
-        "source": game.source,
-        "source_event_id": game.source_event_id,
-        "raw_status": game.raw_status,
-        "source_conflicts": game.source_payload.get("source_conflicts", ()),
-        "baseball_state": None if game.baseball_state is None else {
-            "current_inning": game.baseball_state.current_inning,
-            "inning_half": game.baseball_state.inning_half,
-            "outs": game.baseball_state.outs,
-            "offense_team": game.baseball_state.offense_team,
-            "defense_team": game.baseball_state.defense_team,
-            "occupied_bases": game.baseball_state.occupied_bases,
+        "league": event.league,
+        "sport": event.sport,
+        "kind": event.kind.value,
+        "home_name": home.name if home else None,
+        "away_name": away.name if away else None,
+        "home_score": (home.score or 0) if home else 0,
+        "away_score": (away.score or 0) if away else 0,
+        "period": event.period,
+        "seconds_remaining": event.seconds_remaining,
+        "status": event.status.value,
+        "observed_at": None if event.observed_at is None else event.observed_at.isoformat(),
+        "event_start_time": (
+            None if event.event_start_time is None else event.event_start_time.isoformat()
+        ),
+        "event_name": event.event_name,
+        "source": event.source,
+        "source_event_id": event.source_event_id,
+        "raw_status": event.raw_status,
+        "source_conflicts": [
+            {
+                "field": c.field,
+                "winner_source": c.winner_source,
+                "winner_value": c.winner_value,
+                "loser_source": c.loser_source,
+                "loser_value": c.loser_value,
+                "decided_by": c.decided_by,
+            }
+            for c in event.source_conflicts
+        ],
+        "contributing_sources": list(event.contributing_sources),
+        "baseball_state": None if event.baseball_state is None else {
+            "current_inning": event.baseball_state.current_inning,
+            "inning_half": event.baseball_state.inning_half,
+            "outs": event.baseball_state.outs,
+            "offense_team": event.baseball_state.offense_team,
+            "defense_team": event.baseball_state.defense_team,
+            "occupied_bases": event.baseball_state.occupied_bases,
         },
-        "tennis_state": _tennis_state_metadata(game.tennis_state),
-        "soccer_state": None if game.soccer_state is None else {
-            "period": game.soccer_state.period,
-            "clock_minutes": game.soccer_state.clock_minutes,
-            "added_minutes": game.soccer_state.added_minutes,
-            "home_red_cards": game.soccer_state.home_red_cards,
-            "away_red_cards": game.soccer_state.away_red_cards,
+        "tennis_state": _tennis_state_metadata(event.tennis_state),
+        "soccer_state": None if event.soccer_state is None else {
+            "period": event.soccer_state.period,
+            "clock_minutes": event.soccer_state.clock_minutes,
+            "added_minutes": event.soccer_state.added_minutes,
+            "home_red_cards": event.soccer_state.home_red_cards,
+            "away_red_cards": event.soccer_state.away_red_cards,
         },
-        "esports_state": None if game.esports_state is None else {
-            "best_of": game.esports_state.best_of,
-            "current_map_index": game.esports_state.current_map_index,
-            "home_maps_won": game.esports_state.home_maps_won,
-            "away_maps_won": game.esports_state.away_maps_won,
-            "home_current_map_score": game.esports_state.home_current_map_score,
-            "away_current_map_score": game.esports_state.away_current_map_score,
+        "esports_state": None if event.esports_state is None else {
+            "best_of": event.esports_state.best_of,
+            "current_map_index": event.esports_state.current_map_index,
+            "home_maps_won": event.esports_state.home_maps_won,
+            "away_maps_won": event.esports_state.away_maps_won,
+            "home_current_map_score": event.esports_state.home_current_map_score,
+            "away_current_map_score": event.esports_state.away_current_map_score,
         },
-        "cricket_state": None if game.cricket_state is None else {
-            "current_innings": game.cricket_state.current_innings,
-            "batting_side": game.cricket_state.batting_side,
-            "runs": game.cricket_state.runs,
-            "wickets": game.cricket_state.wickets,
-            "overs_completed": game.cricket_state.overs_completed,
-            "target": game.cricket_state.target,
-            "required_runs": game.cricket_state.required_runs,
-            "required_balls": game.cricket_state.required_balls,
+        "cricket_state": None if event.cricket_state is None else {
+            "current_innings": event.cricket_state.current_innings,
+            "batting_side": event.cricket_state.batting_side,
+            "runs": event.cricket_state.runs,
+            "wickets": event.cricket_state.wickets,
+            "overs_completed": event.cricket_state.overs_completed,
+            "target": event.cricket_state.target,
+            "required_runs": event.cricket_state.required_runs,
+            "required_balls": event.cricket_state.required_balls,
+        },
+        "race_state": None if event.race_state is None else {
+            "leader_driver": event.race_state.leader_driver,
+            "leader_team": event.race_state.leader_team,
+            "laps_completed": event.race_state.laps_completed,
+            "total_laps": event.race_state.total_laps,
+            "status_flag": event.race_state.status_flag,
+            "drivers": [
+                {
+                    "name": d.name,
+                    "position": d.position,
+                    "team": d.team,
+                }
+                for d in event.drivers
+            ],
         },
     }
 
 
-def match_live_game(market: Market, game: SportsLiveGame) -> LiveMarketMatch | None:
-    """按队伍别名把一个外部比赛匹配到一个本地 market。
+def match_live_event(market: Market, event: LiveEvent) -> LiveMarketMatch | None:
+    """按 ``event.kind`` 分支，匹配一个外部 LiveEvent 到一个本地 market。
 
-    这里不判断是否值得交易，只解决“这个比分属于哪个 market”的业务语义。
+    这里不判断是否值得交易，只解决"这个事件属于哪个 market"的业务语义。
     """
 
     market_text = _market_text(market)
-    return _match_live_game_from_market_text(market, game, market_text)
+    return _match_live_event_from_market_text(market, event, market_text)
 
 
-def _match_live_game_from_market_text(
+def _match_live_event_from_market_text(
     market: Market,
-    game: SportsLiveGame,
+    event: LiveEvent,
     market_text: str,
 ) -> LiveMarketMatch | None:
-    """使用已归一化 market 文本匹配单场比赛，避免批量匹配重复做文本清洗。"""
+    if event.kind == LiveEventKind.TEAM_MATCH:
+        return _match_team_event(market, event, market_text)
+    if event.kind == LiveEventKind.RACE:
+        return _match_race_event(market, event, market_text)
+    return None
 
+
+def _match_team_event(
+    market: Market,
+    event: LiveEvent,
+    market_text: str,
+) -> LiveMarketMatch | None:
+    home = event.home
+    away = event.away
+    if home is None or away is None:
+        return None
     market_start = _market_event_start_time(market)
-    game_start = _game_event_start_time(game)
+    event_start = _event_start_time(event)
     precise_start_matched = False
     if (
         market_start is not None
-        and game_start is not None
-        and not _allows_event_start_time_match(game, market_start, game_start)
+        and event_start is not None
+        and not _allows_event_start_time_match(event, market_start, event_start)
     ):
         return None
-    if market_start is not None and game_start is not None:
+    if market_start is not None and event_start is not None:
         precise_start_matched = True
     market_date = _market_event_date(market_text)
-    game_date = _game_event_date(game)
+    event_date = _event_date(event)
     if (
         not precise_start_matched
         and market_date is not None
-        and game_date is not None
-        and market_date != game_date
-        and not _allows_adjacent_event_date(game, market_date, game_date)
+        and event_date is not None
+        and market_date != event_date
+        and not _allows_adjacent_event_date(event, market_date, event_date)
     ):
         return None
     market_tokens = set(market_text.split())
-    home_alias = _best_alias(market_text, market_tokens, game.home.match_aliases())
-    away_alias = _best_alias(market_text, market_tokens, game.away.match_aliases())
+    home_alias = _best_alias(market_text, market_tokens, home.match_aliases())
+    away_alias = _best_alias(market_text, market_tokens, away.match_aliases())
     if home_alias is None or away_alias is None:
         return None
     home_score = _alias_score(home_alias)
     away_score = _alias_score(away_alias)
     return LiveMarketMatch(
         market=market,
-        game=game,
+        event=event,
         score=home_score + away_score,
         matched_home_alias=home_alias,
         matched_away_alias=away_alias,
+        kind=LiveEventKind.TEAM_MATCH,
     )
+
+
+def _match_race_event(
+    market: Market,
+    event: LiveEvent,
+    market_text: str,
+) -> LiveMarketMatch | None:
+    """race kind 文本匹配：扫 market 文本里是否提到 leader / top-3 driver / event_name。
+
+    赛车 market 形态多样（"Will <driver> win the race?"、"<event> winner"
+    yes/no prop 等），所以这里用关键字命中而不是 home/away pair。命中后用
+    较低 score（× _RACE_CONFIDENCE_DISCOUNT）让 best_live_match 不压制 team-pair
+    匹配——两类比赛使用相同的 confidence 字段进入排序。
+    """
+
+    race_state = event.race_state
+    drivers = event.drivers
+    market_tokens = set(market_text.split())
+    score = 0
+    matched_driver: str | None = None
+    matched_event_alias: str | None = None
+    leader = (race_state.leader_driver if race_state else None) or None
+    if leader and _phrase_matches(leader, market_text, market_tokens):
+        score += _RACE_LEADER_DRIVER_SCORE
+        matched_driver = leader
+    if drivers:
+        # 给 leader 之后的 top 候选也做一次扫描，命中其中之一即可。
+        top_drivers = [d.name for d in drivers if d.position is not None and d.position <= 3]
+        for driver_name in top_drivers:
+            if driver_name == leader:
+                continue
+            if _phrase_matches(driver_name, market_text, market_tokens):
+                score += _RACE_TOP3_DRIVER_SCORE
+                if matched_driver is None:
+                    matched_driver = driver_name
+                break
+    if event.event_name and _phrase_matches(event.event_name, market_text, market_tokens):
+        score += _RACE_EVENT_NAME_SCORE
+        matched_event_alias = event.event_name
+    if score <= 0:
+        return None
+    return LiveMarketMatch(
+        market=market,
+        event=event,
+        score=score,
+        matched_home_alias=matched_driver or "",
+        matched_away_alias=matched_event_alias or "",
+        kind=LiveEventKind.RACE,
+    )
+
+
+def _phrase_matches(phrase: str, market_text: str, market_tokens: set[str]) -> bool:
+    """车手名或赛事名命中文本——保守起见走 token 级匹配，不让短词撞名。"""
+
+    normalized = _normalize_text(phrase)
+    tokens = [token for token in normalized.split() if token not in _GENERIC_ALIAS_TOKENS]
+    if not tokens:
+        return False
+    if len(tokens) == 1:
+        return tokens[0] in market_tokens and len(tokens[0]) >= 3
+    phrase_text = " ".join(tokens)
+    return f" {phrase_text} " in f" {market_text} " or all(t in market_tokens for t in tokens)
 
 
 def best_live_match(
     market: Market,
-    games: tuple[SportsLiveGame, ...],
+    events: tuple[LiveEvent, ...],
 ) -> LiveMarketMatch | None:
-    """返回 market 在当前比赛集合中的最高置信匹配。"""
+    """返回 market 在当前事件集合中的最高置信匹配。"""
 
     market_text = _market_text(market)
     matches = [
         match
-        for game in games
-        if (match := _match_live_game_from_market_text(market, game, market_text)) is not None
+        for event in events
+        if (match := _match_live_event_from_market_text(market, event, market_text)) is not None
     ]
     if not matches:
         return None
-    return max(matches, key=lambda item: item.score)
+    # 按 confidence 排序：team-pair 优先，但高 confidence 的 race 也能击败低 confidence team。
+    return max(matches, key=lambda item: (item.confidence, item.score))
 
 
 def build_live_state_match(
     market: Market,
-    games: tuple[SportsLiveGame, ...],
+    events: tuple[LiveEvent, ...],
     *,
     market_end_horizon_seconds: int,
     bypass_resolver: "callable | None" = None,
 ) -> LiveStateMatch | None:
-    """框架 hook ``match_live_state`` 的策略侧实现：返回强类型 LiveStateMatch。
+    """框架 hook ``match_live_state`` 的策略侧实现：返回强类型 LiveStateMatch。"""
 
-    ``payload`` 由 ``LiveMarketMatch.metadata()`` 给出（含游戏快照 + match 信息），
-    framework 不解释字段语义，admin/UI 可整体透传。
-    ``signal_allowed/reason`` 由 ``entry_signal_gate`` 决定，可被 bypass_resolver
-    在 ``market_end_too_far`` 情况下放行。
-    """
-
-    match = best_live_match(market, games)
+    match = best_live_match(market, events)
     if match is None:
         return None
     matched_market = match.market
-    game = match.game
+    event = match.event
     signal_allowed, signal_reason = entry_signal_gate(
         matched_market,
-        game,
+        event,
         market_end_horizon_seconds=market_end_horizon_seconds,
     )
     if not signal_allowed and signal_reason == "market_end_too_far" and bypass_resolver is not None:
-        bypass = bypass_resolver(matched_market, game)
+        bypass = bypass_resolver(matched_market, event)
         if bypass is not None:
             signal_allowed = True
             signal_reason = bypass
     payload = match.metadata()
     return LiveStateMatch(
         market=matched_market,
-        game=game,
+        event=event,
         signal_allowed=signal_allowed,
         signal_reason=signal_reason,
-        phase=str(getattr(game.status, "value", game.status) or "").strip().lower(),
+        phase=str(getattr(event.status, "value", event.status) or "").strip().lower(),
+        primary_source=match.primary_source,
+        contributing_sources=match.contributing_sources,
+        confidence=match.confidence,
         payload=payload,
     )
 
 
 def entry_signal_gate(
     market: Market,
-    game: SportsLiveGame,
+    event: LiveEvent,
     *,
     market_end_horizon_seconds: int,
 ) -> tuple[bool, str]:
@@ -256,13 +414,13 @@ def entry_signal_gate(
     或已经结束但 Polymarket 尚未封盘的 market，避免远期 live 匹配挤压交易队列。
     """
 
-    if game.status == SportsLiveGameStatus.ENDED:
+    if event.status == SportsLiveGameStatus.ENDED:
         return True, "ended_not_closed"
-    if game.status != SportsLiveGameStatus.LIVE:
-        return False, f"sports_live_state_{game.status.value}"
+    if event.status != SportsLiveGameStatus.LIVE:
+        return False, f"sports_live_state_{event.status.value}"
     if market.end_date is None or market_end_horizon_seconds <= 0:
         return True, "market_end_unknown"
-    current_time = _ensure_utc(game.observed_at) or datetime.now(timezone.utc)
+    current_time = _ensure_utc(event.observed_at) or datetime.now(timezone.utc)
     market_end = _ensure_utc(market.end_date)
     if market_end is None:
         return True, "market_end_unknown"
@@ -326,7 +484,15 @@ def _market_event_start_time(market: Market) -> datetime | None:
     return _ensure_utc(market.game_start_time)
 
 
-def _game_event_start_time(game: SportsLiveGame) -> datetime | None:
+def _event_start_time(event: LiveEvent) -> datetime | None:
+    """开赛时间优先读 event.event_start_time 一等字段；缺失时回退 source_payload。
+
+    一等字段是新模型主路径；source_payload 的 fallback 只在历史快照或外部源
+    未填一等字段时短暂启用——所有 client 都应主动写一等字段。
+    """
+
+    if event.event_start_time is not None:
+        return _ensure_utc(event.event_start_time)
     for key in (
         "start_timestamp",
         "start_time_utc",
@@ -334,13 +500,16 @@ def _game_event_start_time(game: SportsLiveGame) -> datetime | None:
         "game_date",
         "date",
     ):
-        parsed = _parse_event_datetime_value(game.source_payload.get(key))
+        parsed = _parse_event_datetime_value(event.source_payload.get(key))
         if parsed is not None:
             return parsed
     return None
 
 
-def _game_event_date(game: SportsLiveGame) -> date | None:
+def _event_date(event: LiveEvent) -> date | None:
+    start = _event_start_time(event)
+    if start is not None:
+        return start.date()
     for key in (
         "start_time_utc",
         "game_time_utc",
@@ -348,16 +517,16 @@ def _game_event_date(game: SportsLiveGame) -> date | None:
         "official_date",
         "start_timestamp",
     ):
-        parsed = _parse_event_date_value(game.source_payload.get(key))
+        parsed = _parse_event_date_value(event.source_payload.get(key))
         if parsed is not None:
             return parsed
     return None
 
 
 def _allows_event_start_time_match(
-    game: SportsLiveGame,
+    event: LiveEvent,
     market_start: datetime,
-    game_start: datetime,
+    event_start: datetime,
 ) -> bool:
     """用精确开赛时间防止同队多场比赛串场。
 
@@ -365,24 +534,26 @@ def _allows_event_start_time_match(
     赛程漂移窗口，因为资格赛/小赛会的页面时间和直播源时间可能被重排。
     """
 
+    sport = str(event.sport or event.source_payload.get("sport") or "").strip().lower()
     tolerance = (
         _TENNIS_EVENT_START_TOLERANCE
-        if str(game.source_payload.get("sport") or "").strip().lower() == "tennis"
+        if sport == "tennis"
         else _TEAM_EVENT_START_TOLERANCE
     )
-    return abs(market_start - game_start) <= tolerance
+    return abs(market_start - event_start) <= tolerance
 
 
-def _allows_adjacent_event_date(game: SportsLiveGame, market_date: date, game_date: date) -> bool:
+def _allows_adjacent_event_date(event: LiveEvent, market_date: date, event_date: date) -> bool:
     """处理网球跨时区开赛日期。
 
     Polymarket 网球 slug 常按页面本地日期命名，SofaScore 使用 UTC 开赛时间；
     同一场可能相差一天。团队联赛不使用该宽松规则，避免 MLB/NBA 同队多日赛串场。
     """
 
-    if str(game.source_payload.get("sport") or "").strip().lower() != "tennis":
+    sport = str(event.sport or event.source_payload.get("sport") or "").strip().lower()
+    if sport != "tennis":
         return False
-    return abs((market_date - game_date).days) <= 1
+    return abs((market_date - event_date).days) <= 1
 
 
 def _parse_event_datetime_value(value: Any) -> datetime | None:
@@ -514,11 +685,7 @@ def _fold_ascii(value: str) -> str:
 
 
 def _alias_text_variants(alias: str) -> tuple[str, ...]:
-    """返回外部队名常见语言/拼写变体，用于跨来源匹配。
-
-    Polymarket 和比分源经常混用英语、法语或连写队名；这里仅生成保守的
-    多词队名变体，避免把短缩写误匹配到无关市场。
-    """
+    """返回外部队名常见语言/拼写变体，用于跨来源匹配。"""
 
     normalized = _normalize_text(alias)
     if not normalized:

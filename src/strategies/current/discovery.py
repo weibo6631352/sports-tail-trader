@@ -10,9 +10,10 @@ from __future__ import annotations
 import re
 
 from polymarket_trader.domain.sports_live import (
-    SportsLiveGame,
+    LiveEvent,
+    LiveEventKind,
+    Participant,
     SportsLiveGameStatus,
-    SportsLiveTeam,
 )
 from polymarket_trader.extension_api import DiscoveryQuery
 from strategies.current.config import CurrentStrategyConfig
@@ -90,9 +91,9 @@ def build_configured_discovery_queries(config: CurrentStrategyConfig) -> tuple[D
     )
 
 
-def build_live_game_discovery_queries(
+def build_live_event_discovery_queries(
     config: CurrentStrategyConfig,
-    games: tuple[SportsLiveGame, ...],
+    events: tuple[LiveEvent, ...],
 ) -> tuple[DiscoveryQuery, ...]:
     """用直播源里的真实比赛生成高意图查询。
 
@@ -102,16 +103,16 @@ def build_live_game_discovery_queries(
     """
 
     tag_slugs = tuple(tag_slug.strip() for tag_slug in config.discovery_tag_slugs if tag_slug.strip())
-    active_games = tuple(
+    active_events = tuple(
         sorted(
-            (game for game in games if game.status in _LIVE_DISCOVERY_STATUSES),
-            key=_live_game_rank,
+            (event for event in events if event.status in _LIVE_DISCOVERY_STATUSES),
+            key=_live_event_rank,
         )
     )
     queries: list[DiscoveryQuery] = []
     seen: set[tuple[str, str | None]] = set()
-    for game in active_games[: config.tail_live_discovery_max_games]:
-        for term in _game_query_terms(game):
+    for event in active_events[: config.tail_live_discovery_max_games]:
+        for term in _event_query_terms(event):
             for tag_slug in tag_slugs or (None,):
                 key = (term, tag_slug)
                 if key in seen:
@@ -124,7 +125,7 @@ def build_live_game_discovery_queries(
                     suffix = f"{term}|tag_slug:{tag_slug}"
                 queries.append(
                     DiscoveryQuery(
-                        name=f"live_game:{game.league.lower()}:{game.source_event_id}:{suffix}",
+                        name=f"live_event:{event.league.lower()}:{event.source_event_id}:{suffix}",
                         params=params,
                     )
                 )
@@ -133,27 +134,27 @@ def build_live_game_discovery_queries(
     return tuple(queries)
 
 
-def _live_game_rank(game: SportsLiveGame) -> tuple[int, int, str, str]:
+def _live_event_rank(event: LiveEvent) -> tuple[int, int, str, str]:
     """优先用真正 live 且 Polymarket 覆盖更高的比赛生成 discovery 查询。"""
 
     return (
-        _LIVE_DISCOVERY_STATUS_PRIORITY.get(game.status, 99),
-        _market_coverage_priority(game),
-        game.league.lower(),
-        game.source_event_id,
+        _LIVE_DISCOVERY_STATUS_PRIORITY.get(event.status, 99),
+        _market_coverage_priority(event),
+        event.league.lower(),
+        event.source_event_id,
     )
 
 
-def _market_coverage_priority(game: SportsLiveGame) -> int:
-    """估计直播源比赛在 Polymarket 单场盘口中的发现价值。
+def _market_coverage_priority(event: LiveEvent) -> int:
+    """估计直播源事件在 Polymarket 单场盘口中的发现价值。
 
     SofaScore 会返回大量 ITF 等低覆盖赛事；如果不按可交易覆盖排序，有限的
     Gamma 请求预算会先被低覆盖比赛消耗，导致 ATP/WTA 等真实可交易盘口延后。
     这里仍只影响 discovery 查询顺序，不改变最终入场判断。
     """
 
-    league = game.league.lower()
-    sport = str(game.source_payload.get("sport") or "").strip().lower()
+    league = event.league.lower()
+    sport = (event.sport or "").strip().lower()
     searchable_text = f"{league} {sport}"
     if any(token in searchable_text for token in _LIVE_DISCOVERY_MAJOR_LEAGUE_TOKENS):
         return 0
@@ -166,16 +167,32 @@ def _market_coverage_priority(game: SportsLiveGame) -> int:
     return 2
 
 
-def _game_query_terms(game: SportsLiveGame) -> tuple[str, ...]:
+def _event_query_terms(event: LiveEvent) -> tuple[str, ...]:
+    """按 kind 分支构造查询词。
+
+    team_match：home/away 对阵 + 单队名兜底；
+    race：用 leader_driver / event_name 关键字，赛车 market 经常用赛事名 + 车手提问。
+    """
+
+    if event.kind == LiveEventKind.TEAM_MATCH and event.home is not None and event.away is not None:
+        return _team_event_query_terms(event)
+    if event.kind == LiveEventKind.RACE:
+        return _race_event_query_terms(event)
+    return ()
+
+
+def _team_event_query_terms(event: LiveEvent) -> tuple[str, ...]:
     terms: list[str] = []
     seen: set[str] = set()
-    for term in _matchup_query_terms(game):
+    for term in _matchup_query_terms(event):
         if term in seen:
             continue
         seen.add(term)
         terms.append(term)
-    for team in (game.home, game.away):
-        for term in _team_query_terms(team):
+    for participant in (event.home, event.away):
+        if participant is None:
+            continue
+        for term in _team_query_terms(participant):
             if term in seen:
                 continue
             seen.add(term)
@@ -183,11 +200,34 @@ def _game_query_terms(game: SportsLiveGame) -> tuple[str, ...]:
     return tuple(terms)
 
 
-def _matchup_query_terms(game: SportsLiveGame) -> tuple[str, ...]:
+def _race_event_query_terms(event: LiveEvent) -> tuple[str, ...]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    leader = event.race_state.leader_driver if event.race_state else None
+    if leader:
+        normalized = _normalize_query_term(leader)
+        if normalized:
+            for term in _compact_team_terms(normalized):
+                if term in seen:
+                    continue
+                seen.add(term)
+                terms.append(term)
+    event_name = event.event_name
+    if event_name:
+        normalized = _normalize_query_term(event_name)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            terms.append(normalized)
+    return tuple(terms)
+
+
+def _matchup_query_terms(event: LiveEvent) -> tuple[str, ...]:
     """生成优先级最高的对阵组合词，减少单队名搜索带来的远期噪声。"""
 
-    home_terms = _team_query_terms(game.home)
-    away_terms = _team_query_terms(game.away)
+    if event.home is None or event.away is None:
+        return ()
+    home_terms = _team_query_terms(event.home)
+    away_terms = _team_query_terms(event.away)
     if not home_terms or not away_terms:
         return ()
     home = home_terms[0]
@@ -197,18 +237,18 @@ def _matchup_query_terms(game: SportsLiveGame) -> tuple[str, ...]:
     return (f"{home} {away}", f"{away} {home}")
 
 
-def _team_query_terms(team: SportsLiveTeam) -> tuple[str, ...]:
+def _team_query_terms(participant: Participant) -> tuple[str, ...]:
     terms: list[str] = []
     seen: set[str] = set()
-    location = _normalize_query_term(team.location or "")
-    abbreviation = _normalize_query_term(team.abbreviation or "")
+    location = _normalize_query_term(participant.location or "")
+    abbreviation = _normalize_query_term(participant.abbreviation or "")
     aliases = tuple(
         alias
         for alias in (
-            team.name,
-            team.display_name,
-            team.short_name,
-            *team.aliases,
+            participant.name,
+            participant.display_name,
+            participant.short_name,
+            *participant.aliases,
         )
         if alias
     )
