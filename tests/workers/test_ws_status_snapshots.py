@@ -8,9 +8,6 @@ from types import SimpleNamespace
 from freezegun import freeze_time
 
 from polymarket_trader.domain.market import Market, MarketOutcome
-
-# 固定 snapshot 时间戳；snapshot.received_at 仅作 metadata。
-_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.position import Position
 from polymarket_trader.runtime.account_state import AccountStateStore
@@ -22,6 +19,9 @@ from polymarket_trader.runtime.ws_loops import (
 )
 from polymarket_trader.workers.market_ws import MarketWsWorker
 from polymarket_trader.workers.user_ws import UserWsWorker
+
+# 固定 snapshot 时间戳；snapshot.received_at 仅作 metadata。
+_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
 
 
 def test_market_ws_status_can_return_lightweight_summary() -> None:

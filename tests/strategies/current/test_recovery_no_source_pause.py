@@ -5,9 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-# 固定 envelope occurred_at；recovery 逻辑不读 occurred_at，但稳定值便于回放。
-_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
-
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.extension_api.context import ExtensionContext
 from polymarket_trader.extension_api.lifecycle import (
@@ -19,6 +16,9 @@ from polymarket_trader.extension_api.ports import ExtensionPorts
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.identity import STRATEGY_ID
 from strategies.current.strategy import CurrentStrategy
+
+# 固定 envelope occurred_at；recovery 逻辑不读 occurred_at，但稳定值便于回放。
+_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
 
 
 @dataclass

@@ -5,12 +5,12 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
-# 固定时间戳，让快照时间不再随墙钟漂移；具体瞬间任意，仅作 metadata。
-_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
-
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.infra.polymarket import PolymarketClientError
+
+# 固定时间戳，让快照时间不再随墙钟漂移；具体瞬间任意，仅作 metadata。
+_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
 
 
 class _MissingMidpointClient:

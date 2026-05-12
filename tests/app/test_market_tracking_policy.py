@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from polymarket_trader.app.market_tracking_policy import market_unsubscribe_prune_reason
-
-# 固定 "now"，prune policy 不依赖墙钟漂移，仅需稳定的参考时间。
-_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.position import Position
+
+# 固定 "now"，prune policy 不依赖墙钟漂移，仅需稳定的参考时间。
+_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
 
 
 def test_prunes_paused_filtered_market_without_exposure() -> None:
