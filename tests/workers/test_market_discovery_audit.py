@@ -22,6 +22,9 @@ from polymarket_trader.app.market_service import MarketDiscoveryOutcome
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.workers.market_discovery_worker import MarketDiscoveryWorker
 
+# 固定事件 created_at；审计路径不读墙钟，仅作 metadata。
+_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
+
 
 @dataclass(frozen=True, slots=True)
 class _FakeParseResult:
@@ -50,7 +53,7 @@ def _make_outcome(*, condition_id: str, market_slug: str) -> MarketDiscoveryOutc
         market_slug=market_slug,
         condition_id=condition_id,
         reason="universe_excluded",
-        created_at=datetime.now(timezone.utc),
+        created_at=_FIXED_NOW,
         payload={"market": {"condition_id": condition_id, "market_slug": market_slug}},
     )
     return MarketDiscoveryOutcome(
@@ -167,7 +170,7 @@ def test_rediscovered_market_emits_market_updated_not_market_discovered() -> Non
             market_slug="slug-C",
             condition_id="0xcondC",
             reason="",
-            created_at=datetime.now(timezone.utc),
+            created_at=_FIXED_NOW,
             payload={"market": {"condition_id": "0xcondC", "market_slug": "slug-C"}},
         )
         return MarketDiscoveryOutcome(

@@ -46,8 +46,13 @@ def _snapshot(observed_at: datetime) -> SeasonSnapshot:
 
 def test_worker_disabled_returns_none() -> None:
     store = SeasonStateStore()
+    fixed_now = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
+
+    async def provider() -> SeasonSnapshot:
+        return _snapshot(fixed_now)
+
     worker = SportsSeasonStateWorker(
-        snapshot_provider=lambda: asyncio.sleep(0, result=_snapshot(datetime.now(timezone.utc))),
+        snapshot_provider=provider,
         store=store,
     )
     result = asyncio.run(worker.sync_once())

@@ -5,7 +5,12 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
+from freezegun import freeze_time
+
 from polymarket_trader.domain.market import Market, MarketOutcome
+
+# 固定 snapshot 时间戳；snapshot.received_at 仅作 metadata。
+_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.position import Position
 from polymarket_trader.runtime.account_state import AccountStateStore
@@ -91,6 +96,7 @@ def test_user_ws_status_can_return_lightweight_summary() -> None:
     assert status.subscriptions == ()
 
 
+@freeze_time("2026-05-12T00:00:00Z")
 def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None:
     now = datetime.now(timezone.utc)
     registry = MarketRegistry()
@@ -198,7 +204,7 @@ def test_market_ws_worker_prefetches_rest_snapshot_for_empty_tracked_token() -> 
                 best_ask_size=Decimal("200"),
                 bids=(PriceLevel(price=Decimal("0.52"), size=Decimal("100")),),
                 asks=(PriceLevel(price=Decimal("0.53"), size=Decimal("200")),),
-                received_at=datetime.now(timezone.utc),
+                received_at=_FIXED_NOW,
             )
 
         worker = MarketWsWorker(rest_snapshot_loader=load_snapshot)
