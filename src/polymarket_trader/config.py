@@ -142,6 +142,16 @@ class Settings(BaseSettings):
     sports_live_state_pandascore_base_url: str = "https://api.pandascore.co"
     sports_live_state_pandascore_token: SecretStr | None = None
     sports_live_state_pandascore_videogames: str = ""
+    # Phase 2 新增源 token：未配置时该源静默跳过装配，不阻塞主路径。
+    # tennis_live_data：api-tennis.com 商业 token；api_football：rapidapi key；
+    # college_football_data：CFBD Bearer token（NCAAB 走 ncaa-api 公共实例无需 token）。
+    sports_live_state_tennis_live_data_base_url: str = "https://api.api-tennis.com/tennis"
+    sports_live_state_tennis_live_data_token: SecretStr | None = None
+    sports_live_state_api_football_base_url: str = "https://api-football-v1.p.rapidapi.com/v3"
+    sports_live_state_api_football_token: SecretStr | None = None
+    sports_live_state_college_football_data_base_url: str = "https://api.collegefootballdata.com"
+    sports_live_state_college_football_data_token: SecretStr | None = None
+    sports_live_state_ncaa_api_base_url: str = "https://ncaa-api.henrygd.me"
     sports_live_state_leagues: str = "nba,nhl,nfl,mlb,tennis,sports"
     sports_live_state_interval_seconds: int = Field(default=5, ge=5)
     sports_live_state_timeout_s: float = Field(default=5.0, ge=0.1)
@@ -222,6 +232,9 @@ class Settings(BaseSettings):
         "sofascore",
         "thesportsdb",
         "pandascore",
+        "tennis_live_data",
+        "api_football",
+        "college_football_data",
     )
     _ESPN_SUPPORTED_LEAGUES: ClassVar[tuple[str, ...]] = (
         "nba",

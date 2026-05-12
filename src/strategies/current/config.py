@@ -13,8 +13,9 @@ https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Mapping
 
 from polymarket_trader.extension_api import load_extension_config
 from strategies.current.tail import (
@@ -22,6 +23,37 @@ from strategies.current.tail import (
     SportsMarketType,
     TailPolicy,
 )
+
+
+def _default_league_source_affinity() -> Mapping[str, tuple[str, ...]]:
+    """各 league 偏好的直播源顺序，靠前权重更高（aggregate league-aware priority）。
+
+    第 1 位映射到 priority=100、第 2 位 90、...，aggregate 据此覆盖默认全局表。
+    没列出的 league 仍回退到全局 _DEFAULT_SOURCE_PRIORITY。
+    """
+
+    return {
+        "NBA": ("nba", "espn", "sofascore", "thesportsdb"),
+        "WNBA": ("espn", "sofascore"),
+        "NHL": ("nhl", "espn", "sofascore", "thesportsdb"),
+        "MLB": ("mlb", "espn", "sofascore", "thesportsdb"),
+        "NFL": ("espn", "sofascore"),
+        "NCAAF": ("college_football_data", "espn"),
+        "NCAAMB": ("ncaa_api", "espn"),
+        "NCAAWB": ("espn",),
+        "NCAAB": ("ncaa_api", "espn"),
+        "ATP": ("tennis_live_data", "sofascore", "espn"),
+        "WTA": ("tennis_live_data", "sofascore", "espn"),
+        "EPL": ("api_football", "sofascore"),
+        "PREMIER-LEAGUE": ("api_football", "sofascore"),
+        "F1": ("espn",),
+        "NASCAR": ("espn",),
+        "INDYCAR": ("espn",),
+        "CS2": ("pandascore",),
+        "DOTA2": ("pandascore",),
+        "LOL": ("pandascore",),
+        "VALORANT": ("pandascore",),
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +265,12 @@ class CurrentStrategyConfig:
     tail_outright_late_min_pnl_pct: Decimal = Decimal("0.05")
     tail_outright_entry_maker_max_resting_seconds: int = 86400
     tail_outright_min_orderbook_depth_usdc: Decimal = Decimal("100")
+
+    # league-aware 源亲和：aggregate_client 用此覆盖默认全局源优先级表。
+    # 仅当前体育扫尾策略关心；framework Settings 不持有，CLAUDE.md §10。
+    league_source_affinity: Mapping[str, tuple[str, ...]] = field(
+        default_factory=_default_league_source_affinity
+    )
 
 
 def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:

@@ -39,8 +39,23 @@ from polymarket_trader.infra.sports.thesportsdb_client import (
     parse_thesportsdb_events_payload,
     thesportsdb_sports_for_leagues,
 )
+from polymarket_trader.infra.sports.tennis_live_data_client import (
+    TennisLiveDataClient,
+    parse_tennis_live_data_payload,
+)
+from polymarket_trader.infra.sports.api_football_client import (
+    ApiFootballClient,
+    parse_api_football_payload,
+)
+from polymarket_trader.infra.sports.college_football_data_client import (
+    CollegeFootballDataClient,
+    parse_cfbd_games_payload,
+    parse_ncaa_api_scoreboard,
+)
 
 __all__ = [
+    "ApiFootballClient",
+    "CollegeFootballDataClient",
     "EspnScoreboardClient",
     "EspnStandingsClient",
     "MlbStatsApiClient",
@@ -49,6 +64,7 @@ __all__ = [
     "PandascoreLiveClient",
     "SeasonOddsClient",
     "SofaScoreLiveClient",
+    "TennisLiveDataClient",
     "TheOddsApiClient",
     "TheSportsDbLiveClient",
     "SportsDataClientError",
@@ -57,14 +73,18 @@ __all__ = [
     "SportsDataTimeoutError",
     "SportsDataTransportError",
     "SportsLiveAggregateClient",
+    "parse_api_football_payload",
+    "parse_cfbd_games_payload",
     "parse_espn_race_payload",
     "parse_espn_scoreboard_payload",
     "parse_espn_standings_payload",
     "parse_mlb_schedule_payload",
     "parse_nba_scoreboard_payload",
+    "parse_ncaa_api_scoreboard",
     "parse_nhl_score_payload",
     "parse_pandascore_lives_payload",
     "parse_sofascore_events_payload",
+    "parse_tennis_live_data_payload",
     "parse_theoddsapi_outrights_payload",
     "parse_thesportsdb_events_payload",
     "sofascore_sports_for_leagues",

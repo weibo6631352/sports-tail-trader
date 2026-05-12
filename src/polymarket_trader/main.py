@@ -49,6 +49,8 @@ from polymarket_trader.infra.polymarket.order_executor import (
     PolymarketOrderExecutor,
 )
 from polymarket_trader.infra.sports import (
+    ApiFootballClient,
+    CollegeFootballDataClient,
     EspnScoreboardClient,
     EspnStandingsClient,
     MlbStatsApiClient,
@@ -57,6 +59,7 @@ from polymarket_trader.infra.sports import (
     PandascoreLiveClient,
     SofaScoreLiveClient,
     SportsLiveAggregateClient,
+    TennisLiveDataClient,
     TheOddsApiClient,
     TheSportsDbLiveClient,
     sofascore_sports_for_leagues,
@@ -164,8 +167,18 @@ class RuntimeComponents:
     parameter_store: Any | None = None
 
 
-def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateClient:
-    """按配置构建多源体育直播状态聚合器。"""
+def _build_sports_live_state_client(
+    settings: Settings,
+    *,
+    league_source_priority: Any | None = None,
+    trusted_sources: Any | None = None,
+) -> SportsLiveAggregateClient:
+    """按配置构建多源体育直播状态聚合器。
+
+    ``league_source_priority`` 是策略包提供的 league-aware 源优先级（CLAUDE.md §10
+    禁止策略字段进 framework Settings，所以由策略侧装配处传入）。``trusted_sources``
+    可覆盖 aggregate 内置 _DEFAULT_OFFICIAL_SOURCES，默认 None 走内置表。
+    """
 
     source_codes = set(settings.sports_live_state_source_codes)
     league_codes = set(settings.sports_live_state_league_codes)
@@ -182,28 +195,28 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
             leagues=espn_leagues,
             timeout_s=settings.sports_live_state_timeout_s,
         )
-        providers.append(("espn", espn_client.list_games))
+        providers.append(("espn", espn_client.list_events))
         closers.append(espn_client.aclose)
     if "nba" in source_codes and "nba" in league_codes:
         nba_client = NbaLiveScoreboardClient(
             base_url=settings.sports_live_state_nba_base_url,
             timeout_s=settings.sports_live_state_timeout_s,
         )
-        providers.append(("nba", nba_client.list_games))
+        providers.append(("nba", nba_client.list_events))
         closers.append(nba_client.aclose)
     if "nhl" in source_codes and "nhl" in league_codes:
         nhl_client = NhlScoreApiClient(
             base_url=settings.sports_live_state_nhl_base_url,
             timeout_s=settings.sports_live_state_timeout_s,
         )
-        providers.append(("nhl", nhl_client.list_games))
+        providers.append(("nhl", nhl_client.list_events))
         closers.append(nhl_client.aclose)
     if "mlb" in source_codes and "mlb" in league_codes:
         mlb_client = MlbStatsApiClient(
             base_url=settings.sports_live_state_mlb_base_url,
             timeout_s=settings.sports_live_state_timeout_s,
         )
-        providers.append(("mlb", mlb_client.list_games))
+        providers.append(("mlb", mlb_client.list_events))
         closers.append(mlb_client.aclose)
     if "sofascore" in source_codes:
         sofascore_sports = sofascore_sports_for_leagues(settings.sports_live_state_league_codes)
@@ -216,7 +229,7 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
                 lookback_days=settings.sports_live_state_sofascore_lookback_days,
                 lookahead_days=settings.sports_live_state_sofascore_lookahead_days,
             )
-            providers.append(("sofascore", sofascore_client.list_games))
+            providers.append(("sofascore", sofascore_client.list_events))
             closers.append(sofascore_client.aclose)
     if "thesportsdb" in source_codes:
         thesportsdb_sports = thesportsdb_sports_for_leagues(settings.sports_live_state_league_codes)
@@ -227,7 +240,7 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
                 league_codes=settings.sports_live_state_league_codes,
                 timeout_s=settings.sports_live_state_timeout_s,
             )
-            providers.append(("thesportsdb", thesportsdb_client.list_games))
+            providers.append(("thesportsdb", thesportsdb_client.list_events))
             closers.append(thesportsdb_client.aclose)
     if "pandascore" in source_codes:
         token_secret = settings.sports_live_state_pandascore_token
@@ -244,10 +257,51 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
                 videogame_slugs=videogames or None,
                 timeout_s=settings.sports_live_state_timeout_s,
             )
-            providers.append(("pandascore", pandascore_client.list_games))
+            providers.append(("pandascore", pandascore_client.list_events))
             closers.append(pandascore_client.aclose)
         # 缺 token 时不注册 provider；启动期校验里会有 warning，避免 source_statuses 每 5 秒重复报错。
-    # 聚合器超时是“单个 provider 完整快照”的预算；像 ESPN/SofaScore 这类 provider
+    if "tennis_live_data" in source_codes:
+        token_secret = settings.sports_live_state_tennis_live_data_token
+        token_value = token_secret.get_secret_value() if token_secret is not None else None
+        if token_value:
+            tennis_client = TennisLiveDataClient(
+                base_url=settings.sports_live_state_tennis_live_data_base_url,
+                api_token=token_value,
+                timeout_s=settings.sports_live_state_timeout_s,
+            )
+            providers.append(("tennis_live_data", tennis_client.list_events))
+            closers.append(tennis_client.aclose)
+    if "api_football" in source_codes:
+        token_secret = settings.sports_live_state_api_football_token
+        token_value = token_secret.get_secret_value() if token_secret is not None else None
+        if token_value:
+            api_football_client = ApiFootballClient(
+                base_url=settings.sports_live_state_api_football_base_url,
+                api_token=token_value,
+                timeout_s=settings.sports_live_state_timeout_s,
+            )
+            providers.append(("api_football", api_football_client.list_events))
+            closers.append(api_football_client.aclose)
+    if "college_football_data" in source_codes:
+        token_secret = settings.sports_live_state_college_football_data_token
+        token_value = token_secret.get_secret_value() if token_secret is not None else None
+        cfbd_sports: list[str] = []
+        if token_value:
+            cfbd_sports.append("football")
+        # NCAAB 走 ncaa-api 公共实例，不需要 token——只要策略 league 列表里有 ncaab 或 basketball。
+        if league_codes & {"ncaab", "ncaa", "basketball", "mens-college-basketball"}:
+            cfbd_sports.append("basketball")
+        if cfbd_sports:
+            cfbd_client = CollegeFootballDataClient(
+                cfbd_base_url=settings.sports_live_state_college_football_data_base_url,
+                ncaa_api_base_url=settings.sports_live_state_ncaa_api_base_url,
+                cfbd_token=token_value,
+                sports=tuple(cfbd_sports),
+                timeout_s=settings.sports_live_state_timeout_s,
+            )
+            providers.append(("college_football_data", cfbd_client.list_events))
+            closers.append(cfbd_client.aclose)
+    # 聚合器超时是"单个 provider 完整快照"的预算；像 ESPN/SofaScore 这类 provider
     # 内部会按多个 sport/league 拉取，预算需要高于单次 HTTP timeout，避免刚拿到部分
     # 实盘数据时被外层取消。各 provider 已并行隔离，放宽这里不会阻塞交易主链路。
     provider_timeout_s = max(settings.sports_live_state_timeout_s * 3, 12.0)
@@ -257,6 +311,8 @@ def _build_sports_live_state_client(settings: Settings) -> SportsLiveAggregateCl
         provider_timeout_s=provider_timeout_s,
         cooldown_base_s=settings.sports_live_state_health_cooldown_base_s,
         eviction_s=settings.sports_live_state_health_eviction_s,
+        league_source_priority=league_source_priority,
+        trusted_sources=trusted_sources,
     )
 
 
@@ -595,9 +651,17 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 extra={"extension": getattr(extension.spec, "name", "unknown")},
             )
         else:
-            sports_live_state_client = _build_sports_live_state_client(settings)
+            # 策略包提供 league-aware 源亲和；framework Settings 不持有策略字段
+            # （CLAUDE.md §10）。当前扩展无该字段时退回 None（走 aggregate 内置全局表）。
+            strategy_config = getattr(extension, "config", None) or getattr(extension, "_config", None)
+            league_source_priority = getattr(strategy_config, "league_source_affinity", None)
+            sports_live_state_client = _build_sports_live_state_client(
+                settings,
+                league_source_priority=league_source_priority,
+                trusted_sources=None,  # 默认走 aggregate 内置 _DEFAULT_OFFICIAL_SOURCES
+            )
             sports_live_state_worker = SportsLiveStateWorker(
-                snapshot_provider=sports_live_state_client.list_games,
+                snapshot_provider=sports_live_state_client.list_events,
                 match_live_state=live_state_hooks.match_live_state,
                 registry=registry,
                 entry_metadata_store=entry_metadata_store,
@@ -1272,7 +1336,7 @@ async def _run_sports_live_state_sync(runtime: RuntimeComponents) -> None:
         runtime.supervisor.heartbeat_worker(
             "sports_live_state_sync",
             detail=(
-                f"games={result.games_seen} matches={result.matches} "
+                f"events={result.events_seen} matches={result.matches} "
                 f"signals={result.entry_signals_published}"
             ),
         )
