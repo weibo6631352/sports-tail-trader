@@ -77,7 +77,7 @@ export function HealthPage() {
             <QueryErrorNotice error={workers.error} compact />
           ) : (
             <Stack gap={6}>
-              {(workers.data?.worker_health ?? workers.data?.workers ?? []).map((w) => (
+              {(workers.data?.workers ?? []).map((w) => (
                 <Group key={w.name} justify="space-between" wrap="nowrap">
                   <Stack gap={0}>
                     <Text size="sm" ff="var(--font-mono)">
@@ -101,7 +101,7 @@ export function HealthPage() {
                   </Group>
                 </Group>
               ))}
-              {!(workers.data?.worker_health ?? workers.data?.workers ?? []).length && (
+              {!(workers.data?.workers ?? []).length && (
                 <Text c="dimmed" size="xs">
                   无 worker 数据
                 </Text>

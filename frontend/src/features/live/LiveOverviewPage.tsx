@@ -122,7 +122,7 @@ export function LiveOverviewPage() {
             <QueryErrorNotice error={workers.error} compact />
           ) : (
             <Stack gap={4}>
-              {(workers.data?.worker_health ?? workers.data?.workers ?? []).slice(0, 8).map((w) => (
+              {(workers.data?.workers ?? []).slice(0, 8).map((w) => (
                 <Group key={w.name} justify="space-between" gap="xs">
                   <Text size="xs" ff="var(--font-mono)">
                     {w.name}
@@ -139,7 +139,7 @@ export function LiveOverviewPage() {
                   </Group>
                 </Group>
               ))}
-              {!(workers.data?.worker_health ?? workers.data?.workers ?? []).length && (
+              {!(workers.data?.workers ?? []).length && (
                 <Text c="dimmed" size="xs">
                   无 worker 数据
                 </Text>

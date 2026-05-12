@@ -76,7 +76,6 @@ export type WorkerHealth = {
 export type WorkersSnapshot = {
   automatic_trading_enabled?: boolean
   workers?: WorkerHealth[]
-  worker_health?: WorkerHealth[]
   scheduler?: {
     jobs?: Array<{ name: string; interval_ms?: number; last_run_at?: Iso; healthy?: boolean }>
   }

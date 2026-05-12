@@ -51,7 +51,7 @@ def _require_py_clob_client() -> dict[str, Any]:
     saved_proxy_env: dict[str, str] = {}
     for key in proxy_keys:
         value = os.environ.get(key)
-        if value and value.startswith("socks://"):
+        if value and value.lower().startswith(("socks://", "socks4://", "socks5://")):
             saved_proxy_env[key] = value
             os.environ.pop(key, None)
     try:
