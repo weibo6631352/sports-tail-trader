@@ -4,11 +4,12 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from polymarket_trader.domain.sports_live import (
-    SportsLiveGame,
+    LiveEvent,
+    LiveEventKind,
+    Participant,
+    RaceState,
     SportsLiveGameStatus,
-    SportsLiveRaceEvent,
     SportsLiveSnapshot,
-    SportsLiveTeam,
 )
 from polymarket_trader.infra.sports import SportsLiveAggregateClient
 from polymarket_trader.infra.sports.espn_client import parse_espn_race_payload
@@ -65,15 +66,14 @@ def test_parser_extracts_race_with_leader_and_laps() -> None:
     assert race.league == "F1"
     assert race.event_name == "Monaco Grand Prix"
     assert race.status == SportsLiveGameStatus.LIVE
-    assert race.leader_driver == "Max Verstappen"
-    assert race.leader_team == "Red Bull Racing"
-    assert race.laps_completed == 48
-    assert race.total_laps == 78
-    assert race.status_flag == "green"
+    assert race.race_state.leader_driver == "Max Verstappen"
+    assert race.race_state.leader_team == "Red Bull Racing"
+    assert race.race_state.laps_completed == 48
+    assert race.race_state.total_laps == 78
+    assert race.race_state.status_flag == "green"
     assert len(race.drivers) == 3
-    norris = next(d for d in race.drivers if d.driver == "Lando Norris")
+    norris = next(d for d in race.drivers if d.name == "Lando Norris")
     assert norris.position == 2
-    assert norris.gap_to_leader == "+2.345"
     assert race.source_payload["venue"] == "Circuit de Monaco"
 
 
@@ -109,8 +109,8 @@ def test_parser_falls_back_to_lowest_position_when_no_competitor_marked_leader_1
         ]
     }
     races = parse_espn_race_payload(payload, league="f1")
-    assert races[0].leader_driver == "George Russell"
-    assert races[0].leader_team == "Mercedes"
+    assert races[0].race_state.leader_driver == "George Russell"
+    assert races[0].race_state.leader_team == "Mercedes"
 
 
 def test_parser_falls_back_to_competitor_displayname_when_no_athlete() -> None:
@@ -133,8 +133,8 @@ def test_parser_falls_back_to_competitor_displayname_when_no_athlete() -> None:
     races = parse_espn_race_payload(payload, league="nascar")
     assert len(races) == 1
     driver = races[0].drivers[0]
-    assert driver.driver == "Car #24"
-    assert races[0].leader_driver == "Car #24"
+    assert driver.name == "Car #24"
+    assert races[0].race_state.leader_driver == "Car #24"
 
 
 def test_parser_drops_driver_with_no_name() -> None:
@@ -159,9 +159,9 @@ def test_parser_drops_driver_with_no_name() -> None:
     races = parse_espn_race_payload(payload, league="f1")
     drivers = races[0].drivers
     assert len(drivers) == 1
-    assert drivers[0].driver == "Max V."
+    assert drivers[0].name == "Max V."
     # leader 兜底找最小 position 的有效 driver
-    assert races[0].leader_driver == "Max V."
+    assert races[0].race_state.leader_driver == "Max V."
 
 
 def test_parser_handles_competitions_not_sequence() -> None:
@@ -194,7 +194,7 @@ def test_parser_uses_event_status_when_competition_status_missing() -> None:
     }
     races = parse_espn_race_payload(payload, league="f1")
     assert races[0].status == SportsLiveGameStatus.LIVE
-    assert races[0].status_flag == "yellow"
+    assert races[0].race_state.status_flag == "yellow"
 
 
 def test_parser_falls_back_to_competition_status_when_event_status_missing() -> None:
@@ -273,7 +273,7 @@ def test_parser_ignores_malformed_competitors() -> None:
     races = parse_espn_race_payload(payload, league="f1")
     drivers = races[0].drivers
     assert len(drivers) == 1
-    assert drivers[0].driver == "Valid"
+    assert drivers[0].name == "Valid"
 
 
 def test_parser_handles_event_not_mapping_in_events_list() -> None:
@@ -292,20 +292,25 @@ def test_parser_returns_empty_for_no_events() -> None:
 
 def test_aggregate_client_merges_race_events_alongside_games() -> None:
     observed = datetime(2026, 5, 11, 2, 0, tzinfo=timezone.utc)
-    race = SportsLiveRaceEvent(
+    race = LiveEvent(
         source="espn",
         source_event_id="race-1",
+        kind=LiveEventKind.RACE,
+        sport="motorsport",
+        participants=(Participant(role="driver", name="Max Verstappen", position=1),),
         league="F1",
         event_name="Imola",
         status=SportsLiveGameStatus.LIVE,
         observed_at=observed,
+        race_state=RaceState(leader_driver="Max Verstappen"),
     )
-    nba_game = SportsLiveGame(
-        source="espn",
+    nba_game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Celtics", score=100), Participant(role="away", name="Knicks", score=98),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="basketball",source="espn",
         source_event_id="nba-1",
         league="NBA",
-        home=SportsLiveTeam(name="Celtics", score=100),
-        away=SportsLiveTeam(name="Knicks", score=98),
         status=SportsLiveGameStatus.LIVE,
         period="Q4",
         observed_at=observed,
@@ -315,8 +320,7 @@ def test_aggregate_client_merges_race_events_alongside_games() -> None:
         return SportsLiveSnapshot(
             source="espn",
             observed_at=observed,
-            games=(nba_game,),
-            race_events=(race,),
+            events=(nba_game, race),
         )
 
     async def run() -> SportsLiveSnapshot:
@@ -324,37 +328,43 @@ def test_aggregate_client_merges_race_events_alongside_games() -> None:
             providers=(("espn", provider),),
             now_provider=lambda: observed,
         )
-        return await client.list_games()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
-    assert len(snapshot.games) == 1
-    assert snapshot.games[0].source_event_id == "nba-1"
-    assert len(snapshot.race_events) == 1
-    assert snapshot.race_events[0].event_name == "Imola"
+    # 新模型 LiveEvent 把 team_match 与 race 放在同一 events 列表；两类不互相 dedup。
+    assert len(snapshot.events) == 2
+    by_kind = {e.kind: e for e in snapshot.events}
+    assert by_kind[LiveEventKind.TEAM_MATCH].source_event_id == "nba-1"
+    assert by_kind[LiveEventKind.RACE].event_name == "Imola"
 
 
 def test_aggregate_client_dedupes_race_events_keeping_newest() -> None:
     base = datetime(2026, 5, 11, tzinfo=timezone.utc)
-    older = SportsLiveRaceEvent(
-        source="espn", source_event_id="r", league="F1",
+    older = LiveEvent(
+        source="espn", source_event_id="r", kind=LiveEventKind.RACE, sport="motorsport",
+        participants=(Participant(role="driver", name="X", position=1),),
+        league="F1",
         event_name="Imola", status=SportsLiveGameStatus.LIVE,
-        observed_at=base, laps_completed=10,
+        observed_at=base, race_state=RaceState(laps_completed=10),
+        external_ids={"espn": "r"},
     )
-    newer = SportsLiveRaceEvent(
-        source="espn", source_event_id="r", league="F1",
+    newer = LiveEvent(
+        source="espn", source_event_id="r", kind=LiveEventKind.RACE, sport="motorsport",
+        participants=(Participant(role="driver", name="X", position=1),),
+        league="F1",
         event_name="Imola", status=SportsLiveGameStatus.LIVE,
-        observed_at=base + timedelta(minutes=5), laps_completed=15,
+        observed_at=base + timedelta(minutes=5), race_state=RaceState(laps_completed=15),
+        external_ids={"espn": "r"},
     )
 
     async def provider_a() -> SportsLiveSnapshot:
-        return SportsLiveSnapshot(source="espn", observed_at=base, games=(), race_events=(older,))
+        return SportsLiveSnapshot(source="espn", observed_at=base, events=(older,))
 
     async def provider_b() -> SportsLiveSnapshot:
         return SportsLiveSnapshot(
             source="thesportsdb",
             observed_at=base + timedelta(minutes=5),
-            games=(),
-            race_events=(newer,),
+            events=(newer,),
         )
 
     async def run() -> SportsLiveSnapshot:
@@ -362,8 +372,8 @@ def test_aggregate_client_dedupes_race_events_keeping_newest() -> None:
             providers=(("espn", provider_a), ("thesportsdb", provider_b)),
             now_provider=lambda: base + timedelta(minutes=5),
         )
-        return await client.list_games()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
-    assert len(snapshot.race_events) == 1
-    assert snapshot.race_events[0].laps_completed == 15
+    assert len(snapshot.events) == 1
+    assert snapshot.events[0].race_state.laps_completed == 15

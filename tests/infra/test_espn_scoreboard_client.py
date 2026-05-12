@@ -23,12 +23,12 @@ def test_espn_scoreboard_client_normalizes_live_basketball_game() -> None:
             ),
         )
 
-        snapshot = await client.list_games()
+        snapshot = await client.list_events()
         await client.aclose()
 
         assert snapshot.source == "espn"
-        assert len(snapshot.games) == 1
-        game = snapshot.games[0]
+        assert len(snapshot.events) == 1
+        game = snapshot.events[0]
         assert game.league == "NBA"
         assert game.home.name == "Knicks"
         assert game.home.score == 102
@@ -64,7 +64,7 @@ def test_espn_scoreboard_client_maps_429_to_rate_limit_error() -> None:
         )
 
         try:
-            await client.list_games()
+            await client.list_events()
         except SportsDataRateLimitError as exc:
             assert exc.status_code == 429
             assert exc.retry_after_s == 3
@@ -99,11 +99,11 @@ def test_espn_scoreboard_client_keeps_healthy_leagues_when_one_league_times_out(
             ),
         )
 
-        snapshot = await client.list_games()
+        snapshot = await client.list_events()
         await client.aclose()
 
-        assert len(snapshot.games) == 1
-        assert snapshot.games[0].league == "NBA"
+        assert len(snapshot.events) == 1
+        assert snapshot.events[0].league == "NBA"
 
     asyncio.run(run())
 
@@ -127,11 +127,11 @@ def test_espn_scoreboard_client_normalizes_live_nfl_clock() -> None:
             ),
         )
 
-        snapshot = await client.list_games()
+        snapshot = await client.list_events()
         await client.aclose()
 
-        assert len(snapshot.games) == 1
-        game = snapshot.games[0]
+        assert len(snapshot.events) == 1
+        game = snapshot.events[0]
         assert game.league == "NFL"
         assert game.status == SportsLiveGameStatus.LIVE
         assert game.period == "Q4"
@@ -158,7 +158,7 @@ def test_espn_scoreboard_client_requests_only_current_scoreboard_date_by_default
             ),
         )
 
-        await client.list_games()
+        await client.list_events()
         await client.aclose()
 
     asyncio.run(run())

@@ -80,7 +80,7 @@ def test_outright_match_live_state_returns_none() -> None:
     """outright 不参与 single-game live state 匹配；hook 应返回 None。"""
 
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
-    match = strategy.match_live_state(_outright_market(), games=())
+    match = strategy.match_live_state(_outright_market(), events=())
     assert match is None
 
 

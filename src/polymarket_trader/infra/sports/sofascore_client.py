@@ -208,12 +208,12 @@ class SofaScoreLiveClient:
                 self._cached_snapshot = snapshot
                 return snapshot
             raise
-        snapshot = SportsLiveSnapshot(source="sofascore", observed_at=observed_at, games=tuple(games))
+        snapshot = SportsLiveSnapshot(source="sofascore", observed_at=observed_at, events=tuple(events))
         snapshot = self._snapshot_with_status(
             snapshot,
             health=(
                 SportsLiveSourceHealth.SUCCESS_WITH_LIVE_DATA
-                if snapshot.games
+                if snapshot.events
                 else SportsLiveSourceHealth.SUCCESS_EMPTY
             ),
             last_error="; ".join(failures) if failures else None,

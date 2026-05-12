@@ -22,7 +22,7 @@ from polymarket_trader.infra.sports import (
 
 
 def test_nba_scoreboard_parser_normalizes_live_game_clock() -> None:
-    games = parse_nba_scoreboard_payload(
+    events = parse_nba_scoreboard_payload(
         {
             "scoreboard": {
                 "games": [
@@ -52,8 +52,8 @@ def test_nba_scoreboard_parser_normalizes_live_game_clock() -> None:
         observed_at=datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
     )
 
-    assert len(games) == 1
-    game = games[0]
+    assert len(events) == 1
+    game = events[0]
     assert game.source == "nba"
     assert game.source_event_id == "0042500104"
     assert game.league == "NBA"
@@ -70,7 +70,7 @@ def test_nba_scoreboard_parser_normalizes_live_game_clock() -> None:
 
 
 def test_sofascore_baseball_parser_exposes_inning_state() -> None:
-    games = parse_sofascore_events_payload(
+    events = parse_sofascore_events_payload(
         {
             "events": [
                 {
@@ -92,8 +92,8 @@ def test_sofascore_baseball_parser_exposes_inning_state() -> None:
         observed_at=datetime(2026, 4, 30, 10, 18, tzinfo=timezone.utc),
     )
 
-    assert len(games) == 1
-    game = games[0]
+    assert len(events) == 1
+    game = events[0]
     assert game.status == SportsLiveGameStatus.LIVE
     assert game.league == "KBO"
     assert game.period == "I3"
@@ -104,7 +104,7 @@ def test_sofascore_baseball_parser_exposes_inning_state() -> None:
 
 
 def test_nhl_score_parser_normalizes_critical_game_clock() -> None:
-    games = parse_nhl_score_payload(
+    events = parse_nhl_score_payload(
         {
             "games": [
                 {
@@ -121,8 +121,8 @@ def test_nhl_score_parser_normalizes_critical_game_clock() -> None:
         observed_at=datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
     )
 
-    assert len(games) == 1
-    game = games[0]
+    assert len(events) == 1
+    game = events[0]
     assert game.source == "nhl"
     assert game.league == "NHL"
     assert game.home.name == "Penguins"
@@ -134,7 +134,7 @@ def test_nhl_score_parser_normalizes_critical_game_clock() -> None:
 
 
 def test_mlb_schedule_parser_normalizes_in_progress_game_without_clock() -> None:
-    games = parse_mlb_schedule_payload(
+    events = parse_mlb_schedule_payload(
         {
             "dates": [
                 {
@@ -182,8 +182,8 @@ def test_mlb_schedule_parser_normalizes_in_progress_game_without_clock() -> None
         observed_at=datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
     )
 
-    assert len(games) == 1
-    game = games[0]
+    assert len(events) == 1
+    game = events[0]
     assert game.source == "mlb"
     assert game.league == "MLB"
     assert game.home.name == "Guardians"
@@ -202,7 +202,7 @@ def test_mlb_schedule_parser_normalizes_in_progress_game_without_clock() -> None
 
 
 def test_sofascore_parser_normalizes_filtered_basketball_live_game() -> None:
-    games = parse_sofascore_events_payload(
+    events = parse_sofascore_events_payload(
         {
             "events": [
                 {
@@ -256,8 +256,8 @@ def test_sofascore_parser_normalizes_filtered_basketball_live_game() -> None:
         observed_at=datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
     )
 
-    assert len(games) == 1
-    game = games[0]
+    assert len(events) == 1
+    game = events[0]
     assert game.source == "sofascore"
     assert game.source_event_id == "15935004"
     assert game.league == "NBA"
@@ -285,7 +285,7 @@ def test_sofascore_sports_code_expands_whole_sports_market_without_tournament_fi
         "table-tennis",
     )
 
-    games = parse_sofascore_events_payload(
+    events = parse_sofascore_events_payload(
         {
             "events": [
                 {
@@ -309,12 +309,12 @@ def test_sofascore_sports_code_expands_whole_sports_market_without_tournament_fi
         observed_at=datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
     )
 
-    assert len(games) == 1
-    assert games[0].league == "Liga ACB"
+    assert len(events) == 1
+    assert events[0].league == "Liga ACB"
 
 
 def test_sofascore_parser_normalizes_table_tennis_event_for_whole_sports_market() -> None:
-    games = parse_sofascore_events_payload(
+    events = parse_sofascore_events_payload(
         {
             "events": [
                 {
@@ -341,8 +341,8 @@ def test_sofascore_parser_normalizes_table_tennis_event_for_whole_sports_market(
         observed_at=datetime(2026, 4, 30, 5, 0, tzinfo=timezone.utc),
     )
 
-    assert len(games) == 1
-    game = games[0]
+    assert len(events) == 1
+    game = events[0]
     assert game.source == "sofascore"
     assert game.league == "World Team Championships Finals"
     assert game.home.name == "Austria"
@@ -353,7 +353,7 @@ def test_sofascore_parser_normalizes_table_tennis_event_for_whole_sports_market(
 
 
 def test_sofascore_parser_normalizes_finished_baseball_game_without_clock() -> None:
-    games = parse_sofascore_events_payload(
+    events = parse_sofascore_events_payload(
         {
             "events": [
                 {
@@ -377,8 +377,8 @@ def test_sofascore_parser_normalizes_finished_baseball_game_without_clock() -> N
         observed_at=datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
     )
 
-    assert len(games) == 1
-    game = games[0]
+    assert len(events) == 1
+    game = events[0]
     assert game.source == "sofascore"
     assert game.league == "MLB"
     assert game.home.name == "Cleveland Guardians"
@@ -389,7 +389,7 @@ def test_sofascore_parser_normalizes_finished_baseball_game_without_clock() -> N
 
 
 def test_sofascore_parser_preserves_tennis_live_state() -> None:
-    games = parse_sofascore_events_payload(
+    events = parse_sofascore_events_payload(
         {
             "events": [
                 {
@@ -429,8 +429,8 @@ def test_sofascore_parser_preserves_tennis_live_state() -> None:
         observed_at=datetime(2026, 4, 28, 7, 0, tzinfo=timezone.utc),
     )
 
-    assert len(games) == 1
-    game = games[0]
+    assert len(events) == 1
+    game = events[0]
     assert game.source == "sofascore"
     assert game.league == "WTA 125K Huzhou, China Women Singles"
     assert game.status == SportsLiveGameStatus.LIVE
@@ -453,7 +453,7 @@ def test_sofascore_parser_preserves_tennis_live_state() -> None:
 
 
 def test_thesportsdb_parser_normalizes_filtered_nhl_live_game() -> None:
-    games = parse_thesportsdb_events_payload(
+    events = parse_thesportsdb_events_payload(
         {
             "events": [
                 {
@@ -485,8 +485,8 @@ def test_thesportsdb_parser_normalizes_filtered_nhl_live_game() -> None:
         observed_at=datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
     )
 
-    assert len(games) == 1
-    game = games[0]
+    assert len(events) == 1
+    game = events[0]
     assert game.source == "thesportsdb"
     assert game.source_event_id == "2466191"
     assert game.league == "NHL"
@@ -501,7 +501,7 @@ def test_thesportsdb_parser_normalizes_filtered_nhl_live_game() -> None:
 
 
 def test_thesportsdb_parser_normalizes_baseball_inning_status() -> None:
-    games = parse_thesportsdb_events_payload(
+    events = parse_thesportsdb_events_payload(
         {
             "events": [
                 {
@@ -523,8 +523,8 @@ def test_thesportsdb_parser_normalizes_baseball_inning_status() -> None:
         observed_at=datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
     )
 
-    assert len(games) == 1
-    game = games[0]
+    assert len(events) == 1
+    game = events[0]
     assert game.source == "thesportsdb"
     assert game.league == "MLB"
     assert game.home.name == "Texas Rangers"
@@ -586,11 +586,11 @@ def test_league_clients_use_expected_public_endpoints() -> None:
             now_provider=lambda: observed,
         )
 
-        await nba.list_games()
-        await nhl.list_games()
-        await mlb.list_games()
-        await sofascore.list_games()
-        await thesportsdb.list_games()
+        await nba.list_events()
+        await nhl.list_events()
+        await mlb.list_events()
+        await sofascore.list_events()
+        await thesportsdb.list_events()
         await nba.aclose()
         await nhl.aclose()
         await mlb.aclose()
@@ -630,7 +630,7 @@ def test_sofascore_client_fetches_today_and_configured_lookahead_dates() -> None
             now_provider=lambda: datetime(2026, 4, 30, 3, 55, tzinfo=timezone.utc),
         )
         try:
-            await client.list_games()
+            await client.list_events()
         finally:
             await client.aclose()
 
@@ -665,7 +665,7 @@ def test_sofascore_client_fetches_configured_lookback_dates_for_recent_unsettled
             now_provider=lambda: datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
         )
         try:
-            await client.list_games()
+            await client.list_events()
         finally:
             await client.aclose()
 
@@ -727,9 +727,9 @@ def test_sofascore_client_reuses_cached_snapshot_inside_min_fetch_interval() -> 
             now_provider=now_provider,
         )
         try:
-            first = await client.list_games()
-            second = await client.list_games()
-            return len(first.games), len(second.games)
+            first = await client.list_events()
+            second = await client.list_events()
+            return len(first.events), len(second.events)
         finally:
             await client.aclose()
 
@@ -771,7 +771,7 @@ def test_sofascore_client_fetches_configured_sports_concurrently() -> None:
             now_provider=lambda: datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
         )
         try:
-            await client.list_games()
+            await client.list_events()
         finally:
             await client.aclose()
 
@@ -819,14 +819,14 @@ def test_sofascore_client_keeps_successful_sports_when_one_sport_times_out() -> 
             now_provider=lambda: datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
         )
         try:
-            return await client.list_games()
+            return await client.list_events()
         finally:
             await client.aclose()
 
     snapshot = asyncio.run(run())
 
-    assert len(snapshot.games) == 1
-    assert snapshot.games[0].league == "NBA"
+    assert len(snapshot.events) == 1
+    assert snapshot.events[0].league == "NBA"
     assert snapshot.source_statuses[0].success is True
     assert snapshot.source_statuses[0].health == SportsLiveSourceHealth.SUCCESS_WITH_LIVE_DATA
     assert "tennis" in (snapshot.source_statuses[0].last_error or "")
@@ -852,13 +852,13 @@ def test_sofascore_client_returns_rate_limited_status_on_cold_rate_limit() -> No
             now_provider=lambda: datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
         )
         try:
-            return await client.list_games()
+            return await client.list_events()
         finally:
             await client.aclose()
 
     snapshot = asyncio.run(run())
 
-    assert len(snapshot.games) == 0
+    assert len(snapshot.events) == 0
     assert snapshot.source_statuses[0].health == SportsLiveSourceHealth.RATE_LIMITED
     assert snapshot.source_statuses[0].success is False
     assert requests == 1
@@ -910,9 +910,9 @@ def test_thesportsdb_client_reuses_cached_snapshot_inside_min_fetch_interval() -
             now_provider=now_provider,
         )
         try:
-            first = await client.list_games()
-            second = await client.list_games()
-            return len(first.games), len(second.games)
+            first = await client.list_events()
+            second = await client.list_events()
+            return len(first.events), len(second.events)
         finally:
             await client.aclose()
 
@@ -973,9 +973,9 @@ def test_thesportsdb_client_uses_cache_when_rate_limited_after_success() -> None
             now_provider=now_provider,
         )
         try:
-            first = await client.list_games()
-            second = await client.list_games()
-            return len(first.games), len(second.games)
+            first = await client.list_events()
+            second = await client.list_events()
+            return len(first.events), len(second.events)
         finally:
             await client.aclose()
 
@@ -1006,13 +1006,13 @@ def test_thesportsdb_client_returns_empty_snapshot_on_cold_rate_limit() -> None:
             now_provider=lambda: datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc),
         )
         try:
-            return await client.list_games()
+            return await client.list_events()
         finally:
             await client.aclose()
 
     snapshot = asyncio.run(run())
 
-    assert len(snapshot.games) == 0
+    assert len(snapshot.events) == 0
     assert snapshot.source_statuses[0].health == SportsLiveSourceHealth.RATE_LIMITED
     assert snapshot.source_statuses[0].success is False
     assert requests == 1

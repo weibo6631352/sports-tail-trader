@@ -6,11 +6,13 @@ from datetime import datetime, timezone
 from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.sports_live import (
-    SportsLiveGame,
+    
+    LiveEvent,
     SportsLiveGameStatus,
     SportsLiveSnapshot,
     SportsLiveSourceStatus,
-    SportsLiveTeam,
+    Participant,
+    LiveEventKind,
 )
 from polymarket_trader.extension_api.live_state import LiveStateMatch
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
@@ -20,12 +22,12 @@ from polymarket_trader.workers.sports_live_state_worker import SportsLiveStateWo
 from strategies.current.live_state import build_live_state_match
 
 
-def _live_state_match_from_metadata(market, games):
+def _live_state_match_from_metadata(market, events):
     """Test helper: 用策略侧 build_live_state_match 构造 LiveStateMatch。"""
 
     return build_live_state_match(
         market,
-        games,
+        events,
         market_end_horizon_seconds=900,
     )
 
@@ -43,11 +45,11 @@ def test_sports_live_state_worker_writes_metadata_and_entry_signals() -> None:
     assert metadata["live_game"]["away_score"] == 94
     assert metadata["live_game"]["seconds_remaining"] == 90
     assert metadata["live_match"]["source_event_id"] == "game-1"
-    assert status.last_games_seen == 1
+    assert status.last_events_seen == 1
     assert status.last_matches == 1
     assert status.last_records_written == 1
     assert status.last_entry_signals_published == 2
-    assert result["last_games"][0].source_event_id == "game-1"
+    assert result["last_events"][0].source_event_id == "game-1"
     assert first_event.event_type == DomainEventType.ENTRY_SIGNAL_TRIGGERED
     assert second_event.event_type == DomainEventType.ENTRY_SIGNAL_TRIGGERED
     assert {first_event.token_id, second_event.token_id} == {"home", "away"}
@@ -97,9 +99,9 @@ def test_sports_live_state_worker_does_not_track_blocked_entry_signal_market() -
         tracker = _MarketTracker()
         worker = SportsLiveStateWorker(
             snapshot_provider=lambda: _snapshot(_game()),
-            match_live_state=lambda market, games: LiveStateMatch(
+            match_live_state=lambda market, events: LiveStateMatch(
                 market=market,
-                game=games[0],
+                event=events[0],
                 signal_allowed=False,
                 signal_reason="market_end_too_far",
                 payload={
@@ -177,9 +179,9 @@ def test_sports_live_state_worker_writes_metadata_without_blocked_entry_signals(
         event_bus = EventBus(trading_capacity=10, maintenance_capacity=10, persistence_capacity=10)
         worker = SportsLiveStateWorker(
             snapshot_provider=lambda: _snapshot(_game()),
-            match_live_state=lambda market, games: LiveStateMatch(
+            match_live_state=lambda market, events: LiveStateMatch(
                 market=market,
-                game=games[0],
+                event=events[0],
                 signal_allowed=False,
                 signal_reason="market_end_too_far",
                 payload={
@@ -227,7 +229,7 @@ def test_sports_live_state_worker_exposes_source_statuses() -> None:
                 _game(),
                 source="sports_live_aggregate",
                 source_statuses=(
-                    SportsLiveSourceStatus(source="espn", success=True, games_seen=1),
+                    SportsLiveSourceStatus(source="espn", success=True, events_seen=1),
                     SportsLiveSourceStatus(source="nba", success=False, last_error="timeout"),
                 ),
             ),
@@ -281,7 +283,7 @@ def test_no_feasible_source_lifecycle_fires_on_both_transitions() -> None:
             SportsLiveSnapshot(
                 source="sports_live_aggregate",
                 observed_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
-                games=(),
+                events=(),
                 source_statuses=(
                     SportsLiveSourceStatus(source="espn", success=False, last_error="500"),
                     SportsLiveSourceStatus(source="nba", success=False, last_error="429"),
@@ -291,7 +293,7 @@ def test_no_feasible_source_lifecycle_fires_on_both_transitions() -> None:
             SportsLiveSnapshot(
                 source="sports_live_aggregate",
                 observed_at=datetime(2026, 4, 27, 0, 0, 5, tzinfo=timezone.utc),
-                games=(),
+                events=(),
                 source_statuses=(
                     SportsLiveSourceStatus(source="espn", success=False),
                     SportsLiveSourceStatus(source="nba", success=False),
@@ -301,9 +303,9 @@ def test_no_feasible_source_lifecycle_fires_on_both_transitions() -> None:
             SportsLiveSnapshot(
                 source="sports_live_aggregate",
                 observed_at=datetime(2026, 4, 27, 0, 0, 10, tzinfo=timezone.utc),
-                games=(),
+                events=(),
                 source_statuses=(
-                    SportsLiveSourceStatus(source="espn", success=True, games_seen=1),
+                    SportsLiveSourceStatus(source="espn", success=True, events_seen=1),
                     SportsLiveSourceStatus(source="nba", success=False),
                 ),
             ),
@@ -391,14 +393,14 @@ async def _run_sync_with_match() -> dict[str, object]:
         "metadata": store.metadata_for(condition_id="moneyline-condition"),
         "store": store,
         "status": worker.status_snapshot(),
-        "last_games": worker.last_games(),
+        "last_events": worker.last_events(),
         "first_event": await event_bus.next_trading_event(),
         "second_event": await event_bus.next_trading_event(),
     }
 
 
 async def _snapshot(
-    game: SportsLiveGame,
+    game: LiveEvent,
     *,
     source: str = "espn",
     source_statuses: tuple[SportsLiveSourceStatus, ...] = (),
@@ -406,7 +408,7 @@ async def _snapshot(
     return SportsLiveSnapshot(
         source=source,
         observed_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
-        games=(game,),
+        events=(game,),
         source_statuses=source_statuses,
     )
 
@@ -419,25 +421,26 @@ def _game(
     away_display: str | None = None,
     home_abbreviation: str = "NYK",
     away_abbreviation: str = "BOS",
-) -> SportsLiveGame:
-    return SportsLiveGame(
-        source="espn",
-        source_event_id="game-1",
-        league="NBA",
-        home=SportsLiveTeam(
-            name=home,
+) -> LiveEvent:
+    return LiveEvent(
+        
+        participants=(Participant(
+            role="home", name=home,
             score=102,
             display_name=home_display or f"New York {home}",
             abbreviation=home_abbreviation,
             short_name=home,
-        ),
-        away=SportsLiveTeam(
-            name=away,
+        ), Participant(
+            role="away", name=away,
             score=94,
             display_name=away_display or f"Boston {away}",
             abbreviation=away_abbreviation,
             short_name=away,
-        ),
+        ),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="basketball",source="espn",
+        source_event_id="game-1",
+        league="NBA",
         status=SportsLiveGameStatus.LIVE,
         period="Q4",
         seconds_remaining=90,
@@ -483,7 +486,7 @@ def _audit_match_for(market: Market, *, score: int, signal_allowed: bool = True)
     """生成可控 game-state payload 的 LiveStateMatch，让测试能针对单字段切换验证 hash 不变性。"""
     return LiveStateMatch(
         market=market,
-        game=_game(),
+        event=_game(),
         signal_allowed=signal_allowed,
         signal_reason="late_game_certainty" if signal_allowed else "market_end_too_far",
         phase="late_4q",

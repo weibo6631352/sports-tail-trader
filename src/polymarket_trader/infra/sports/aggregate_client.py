@@ -217,7 +217,6 @@ class SportsLiveAggregateClient:
 
         # 把单成员组按 (kind, league, sport, team-pair-or-event-name, start-bucket) 文本合并
         text_keys: dict[tuple[str, str, str, str, str | None], int] = {}
-        next_group = max((g for g in group_of), default=-1) + 1
         merged_indices: dict[int, list[int]] = {}
         for idx, event in enumerate(events):
             current_group = group_of[idx]
@@ -630,13 +629,24 @@ def _text_key(event: LiveEvent) -> tuple[str, str, str, str, str | None]:
 
 
 def _team_key(participant: Any) -> str:
-    name = (
-        participant.display_name
-        or participant.name
-        or participant.abbreviation
-        or ""
-    )
-    return _normalize(name)
+    """生成一个用于 text-fallback dedup 的稳定 team-key。
+
+    优先取 ``short_name``——多源约定 short_name 是无地理前缀的"绰号"形式
+    （Utah Mammoth → Mammoth；Vegas Golden Knights → Golden Knights），跨源
+    最稳定。回退到 abbreviation / display_name / name。所有候选都先 normalize。
+    """
+
+    candidates = [
+        participant.short_name,
+        participant.abbreviation,
+        participant.display_name,
+        participant.name,
+    ]
+    for candidate in candidates:
+        normalized = _normalize(candidate)
+        if normalized and normalized != "unknown":
+            return normalized
+    return "unknown"
 
 
 def _normalize(value: str | None) -> str:

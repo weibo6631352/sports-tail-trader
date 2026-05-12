@@ -4,9 +4,11 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from polymarket_trader.domain.sports_live import (
-    SportsLiveGame,
+    
+    LiveEvent,
     SportsLiveGameStatus,
-    SportsLiveTeam,
+    Participant,
+    LiveEventKind,
 )
 from polymarket_trader.extension_api import DiscoveryQuery
 from polymarket_trader.runtime import discovery_runner
@@ -19,12 +21,13 @@ def test_full_market_discovery_defaults_keep_background_sla() -> None:
 
 
 def test_discovery_queries_prioritize_live_game_queries_before_broad_queries() -> None:
-    game = SportsLiveGame(
-        source="nhl",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Oilers", score=0, display_name="Edmonton Oilers"), Participant(role="away", name="Ducks", score=0, display_name="Anaheim Ducks"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="ice-hockey",source="nhl",
         source_event_id="2025030185",
         league="NHL",
-        home=SportsLiveTeam(name="Oilers", score=0, display_name="Edmonton Oilers"),
-        away=SportsLiveTeam(name="Ducks", score=0, display_name="Anaheim Ducks"),
         status=SportsLiveGameStatus.SCHEDULED,
         period="FUT",
     )

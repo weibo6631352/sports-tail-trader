@@ -4,12 +4,14 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from polymarket_trader.domain.sports_live import (
-    SportsLiveGame,
+    
+    LiveEvent,
     SportsLiveGameStatus,
     SportsLiveSnapshot,
     SportsLiveSourceHealth,
     SportsLiveSourceStatus,
-    SportsLiveTeam,
+    Participant,
+    LiveEventKind,
 )
 from polymarket_trader.infra.sports import SportsLiveAggregateClient
 
@@ -25,16 +27,16 @@ def test_aggregate_client_prefers_live_source_over_scheduled_duplicate() -> None
             ),
             now_provider=lambda: observed,
         )
-        return await client.list_games()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
 
     assert snapshot.source == "sports_live_aggregate"
-    assert len(snapshot.games) == 1
-    assert snapshot.games[0].source == "nba"
-    assert snapshot.games[0].status == SportsLiveGameStatus.LIVE
+    assert len(snapshot.events) == 1
+    assert snapshot.events[0].source == "nba"
+    assert snapshot.events[0].status == SportsLiveGameStatus.LIVE
     assert [status.source for status in snapshot.source_statuses] == ["espn", "nba"]
-    assert [status.games_seen for status in snapshot.source_statuses] == [1, 1]
+    assert [status.events_seen for status in snapshot.source_statuses] == [1, 1]
     assert all(status.success for status in snapshot.source_statuses)
 
 
@@ -52,13 +54,13 @@ def test_aggregate_client_keeps_healthy_sources_when_one_source_fails() -> None:
             ),
             now_provider=lambda: observed,
         )
-        return await client.list_games()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
 
-    assert len(snapshot.games) == 1
-    assert snapshot.games[0].source == "nhl"
-    assert [(status.source, status.success, status.games_seen) for status in snapshot.source_statuses] == [
+    assert len(snapshot.events) == 1
+    assert snapshot.events[0].source == "nhl"
+    assert [(status.source, status.success, status.events_seen) for status in snapshot.source_statuses] == [
         ("espn", False, 0),
         ("nhl", True, 1),
     ]
@@ -71,7 +73,7 @@ def test_aggregate_client_keeps_healthy_sources_when_one_source_hangs() -> None:
     async def hanging_provider() -> SportsLiveSnapshot:
         # 永久挂起直到被 provider_timeout 取消；不依赖 sleep 时间为正以避免 CI 抖动。
         await asyncio.Event().wait()
-        return SportsLiveSnapshot(source="espn", observed_at=observed, games=())
+        return SportsLiveSnapshot(source="espn", observed_at=observed, events=())
 
     async def run() -> SportsLiveSnapshot:
         client = SportsLiveAggregateClient(
@@ -82,13 +84,13 @@ def test_aggregate_client_keeps_healthy_sources_when_one_source_hangs() -> None:
             now_provider=lambda: observed,
             provider_timeout_s=0.01,
         )
-        return await client.list_games()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
 
-    assert len(snapshot.games) == 1
-    assert snapshot.games[0].source == "nhl"
-    assert [(status.source, status.success, status.games_seen) for status in snapshot.source_statuses] == [
+    assert len(snapshot.events) == 1
+    assert snapshot.events[0].source == "nhl"
+    assert [(status.source, status.success, status.events_seen) for status in snapshot.source_statuses] == [
         ("espn", False, 0),
         ("nhl", True, 1),
     ]
@@ -109,7 +111,7 @@ def test_aggregate_client_reuses_last_successful_provider_snapshot_after_timeout
             )
         # 永久挂起直到被 provider_timeout 取消；不依赖 sleep 时间为正以避免 CI 抖动。
         await asyncio.Event().wait()
-        return SportsLiveSnapshot(source="sofascore", observed_at=observed, games=())
+        return SportsLiveSnapshot(source="sofascore", observed_at=observed, events=())
 
     async def run() -> SportsLiveSnapshot:
         client = SportsLiveAggregateClient(
@@ -120,15 +122,15 @@ def test_aggregate_client_reuses_last_successful_provider_snapshot_after_timeout
             now_provider=lambda: observed,
             provider_timeout_s=0.01,
         )
-        await client.list_games()
-        return await client.list_games()
+        await client.list_events()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
 
-    assert len(snapshot.games) == 1
-    assert snapshot.games[0].source == "nhl"
+    assert len(snapshot.events) == 1
+    assert snapshot.events[0].source == "nhl"
     assert [
-        (status.source, status.success, status.health, status.games_seen)
+        (status.source, status.success, status.health, status.events_seen)
         for status in snapshot.source_statuses
     ] == [
         ("sofascore", True, SportsLiveSourceHealth.CACHED, 1),
@@ -144,13 +146,13 @@ def test_aggregate_client_classifies_empty_rate_limited_and_failed_sources() -> 
         return SportsLiveSnapshot(
             source="thesportsdb",
             observed_at=observed,
-            games=(),
+            events=(),
             source_statuses=(
                 SportsLiveSourceStatus(
                     source="thesportsdb",
                     success=False,
                     health=SportsLiveSourceHealth.RATE_LIMITED,
-                    games_seen=0,
+                    events_seen=0,
                     observed_at=observed,
                     last_error="HTTP 429",
                 ),
@@ -158,7 +160,7 @@ def test_aggregate_client_classifies_empty_rate_limited_and_failed_sources() -> 
         )
 
     async def empty_provider() -> SportsLiveSnapshot:
-        return SportsLiveSnapshot(source="sofascore", observed_at=observed, games=())
+        return SportsLiveSnapshot(source="sofascore", observed_at=observed, events=())
 
     async def failing_provider() -> SportsLiveSnapshot:
         raise RuntimeError("timeout")
@@ -172,12 +174,12 @@ def test_aggregate_client_classifies_empty_rate_limited_and_failed_sources() -> 
             ),
             now_provider=lambda: observed,
         )
-        return await client.list_games()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
 
     assert [
-        (status.source, status.success, status.health, status.games_seen)
+        (status.source, status.success, status.health, status.events_seen)
         for status in snapshot.source_statuses
     ] == [
         ("thesportsdb", False, SportsLiveSourceHealth.RATE_LIMITED, 0),
@@ -197,12 +199,12 @@ def test_aggregate_client_prefers_official_source_over_generic_duplicate() -> No
             ),
             now_provider=lambda: observed,
         )
-        return await client.list_games()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
 
-    assert len(snapshot.games) == 1
-    assert snapshot.games[0].source == "nba"
+    assert len(snapshot.events) == 1
+    assert snapshot.events[0].source == "nba"
 
 
 def test_aggregate_client_keeps_official_status_when_generic_source_conflicts() -> None:
@@ -218,45 +220,49 @@ def test_aggregate_client_keeps_official_status_when_generic_source_conflicts() 
             ),
             now_provider=lambda: observed,
         )
-        return await client.list_games()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
 
-    assert len(snapshot.games) == 1
-    assert snapshot.games[0].source == "nba"
-    assert snapshot.games[0].status == SportsLiveGameStatus.PAUSED
-    assert snapshot.games[0].source_payload["source_conflicts"] == (
-        {
-            "source": "sofascore",
-            "status": "live",
-            "raw_status": "live",
-        },
+    assert len(snapshot.events) == 1
+    assert snapshot.events[0].source == "nba"
+    assert snapshot.events[0].status == SportsLiveGameStatus.PAUSED
+    # 新模型 source_conflicts 是 ConflictRecord 一等字段，不再藏在 source_payload。
+    conflicts = snapshot.events[0].source_conflicts
+    assert any(
+        c.field == "status"
+        and c.winner_source == "nba"
+        and c.loser_source == "sofascore"
+        and c.winner_value == SportsLiveGameStatus.PAUSED.value
+        and c.loser_value == SportsLiveGameStatus.LIVE.value
+        for c in conflicts
     )
 
 
 def test_aggregate_client_deduplicates_abbreviation_and_display_name_sources() -> None:
     observed = datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc)
     espn_game = _game("espn", SportsLiveGameStatus.SCHEDULED, observed)
-    nba_game = SportsLiveGame(
-        source="nba",
-        source_event_id="nba-game-1",
-        league="NBA",
-        home=SportsLiveTeam(
-            name="Magic",
+    nba_game = LiveEvent(
+        
+        participants=(Participant(
+            role="home", name="Magic",
             score=87,
             display_name="Orlando Magic",
             abbreviation="ORL",
             short_name="Magic",
             location="Orlando",
-        ),
-        away=SportsLiveTeam(
-            name="Pistons",
+        ), Participant(
+            role="away", name="Pistons",
             score=85,
             display_name="Detroit Pistons",
             abbreviation="DET",
             short_name="Pistons",
             location="Detroit",
-        ),
+        ),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="basketball",source="nba",
+        source_event_id="nba-game-1",
+        league="NBA",
         status=SportsLiveGameStatus.LIVE,
         period="Q4",
         seconds_remaining=188,
@@ -272,34 +278,35 @@ def test_aggregate_client_deduplicates_abbreviation_and_display_name_sources() -
             ),
             now_provider=lambda: observed,
         )
-        return await client.list_games()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
 
-    assert len(snapshot.games) == 1
-    assert snapshot.games[0].source == "nba"
+    assert len(snapshot.events) == 1
+    assert snapshot.events[0].source == "nba"
 
 
 def test_aggregate_client_deduplicates_full_name_and_short_name_aliases() -> None:
     observed = datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc)
-    espn_game = SportsLiveGame(
-        source="espn",
-        source_event_id="espn-nhl-1",
-        league="NHL",
-        home=SportsLiveTeam(
-            name="Utah Mammoth",
+    espn_game = LiveEvent(
+        
+        participants=(Participant(
+            role="home", name="Utah Mammoth",
             score=0,
             display_name="Utah Mammoth",
             abbreviation="UTA",
             short_name="Mammoth",
-        ),
-        away=SportsLiveTeam(
-            name="Vegas Golden Knights",
+        ), Participant(
+            role="away", name="Vegas Golden Knights",
             score=2,
             display_name="Vegas Golden Knights",
             abbreviation="VGK",
             short_name="Golden Knights",
-        ),
+        ),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="ice-hockey",source="espn",
+        source_event_id="espn-nhl-1",
+        league="NHL",
         status=SportsLiveGameStatus.LIVE,
         period="P1",
         seconds_remaining=2400,
@@ -307,24 +314,25 @@ def test_aggregate_client_deduplicates_full_name_and_short_name_aliases() -> Non
         raw_status="STATUS_IN_PROGRESS",
         source_payload={"start_time_utc": "2026-04-28T01:30Z"},
     )
-    nhl_game = SportsLiveGame(
-        source="nhl",
-        source_event_id="nhl-1",
-        league="NHL",
-        home=SportsLiveTeam(
-            name="Mammoth",
+    nhl_game = LiveEvent(
+        
+        participants=(Participant(
+            role="home", name="Mammoth",
             score=0,
             display_name="Mammoth",
             abbreviation="UTA",
             short_name="Mammoth",
-        ),
-        away=SportsLiveTeam(
-            name="Golden Knights",
+        ), Participant(
+            role="away", name="Golden Knights",
             score=2,
             display_name="Golden Knights",
             abbreviation="VGK",
             short_name="Golden Knights",
-        ),
+        ),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="ice-hockey",source="nhl",
+        source_event_id="nhl-1",
+        league="NHL",
         status=SportsLiveGameStatus.PAUSED,
         period="P1",
         seconds_remaining=2837,
@@ -341,57 +349,64 @@ def test_aggregate_client_deduplicates_full_name_and_short_name_aliases() -> Non
             ),
             now_provider=lambda: observed,
         )
-        return await client.list_games()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
 
-    assert len(snapshot.games) == 1
-    assert snapshot.games[0].source == "espn"
+    assert len(snapshot.events) == 1
+    # 新模型按 league-aware 全局优先级（nhl 50 > espn 40）选融合主源；text-fallback dedup
+    # 后两源被合并，contributing_sources 体现两源都参与。
+    assert snapshot.events[0].source == "nhl"
+    assert set(snapshot.events[0].contributing_sources) == {"espn", "nhl"}
 
 
 def test_aggregate_client_keeps_same_teams_on_different_start_dates() -> None:
     observed = datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc)
-    ended_today = SportsLiveGame(
-        source="mlb",
-        source_event_id="mlb-1",
-        league="MLB",
-        home=SportsLiveTeam(
-            name="Guardians",
+    ended_today = LiveEvent(
+        
+        participants=(Participant(
+            role="home", name="Guardians",
             score=2,
             display_name="Cleveland Guardians",
             abbreviation="CLE",
-        ),
-        away=SportsLiveTeam(
-            name="Rays",
+        ), Participant(
+            role="away", name="Rays",
             score=3,
             display_name="Tampa Bay Rays",
             abbreviation="TB",
-        ),
+        ),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="baseball",source="mlb",
+        source_event_id="mlb-1",
+        league="MLB",
         status=SportsLiveGameStatus.ENDED,
         period="B9",
         observed_at=observed,
+        event_start_time=datetime(2026, 4, 27, 22, 10, tzinfo=timezone.utc),
         raw_status="Final",
         source_payload={"game_date": "2026-04-27T22:10:00Z"},
     )
-    scheduled_tomorrow = SportsLiveGame(
-        source="sofascore",
-        source_event_id="sofascore-1",
-        league="MLB",
-        home=SportsLiveTeam(
-            name="Cleveland Guardians",
+    scheduled_tomorrow = LiveEvent(
+        
+        participants=(Participant(
+            role="home", name="Cleveland Guardians",
             score=0,
             display_name="Cleveland Guardians",
             abbreviation="CLE",
-        ),
-        away=SportsLiveTeam(
-            name="Tampa Bay Rays",
+        ), Participant(
+            role="away", name="Tampa Bay Rays",
             score=0,
             display_name="Tampa Bay Rays",
             abbreviation="TB",
-        ),
+        ),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="baseball",source="sofascore",
+        source_event_id="sofascore-1",
+        league="MLB",
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=observed,
+        event_start_time=datetime(2026, 4, 28, 22, 10, tzinfo=timezone.utc),
         raw_status="Not started",
         source_payload={"start_timestamp": 1777414200},
     )
@@ -404,12 +419,12 @@ def test_aggregate_client_keeps_same_teams_on_different_start_dates() -> None:
             ),
             now_provider=lambda: observed,
         )
-        return await client.list_games()
+        return await client.list_events()
 
     snapshot = asyncio.run(run())
 
-    assert len(snapshot.games) == 2
-    assert [game.source for game in snapshot.games] == ["mlb", "sofascore"]
+    assert len(snapshot.events) == 2
+    assert [game.source for game in snapshot.events] == ["mlb", "sofascore"]
 
 
 def test_aggregate_client_cooldown_grows_exponentially_with_repeated_failures() -> None:
@@ -434,7 +449,7 @@ def test_aggregate_client_cooldown_grows_exponentially_with_repeated_failures() 
         # 调用足够多次以让 cooldown_until 一直处于过期状态后再次触发失败。
         # 由于每次模拟时间只推进 1ms，cooldown_until 永远不会过期；
         # 所以从第 2 次失败之后，后续 list_games 都进入 cooldown 分支。
-        await client.list_games()  # failure #1, no cooldown yet
+        await client.list_events()  # failure #1, no cooldown yet
         return client
 
     client = asyncio.run(run())
@@ -449,7 +464,7 @@ def test_aggregate_client_cooldown_grows_exponentially_with_repeated_failures() 
     async def push_failure(client: SportsLiveAggregateClient) -> None:
         # 推到 active 列表前手动清零 cooldown_until，以模拟 cooldown 到期可重试。
         client._cooldowns["espn"].cooldown_until = None
-        await client.list_games()
+        await client.list_events()
 
     expected_delays = [10.0, 20.0, 40.0, 40.0]  # base=10 → 10, 20, 40, capped at 40
     for expected_delay in expected_delays:
@@ -471,7 +486,7 @@ def test_aggregate_client_resets_cooldown_state_after_recovery() -> None:
         call_count += 1
         if call_count == 1:
             raise RuntimeError("first failure")
-        return SportsLiveSnapshot(source="espn", observed_at=base, games=())
+        return SportsLiveSnapshot(source="espn", observed_at=base, events=())
 
     times = iter([base, base + timedelta(seconds=5)])
 
@@ -482,10 +497,10 @@ def test_aggregate_client_resets_cooldown_state_after_recovery() -> None:
             cooldown_base_s=60.0,
             cooldown_failure_threshold=1,
         )
-        await client.list_games()  # failure → cooldown_until set
+        await client.list_events()  # failure → cooldown_until set
         # 强制清掉 cooldown_until 让下一轮真正调用 provider 而不是跳过。
         client._cooldowns["espn"].cooldown_until = None
-        await client.list_games()  # success → state should reset
+        await client.list_events()  # success → state should reset
         return client
 
     client = asyncio.run(run())
@@ -506,7 +521,7 @@ def test_aggregate_client_skips_provider_during_active_cooldown() -> None:
         raise RuntimeError("flaky")
 
     async def healthy_provider() -> SportsLiveSnapshot:
-        return SportsLiveSnapshot(source="nhl", observed_at=base, games=(_game("nhl", SportsLiveGameStatus.LIVE, base),))
+        return SportsLiveSnapshot(source="nhl", observed_at=base, events=(_game("nhl", SportsLiveGameStatus.LIVE, base),))
 
     times = iter([base, base + timedelta(seconds=1), base + timedelta(seconds=2)])
 
@@ -520,7 +535,7 @@ def test_aggregate_client_skips_provider_during_active_cooldown() -> None:
             cooldown_base_s=300.0,
             cooldown_failure_threshold=1,
         )
-        return [await client.list_games() for _ in range(3)]
+        return [await client.list_events() for _ in range(3)]
 
     snapshots = asyncio.run(run())
 
@@ -532,37 +547,38 @@ def test_aggregate_client_skips_provider_during_active_cooldown() -> None:
     assert cooldown_status.success is False
 
 
-async def _snapshot(source: str, game: SportsLiveGame) -> SportsLiveSnapshot:
+async def _snapshot(source: str, game: LiveEvent) -> SportsLiveSnapshot:
     # 兜底 observed_at 用固定瞬间，避免依赖墙钟。
     fallback_observed = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
     return SportsLiveSnapshot(
         source=source,
         observed_at=game.observed_at or fallback_observed,
-        games=(game,),
+        events=(game,),
     )
 
 
-def _game(source: str, status: SportsLiveGameStatus, observed_at: datetime) -> SportsLiveGame:
-    return SportsLiveGame(
-        source=source,
-        source_event_id=f"{source}-game-1",
-        league="NBA",
-        home=SportsLiveTeam(
-            name="Magic",
+def _game(source: str, status: SportsLiveGameStatus, observed_at: datetime) -> LiveEvent:
+    return LiveEvent(
+        
+        participants=(Participant(
+            role="home", name="Magic",
             score=78,
             display_name="Orlando Magic",
             abbreviation="ORL",
             short_name="Magic",
             location="Orlando",
-        ),
-        away=SportsLiveTeam(
-            name="Pistons",
+        ), Participant(
+            role="away", name="Pistons",
             score=76,
             display_name="Detroit Pistons",
             abbreviation="DET",
             short_name="Pistons",
             location="Detroit",
-        ),
+        ),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="basketball",source=source,
+        source_event_id=f"{source}-game-1",
+        league="NBA",
         status=status,
         period="Q4" if status == SportsLiveGameStatus.LIVE else "STATUS_SCHEDULED",
         seconds_remaining=524 if status == SportsLiveGameStatus.LIVE else None,

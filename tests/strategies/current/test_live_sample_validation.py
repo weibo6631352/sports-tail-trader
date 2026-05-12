@@ -18,6 +18,6 @@ def test_live_sample_validation_checks_espn_fields_and_market_match(fixture_path
     report = validate_sports_live_sample_file(str(fixture_path))
 
     assert report.passed is True
-    assert report.games_seen >= 1
+    assert report.events_seen >= 1
     assert report.markets_checked >= 1
     assert len(report.matches) >= 1

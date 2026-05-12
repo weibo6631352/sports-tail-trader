@@ -4,16 +4,18 @@ from datetime import datetime, timezone
 
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.sports_live import (
+    
     BaseballGameState,
-    SportsLiveGame,
+    LiveEvent,
     SportsLiveGameStatus,
-    SportsLiveTeam,
+    Participant,
     TennisGameState,
+    LiveEventKind,
 )
 import strategies.current.live_state as live_state_module
 import strategies.current.strategy as strategy_module
 from strategies.current.config import CurrentStrategyConfig
-from strategies.current.live_state import match_live_game
+from strategies.current.live_state import match_live_event
 from strategies.current.strategy import CurrentStrategy
 
 
@@ -21,17 +23,17 @@ def test_live_state_match_requires_market_date_when_both_sides_have_dates() -> N
     market = _market("nba-phi-bos-2026-05-02")
     game = _game(start_time_utc="2026-04-28T23:30:00Z")
 
-    assert match_live_game(market, game) is None
+    assert match_live_event(market, game) is None
 
 
 def test_live_state_match_accepts_same_date_team_match() -> None:
     market = _market("nba-phi-bos-2026-04-28")
     game = _game(start_time_utc="2026-04-28T23:30:00Z")
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
-    assert match.game.source_event_id == "401869408"
+    assert match.event.source_event_id == "401869408"
 
 
 def test_live_state_match_accepts_compact_soccer_team_variants() -> None:
@@ -50,12 +52,13 @@ def test_live_state_match_accepts_compact_soccer_team_variants() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Olympique Dcheira", score=0), Participant(role="away", name="Union Touarga Sport", score=0, short_name="Union Touarga"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16037147",
         league="Botola Pro",
-        home=SportsLiveTeam(name="Olympique Dcheira", score=0),
-        away=SportsLiveTeam(name="Union Touarga Sport", score=0, short_name="Union Touarga"),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
@@ -66,7 +69,7 @@ def test_live_state_match_accepts_compact_soccer_team_variants() -> None:
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
     assert match.matched_home_alias == "Olympique Dcheira"
@@ -89,12 +92,13 @@ def test_live_state_match_accepts_accented_basketball_team_names() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Fenerbahçe Beko", score=0, short_name="Fenerbahçe"), Participant(role="away", name="Žalgiris Kaunas", score=0, short_name="Žalgiris"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16000001",
         league="Euroleague",
-        home=SportsLiveTeam(name="Fenerbahçe Beko", score=0, short_name="Fenerbahçe"),
-        away=SportsLiveTeam(name="Žalgiris Kaunas", score=0, short_name="Žalgiris"),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
@@ -105,7 +109,7 @@ def test_live_state_match_accepts_accented_basketball_team_names() -> None:
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
     assert match.matched_home_alias == "Fenerbahçe"
@@ -128,22 +132,23 @@ def test_live_state_match_ignores_basketball_club_and_sponsor_tokens() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
-        source_event_id="16074050",
-        league="ABA League",
-        home=SportsLiveTeam(
-            name="KK Spartak Office Shoes",
+    game = LiveEvent(
+        
+        participants=(Participant(
+            role="home", name="KK Spartak Office Shoes",
             score=0,
             short_name="KK Spartak",
             aliases=("kk spartak office shoes subotica",),
-        ),
-        away=SportsLiveTeam(
-            name="KK Zadar",
+        ), Participant(
+            role="away", name="KK Zadar",
             score=0,
             short_name="Zadar",
             aliases=("kk zadar",),
-        ),
+        ),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
+        source_event_id="16074050",
+        league="ABA League",
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
@@ -154,10 +159,10 @@ def test_live_state_match_ignores_basketball_club_and_sponsor_tokens() -> None:
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
-    assert match.game.source_event_id == "16074050"
+    assert match.event.source_event_id == "16074050"
     assert match.matched_home_alias == "kk spartak office shoes subotica"
     assert match.matched_away_alias in {"KK Zadar", "Zadar"}
 
@@ -178,12 +183,13 @@ def test_live_state_match_ignores_basketball_team_suffix() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Olympiacos BC", score=0, short_name="Olympiacos"), Participant(role="away", name="Monaco Basket", score=0, short_name="Monaco Basket"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="15916331",
         league="Euroleague",
-        home=SportsLiveTeam(name="Olympiacos BC", score=0, short_name="Olympiacos"),
-        away=SportsLiveTeam(name="Monaco Basket", score=0, short_name="Monaco Basket"),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
@@ -194,10 +200,10 @@ def test_live_state_match_ignores_basketball_team_suffix() -> None:
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
-    assert match.game.source_event_id == "15916331"
+    assert match.event.source_event_id == "15916331"
 
 
 def test_live_state_match_accepts_chinese_soccer_translation_variants() -> None:
@@ -216,12 +222,13 @@ def test_live_state_match_accepts_chinese_soccer_translation_variants() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Tianjin Jinmen Tiger", score=0, short_name="Jinmen Tiger"), Participant(role="away", name="Wuhan Three Towns", score=0, short_name="Three Towns"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="15552514",
         league="Chinese Super League",
-        home=SportsLiveTeam(name="Tianjin Jinmen Tiger", score=0, short_name="Jinmen Tiger"),
-        away=SportsLiveTeam(name="Wuhan Three Towns", score=0, short_name="Three Towns"),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
@@ -232,10 +239,10 @@ def test_live_state_match_accepts_chinese_soccer_translation_variants() -> None:
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
-    assert match.game.source_event_id == "15552514"
+    assert match.event.source_event_id == "15552514"
 
 
 def test_live_state_match_accepts_moroccan_soccer_name_variants() -> None:
@@ -254,12 +261,13 @@ def test_live_state_match_accepts_moroccan_soccer_name_variants() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Difaâ Hassani El-Jadidi", score=0, short_name="DHJ"), Participant(role="away", name="Renaissance Zemamra", score=0, short_name="Renaissance Zemamra"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16037146",
         league="Botola Pro",
-        home=SportsLiveTeam(name="Difaâ Hassani El-Jadidi", score=0, short_name="DHJ"),
-        away=SportsLiveTeam(name="Renaissance Zemamra", score=0, short_name="Renaissance Zemamra"),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
@@ -270,10 +278,10 @@ def test_live_state_match_accepts_moroccan_soccer_name_variants() -> None:
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
-    assert match.game.source_event_id == "16037146"
+    assert match.event.source_event_id == "16037146"
 
 
 def test_live_state_match_ignores_soccer_club_prefix_variants() -> None:
@@ -292,12 +300,13 @@ def test_live_state_match_ignores_soccer_club_prefix_variants() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="SC Poltava", score=0), Participant(role="away", name="FC Kryvbas Kryvyi Rih", score=0, short_name="Kryvbas"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="14090463",
         league="Ukrainian Premier League",
-        home=SportsLiveTeam(name="SC Poltava", score=0),
-        away=SportsLiveTeam(name="FC Kryvbas Kryvyi Rih", score=0, short_name="Kryvbas"),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
@@ -308,10 +317,10 @@ def test_live_state_match_ignores_soccer_club_prefix_variants() -> None:
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
-    assert match.game.source_event_id == "14090463"
+    assert match.event.source_event_id == "14090463"
 
 
 def test_live_state_match_accepts_basketball_location_suffix_variants() -> None:
@@ -330,12 +339,13 @@ def test_live_state_match_accepts_basketball_location_suffix_variants() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Fraport Skyliners Frankfurt", score=0, short_name="Frankfurt"), Participant(role="away", name="Telekom Baskets Bonn", score=0, short_name="Bonn"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="14381848",
         league="Germany BBL",
-        home=SportsLiveTeam(name="Fraport Skyliners Frankfurt", score=0, short_name="Frankfurt"),
-        away=SportsLiveTeam(name="Telekom Baskets Bonn", score=0, short_name="Bonn"),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
@@ -346,10 +356,10 @@ def test_live_state_match_accepts_basketball_location_suffix_variants() -> None:
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
-    assert match.game.source_event_id == "14381848"
+    assert match.event.source_event_id == "14381848"
 
 
 def test_live_state_match_accepts_russian_soccer_transliteration_variants() -> None:
@@ -368,12 +378,13 @@ def test_live_state_match_accepts_russian_soccer_transliteration_variants() -> N
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Lokomotiv Moscow", score=0, short_name="Lokomotiv"), Participant(role="away", name="Dynamo Moscow", score=0, short_name="Dynamo"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="14036734",
         league="Russian Premier League",
-        home=SportsLiveTeam(name="Lokomotiv Moscow", score=0, short_name="Lokomotiv"),
-        away=SportsLiveTeam(name="Dynamo Moscow", score=0, short_name="Dynamo"),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
@@ -384,10 +395,10 @@ def test_live_state_match_accepts_russian_soccer_transliteration_variants() -> N
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
-    assert match.game.source_event_id == "14036734"
+    assert match.event.source_event_id == "14036734"
 
 
 def test_live_state_match_ignores_latin_american_club_prefix_variants() -> None:
@@ -406,12 +417,13 @@ def test_live_state_match_ignores_latin_american_club_prefix_variants() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Deportivo Guastatoya", score=0, short_name="Dep. Guastatoya"), Participant(role="away", name="CSD Municipal", score=0, short_name="Municipal"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16083435",
         league="Liga Nacional de Fútbol de Guatemala, Clausura",
-        home=SportsLiveTeam(name="Deportivo Guastatoya", score=0, short_name="Dep. Guastatoya"),
-        away=SportsLiveTeam(name="CSD Municipal", score=0, short_name="Municipal"),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
@@ -422,10 +434,10 @@ def test_live_state_match_ignores_latin_american_club_prefix_variants() -> None:
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
-    assert match.game.source_event_id == "16083435"
+    assert match.event.source_event_id == "16083435"
 
 
 def test_live_state_match_accepts_french_polynesia_table_tennis_alias() -> None:
@@ -444,12 +456,13 @@ def test_live_state_match_accepts_french_polynesia_table_tennis_alias() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Chile", score=0), Participant(role="away", name="Tahiti", score=0),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16094584",
         league="World Team Championships Finals",
-        home=SportsLiveTeam(name="Chile", score=0),
-        away=SportsLiveTeam(name="Tahiti", score=0),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 10, 0, tzinfo=timezone.utc),
@@ -460,10 +473,10 @@ def test_live_state_match_accepts_french_polynesia_table_tennis_alias() -> None:
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
-    assert match.game.source_event_id == "16094584"
+    assert match.event.source_event_id == "16094584"
 
 
 def test_best_live_state_match_reuses_market_text_across_many_games(monkeypatch) -> None:
@@ -504,14 +517,15 @@ def test_current_strategy_prefilters_live_games_before_text_matching(monkeypatch
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    games = tuple(
+    events = tuple(
         [
-            SportsLiveGame(
-                source="sofascore",
+            LiveEvent(
+
+        participants=(Participant(role="home", name=f"Home {index}", score=0), Participant(role="away", name=f"Away {index}", score=0),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
                 source_event_id=f"basketball-{index}",
                 league="Liga ACB",
-                home=SportsLiveTeam(name=f"Home {index}", score=0),
-                away=SportsLiveTeam(name=f"Away {index}", score=0),
                 status=SportsLiveGameStatus.SCHEDULED,
                 period="Not started",
                 source_payload={
@@ -522,12 +536,13 @@ def test_current_strategy_prefilters_live_games_before_text_matching(monkeypatch
             for index in range(50)
         ]
         + [
-            SportsLiveGame(
-                source="sofascore",
+            LiveEvent(
+                
+        participants=(Participant(role="home", name="Athletics", score=0), Participant(role="away", name="Kansas City Royals", score=0),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="baseball",source="sofascore",
                 source_event_id="baseball-match",
                 league="MLB",
-                home=SportsLiveTeam(name="Athletics", score=0),
-                away=SportsLiveTeam(name="Kansas City Royals", score=0),
                 status=SportsLiveGameStatus.SCHEDULED,
                 period="Not started",
                 source_payload={
@@ -546,7 +561,7 @@ def test_current_strategy_prefilters_live_games_before_text_matching(monkeypatch
 
     monkeypatch.setattr(strategy_module, "build_live_state_match", counted_match)
 
-    CurrentStrategy(config=CurrentStrategyConfig()).match_live_state(market, games)
+    CurrentStrategy(config=CurrentStrategyConfig()).match_live_state(market, events)
 
     assert seen_game_count == 1
 
@@ -582,13 +597,14 @@ def test_current_strategy_reuses_live_game_prefilter_for_same_event(monkeypatch)
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    games = (
-        SportsLiveGame(
-            source="sofascore",
+    events = (
+        LiveEvent(
+
+        participants=(Participant(role="home", name="Athletics", score=0), Participant(role="away", name="Kansas City Royals", score=0),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="baseball",source="sofascore",
             source_event_id="baseball-match",
             league="MLB",
-            home=SportsLiveTeam(name="Athletics", score=0),
-            away=SportsLiveTeam(name="Kansas City Royals", score=0),
             status=SportsLiveGameStatus.SCHEDULED,
             period="Not started",
             source_payload={
@@ -598,19 +614,19 @@ def test_current_strategy_reuses_live_game_prefilter_for_same_event(monkeypatch)
         ),
     )
     start_parse_calls = 0
-    original_game_start_time = strategy_module._game_start_time
+    original_event_start_time = strategy_module._event_start_time
 
-    def counted_game_start_time(game):
+    def counted_event_start_time(event):
         nonlocal start_parse_calls
         start_parse_calls += 1
-        return original_game_start_time(game)
+        return original_event_start_time(event)
 
-    monkeypatch.setattr(strategy_module, "_game_start_time", counted_game_start_time)
+    monkeypatch.setattr(strategy_module, "_event_start_time", counted_event_start_time)
     monkeypatch.setattr(strategy_module, "build_live_state_match", lambda _market, _games, **_kwargs: None)
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
-    strategy.match_live_state(first_market, games)
-    strategy.match_live_state(second_market, games)
+    strategy.match_live_state(first_market, events)
+    strategy.match_live_state(second_market, events)
 
     assert start_parse_calls == 1
 
@@ -631,12 +647,13 @@ def test_current_strategy_matches_wtt_table_tennis_live_state() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Austria", score=0), Participant(role="away", name="Italy", score=0),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16094559",
         league="World Team Championships Finals",
-        home=SportsLiveTeam(name="Austria", score=0),
-        away=SportsLiveTeam(name="Italy", score=0),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, 5, 0, tzinfo=timezone.utc),
@@ -650,7 +667,7 @@ def test_current_strategy_matches_wtt_table_tennis_live_state() -> None:
     match = strategy.match_live_state(market, (game,))
 
     assert match is not None
-    assert match.game.source_event_id == "16094559"
+    assert match.event.source_event_id == "16094559"
     assert match.payload["live_match"]["matched_home_alias"] == "Austria"
     assert match.payload["live_match"]["matched_away_alias"] == "Italy"
     assert match.signal_allowed is False
@@ -668,7 +685,7 @@ def test_current_strategy_marks_far_live_match_as_non_entry_signal() -> None:
 
     assert match is not None
     assert match.market.condition_id == market.condition_id
-    assert match.game.source_event_id == game.source_event_id
+    assert match.event.source_event_id == game.source_event_id
     assert match.signal_allowed is False
     assert match.signal_reason == "market_end_too_far"
 
@@ -689,12 +706,13 @@ def test_current_strategy_allows_far_mlb_signal_when_structured_tail_state_reach
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="mlb",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Pittsburgh Pirates", score=1), Participant(role="away", name="St. Louis Cardinals", score=5),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="baseball",source="mlb",
         source_event_id="823392",
         league="MLB",
-        home=SportsLiveTeam(name="Pittsburgh Pirates", score=1),
-        away=SportsLiveTeam(name="St. Louis Cardinals", score=5),
         status=SportsLiveGameStatus.LIVE,
         period="B9",
         observed_at=datetime(2026, 4, 30, tzinfo=timezone.utc),
@@ -733,12 +751,13 @@ def test_current_strategy_allows_far_tennis_set_winner_signal_after_set_complete
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Stefanos Tsitsipas", score=1), Participant(role="away", name="Casper Ruud", score=0),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16013091",
         league="ATP Madrid Masters",
-        home=SportsLiveTeam(name="Stefanos Tsitsipas", score=1),
-        away=SportsLiveTeam(name="Casper Ruud", score=0),
         status=SportsLiveGameStatus.LIVE,
         period="S2",
         observed_at=datetime(2026, 4, 28, tzinfo=timezone.utc),
@@ -782,12 +801,13 @@ def test_current_strategy_allows_far_tennis_match_total_when_minimum_final_games
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Mathys Erhard", score=1), Participant(role="away", name="Andrej Nedic", score=1),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16050302",
         league="Shymkent 2, Kazakhstan",
-        home=SportsLiveTeam(name="Mathys Erhard", score=1),
-        away=SportsLiveTeam(name="Andrej Nedic", score=1),
         status=SportsLiveGameStatus.LIVE,
         period="S3",
         observed_at=datetime(2026, 4, 29, 8, 25, tzinfo=timezone.utc),
@@ -831,12 +851,13 @@ def test_current_strategy_allows_far_tennis_moneyline_signal_when_tail_state_rea
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Amir Omarkhanov", score=0), Participant(role="away", name="Denis Yevseyev", score=0),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16013092",
         league="ATP Challenger",
-        home=SportsLiveTeam(name="Amir Omarkhanov", score=0),
-        away=SportsLiveTeam(name="Denis Yevseyev", score=0),
         status=SportsLiveGameStatus.LIVE,
         period="S2",
         observed_at=datetime(2026, 4, 28, tzinfo=timezone.utc),
@@ -879,12 +900,13 @@ def test_current_strategy_does_not_apply_single_game_live_source_to_series_marke
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="nba",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Suns", score=122, display_name="Phoenix Suns"), Participant(role="away", name="Thunder", score=131, display_name="Oklahoma City Thunder"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="basketball",source="nba",
         source_event_id="0042500144",
         league="NBA",
-        home=SportsLiveTeam(name="Suns", score=122, display_name="Phoenix Suns"),
-        away=SportsLiveTeam(name="Thunder", score=131, display_name="Oklahoma City Thunder"),
         status=SportsLiveGameStatus.ENDED,
         period="Final",
         observed_at=datetime(2026, 4, 28, tzinfo=timezone.utc),
@@ -911,12 +933,13 @@ def test_current_strategy_does_not_apply_single_game_live_source_to_league_winne
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Massucco S / Mencaglia S", score=0), Participant(role="away", name="Cocola S / Rahmani K", score=0),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16093356",
         league="ITF M25 Santa Margherita di Pula 5 Men Doubles",
-        home=SportsLiveTeam(name="Massucco S / Mencaglia S", score=0),
-        away=SportsLiveTeam(name="Cocola S / Rahmani K", score=0),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 30, tzinfo=timezone.utc),
@@ -943,12 +966,13 @@ def test_live_state_match_rejects_same_teams_on_different_start_times() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    previous_game = SportsLiveGame(
-        source="sofascore",
+    previous_game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Los Angeles Dodgers", score=5, abbreviation="LAD"), Participant(role="away", name="Miami Marlins", score=4, abbreviation="MIA"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="baseball",source="sofascore",
         source_event_id="15508565",
         league="MLB",
-        home=SportsLiveTeam(name="Los Angeles Dodgers", score=5, abbreviation="LAD"),
-        away=SportsLiveTeam(name="Miami Marlins", score=4, abbreviation="MIA"),
         status=SportsLiveGameStatus.ENDED,
         period="Ended",
         observed_at=datetime(2026, 4, 28, 11, 4, tzinfo=timezone.utc),
@@ -959,7 +983,7 @@ def test_live_state_match_rejects_same_teams_on_different_start_times() -> None:
         },
     )
 
-    assert match_live_game(market, previous_game) is None
+    assert match_live_event(market, previous_game) is None
 
 
 def test_live_state_match_accepts_same_teams_on_matching_start_times() -> None:
@@ -977,12 +1001,13 @@ def test_live_state_match_accepts_same_teams_on_matching_start_times() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    scheduled_game = SportsLiveGame(
-        source="sofascore",
+    scheduled_game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Los Angeles Dodgers", score=0, abbreviation="LAD"), Participant(role="away", name="Miami Marlins", score=0, abbreviation="MIA"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="baseball",source="sofascore",
         source_event_id="upcoming",
         league="MLB",
-        home=SportsLiveTeam(name="Los Angeles Dodgers", score=0, abbreviation="LAD"),
-        away=SportsLiveTeam(name="Miami Marlins", score=0, abbreviation="MIA"),
         status=SportsLiveGameStatus.SCHEDULED,
         period="Not started",
         observed_at=datetime(2026, 4, 28, 11, 4, tzinfo=timezone.utc),
@@ -993,7 +1018,7 @@ def test_live_state_match_accepts_same_teams_on_matching_start_times() -> None:
         },
     )
 
-    assert match_live_game(market, scheduled_game) is not None
+    assert match_live_event(market, scheduled_game) is not None
 
 
 def test_live_state_metadata_preserves_tennis_state() -> None:
@@ -1011,12 +1036,13 @@ def test_live_state_metadata_preserves_tennis_state() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Rada Zolotareva", score=0, short_name="R. Zolotareva"), Participant(role="away", name="Despina Papamichail", score=1, short_name="D. Papamichail"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16078142",
         league="WTA 125K Huzhou, China Women Singles",
-        home=SportsLiveTeam(name="Rada Zolotareva", score=0, short_name="R. Zolotareva"),
-        away=SportsLiveTeam(name="Despina Papamichail", score=1, short_name="D. Papamichail"),
         status=SportsLiveGameStatus.LIVE,
         period="S2",
         observed_at=datetime(2026, 4, 28, 7, 0, tzinfo=timezone.utc),
@@ -1036,7 +1062,7 @@ def test_live_state_metadata_preserves_tennis_state() -> None:
         },
     )
 
-    match = match_live_game(market, game)
+    match = match_live_event(market, game)
 
     assert match is not None
     assert match.metadata()["live_game"]["tennis_state"]["total_games"] == 10
@@ -1058,12 +1084,13 @@ def test_live_state_match_allows_tennis_adjacent_utc_date() -> None:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-    game = SportsLiveGame(
-        source="sofascore",
+    game = LiveEvent(
+        
+        participants=(Participant(role="home", name="Rada Zolotareva", score=0, short_name="R. Zolotareva"), Participant(role="away", name="Despina Papamichail", score=1, short_name="D. Papamichail"),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="",source="sofascore",
         source_event_id="16078142",
         league="WTA 125K Huzhou, China Women Singles",
-        home=SportsLiveTeam(name="Rada Zolotareva", score=0, short_name="R. Zolotareva"),
-        away=SportsLiveTeam(name="Despina Papamichail", score=1, short_name="D. Papamichail"),
         status=SportsLiveGameStatus.LIVE,
         period="S2",
         observed_at=datetime(2026, 4, 28, 7, 0, tzinfo=timezone.utc),
@@ -1074,7 +1101,7 @@ def test_live_state_match_allows_tennis_adjacent_utc_date() -> None:
         },
     )
 
-    assert match_live_game(market, game) is not None
+    assert match_live_event(market, game) is not None
 
 
 def _market(slug: str) -> Market:
@@ -1094,25 +1121,26 @@ def _market(slug: str) -> Market:
     )
 
 
-def _game(*, start_time_utc: str) -> SportsLiveGame:
-    return SportsLiveGame(
-        source="espn",
-        source_event_id="401869408",
-        league="NBA",
-        home=SportsLiveTeam(
-            name="Celtics",
+def _game(*, start_time_utc: str) -> LiveEvent:
+    return LiveEvent(
+        
+        participants=(Participant(
+            role="home", name="Celtics",
             score=0,
             display_name="Boston Celtics",
             abbreviation="BOS",
             short_name="Celtics",
-        ),
-        away=SportsLiveTeam(
-            name="76ers",
+        ), Participant(
+            role="away", name="76ers",
             score=0,
             display_name="Philadelphia 76ers",
             abbreviation="PHI",
             short_name="76ers",
-        ),
+        ),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="basketball",source="espn",
+        source_event_id="401869408",
+        league="NBA",
         status=SportsLiveGameStatus.SCHEDULED,
         period="STATUS_SCHEDULED",
         observed_at=datetime(2026, 4, 28, tzinfo=timezone.utc),
@@ -1120,25 +1148,26 @@ def _game(*, start_time_utc: str) -> SportsLiveGame:
     )
 
 
-def _live_game() -> SportsLiveGame:
-    return SportsLiveGame(
-        source="espn",
-        source_event_id="401869408",
-        league="NBA",
-        home=SportsLiveTeam(
-            name="Celtics",
+def _live_game() -> LiveEvent:
+    return LiveEvent(
+        
+        participants=(Participant(
+            role="home", name="Celtics",
             score=96,
             display_name="Boston Celtics",
             abbreviation="BOS",
             short_name="Celtics",
-        ),
-        away=SportsLiveTeam(
-            name="76ers",
+        ), Participant(
+            role="away", name="76ers",
             score=94,
             display_name="Philadelphia 76ers",
             abbreviation="PHI",
             short_name="76ers",
-        ),
+        ),),
+        kind=LiveEventKind.TEAM_MATCH,
+        sport="basketball",source="espn",
+        source_event_id="401869408",
+        league="NBA",
         status=SportsLiveGameStatus.LIVE,
         period="Q4",
         seconds_remaining=600,
