@@ -230,7 +230,7 @@ async def run_market_discovery_scan(
             if state.last_tick_markets >= _MARKET_DISCOVERY_MARKET_BUDGET_PER_TICK:
                 break
         await expand_live_event_market_discovery(runtime)
-    except Exception as exc:  # pragma: no cover - depends on external gamma
+    except Exception as exc:
         state.record_failure(str(exc))
         backoff_seconds = _retry_backoff_seconds(state.consecutive_failures)
         runtime.market_discovery_worker.record_failure(

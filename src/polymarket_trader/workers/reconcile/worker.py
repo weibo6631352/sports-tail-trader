@@ -308,7 +308,7 @@ class ReconcileWorker:
                     applied_actions.append(action)
                     if self._account_state_store is not None:
                         working_snapshot = self._account_state_store.snapshot()
-                except Exception as exc:  # pragma: no cover - injected adapters can fail
+                except Exception as exc:
                     failed_actions.append((action, str(exc)))
 
             if market_plan.has_changes:

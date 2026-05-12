@@ -14,7 +14,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
+from polymarket_trader.domain.order import BuyOrderIntent, OrderType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
+from polymarket_trader.domain.risk import RiskManager
 from strategies.current.allocation import (
     AllocationMarketSnapshot,
     ProbView,
@@ -264,3 +266,76 @@ def test_kelly_plan_sequential_bankroll_strict_decrement():
     f_c2 = by_id["c2"].kelly_f_star
     f_c3 = by_id["c3"].kelly_f_star
     assert f_c1 >= f_c2 >= f_c3
+
+
+# ============================================================
+# Contract test: kelly_plan output ≤ RiskManager position cap
+# ============================================================
+
+
+def test_kelly_plan_stake_always_passes_risk_manager_position_cap() -> None:
+    """kelly_plan 产出的 buy_budget_usdc 必须 ≤ RiskManager Kelly cap，不得有双侧漂移。
+
+    这是策略侧 kelly_plan 与 RiskManager.check_order_intent 之间的双门禁一致性
+    合约测试（§3 风控强制门禁 + CLAUDE.md §7 Kelly 不重复计算）。
+    """
+    bankroll = Decimal("200")
+    max_fraction = Decimal("0.10")
+    price = Decimal("0.20")
+    prob_p = Decimal("0.35")
+
+    plan = kelly_plan(
+        trace_id="trace-contract",
+        bankroll_usdc=bankroll,
+        portfolio_budget_usdc=bankroll,
+        markets=[
+            _snapshot(
+                condition_id="c1",
+                token_id="yes",
+                best_ask=price,
+                min_order_size=Decimal("1"),
+            )
+        ],
+        prob_provider=_const_prob(prob_p),
+        **_kelly_kwargs(kelly_max_position_fraction=max_fraction),
+    )
+
+    alloc = next(a for a in plan.allocations if a.condition_id == "c1")
+    stake_usdc = alloc.buy_budget_usdc
+    assert stake_usdc > Decimal("0"), "test setup: kelly should produce positive stake"
+
+    intent = BuyOrderIntent(
+        strategy_id="sports_tail",
+        trace_id="trace-contract",
+        condition_id="c1",
+        token_id="yes",
+        price=price,
+        amount_usdc=stake_usdc,
+        order_type=OrderType.FAK,
+    )
+    decision = RiskManager().check_order_intent(
+        intent,
+        market=alloc_market_stub("c1", "yes"),
+        bankroll_usdc=bankroll,
+        kelly_max_position_fraction=max_fraction,
+        balance_usdc=bankroll,
+        allowance_usdc=bankroll,
+    )
+
+    assert decision.passed is True, (
+        f"kelly_plan stake {stake_usdc} should pass RiskManager, got: {decision.reason}"
+    )
+
+
+def alloc_market_stub(condition_id: str, token_id: str):
+    return Market(
+        condition_id=condition_id,
+        market_slug="contract-test",
+        outcomes=(
+            MarketOutcome(token_id=token_id, outcome="Yes"),
+            MarketOutcome(token_id="no", outcome="No"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+        tick_size=Decimal("0.01"),
+        min_order_size=Decimal("1"),
+    )

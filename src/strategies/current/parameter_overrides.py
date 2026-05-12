@@ -17,12 +17,15 @@ frozen dataclass，启动期校验后不应再被替换。Override 是 runtime �
 
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from contextvars import ContextVar
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterator
 
 from polymarket_trader.extension_api import ExtensionPorts
+
+logger = logging.getLogger(__name__)
 
 
 _active_ports: ContextVar[ExtensionPorts | None] = ContextVar(
@@ -50,8 +53,8 @@ def _resolve(ports: ExtensionPorts | None, key: str, default: Any) -> Any:
         return default
     try:
         return port.get("strategy", key, default=default)
-    except Exception:
-        # ParameterPort 行为异常时降级到静态 config，不阻塞热路径
+    except Exception as exc:
+        logger.warning("parameter_port_error: key=%s, degrading to static config: %s", key, exc)
         return default
 
 

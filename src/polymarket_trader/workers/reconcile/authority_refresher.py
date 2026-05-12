@@ -779,7 +779,7 @@ async def _await_authority(
                 reason="timeout",
             )
         )
-    except Exception as exc:  # pragma: no cover - external SDK failure path
+    except Exception as exc:
         failures.append(
             AuthoritativeRefreshFailure(
                 component=component,

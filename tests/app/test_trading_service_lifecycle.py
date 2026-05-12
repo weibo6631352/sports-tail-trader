@@ -347,3 +347,24 @@ def test_intent_tags_propagated_in_lifecycle_payload() -> None:
     asyncio.run(run())
     assert len(received) == 1
     assert received[0].payload["intent_tags"] == ("scale_in",)
+
+
+def test_executor_raises_exception_returns_failed_result() -> None:
+    """executor.submit() 抛异常 → TradingService 捕获并返回 FAILED，不让异常逃出链路。
+
+    覆盖 trading_service.py 中 _execute_intent 的 except Exception 分支。
+    """
+
+    class _RaisingExecutor:
+        async def submit(self, intent: BuyOrderIntent) -> OrderResult:
+            raise RuntimeError("simulated_executor_crash")
+
+    service = TradingService(
+        risk_manager=_AlwaysPassRisk(),
+        executor=_RaisingExecutor(),
+    )
+
+    result = asyncio.run(service.review_intent(_build_intent(), operation="buy"))
+    assert result.order_result is not None
+    assert result.order_result.status == OrderResultStatus.FAILED
+    assert result.order_result.reason == "simulated_executor_crash"

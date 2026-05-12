@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from polymarket_trader.domain.sports_live import (
-    
+
     LiveEvent,
     SportsLiveGameStatus,
     Participant,
@@ -138,3 +139,48 @@ def test_live_event_expansion_uses_stale_live_metadata_event_slugs() -> None:
     )
 
     assert discovery_runner._live_event_slugs_for_expansion(runtime, now=now) == ("atp-live-1",)
+
+
+def test_run_market_discovery_scan_records_failure_when_gamma_raises() -> None:
+    """Exception path (line 233): gamma error → state.consecutive_failures increments."""
+
+    class _ErrorGammaClient:
+        async def list_events_keyset_by_params(self, params: dict, *, timeout_s: float) -> tuple:
+            raise ValueError("simulated_gamma_failure")
+
+        async def list_events(self, **kwargs) -> tuple:
+            return (), None
+
+    state = discovery_runner.FullMarketDiscoveryState()
+    recorded_failures: list[dict] = []
+    runtime = SimpleNamespace(
+        market_discovery_scan=state,
+        market_discovery_worker=SimpleNamespace(
+            last_failure=None,
+            mark_scan_success=lambda: None,
+            record_failure=lambda source, reason, retry_after_seconds: recorded_failures.append(
+                {"source": source, "reason": reason}
+            ),
+            ingest_source_page=lambda page, source, trace_id: None,
+        ),
+        supervisor=SimpleNamespace(
+            heartbeat_worker=lambda name, detail="": None,
+            mark_worker_error=lambda name, detail="", last_error="": None,
+        ),
+        extension=SimpleNamespace(
+            hooks=SimpleNamespace(discovery_queries=lambda: (DiscoveryQuery.title_search("nba"),)),
+            live_state_hooks=SimpleNamespace(discovery_queries_for_live_games=lambda games: ()),
+        ),
+        sports_live_state_worker=SimpleNamespace(last_games=lambda: ()),
+        gamma_client=_ErrorGammaClient(),
+        metrics=SimpleNamespace(inc_counter=lambda name, value: None),
+        entry_metadata_store=SimpleNamespace(records=lambda: ()),
+    )
+
+    asyncio.run(discovery_runner.run_market_discovery_scan(runtime))
+
+    assert state.consecutive_failures == 1
+    assert state.last_error == "simulated_gamma_failure"
+    assert len(recorded_failures) == 1
+    assert recorded_failures[0]["source"] == "gamma.events_keyset"
+    assert "simulated_gamma_failure" in recorded_failures[0]["reason"]

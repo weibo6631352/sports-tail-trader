@@ -318,3 +318,34 @@ def test_submit_rejects_cancel_intent_with_type_error() -> None:
         _run(run())
     finally:
         executor.close()
+
+
+def test_concurrent_submit_same_idempotency_key_deduplicates() -> None:
+    """并发同 idempotency_key → 只有一次真实 client.submit；两个协程都拿到同一结果。
+
+    验证幂等锁在并发路径（asyncio.gather）下的正确性：
+    CLAUDE.md §7 「幂等键防双发」不仅对顺序调用成立，也对并发调用成立。
+    """
+    sink = _CollectingOutboxSink()
+    client = InMemoryPolymarketOrderClient()
+    executor = PolymarketOrderExecutor(client=client, outbox=sink)
+    try:
+        intent_a = _build_buy_intent(idempotency_key="concurrent-key-1")
+        intent_b = _build_buy_intent(idempotency_key="concurrent-key-1")
+
+        async def run() -> tuple:
+            r1, r2 = await asyncio.gather(
+                executor.submit(intent_a),
+                executor.submit(intent_b),
+            )
+            await asyncio.sleep(0)
+            return r1, r2
+
+        r1, r2 = _run(run())
+        assert r1.status == r2.status
+        submit_calls = [r for kind, r in client.requests if kind == "submit"]
+        assert len(submit_calls) == 1, (
+            f"concurrent同 key 应只触发 1 次 client.submit，实际 {len(submit_calls)}"
+        )
+    finally:
+        executor.close()

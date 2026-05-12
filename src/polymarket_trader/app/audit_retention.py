@@ -92,7 +92,7 @@ async def purge_audit_events_once(
                     "cutoff": summary["cutoff"],
                 },
             )
-    except Exception as exc:  # pragma: no cover - external db
+    except Exception as exc:
         summary["error"] = str(exc)
         logger.warning(
             "audit_retention.purge_failed",

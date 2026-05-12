@@ -930,7 +930,7 @@ async def _orderbook_with_rest_fallback(
         return ws_snapshot, rest_budget_remaining, False
     try:
         rest_orderbook = await clob_client.get_orderbook(token_id)
-    except Exception:  # pragma: no cover - depends on external clob
+    except Exception:
         return ws_snapshot, rest_budget_remaining - 1, False
     rest_snapshot = rest_orderbook.to_snapshot() if rest_orderbook is not None else None
     return (

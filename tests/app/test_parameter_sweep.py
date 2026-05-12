@@ -597,3 +597,13 @@ def test_sweep_sample_quality_enum_values_are_stable() -> None:
     assert SweepSampleQuality.ENTRY_PRICE_CAP_FALLBACK.value == "entry_price_cap_fallback"
     # StrEnum 行为：member 与字符串相等，便于历史日志/字符串比较
     assert SweepSampleQuality.REAL_BEST_ASK == "real_best_ask"
+
+
+def test_coerce_value_raises_for_unknown_type_name() -> None:
+    """Exhaustiveness guard: _coerce_value unknown spec.type_name raises ValueError."""
+
+    from polymarket_trader.app.parameter_sweep import _ParameterSpec, _coerce_value
+
+    spec = _ParameterSpec("string")
+    with pytest.raises(ValueError, match="unknown spec: string"):
+        _coerce_value("some_key", "foo", spec)

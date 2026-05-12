@@ -419,7 +419,7 @@ class TradingService:
                     fallback_reason=fallback_reason,
                 )
                 return order_result, True, None
-            except Exception as exc:  # pragma: no cover - injected in tests
+            except Exception as exc:
                 last_error = str(exc)
                 break
         if last_error is not None:

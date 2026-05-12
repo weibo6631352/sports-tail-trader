@@ -437,3 +437,36 @@ def test_refresh_market_authority_disabled_skips_all_gamma_calls_even_with_expos
 
     assert gamma.slugs_called == []
     assert summary.market_count == 1
+
+
+def test_refresh_collects_failure_when_gamma_raises_general_exception() -> None:
+    """gamma list_markets 抛非 TimeoutError 的一般异常 → AuthoritativeRefreshFailure(reason='exception') 收集，
+    refresh 不向上抛异常。覆盖 authority_refresher.py 中 except Exception 分支。"""
+    market = _market(1)
+    account_state = AccountStateStore()
+    account_state.upsert_position(
+        Position(
+            strategy_id="sports_tail",
+            condition_id=market.condition_id,
+            token_id=market.token_ids[0],
+            shares=Decimal("1"),
+            cost_usdc=Decimal("0.5"),
+        )
+    )
+
+    class _ErrorGammaClient:
+        async def list_markets(self, **kwargs) -> tuple:
+            raise ValueError("simulated_gamma_error")
+
+    refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
+        registry_snapshot_provider=lambda: MarketRegistrySnapshot((market,)),
+        account_state_store=account_state,
+        gamma_client=_ErrorGammaClient(),
+    )
+
+    summary = asyncio.run(refresher.refresh(trace_id="trace-general-fail"))
+
+    assert summary.refreshed_markets == 0
+    failure_reasons = {failure.reason for failure in summary.failures}
+    assert "exception" in failure_reasons

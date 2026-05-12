@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -58,6 +59,8 @@ from strategies.current.trading.helpers import (
     bid_plus_tick_fallback_metadata,
 )
 from strategies.current.universe import select_market
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -463,6 +466,12 @@ class CurrentStrategy:
                         orderbook=orderbook,
                         tick_size=market.tick_size,
                         fallback_ask=fallback_ask,
+                    )
+                    logger.warning(
+                        "bid_plus_tick_fallback: no best_ask, using bid+tick=%s for token=%s market=%s",
+                        fallback_ask,
+                        token_view.token_id,
+                        market.condition_id,
                     )
             buyable = (
                 orderbook.buyable_ask_depth(max_price=config.tail_outright_max_entry_price)

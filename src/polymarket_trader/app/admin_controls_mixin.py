@@ -24,9 +24,10 @@ from polymarket_trader.app.admin_operations import (
     normalize_condition_ids,
 )
 from polymarket_trader.app.order_projection import normalize_order_id, order_open_shares
-from polymarket_trader.domain.account import MarketPauseSource
+from polymarket_trader.domain.account import AccountSnapshot, MarketPauseSource
 from polymarket_trader.domain.order import (
     CancelOrderIntent,
+    Order,
     OrderResultStatus,
     OrderSide,
     OrderType,
@@ -39,17 +40,13 @@ from polymarket_trader.workers.trading_decision import (
 )
 
 
-def _resolve_admin_bankroll(account: Any, portfolio_budget_usdc: Any) -> Decimal:
+def _resolve_admin_bankroll(account: AccountSnapshot, portfolio_budget_usdc: Any) -> Decimal:
     """同 EntryPlanner / worker 一致的 bankroll 口径。Admin/manual 入口同样要走 Kelly。"""
 
     cap = portfolio_budget_usdc if isinstance(portfolio_budget_usdc, Decimal) else Decimal(
         str(portfolio_budget_usdc) if portfolio_budget_usdc is not None else "0"
     )
-    available = getattr(account, "available_usdc", None)
-    if available is None:
-        bankroll = cap
-    else:
-        bankroll = min(available, cap)
+    bankroll = min(account.available_usdc, cap)
     if bankroll < Decimal("0"):
         return Decimal("0")
     return bankroll
@@ -485,7 +482,7 @@ class AdminControlsMixin:
         event_type_pre: str,
         event_type_post: str,
         trace_id: str,
-        order: Any,
+        order: Order,
         order_result: Any,
         operator: str,
         reason: str,
@@ -506,10 +503,7 @@ class AdminControlsMixin:
         event_bus = getattr(self.runtime, "event_bus", None)
         if event_bus is None:
             return
-        condition_id = getattr(order, "condition_id", None)
-        token_id = getattr(order, "token_id", None)
-        market_slug = getattr(order, "market_slug", None)
-        order_id = getattr(order, "order_id", None) or normalize_order_id(order)
+        order_id = order.order_id or normalize_order_id(order)
         pre_payload: dict[str, Any] = {
             "operator": operator,
             "reason": reason,
@@ -530,9 +524,9 @@ class AdminControlsMixin:
                 trace_id=trace_id,
                 event_type=getattr(DomainEventType, event_type_pre),
                 event_id=uuid4().hex,
-                market_slug=market_slug,
-                condition_id=condition_id,
-                token_id=token_id,
+                market_slug=order.market_slug,
+                condition_id=order.condition_id,
+                token_id=order.token_id,
                 reason=reason,
                 payload=pre_payload,
             ),
@@ -547,9 +541,9 @@ class AdminControlsMixin:
                 trace_id=trace_id,
                 event_type=getattr(DomainEventType, event_type_post),
                 event_id=uuid4().hex,
-                market_slug=market_slug,
-                condition_id=condition_id,
-                token_id=token_id,
+                market_slug=order.market_slug,
+                condition_id=order.condition_id,
+                token_id=order.token_id,
                 reason=order_result.reason or reason,
                 payload=post_payload,
             ),

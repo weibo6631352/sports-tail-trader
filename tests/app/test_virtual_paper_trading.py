@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
-from polymarket_trader.app.virtual_paper_trading import run_virtual_paper_trade
+from polymarket_trader.app.virtual_paper_trading import _orderbook_with_rest_fallback, run_virtual_paper_trade
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.runtime.account_state import AccountStateStore
@@ -403,3 +403,24 @@ def _runtime_with_scheduled_and_live_single_game_rejections() -> SimpleNamespace
         },
     )
     return runtime
+
+
+def test_orderbook_rest_fallback_returns_gracefully_when_clob_raises() -> None:
+    """Exception path (line 933): REST clob failure → returns original ws snapshot, budget decremented."""
+
+    class _ErrorClobClient:
+        async def get_orderbook(self, token_id: str) -> Any:
+            raise ConnectionError("simulated_clob_timeout")
+
+    runtime = SimpleNamespace(
+        market_ws=SimpleNamespace(snapshot=lambda token_id: None),
+        clob_client=_ErrorClobClient(),
+    )
+
+    snapshot, remaining_budget, used_rest = asyncio.run(
+        _orderbook_with_rest_fallback(runtime, "token-x", rest_budget_remaining=3)
+    )
+
+    assert snapshot is None
+    assert remaining_budget == 2
+    assert used_rest is False

@@ -266,7 +266,7 @@ def _coerce_value(key: str, value: Any, spec: _ParameterSpec) -> Any:
         except (InvalidOperation, ValueError) as exc:
             raise ValueError(f"expected decimal candidate, got {value!r}") from exc
     else:
-        raise ValueError(f"unknown spec: {spec.type_name}")  # pragma: no cover
+        raise ValueError(f"unknown spec: {spec.type_name}")
     _check_range(key, coerced, spec)
     return coerced
 

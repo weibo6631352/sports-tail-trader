@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from datetime import timezone as _tz
 
 from freezegun import freeze_time
 from decimal import Decimal
@@ -23,8 +24,14 @@ from polymarket_trader.extension_api.decisions import (
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry, MarketRegistrySnapshot
-from polymarket_trader.app.reconcile_service import ReconcileService
-from polymarket_trader.app.reconcile_service import ReconcileActionType
+from polymarket_trader.app.reconcile_service import (
+    ReconcileAction,
+    ReconcileActionType,
+    ReconcileMarketPlan,
+    ReconcilePlan,
+    ReconcileService,
+)
+from polymarket_trader.domain.order import CancelOrderIntent as _CancelIntent
 from polymarket_trader.main import _is_reconcile_trigger
 from polymarket_trader.main import _runtime_trace_id
 from polymarket_trader.workers.market_ws import MarketWsWorker
@@ -586,3 +593,77 @@ def test_terminal_live_state_pause_keeps_existing_position_exit_in_plan() -> Non
     assert submit_action.source_order_side is not None
     assert submit_action.target_size_shares == Decimal("7")
     assert submit_action.metadata["exit_trigger"] == "reconcile_position"
+
+
+# ============================================================
+# reconcile worker: action_applier 异常捕获路径
+# ============================================================
+
+
+class _StubReconcileServiceWithCancelAction(ReconcileService):
+    """重写 build_reconcile_plan 以注入一个 CANCEL_ORDER action。
+
+    仅用于测试 worker 的 except Exception 兜底路径（worker.py line 311）。
+    """
+
+    def __init__(self, market: Market) -> None:
+        super().__init__(strategy_id="sports_tail", extension_hooks=_NoopHooks())
+        self._market = market
+
+    def build_reconcile_plan(self, **kwargs) -> ReconcilePlan:
+        intent = _CancelIntent(
+            strategy_id="sports_tail",
+            trace_id="trace-injected",
+            condition_id=self._market.condition_id,
+            token_id=self._market.token_ids[0],
+            order_id="stale-order-1",
+            market_slug=self._market.market_slug,
+            reason="stale_resting_buy",
+        )
+        action = ReconcileAction(
+            action_type=ReconcileActionType.CANCEL_ORDER,
+            trace_id="trace-injected",
+            condition_id=self._market.condition_id,
+            token_id=self._market.token_ids[0],
+            market_slug=self._market.market_slug,
+            reason="stale_resting_buy",
+            intent=intent,
+        )
+        market_plan = ReconcileMarketPlan(
+            trace_id="trace-injected",
+            market=self._market,
+            position=None,
+            open_orders=(),
+            actions=(action,),
+            pause_trading=False,
+        )
+        return ReconcilePlan(
+            trace_id="trace-injected",
+            generated_at=datetime.now(_tz.utc),
+            market_plans=(market_plan,),
+            total_actions=1,
+            paused_market_count=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_worker_records_failed_action_when_applier_raises() -> None:
+    """action_applier.apply() 抛异常 → worker 记录到 failed_actions，不向上传播异常。
+
+    覆盖 workers/reconcile/worker.py 中 for action in market_plan.actions: 的
+    except Exception 分支（之前标注 pragma: no cover - injected adapters can fail）。
+    """
+    market = _market(1)
+    reconcile_service = _StubReconcileServiceWithCancelAction(market)
+    worker = ReconcileWorker(
+        reconcile_service=reconcile_service,
+        trading_service=None,  # 触发 ReconcileActionApplier._apply_cancel 中的 RuntimeError
+    )
+
+    result = await worker.reconcile_once(trace_id="trace-exception-test", refresh_market_authority=False)
+
+    assert len(result.failed_actions) == 1
+    failed_action, error_msg = result.failed_actions[0]
+    assert failed_action.action_type == ReconcileActionType.CANCEL_ORDER
+    assert "trading_service_required" in error_msg
+    assert len(result.applied_actions) == 0

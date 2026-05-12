@@ -197,8 +197,8 @@ class AdminOrderController:
         payload = {
             "operator": operator,
             "reason": reason,
-            "order_id": getattr(order, "order_id", None) or normalize_order_id(order),
-            "old_price": str(order.price) if getattr(order, "price", None) is not None else None,
+            "order_id": order.order_id or normalize_order_id(order),
+            "old_price": str(order.price),
             "new_price": str(new_price),
             "old_size_shares": (
                 str(order_open_shares(order)) if order_open_shares(order) is not None else None
@@ -216,9 +216,9 @@ class AdminOrderController:
                 trace_id=trace_id,
                 event_type=DomainEventType.REPLACE_ORDER_SUBMITTED,
                 event_id=uuid4().hex,
-                market_slug=getattr(order, "market_slug", None),
-                condition_id=getattr(order, "condition_id", None),
-                token_id=getattr(order, "token_id", None),
+                market_slug=order.market_slug,
+                condition_id=order.condition_id,
+                token_id=order.token_id,
                 reason=reason,
                 payload=payload,
             ),

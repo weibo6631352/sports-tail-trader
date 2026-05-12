@@ -394,7 +394,7 @@ def build_live_state_match(
         event=event,
         signal_allowed=signal_allowed,
         signal_reason=signal_reason,
-        phase=str(getattr(event.status, "value", event.status) or "").strip().lower(),
+        phase=event.status.value,
         primary_source=match.primary_source,
         contributing_sources=match.contributing_sources,
         confidence=match.confidence,
