@@ -1,0 +1,22 @@
+{
+  "games": [
+    {
+      "game": {
+        "gameID": "5859812",
+        "gameState": "live",
+        "startDate": "2026-02-15T20:00:00Z",
+        "currentPeriod": "2nd",
+        "home": {
+          "names": {"full": "Duke", "short": "Duke", "char6": "DUKE"},
+          "teamId": "150",
+          "score": "42"
+        },
+        "away": {
+          "names": {"full": "North Carolina", "short": "UNC", "char6": "UNC"},
+          "teamId": "153",
+          "score": "38"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+[
+  {
+    "id": 401601001,
+    "season": 2025,
+    "week": 12,
+    "season_type": "regular",
+    "start_date": "2025-11-22T19:30:00.000Z",
+    "completed": false,
+    "neutral_site": false,
+    "conference_game": true,
+    "home_id": 333,
+    "home_team": "Alabama",
+    "home_points": 21,
+    "away_id": 61,
+    "away_team": "Auburn",
+    "away_points": 14,
+    "venue": "Bryant-Denny Stadium"
+  }
+]

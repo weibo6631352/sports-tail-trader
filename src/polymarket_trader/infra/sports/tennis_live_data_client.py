@@ -324,13 +324,25 @@ def _set_scores(raw_event: Mapping[str, Any]) -> tuple[tuple[int, int], ...]:
 
 
 def _final_set_scores(raw_event: Mapping[str, Any]) -> tuple[int, int]:
+    """统计已结束的 set 中的胜场数；不把进行中的 current_set 计入（防漏算返场）。
+
+    判定"已结束"：分数差 >= 2 且任一方 >= 6，或一方 == 7（抢七）。
+    """
+
     home = away = 0
     for entry in _set_scores(raw_event):
-        if entry[0] > entry[1]:
-            home += 1
-        elif entry[1] > entry[0]:
-            away += 1
+        if _set_score_is_final(entry[0], entry[1]):
+            if entry[0] > entry[1]:
+                home += 1
+            elif entry[1] > entry[0]:
+                away += 1
     return home, away
+
+
+def _set_score_is_final(home_games: int, away_games: int) -> bool:
+    winner = max(home_games, away_games)
+    loser = min(home_games, away_games)
+    return (winner >= 6 and winner - loser >= 2) or winner == 7
 
 
 def _total_games(raw_event: Mapping[str, Any]) -> tuple[int, int]:

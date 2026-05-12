@@ -1,0 +1,26 @@
+{
+  "success": 1,
+  "result": [
+    {
+      "event_key": "12345",
+      "event_date": "2026-05-25",
+      "event_time": "13:30",
+      "event_first_player": "Carlos Alcaraz",
+      "first_player_key": "alcaraz-1",
+      "first_player_atp_id": "207989",
+      "event_second_player": "Jannik Sinner",
+      "second_player_key": "sinner-1",
+      "second_player_atp_id": "206173",
+      "event_status": "Set 3",
+      "tournament_name": "ATP Roland Garros",
+      "event_winner": "",
+      "event_serve": "First Player",
+      "current_set": "3",
+      "scores": [
+        {"score_first": 6, "score_second": 4},
+        {"score_first": 4, "score_second": 6},
+        {"score_first": 3, "score_second": 2}
+      ]
+    }
+  ]
+}
