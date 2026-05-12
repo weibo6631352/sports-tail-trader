@@ -12,7 +12,8 @@ from polymarket_trader.domain.time_filters import TimeRange
 def test_unbounded_range_is_empty_and_contains_anything() -> None:
     time_range = TimeRange()
     assert time_range.is_empty
-    assert time_range.contains(datetime.now(timezone.utc))
+    # 任选一个固定瞬间断言"无界区间包含任意时刻"。
+    assert time_range.contains(datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc))
     # 空区间也允许 None 时刻（无需过滤）。
     assert time_range.contains(None)
     since_dt, until_dt = time_range.to_datetime_range()

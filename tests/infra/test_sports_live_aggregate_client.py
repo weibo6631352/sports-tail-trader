@@ -69,7 +69,8 @@ def test_aggregate_client_keeps_healthy_sources_when_one_source_hangs() -> None:
     observed = datetime(2026, 4, 28, 2, 0, tzinfo=timezone.utc)
 
     async def hanging_provider() -> SportsLiveSnapshot:
-        await asyncio.sleep(10)
+        # 永久挂起直到被 provider_timeout 取消；不依赖 sleep 时间为正以避免 CI 抖动。
+        await asyncio.Event().wait()
         return SportsLiveSnapshot(source="espn", observed_at=observed, games=())
 
     async def run() -> SportsLiveSnapshot:
@@ -106,7 +107,8 @@ def test_aggregate_client_reuses_last_successful_provider_snapshot_after_timeout
                 "sofascore",
                 _game("sofascore", SportsLiveGameStatus.LIVE, observed),
             )
-        await asyncio.sleep(10)
+        # 永久挂起直到被 provider_timeout 取消；不依赖 sleep 时间为正以避免 CI 抖动。
+        await asyncio.Event().wait()
         return SportsLiveSnapshot(source="sofascore", observed_at=observed, games=())
 
     async def run() -> SportsLiveSnapshot:
@@ -531,7 +533,13 @@ def test_aggregate_client_skips_provider_during_active_cooldown() -> None:
 
 
 async def _snapshot(source: str, game: SportsLiveGame) -> SportsLiveSnapshot:
-    return SportsLiveSnapshot(source=source, observed_at=game.observed_at or datetime.now(timezone.utc), games=(game,))
+    # 兜底 observed_at 用固定瞬间，避免依赖墙钟。
+    fallback_observed = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
+    return SportsLiveSnapshot(
+        source=source,
+        observed_at=game.observed_at or fallback_observed,
+        games=(game,),
+    )
 
 
 def _game(source: str, status: SportsLiveGameStatus, observed_at: datetime) -> SportsLiveGame:

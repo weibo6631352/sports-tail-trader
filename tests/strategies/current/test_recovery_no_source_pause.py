@@ -17,6 +17,9 @@ from strategies.current.config import CurrentStrategyConfig
 from strategies.current.identity import STRATEGY_ID
 from strategies.current.strategy import CurrentStrategy
 
+# 固定 envelope occurred_at；recovery 逻辑不读 occurred_at，但稳定值便于回放。
+_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
+
 
 @dataclass
 class _FakeLifecycleBus:
@@ -36,7 +39,7 @@ class _FakeLifecycleBus:
 
     def publish_now(self, event: LifecycleEvent, payload: Mapping[str, Any]) -> None:
         for cb in self.subscribers.get(event, ()):
-            result = cb(LifecycleEnvelope(event=event, occurred_at=datetime.now(timezone.utc), payload=payload))
+            result = cb(LifecycleEnvelope(event=event, occurred_at=_FIXED_NOW, payload=payload))
             if asyncio.iscoroutine(result):
                 asyncio.get_event_loop().run_until_complete(result)
 
@@ -118,6 +121,6 @@ def test_recovery_resumes_when_any_source_recovers() -> None:
 
 
 async def _fire(bus: _FakeLifecycleBus, event: LifecycleEvent, payload: dict) -> None:
-    envelope = LifecycleEnvelope(event=event, occurred_at=datetime.now(timezone.utc), payload=payload)
+    envelope = LifecycleEnvelope(event=event, occurred_at=_FIXED_NOW, payload=payload)
     for cb in bus.subscribers.get(event, ()):
         await cb(envelope)

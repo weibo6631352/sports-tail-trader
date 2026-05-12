@@ -247,8 +247,11 @@ def test_submit_publishes_lifecycle_to_outbox() -> None:
     try:
         async def run() -> None:
             await executor.submit(_build_buy_intent())
-            # lifecycle 用 asyncio.create_task fire-and-forget；多让一次回合
-            await asyncio.sleep(0.05)
+            # lifecycle 用 asyncio.create_task fire-and-forget；显式等所有 pending task
+            # 跑完，避免依赖固定 sleep 时长。
+            pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
 
         _run(run())
         assert len(sink.events) >= 1, "outbox 应至少收到一条 lifecycle event"

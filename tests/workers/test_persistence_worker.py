@@ -40,9 +40,9 @@ class _StubOutbox:
         self._queue.append(event)
 
     async def get(self) -> OutboxEvent:
-        # 模拟真实 outbox：空队列时 await 永不返回，让 worker 的 wait_for 超时。
+        # 模拟真实 outbox：空队列时 await 让出事件循环；外层 wait_for 自己负责超时。
         while not self._queue:
-            await asyncio.sleep(0.001)
+            await asyncio.sleep(0)
         return self._queue.pop(0)
 
     async def ack(self, event: str | OutboxEvent) -> None:

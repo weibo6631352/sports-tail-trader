@@ -2606,7 +2606,6 @@ def test_entry_plan_rejects_ended_moneyline_when_best_ask_is_missing() -> None:
 
 
 def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
-    from datetime import datetime, timezone
     from polymarket_trader.extension_api import ManualConfirmation
 
     market = _moneyline_market()
@@ -2630,7 +2629,7 @@ def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
         manual_confirmation=ManualConfirmation(
             operator="operator-1",
             reason="score_verified",
-            confirmed_at=datetime.now(timezone.utc),
+            confirmed_at=datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc),
         ),
     )
 

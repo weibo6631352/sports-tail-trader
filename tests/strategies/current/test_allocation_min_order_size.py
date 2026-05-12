@@ -7,6 +7,9 @@ from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from strategies.current.allocation import AllocationMarketSnapshot, equal_weight_plan
 
+# 固定 snapshot 时间戳；分配逻辑不读 received_at，仅用于稳定测试数据。
+_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
+
 
 def test_allocation_allows_low_usdc_order_when_share_size_meets_market_minimum() -> None:
     plan = equal_weight_plan(
@@ -99,7 +102,7 @@ def _snapshot(
         best_ask=best_ask,
         bids=(PriceLevel(price=best_ask - Decimal("0.01"), size=Decimal("100")),),
         asks=(PriceLevel(price=best_ask, size=best_ask_size),),
-        received_at=datetime.now(timezone.utc),
+        received_at=_FIXED_NOW,
         condition_id="condition",
         market_slug="market",
         best_bid_size=Decimal("100"),

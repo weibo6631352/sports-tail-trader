@@ -741,14 +741,21 @@ def test_sofascore_client_reuses_cached_snapshot_inside_min_fetch_interval() -> 
 
 
 def test_sofascore_client_fetches_configured_sports_concurrently() -> None:
+    expected_sports = 3
     active_requests = 0
     max_active_requests = 0
+    barrier_reached = asyncio.Event()
+    entered = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal active_requests, max_active_requests
+        nonlocal active_requests, max_active_requests, entered
         active_requests += 1
         max_active_requests = max(max_active_requests, active_requests)
-        await asyncio.sleep(0.01)
+        entered += 1
+        # 等其余 sports 都进入 handler 再放行，断言并发而不靠 wall-clock sleep。
+        if entered >= expected_sports:
+            barrier_reached.set()
+        await barrier_reached.wait()
         active_requests -= 1
         return httpx.Response(200, request=request, json={"events": []})
 
@@ -770,7 +777,7 @@ def test_sofascore_client_fetches_configured_sports_concurrently() -> None:
 
     asyncio.run(run())
 
-    assert max_active_requests > 1
+    assert max_active_requests == expected_sports
 
 
 def test_sofascore_client_keeps_successful_sports_when_one_sport_times_out() -> None:

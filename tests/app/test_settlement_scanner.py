@@ -114,8 +114,12 @@ def test_resolve_payload_closed_but_missing_prices_returns_closed_record() -> No
 
 def test_scanner_skips_positions_with_zero_shares() -> None:
     bus = _SpyEventBus()
+
+    async def _noop_gamma(cid: str) -> None:
+        return None
+
     service = SettlementScannerService(
-        gamma_market_by_condition=lambda cid: asyncio.sleep(0),
+        gamma_market_by_condition=_noop_gamma,
         positions_provider=lambda: (_StubPosition("c1", Decimal("0")),),
         audit_events_query=_empty_audit_query,
         event_bus=bus,
