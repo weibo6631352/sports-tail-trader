@@ -41,6 +41,14 @@ _PERSISTABLE_EVENT_TYPES = {
     DomainEventType.ORDER_CANCEL_REQUESTED.value,
     DomainEventType.ORDER_CANCELLED.value,
     DomainEventType.REPLACE_ORDER_SUBMITTED.value,
+    # Reconcile 与单市场暂停事件：admin_query.reconcile_decisions / timeline 都查这
+    # 几种 type；不落 audit 会让 /admin/reconcile_diffs 永远返回 0，违反 §10 可审计要求。
+    # RECONCILE_STARTED 是 admin opt-in（include_started=True）才查，但同样落库，
+    # 否则跨"调度起点"维度的复盘缺失。
+    DomainEventType.RECONCILE_STARTED.value,
+    DomainEventType.RECONCILE_DIFF_DETECTED.value,
+    DomainEventType.RECONCILE_APPLIED.value,
+    DomainEventType.TRADING_PAUSED_FOR_MARKET.value,
 }
 
 _MARKET_EVENT_TYPES = {
@@ -199,6 +207,31 @@ _FIELD_PROJECTIONS: dict[str, tuple[str, ...]] = {
     DomainEventType.REPLACE_ORDER_SUBMITTED.value: _ORDER_ACTION_FIELDS,
     DomainEventType.TRADING_PAUSED.value: _TRADING_TOGGLE_FIELDS,
     DomainEventType.TRADING_RESUMED.value: _TRADING_TOGGLE_FIELDS,
+    DomainEventType.RECONCILE_STARTED.value: (
+        "market_count",
+        "paused_market_count",
+        "diff_count",
+        "trigger_event_type",
+        "refresh_summary",
+    ),
+    DomainEventType.RECONCILE_DIFF_DETECTED.value: (
+        "action_type",
+        "source_order_id",
+        "source_order_side",
+        "target_size_shares",
+        "target_notional_usdc",
+        "pause_reason",
+        "metadata",
+    ),
+    DomainEventType.RECONCILE_APPLIED.value: (
+        "action_count",
+        "applied_count",
+        "failed_count",
+    ),
+    DomainEventType.TRADING_PAUSED_FOR_MARKET.value: (
+        "market_status",
+        "pause_reason",
+    ),
 }
 
 

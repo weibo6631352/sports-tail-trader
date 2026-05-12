@@ -462,6 +462,68 @@ def test_entry_signal_scale_in_plan_is_dropped_while_market_lifecycle_is_paused(
     asyncio.run(run())
 
 
+def test_worker_emits_heartbeat_after_processing_event_and_on_idle() -> None:
+    """N13：worker 必须能让 supervisor 区分「卡死」和「空闲等事件」。
+
+    场景：
+    - bind_heartbeat 注入 fake supervisor 回调
+    - 推一个 ORDERBOOK_SNAPSHOT_UPDATED 事件 → run_once 完成后 heartbeat
+      detail 含 ``processed event_type=...``
+    - 队列空 + 设极短 idle 超时 → run_once 自身阻塞，超时一次 → heartbeat
+      detail 含 ``idle``，证明 worker 在动而不是卡死
+    """
+
+    async def run() -> None:
+        from polymarket_trader.domain.events import OutboxPriority
+        from polymarket_trader.runtime.event_bus import EventBus
+
+        account_state = _open_entry_gate()
+        decision_service = _CountingDecisionService()
+        event_bus = EventBus()
+        worker = TradingDecisionWorker(
+            event_bus=event_bus,
+            trading_decision_service=decision_service,
+            account_state_store=account_state,
+            idle_heartbeat_seconds=0.05,
+        )
+        heartbeats: list[dict[str, Any]] = []
+
+        def _capture(**kwargs: Any) -> None:
+            heartbeats.append(kwargs)
+
+        worker.bind_heartbeat(_capture)
+
+        # 推一个事件，run_once 应该立刻处理并发心跳。
+        await event_bus.publish(
+            OutboxPriority.P1,
+            _orderbook_event(event_id="event-heartbeat-1"),
+        )
+        await worker.run_once()
+        assert decision_service.calls == 1
+        assert any("processed" in str(hb.get("detail", "")) for hb in heartbeats), heartbeats
+        assert any(
+            DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED.value in str(hb.get("detail", ""))
+            for hb in heartbeats
+        ), heartbeats
+
+        # 空闲：run_once 阻塞，应在 idle_heartbeat_seconds 超时后发出 idle 心跳；为避免
+        # 单测在 worker 内部死循环里卡死，外层加 0.3s 超时然后取消。
+        heartbeats.clear()
+        task = asyncio.create_task(worker.run_once())
+        try:
+            await asyncio.sleep(0.2)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert any("idle" in str(hb.get("detail", "")) for hb in heartbeats), heartbeats
+
+    asyncio.run(run())
+
+
 def test_retryable_entry_rejection_keeps_market_observable_for_next_signal() -> None:
     async def run() -> None:
         market, _ = _exit_market_and_orderbook()

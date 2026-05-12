@@ -634,6 +634,11 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         outbox_depth_warn=settings.persistence_event_queue_max_size,
         reconcile_stale_after_seconds=max(settings.market_sync_interval_seconds * 2, 60),
     )
+    # N13：把 supervisor heartbeat 接到 trading_decision worker；worker 内部不直接持有
+    # supervisor 实例，避免 P0 worker 反向耦合 runtime/状态层。
+    trading_decision_worker.bind_heartbeat(
+        lambda **kwargs: supervisor.heartbeat_worker("trading_decision", **kwargs)
+    )
     return RuntimeComponents(
         settings=settings,
         readiness=readiness,

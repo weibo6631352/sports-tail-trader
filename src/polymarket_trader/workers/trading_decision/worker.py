@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable, Iterable, Mapping
@@ -46,6 +47,12 @@ from .result import TradingDecisionWorkerResult
 PositionsProvider = Callable[[], Iterable[Position]]
 OpenOrdersProvider = Callable[[], Iterable[Order]]
 EntryMetadataProvider = Callable[[DomainEvent, AccountSnapshot | None], Mapping[str, object] | None]
+HeartbeatCallback = Callable[..., None]
+
+# Worker 长时间空闲等事件时，仍要定期触发 heartbeat 让 supervisor 区分「卡死」和「空等」。
+# 60s 在 N13 观测的"4 分钟无心跳"上下文里足够灵敏，又不会刷屏。
+_TRADING_DECISION_IDLE_HEARTBEAT_SECONDS = 60.0
+
 POSITION_INCREASE_LIFECYCLES = {
     MarketLifecycle.POSITION_OPEN,
     MarketLifecycle.FOLLOW_UP_ORDER_OPEN,
@@ -98,6 +105,8 @@ class TradingDecisionWorker:
         order_retry_limit: int | None = None,
         entry_metadata_provider: EntryMetadataProvider | None = None,
         parameter_store: Any | None = None,
+        heartbeat: HeartbeatCallback | None = None,
+        idle_heartbeat_seconds: float = _TRADING_DECISION_IDLE_HEARTBEAT_SECONDS,
     ) -> None:
         self._event_bus = event_bus
         if trading_decision_service is None:
@@ -120,6 +129,10 @@ class TradingDecisionWorker:
         self._order_retry_limit_default = order_retry_limit
         self._parameter_store = parameter_store
         self._entry_metadata_provider = entry_metadata_provider
+        # supervisor 注入的轻量回调；worker 不直接持有 Supervisor，避免 P0 模块反向耦合到 runtime。
+        self._heartbeat = heartbeat
+        # 单测可以设 < 1s 让 idle heartbeat 路径快速触发；运行时仍用 60s 默认。
+        self._idle_heartbeat_seconds = max(0.001, float(idle_heartbeat_seconds))
         self._market_lifecycle: dict[str, MarketLifecycle] = {}
         self._order_result_processor = TradingOrderResultProcessor(
             host=self,
@@ -161,14 +174,28 @@ class TradingDecisionWorker:
     async def run(self) -> None:
         if self._event_bus is None:
             raise RuntimeError("TradingDecisionWorker requires an EventBus to run")
+        self._emit_heartbeat(detail=self._idle_detail("running"))
         while True:
             await self.run_once()
 
     async def run_once(self) -> "TradingDecisionWorkerResult | None":
         if self._event_bus is None:
             raise RuntimeError("TradingDecisionWorker requires an EventBus to run")
-        event = await self._event_bus.next_trading_event()
-        return await self.process_event(event)
+        # 空闲等事件时仍要让 supervisor 区分「卡死」和「无事可做」——超时后只 heartbeat，
+        # 不向上抛错，下一轮继续等。idle 时不消耗 CPU；只有真到 timeout 才唤醒一次。
+        while True:
+            try:
+                event = await asyncio.wait_for(
+                    self._event_bus.next_trading_event(),
+                    timeout=self._idle_heartbeat_seconds,
+                )
+            except asyncio.TimeoutError:
+                self._emit_heartbeat(detail=self._idle_detail("idle"))
+                continue
+            break
+        result = await self.process_event(event)
+        self._emit_heartbeat(detail=self._processed_detail(event))
+        return result
 
     async def process_event(self, event: DomainEvent) -> "TradingDecisionWorkerResult | None":
         if is_self_emitted(event):
@@ -670,6 +697,41 @@ class TradingDecisionWorker:
         if extra_metadata:
             metadata.update(dict(extra_metadata))
         return metadata
+
+    def bind_heartbeat(self, heartbeat: HeartbeatCallback | None) -> None:
+        """Runtime 装配 supervisor.heartbeat_worker 的轻量适配点；测试可注入假回调。"""
+
+        self._heartbeat = heartbeat
+
+    def _emit_heartbeat(self, *, detail: str) -> None:
+        """对外发心跳——supervisor 看不到心跳就视为 worker 卡死。
+
+        任何回调异常都吞掉：观测路径绝不能反向阻塞 P0 主链路（CLAUDE.md §7）。
+        """
+
+        callback = self._heartbeat
+        if callback is None:
+            return
+        try:
+            callback(detail=detail)
+        except Exception:
+            # 故意吞掉异常：心跳是观测副作用，不能影响交易决策路径。
+            return
+
+    def _idle_detail(self, prefix: str) -> str:
+        return f"{prefix} qd={self._trading_queue_depth_safe()}"
+
+    def _processed_detail(self, event: DomainEvent) -> str:
+        return f"processed event_type={event.event_type} qd={self._trading_queue_depth_safe()}"
+
+    def _trading_queue_depth_safe(self) -> int:
+        bus = self._event_bus
+        if bus is None:
+            return 0
+        try:
+            return int(bus.trading_queue_depth())
+        except Exception:
+            return 0
 
     def _snapshot(self) -> AccountSnapshot | None:
         if self._account_state_store is not None:
