@@ -103,7 +103,7 @@ async function request<T>(method: string, path: string, options: RequestOptions 
   if (contentType.includes('application/json')) {
     return (await response.json()) as T
   }
-  return (await response.text()) as unknown as T
+  throw new ApiError({ status: response.status, detail: null, message: `unexpected content-type: ${contentType}`, url })
 }
 
 export const apiClient = {

@@ -338,7 +338,7 @@ def _stale_no_live_state_pause_reason(
         return None
     if live_game_state_from_metadata(context.metadata) is not None:
         return None
-    threshold_seconds = getattr(config, "tail_stale_no_live_state_seconds", 86_400)
+    threshold_seconds = config.tail_stale_no_live_state_seconds
     if threshold_seconds <= 0:
         return None
     now = context.now or datetime.now(timezone.utc)

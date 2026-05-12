@@ -120,7 +120,7 @@ class InProcessLifecycleBus(LifecycleBus):
                 envelope.condition_id,
             )
 
-    def _invoke_sync(self, callback: LifecycleCallback, envelope: LifecycleEnvelope) -> None:  # pragma: no cover - sync fallback
+    def _invoke_sync(self, callback: LifecycleCallback, envelope: LifecycleEnvelope) -> None:
         # 仅在 publish 调用方不在 async 上下文（如启动期 / 同步测试）时走到这里。
         # 生产 publish 全部来自 TradingService / SportsLiveStateWorker / ReconcileWorker
         # 的 async 调用栈，永远不会落到这条路径。

@@ -6,7 +6,8 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import JSONResponse, Response
 
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.app.analytics_service import AnalyticsService, SessionFactoryAnalyticsDAO
@@ -111,7 +112,7 @@ def create_app(
         )
 
     @app.middleware("http")
-    async def _admin_token_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+    async def _admin_token_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
         if expected_token is None:
             return await call_next(request)
         path = request.url.path

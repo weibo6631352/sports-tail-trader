@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Literal
+from typing import Literal, cast
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
@@ -155,14 +155,14 @@ def _normalize_side(value: TradeSide) -> TradeSide:
     normalized = str(value).strip().lower()
     if normalized not in {"buy", "sell"}:
         raise ValueError(f"unsupported trade side: {value!r}")
-    return normalized  # type: ignore[return-value]
+    return cast(TradeSide, normalized)
 
 
 def _normalize_liquidity_role(value: LiquidityRole) -> LiquidityRole:
     normalized = str(value).strip().lower()
     if normalized not in {"maker", "taker"}:
         raise ValueError(f"unsupported liquidity role: {value!r}")
-    return normalized  # type: ignore[return-value]
+    return cast(LiquidityRole, normalized)
 
 
 def _normalize_price(value: Decimal) -> Decimal:
