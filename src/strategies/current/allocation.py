@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from decimal import Decimal, ROUND_DOWN
-from typing import Iterable
+from decimal import Decimal
+from typing import Callable, Iterable
 
 from polymarket_trader.domain.allocation import (
     Allocation,
@@ -10,6 +10,7 @@ from polymarket_trader.domain.allocation import (
     MarketBuyBudgetChanged,
     current_exposure_usdc,
 )
+from polymarket_trader.domain.kelly import KellyStake, kelly_stake
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order, OrderSide
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
@@ -52,49 +53,58 @@ class AllocationMarketSnapshot:
         return self.market.market_slug
 
 
-@dataclass(slots=True)
-class _AllocationCandidate:
-    snapshot: AllocationMarketSnapshot
-    exposure_usdc: Decimal
-    hard_capacity_usdc: Decimal
-    liquidity_usdc: Decimal
-    min_buy_budget_usdc: Decimal
-    target_budget_usdc: Decimal = field(default_factory=lambda: Decimal("0"))
-    buy_budget_usdc: Decimal = field(default_factory=lambda: Decimal("0"))
-    release_reason: str = ""
+# 策略侧给 Kelly 提供 (prob_p, prob_confidence, source_label) 的 callback。
+# source_label 仅作审计标记（"outright_real" / "tail_implied" 等），不影响公式。
+ProbProvider = Callable[[AllocationMarketSnapshot], "ProbView"]
 
 
-def equal_weight_plan(
+@dataclass(frozen=True, slots=True)
+class ProbView:
+    prob_p: Decimal | None
+    prob_confidence: Decimal
+    source: str
+
+
+def kelly_plan(
     *,
     trace_id: str,
+    bankroll_usdc: Decimal,
     portfolio_budget_usdc: Decimal,
     markets: Iterable[AllocationMarketSnapshot],
-    available_usdc: Decimal,
-    max_order_usdc: Decimal,
-    max_market_usdc: Decimal,
-    max_total_usdc: Decimal,
+    prob_provider: ProbProvider,
+    kelly_fraction: Decimal,
+    kelly_max_position_fraction: Decimal,
+    kelly_min_edge: Decimal,
+    kelly_min_stake_usdc: Decimal,
+    kelly_allow_round_up_to_market_min: bool = True,
+    kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
 ) -> AllocationPlan:
+    """Kelly 资金分配。替代旧 equal_weight_plan。
+
+    工作流：
+    1. 对每个 market 跑 ``_allocation_skip_reason``——保留旧 eligibility 语义。
+    2. 对 eligible market 用 prob_provider 取 ``(prob_p, prob_confidence)``，
+       与 ``best_ask`` 一起喂 ``kelly_stake()``。
+    3. 按 ``f_star`` 降序排序——edge 大的优先得到 bankroll。
+    4. **§1 sequential bankroll**：依次分配，``remaining_bankroll = bankroll -
+       Σ(已开 BUY exposure) - Σ(本轮已分配 stake)``。避免并发 over-bet。
+    5. 每个 Allocation 带完整 Kelly 审计字段（prob_p / edge / f_star / capped_by 等）。
+
+    skip 与 reject 一律 buy_budget=0 + reason 写明，不静默丢弃。
+    """
+
     market_snapshots = tuple(markets)
-    candidate_details: list[_AllocationCandidate] = []
     allocations: list[Allocation] = []
     budget_changes: list[MarketBuyBudgetChanged] = []
     plan_reason = ""
 
-    total_exposure_usdc = Decimal("0")
+    # 初步过 skip filter，并记录已开仓 exposure（用于 §1 sequential bankroll 扣减）
+    eligible: list[AllocationMarketSnapshot] = []
+    open_exposure_total = Decimal("0")
     for snapshot in market_snapshots:
         exposure_usdc = current_exposure_usdc(snapshot.position, snapshot.open_orders)
-        total_exposure_usdc += exposure_usdc
+        open_exposure_total += exposure_usdc
         skip_reason = _allocation_skip_reason(snapshot)
-        liquidity_usdc = _market_liquidity_usdc(snapshot)
-        hard_capacity_usdc = _market_hard_capacity_usdc(
-            snapshot,
-            exposure_usdc=exposure_usdc,
-            available_usdc=available_usdc,
-            max_order_usdc=max_order_usdc,
-            max_market_usdc=max_market_usdc,
-            liquidity_usdc=liquidity_usdc,
-        )
-
         if skip_reason:
             allocations.append(
                 Allocation(
@@ -112,19 +122,9 @@ def equal_weight_plan(
                 )
             )
             continue
+        eligible.append(snapshot)
 
-        candidate_details.append(
-            _AllocationCandidate(
-                snapshot=snapshot,
-                exposure_usdc=exposure_usdc,
-                hard_capacity_usdc=hard_capacity_usdc,
-                liquidity_usdc=liquidity_usdc,
-                min_buy_budget_usdc=_min_buy_budget_usdc(snapshot),
-            )
-        )
-
-    eligible_count = len(candidate_details)
-    if eligible_count == 0:
+    if not eligible:
         plan_reason = "no_eligible_market"
         return AllocationPlan(
             trace_id=trace_id,
@@ -134,134 +134,122 @@ def equal_weight_plan(
             reason=plan_reason,
         )
 
-    # 等权目标先按可交易、可风控、可吃到盘口深度的 market 数量平均，后续再把释放出来的额度重新分配。
-    equal_weight_target_usdc = equal_weight_budget(portfolio_budget_usdc, eligible_count)
-    remaining_pool_usdc = portfolio_budget_usdc
-    if available_usdc < remaining_pool_usdc:
-        remaining_pool_usdc = available_usdc
-    remaining_total_capacity_usdc = max_total_usdc - total_exposure_usdc
-    if remaining_total_capacity_usdc < remaining_pool_usdc:
-        remaining_pool_usdc = remaining_total_capacity_usdc
-    if remaining_pool_usdc < Decimal("0"):
-        remaining_pool_usdc = Decimal("0")
+    # §1 sequential bankroll：从总 bankroll 扣已开仓 exposure 得到本轮可用
+    # remaining_bankroll；后续每分配一笔再扣减。
+    remaining_bankroll = bankroll_usdc - open_exposure_total
+    if remaining_bankroll < Decimal("0"):
+        remaining_bankroll = Decimal("0")
 
-    active_candidates = [
-        candidate
-        for candidate in candidate_details
-        if candidate.hard_capacity_usdc >= candidate.min_buy_budget_usdc
-    ]
-    skipped_for_min_order = [candidate for candidate in candidate_details if candidate not in active_candidates]
-    for candidate in skipped_for_min_order:
-        candidate.release_reason = candidate.release_reason or "below_min_order_size"
-    if not active_candidates:
-        plan_reason = "no_market_meets_min_order_size"
-    elif remaining_pool_usdc < min(
-        (candidate.min_buy_budget_usdc for candidate in active_candidates),
-        default=Decimal("0"),
-    ):
-        for candidate in active_candidates:
-            candidate.release_reason = candidate.release_reason or "below_min_order_size"
-        plan_reason = "total_budget_insufficient"
-    else:
-        while active_candidates and remaining_pool_usdc > Decimal("0"):
-            per_market_target_usdc = equal_weight_budget(
-                remaining_pool_usdc,
-                len(active_candidates),
-            )
-            if per_market_target_usdc <= Decimal("0"):
-                for candidate in active_candidates:
-                    candidate.release_reason = candidate.release_reason or "below_min_order_size"
-                plan_reason = "total_budget_insufficient"
-                break
-
-            next_active_candidates: list[_AllocationCandidate] = []
-            allocated_this_round_usdc = Decimal("0")
-            for candidate in active_candidates:
-                min_buy_budget_usdc = candidate.min_buy_budget_usdc
-                hard_capacity_usdc = candidate.hard_capacity_usdc
-                previous_buy_budget_usdc = candidate.buy_budget_usdc
-                available_capacity_usdc = hard_capacity_usdc - previous_buy_budget_usdc
-
-                if available_capacity_usdc < min_buy_budget_usdc:
-                    candidate.release_reason = candidate.release_reason or "market_limit_reached"
-                    continue
-
-                buy_budget_usdc = per_market_target_usdc
-                release_reason = ""
-                if buy_budget_usdc > available_capacity_usdc:
-                    buy_budget_usdc = available_capacity_usdc
-                    release_reason = _capacity_release_reason(
-                        available_capacity_usdc=available_capacity_usdc,
-                        hard_capacity_usdc=hard_capacity_usdc,
-                        liquidity_usdc=candidate.liquidity_usdc,
-                    )
-
-                if buy_budget_usdc < min_buy_budget_usdc:
-                    next_active_candidates.append(candidate)
-                    continue
-
-                candidate.buy_budget_usdc = previous_buy_budget_usdc + buy_budget_usdc
-                candidate.target_budget_usdc = equal_weight_target_usdc
-                allocated_this_round_usdc += buy_budget_usdc
-                if buy_budget_usdc < per_market_target_usdc:
-                    candidate.release_reason = candidate.release_reason or release_reason or "reallocated"
-
-                remaining_capacity_after_buy_usdc = hard_capacity_usdc - candidate.buy_budget_usdc
-                if remaining_capacity_after_buy_usdc >= min_buy_budget_usdc:
-                    next_active_candidates.append(candidate)
-
-            if allocated_this_round_usdc <= Decimal("0"):
-                for candidate in active_candidates:
-                    candidate.release_reason = candidate.release_reason or "below_min_order_size"
-                plan_reason = "budget_remaining_below_min_order_size"
-                break
-
-            remaining_pool_usdc -= allocated_this_round_usdc
-            if remaining_pool_usdc < Decimal("0"):
-                remaining_pool_usdc = Decimal("0")
-            active_candidates = next_active_candidates
-
-            if active_candidates and equal_weight_budget(
-                remaining_pool_usdc,
-                len(active_candidates),
-            ) < min(
-                (candidate.min_buy_budget_usdc for candidate in active_candidates),
-                default=Decimal("0"),
-            ):
-                plan_reason = "budget_remaining_below_min_order_size"
-                break
-
-    allocations.extend(
-        _finalize_candidate_allocations(
-            candidate_details,
-            equal_weight_target_usdc=equal_weight_target_usdc,
+    # 对 eligible 跑 Kelly 决策（用同一 remaining_bankroll 估算 f_star，便于排序）
+    # 真正分配在排序后的循环里，逐笔扣减 remaining_bankroll。
+    candidates: list[tuple[AllocationMarketSnapshot, ProbView, Decimal | None, KellyStake | None, Decimal]] = []
+    for snapshot in eligible:
+        prob_view = prob_provider(snapshot)
+        price_c = snapshot.best_ask if snapshot.best_ask is not None else (
+            snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
         )
-    )
-
-    for candidate in candidate_details:
-        snapshot = candidate.snapshot
-        buy_budget_usdc = candidate.buy_budget_usdc
-        target_budget_usdc = candidate.target_budget_usdc or equal_weight_target_usdc
-        released_budget_usdc = target_budget_usdc - buy_budget_usdc
-        if released_budget_usdc < Decimal("0"):
-            released_budget_usdc = Decimal("0")
-
-        release_reason = candidate.release_reason
-        if buy_budget_usdc != target_budget_usdc or release_reason:
-            budget_changes.append(
-                MarketBuyBudgetChanged(
-                    condition_id=snapshot.condition_id,
-                    market_slug=snapshot.market_slug,
-                    token_id=snapshot.token_id,
-                    previous_buy_budget_usdc=target_budget_usdc,
-                    new_buy_budget_usdc=buy_budget_usdc,
-                    released_budget_usdc=released_budget_usdc,
-                    release_reason=release_reason,
-                    current_exposure_usdc=candidate.exposure_usdc,
-                    target_budget_usdc=target_budget_usdc,
-                    idempotency_key=snapshot.idempotency_key,
+        exposure_usdc = current_exposure_usdc(snapshot.position, snapshot.open_orders)
+        if prob_view.prob_p is None or price_c is None or price_c <= Decimal("0"):
+            allocations.append(
+                _reject_allocation(
+                    snapshot,
+                    exposure_usdc=exposure_usdc,
+                    reason="missing_price_or_prob",
+                    prob_view=prob_view,
+                    price_c=price_c,
                 )
             )
+            continue
+        # 估算用——真分配时再用 remaining_bankroll
+        stake_estimate = _compute_kelly(
+            snapshot=snapshot,
+            bankroll_usdc=remaining_bankroll,
+            prob_view=prob_view,
+            price_c=price_c,
+            kelly_fraction=kelly_fraction,
+            kelly_max_position_fraction=kelly_max_position_fraction,
+            kelly_min_edge=kelly_min_edge,
+            kelly_min_stake_usdc=kelly_min_stake_usdc,
+            kelly_allow_round_up_to_market_min=kelly_allow_round_up_to_market_min,
+            kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
+        )
+        candidates.append((snapshot, prob_view, price_c, stake_estimate, exposure_usdc))
+
+    # 按 f_star 降序排序——edge 大的先吃 bankroll
+    candidates.sort(
+        key=lambda item: item[3].f_star if item[3] is not None else Decimal("-1"),
+        reverse=True,
+    )
+
+    # §1 sequential bankroll：逐笔分配，每笔后扣减 remaining_bankroll
+    for snapshot, prob_view, price_c, _estimate, exposure_usdc in candidates:
+        if price_c is None or prob_view.prob_p is None:
+            continue
+        stake = _compute_kelly(
+            snapshot=snapshot,
+            bankroll_usdc=remaining_bankroll,
+            prob_view=prob_view,
+            price_c=price_c,
+            kelly_fraction=kelly_fraction,
+            kelly_max_position_fraction=kelly_max_position_fraction,
+            kelly_min_edge=kelly_min_edge,
+            kelly_min_stake_usdc=kelly_min_stake_usdc,
+            kelly_allow_round_up_to_market_min=kelly_allow_round_up_to_market_min,
+            kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
+        )
+        if stake.stake_usdc <= Decimal("0"):
+            allocations.append(
+                _reject_allocation(
+                    snapshot,
+                    exposure_usdc=exposure_usdc,
+                    reason=stake.reject_reason or "kelly_zero",
+                    prob_view=prob_view,
+                    price_c=price_c,
+                    kelly=stake,
+                )
+            )
+            continue
+        # 应用策略侧 strategy_budget_cap_usdc（scale-in 路径设的额外硬上限）
+        stake_usdc = stake.stake_usdc
+        capped_by = stake.capped_by
+        if (
+            snapshot.strategy_budget_cap_usdc is not None
+            and stake_usdc > snapshot.strategy_budget_cap_usdc
+        ):
+            stake_usdc = snapshot.strategy_budget_cap_usdc
+            capped_by = "strategy_budget_cap"
+        allocations.append(
+            Allocation(
+                strategy_id=STRATEGY_ID,
+                condition_id=snapshot.condition_id,
+                target_budget_usdc=stake_usdc,
+                buy_budget_usdc=stake_usdc,
+                market_slug=snapshot.market_slug,
+                token_id=snapshot.token_id,
+                current_exposure_usdc=exposure_usdc,
+                released_budget_usdc=Decimal("0"),
+                reason="kelly_sized",
+                idempotency_key=snapshot.idempotency_key,
+                release_reason="",
+                prob_p=prob_view.prob_p,
+                prob_confidence=prob_view.prob_confidence,
+                price_c=price_c,
+                edge_net=stake.edge,
+                edge_gross=stake.edge_gross,
+                fee_per_share_usdc=stake.fee_per_share_usdc,
+                kelly_f_star=stake.f_star,
+                effective_kelly_fraction=stake.effective_kelly_fraction,
+                effective_min_stake_usdc=stake.effective_min_stake_usdc,
+                capped_by=capped_by,
+                is_round_up_overbet=stake.is_round_up_overbet,
+            )
+        )
+        remaining_bankroll -= stake_usdc
+        if remaining_bankroll < Decimal("0"):
+            remaining_bankroll = Decimal("0")
+
+    if not any(allocation.buy_budget_usdc > Decimal("0") for allocation in allocations):
+        plan_reason = plan_reason or "no_kelly_stake"
 
     return AllocationPlan(
         trace_id=trace_id,
@@ -272,10 +260,74 @@ def equal_weight_plan(
     )
 
 
-def equal_weight_budget(portfolio_budget_usdc: Decimal, eligible_market_count: int) -> Decimal:
-    if eligible_market_count <= 0:
-        return Decimal("0")
-    return portfolio_budget_usdc / Decimal(eligible_market_count)
+def _compute_kelly(
+    *,
+    snapshot: AllocationMarketSnapshot,
+    bankroll_usdc: Decimal,
+    prob_view: ProbView,
+    price_c: Decimal,
+    kelly_fraction: Decimal,
+    kelly_max_position_fraction: Decimal,
+    kelly_min_edge: Decimal,
+    kelly_min_stake_usdc: Decimal,
+    kelly_allow_round_up_to_market_min: bool,
+    kelly_round_up_max_overbet_ratio: Decimal,
+) -> KellyStake:
+    fee_rate_bps = snapshot.market.fee_rate_bps
+    if fee_rate_bps is None:
+        fee_rate_bps = snapshot.market.taker_base_fee_bps or 0
+    return kelly_stake(
+        bankroll_usdc=bankroll_usdc,
+        price_c=price_c,
+        fair_value_p=prob_view.prob_p or Decimal("0"),
+        side="BUY_YES",
+        kelly_fraction=kelly_fraction,
+        prob_confidence=prob_view.prob_confidence,
+        max_position_fraction=kelly_max_position_fraction,
+        min_edge=kelly_min_edge,
+        min_stake_usdc=kelly_min_stake_usdc,
+        market_min_order_size_shares=snapshot.market.min_order_size,
+        fee_rate_bps=fee_rate_bps,
+        fees_enabled=snapshot.market.fees_enabled is not False,
+        liquidity_usdc=_market_liquidity_usdc(snapshot),
+        allow_round_up_to_market_min=kelly_allow_round_up_to_market_min,
+        round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
+    )
+
+
+def _reject_allocation(
+    snapshot: AllocationMarketSnapshot,
+    *,
+    exposure_usdc: Decimal,
+    reason: str,
+    prob_view: ProbView | None = None,
+    price_c: Decimal | None = None,
+    kelly: KellyStake | None = None,
+) -> Allocation:
+    return Allocation(
+        strategy_id=STRATEGY_ID,
+        condition_id=snapshot.condition_id,
+        target_budget_usdc=Decimal("0"),
+        buy_budget_usdc=Decimal("0"),
+        market_slug=snapshot.market_slug,
+        token_id=snapshot.token_id,
+        current_exposure_usdc=exposure_usdc,
+        released_budget_usdc=Decimal("0"),
+        reason=reason,
+        idempotency_key=snapshot.idempotency_key,
+        release_reason=reason,
+        prob_p=prob_view.prob_p if prob_view is not None else None,
+        prob_confidence=prob_view.prob_confidence if prob_view is not None else None,
+        price_c=price_c,
+        edge_net=kelly.edge if kelly is not None else None,
+        edge_gross=kelly.edge_gross if kelly is not None else None,
+        fee_per_share_usdc=kelly.fee_per_share_usdc if kelly is not None else None,
+        kelly_f_star=kelly.f_star if kelly is not None else None,
+        effective_kelly_fraction=kelly.effective_kelly_fraction if kelly is not None else None,
+        effective_min_stake_usdc=kelly.effective_min_stake_usdc if kelly is not None else None,
+        capped_by=kelly.capped_by if kelly is not None else None,
+        is_round_up_overbet=kelly.is_round_up_overbet if kelly is not None else False,
+    )
 
 
 def _allocation_skip_reason(
@@ -320,81 +372,12 @@ def _has_open_order(snapshot: AllocationMarketSnapshot, side: OrderSide) -> bool
     return any(order.side == side and order.open for order in snapshot.open_orders)
 
 
-def _market_hard_capacity_usdc(
-    snapshot: AllocationMarketSnapshot,
-    *,
-    exposure_usdc: Decimal,
-    available_usdc: Decimal,
-    max_order_usdc: Decimal,
-    max_market_usdc: Decimal,
-    liquidity_usdc: Decimal,
-) -> Decimal:
-    remaining_market_usdc = max_market_usdc - exposure_usdc
-    if remaining_market_usdc < Decimal("0"):
-        remaining_market_usdc = Decimal("0")
-
-    hard_capacity_usdc = remaining_market_usdc
-    if max_order_usdc < hard_capacity_usdc:
-        hard_capacity_usdc = max_order_usdc
-    fee_adjusted_available_usdc = _fee_adjusted_available_usdc(snapshot, available_usdc)
-    if fee_adjusted_available_usdc < hard_capacity_usdc:
-        hard_capacity_usdc = fee_adjusted_available_usdc
-    if liquidity_usdc < hard_capacity_usdc:
-        hard_capacity_usdc = liquidity_usdc
-    if snapshot.strategy_budget_cap_usdc is not None and snapshot.strategy_budget_cap_usdc < hard_capacity_usdc:
-        hard_capacity_usdc = snapshot.strategy_budget_cap_usdc
-    if hard_capacity_usdc < Decimal("0"):
-        return Decimal("0")
-    return hard_capacity_usdc
-
-
 def _market_liquidity_usdc(
     snapshot: AllocationMarketSnapshot,
 ) -> Decimal:
     if snapshot.liquidity_usdc is not None:
         return snapshot.liquidity_usdc
     return _ask_depth_notional(snapshot.orderbook)
-
-
-def _fee_adjusted_available_usdc(snapshot: AllocationMarketSnapshot, available_usdc: Decimal) -> Decimal:
-    """按 BUY taker 费用预留余额，避免把全部现金作为订单 amount 发出后被 CLOB 费用校验拒绝。"""
-
-    if available_usdc <= Decimal("0") or snapshot.market.fees_enabled is False:
-        return max(available_usdc, Decimal("0"))
-    fee_rate_bps = snapshot.market.fee_rate_bps
-    if fee_rate_bps is None:
-        fee_rate_bps = snapshot.market.taker_base_fee_bps
-    if fee_rate_bps is None or fee_rate_bps <= 0:
-        return available_usdc
-    price = snapshot.best_ask if snapshot.best_ask is not None else (
-        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
-    )
-    if price is None or price <= Decimal("0") or price >= Decimal("1"):
-        return available_usdc
-    fee_multiplier = (Decimal(fee_rate_bps) / Decimal("1000")) * (Decimal("1") - price)
-    if fee_multiplier <= Decimal("0"):
-        return available_usdc
-    adjusted = available_usdc / (Decimal("1") + fee_multiplier)
-    return adjusted.quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
-
-
-def _min_buy_budget_usdc(snapshot: AllocationMarketSnapshot) -> Decimal:
-    """把 Polymarket 最小订单 size 换算为入场预算下限。
-
-    `Market.min_order_size` 是份额下限；当前策略 BUY 意图传 USDC amount。
-    因此预算分配阶段必须用计划入场价格估算 `size * price`，否则会把 5 shares
-    误判成 5 USDC，导致尾盘低价机会被系统性跳过。
-    """
-
-    min_order_size = snapshot.market.min_order_size
-    if min_order_size <= Decimal("0"):
-        return Decimal("0")
-    price = snapshot.best_ask if snapshot.best_ask is not None else (
-        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
-    )
-    if price is None or price <= Decimal("0"):
-        return max(min_order_size, _MIN_CLOB_NOTIONAL_USDC)
-    return max(min_order_size * price, _MIN_CLOB_NOTIONAL_USDC)
 
 
 def _ask_depth_notional(
@@ -409,47 +392,3 @@ def _ask_depth_notional(
     for level in levels:
         depth_usdc += level.price * level.size
     return depth_usdc
-
-
-def _capacity_release_reason(
-    *,
-    available_capacity_usdc: Decimal,
-    hard_capacity_usdc: Decimal,
-    liquidity_usdc: Decimal,
-) -> str:
-    if available_capacity_usdc <= Decimal("0"):
-        return "market_limit_reached"
-    if liquidity_usdc < hard_capacity_usdc:
-        return "depth_insufficient"
-    return "single_market_limit_reached"
-
-
-def _finalize_candidate_allocations(
-    candidate_details: Iterable[_AllocationCandidate],
-    *,
-    equal_weight_target_usdc: Decimal,
-) -> list[Allocation]:
-    finalized: list[Allocation] = []
-    for candidate in candidate_details:
-        snapshot = candidate.snapshot
-        buy_budget_usdc = candidate.buy_budget_usdc
-        target_budget_usdc = candidate.target_budget_usdc or equal_weight_target_usdc
-        released_budget_usdc = target_budget_usdc - buy_budget_usdc
-        if released_budget_usdc < Decimal("0"):
-            released_budget_usdc = Decimal("0")
-        finalized.append(
-            Allocation(
-                strategy_id=STRATEGY_ID,
-                condition_id=snapshot.condition_id,
-                target_budget_usdc=target_budget_usdc,
-                buy_budget_usdc=buy_budget_usdc,
-                market_slug=snapshot.market_slug,
-                token_id=snapshot.token_id,
-                current_exposure_usdc=candidate.exposure_usdc,
-                released_budget_usdc=released_budget_usdc,
-                reason=candidate.release_reason,
-                idempotency_key=snapshot.idempotency_key,
-                release_reason=candidate.release_reason,
-            )
-        )
-    return finalized

@@ -93,6 +93,10 @@ class MarketPause:
 class AccountSnapshot:
     balance_usdc: Decimal = Decimal("0")
     allowance_usdc: Decimal = Decimal("0")
+    # peak_bankroll_usdc：自启动以来 effective_bankroll 的最大观测值。Kelly drawdown
+    # lockout 用 ``current_bankroll < peak × kelly_drawdown_halt_fraction`` 拒新仓。
+    # account_state_store 在 update_balances 时单调维护此值。
+    peak_bankroll_usdc: Decimal = Decimal("0")
     positions: tuple[Position, ...] = ()
     open_orders: tuple[Order, ...] = ()
     fills: tuple[Fill, ...] = ()

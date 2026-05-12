@@ -122,10 +122,6 @@ def _settings(**overrides: object) -> Settings:
         "extension_module": "strategies.current",
         "wallet_private_key": "0x" + "1" * 64,
         "portfolio_budget_usdc": Decimal("10"),
-        "max_order_usdc": Decimal("1"),
-        "max_market_usdc": Decimal("2"),
-        "max_total_usdc": Decimal("10"),
-        "max_open_orders": 2,
     }
     base.update(overrides)
     return Settings(**base)

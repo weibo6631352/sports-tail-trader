@@ -119,14 +119,16 @@
 - 或 `/analytics/missed-opportunities` 显示拒绝决策事后大量盈利（过严）。
 
 处置：
-1. 先停止扩大暴露：`POST /operations/pause-trading` 或调小 `max_order_usdc`。
+1. 先停止扩大暴露：`POST /operations/pause-trading` 或调小 `kelly_max_position_fraction` / `portfolio_budget_usdc`。
 2. 用 `POST /operations/parameter-sweep` 离线评估候选阈值，看 best_by_pnl /
    best_by_win_rate；注意响应里 `entry_price_cap_fallback_count` 非零时数字
    会偏高。
 3. 经验证后用 `PUT /parameters/{scope}/{key}` 写 override，例如：
    - 收紧：`PUT /parameters/strategy/tail_outright_min_edge_bps` 提高到更高 bps
    - 放松液量：`PUT /parameters/strategy/tail_min_liquidity_usdc` 降低
-   - 收紧暴露：`PUT /parameters/settings/max_market_usdc` 降低
+   - 收紧 Kelly 单仓：`PUT /parameters/settings/kelly_max_position_fraction` 降低（如 0.05）
+   - 收紧 κ：`PUT /parameters/settings/kelly_fraction` 降低（如 0.10）
+   - 启用 drawdown lockout：`PUT /parameters/settings/kelly_drawdown_halt_fraction` 提高（如 0.6）
 4. 观察 `/analytics/risk-rejections/aggregate` 与 `/analytics/edge-realization`
    验证阈值生效；override 重启即丢。
 5. 阈值要长期固化时**改 `.env` / `src/strategies/current/config.py` 后重启**，

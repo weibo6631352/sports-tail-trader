@@ -72,6 +72,36 @@ def _coerce_probability(value: Any) -> Decimal:
     return result
 
 
+def _coerce_decimal_positive_le_one(value: Any) -> Decimal:
+    """0 < value ≤ 1 的 Decimal——Kelly κ / max_position_fraction 用。"""
+
+    result = _coerce_decimal_non_negative(value)
+    if result <= Decimal("0") or result > Decimal("1"):
+        raise ValueError("must be in (0, 1]")
+    return result
+
+
+def _coerce_decimal_positive(value: Any) -> Decimal:
+    result = _coerce_decimal_non_negative(value)
+    if result <= Decimal("0"):
+        raise ValueError("must be positive")
+    return result
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "on"}:
+            return True
+        if text in {"false", "0", "no", "off"}:
+            return False
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    raise ValueError(f"not a boolean: {value!r}")
+
+
 # 白名单：只有这些 (scope, key) 能调；其他一律 404。新增字段要显式注册，避免
 # 后端把 SecretStr / 密钥字段误暴露。
 _REGISTRY: dict[tuple[str, str], ParameterSpec] = {}
@@ -91,27 +121,45 @@ _register(ParameterSpec(
 ))
 _register(ParameterSpec(
     scope="settings",
-    key="max_order_usdc",
-    description="单笔订单最大 USDC",
+    key="kelly_fraction",
+    description="Kelly κ：full Kelly 缩放系数。0.25=quarter Kelly（推荐）。",
+    coerce=_coerce_decimal_positive_le_one,
+))
+_register(ParameterSpec(
+    scope="settings",
+    key="kelly_max_position_fraction",
+    description="单市场最大仓位 fraction × bankroll；隐式限制并发头寸 ≈ 1/value。",
+    coerce=_coerce_decimal_positive_le_one,
+))
+_register(ParameterSpec(
+    scope="settings",
+    key="kelly_min_edge",
+    description="Kelly 最低 edge 要求；edge < value 直接 reject。",
     coerce=_coerce_decimal_non_negative,
 ))
 _register(ParameterSpec(
     scope="settings",
-    key="max_market_usdc",
-    description="单市场暴露上限（USDC）",
-    coerce=_coerce_decimal_non_negative,
+    key="kelly_min_stake_usdc",
+    description="框架最低 stake USDC。effective_min = max(此值, market.min_order_size × price)。",
+    coerce=_coerce_decimal_positive,
 ))
 _register(ParameterSpec(
     scope="settings",
-    key="max_total_usdc",
-    description="组合累计暴露上限（USDC）",
-    coerce=_coerce_decimal_non_negative,
+    key="kelly_allow_round_up_to_market_min",
+    description="Kelly 推荐 stake < market min 时是否凑齐到 market min（轻度 over-bet）。",
+    coerce=_coerce_bool,
 ))
 _register(ParameterSpec(
     scope="settings",
-    key="max_open_orders",
-    description="账户级 open order 数量上限",
-    coerce=_coerce_positive_int,
+    key="kelly_round_up_max_overbet_ratio",
+    description="凑齐金额上限：≤ position_cap × ratio。1.0=可达 cap；0.5=仅允许 50% cap。",
+    coerce=_coerce_decimal_positive,
+))
+_register(ParameterSpec(
+    scope="settings",
+    key="kelly_drawdown_halt_fraction",
+    description="bankroll < peak × value 时拒新仓。0=关闭。",
+    coerce=_coerce_probability,
 ))
 _register(ParameterSpec(
     scope="settings",

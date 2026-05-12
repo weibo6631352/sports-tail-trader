@@ -62,9 +62,13 @@ class EntryPlanner:
         trace_id: str | None = None,
         portfolio_budget_usdc: Decimal,
         available_usdc: Decimal | None = None,
-        max_order_usdc: Decimal,
-        max_market_usdc: Decimal,
-        max_total_usdc: Decimal,
+        kelly_fraction: Decimal,
+        kelly_max_position_fraction: Decimal,
+        kelly_min_edge: Decimal,
+        kelly_min_stake_usdc: Decimal,
+        kelly_allow_round_up_to_market_min: bool = True,
+        kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
+        kelly_drawdown_halt_fraction: Decimal = Decimal("0"),
         positions: Iterable[Position] = (),
         open_orders: Iterable[Order] = (),
         metadata: Mapping[str, Any] | None = None,
@@ -131,6 +135,26 @@ class EntryPlanner:
             ),
         )
 
+        bankroll_usdc = _resolve_bankroll(
+            portfolio_budget_usdc=portfolio_budget_usdc,
+            available_usdc=available_usdc,
+        )
+        peak_bankroll_usdc = (
+            account_snapshot.peak_bankroll_usdc
+            if account_snapshot is not None
+            else None
+        )
+        kelly_kwargs: dict[str, Any] = {
+            "bankroll_usdc": bankroll_usdc,
+            "kelly_fraction": kelly_fraction,
+            "kelly_max_position_fraction": kelly_max_position_fraction,
+            "kelly_min_edge": kelly_min_edge,
+            "kelly_min_stake_usdc": kelly_min_stake_usdc,
+            "kelly_allow_round_up_to_market_min": kelly_allow_round_up_to_market_min,
+            "kelly_round_up_max_overbet_ratio": kelly_round_up_max_overbet_ratio,
+            "kelly_drawdown_halt_fraction": kelly_drawdown_halt_fraction,
+            "peak_bankroll_usdc": peak_bankroll_usdc,
+        }
         sizing = self._extension_hooks.size_entry(
             self._sizing_context(
                 trace_id=trace_id,
@@ -143,9 +167,7 @@ class EntryPlanner:
                 entry_candidates=entry_candidates,
                 portfolio_budget_usdc=portfolio_budget_usdc,
                 available_usdc=available_usdc,
-                max_order_usdc=max_order_usdc,
-                max_market_usdc=max_market_usdc,
-                max_total_usdc=max_total_usdc,
+                kelly_kwargs=kelly_kwargs,
                 metadata=base_metadata,
                 manual_confirmation=manual_confirmation,
             )
@@ -177,9 +199,7 @@ class EntryPlanner:
                     open_orders=_open_orders_for(open_orders, resolved_market.condition_id, focus_token_id),
                     portfolio_budget_usdc=portfolio_budget_usdc,
                     available_usdc=available_usdc,
-                    max_order_usdc=max_order_usdc,
-                    max_market_usdc=max_market_usdc,
-                    max_total_usdc=max_total_usdc,
+                    kelly_kwargs=kelly_kwargs,
                     allocation_plan=plan,
                     allocation=allocation,
                     metadata=base_metadata,
@@ -241,21 +261,18 @@ class EntryPlanner:
         entry_candidates: tuple[EntryCandidate, ...],
         portfolio_budget_usdc: Decimal,
         available_usdc: Decimal | None,
-        max_order_usdc: Decimal,
-        max_market_usdc: Decimal,
-        max_total_usdc: Decimal,
+        kelly_kwargs: Mapping[str, Any],
         metadata: Mapping[str, Any],
         manual_confirmation: ManualConfirmation | None = None,
     ) -> ExtensionContext:
         effective_available_usdc = available_usdc if available_usdc is not None else portfolio_budget_usdc
+        # 只把"非 ExtensionContext 一等公民"的 budget 上下文塞进 metadata；Kelly 字段
+        # 已在 ExtensionContext 上有专用 attribute，不再镜像到 metadata 避免双口径漂移。
         context_metadata: dict[str, Any] = dict(metadata)
         context_metadata.update(
             {
                 "portfolio_budget_usdc": portfolio_budget_usdc,
                 "available_usdc": effective_available_usdc,
-                "max_order_usdc": max_order_usdc,
-                "max_market_usdc": max_market_usdc,
-                "max_total_usdc": max_total_usdc,
             }
         )
         return ExtensionContext(
@@ -276,9 +293,7 @@ class EntryPlanner:
             now=orderbook.received_at,
             portfolio_budget_usdc=portfolio_budget_usdc,
             available_usdc=effective_available_usdc,
-            max_order_usdc=max_order_usdc,
-            max_market_usdc=max_market_usdc,
-            max_total_usdc=max_total_usdc,
+            **kelly_kwargs,
             manual_confirmation=manual_confirmation,
             metadata=context_metadata,
         )
@@ -295,9 +310,7 @@ class EntryPlanner:
         open_orders: tuple[Order, ...],
         portfolio_budget_usdc: Decimal,
         available_usdc: Decimal | None,
-        max_order_usdc: Decimal,
-        max_market_usdc: Decimal,
-        max_total_usdc: Decimal,
+        kelly_kwargs: Mapping[str, Any],
         allocation_plan: AllocationPlan,
         allocation: Allocation,
         metadata: Mapping[str, Any],
@@ -312,9 +325,6 @@ class EntryPlanner:
                 "buy_budget_usdc": allocation.buy_budget_usdc,
                 "portfolio_budget_usdc": portfolio_budget_usdc,
                 "available_usdc": available_usdc,
-                "max_order_usdc": max_order_usdc,
-                "max_market_usdc": max_market_usdc,
-                "max_total_usdc": max_total_usdc,
             }
         )
         return ExtensionContext(
@@ -334,9 +344,7 @@ class EntryPlanner:
             now=orderbook.received_at,
             portfolio_budget_usdc=portfolio_budget_usdc,
             available_usdc=available_usdc,
-            max_order_usdc=max_order_usdc,
-            max_market_usdc=max_market_usdc,
-            max_total_usdc=max_total_usdc,
+            **kelly_kwargs,
             allocation_plan=allocation_plan,
             allocation=allocation,
             amount_usdc=allocation.buy_budget_usdc,
@@ -458,6 +466,26 @@ class EntryPlanner:
         # DecisionEventRecorder.record 内部已经吞掉所有异常并仅做 outbox.put_nowait，
         # 不会反向阻塞决策返回；这里不再额外 try/except。
         self._decision_recorder.record(record)
+
+
+def _resolve_bankroll(
+    *,
+    portfolio_budget_usdc: Decimal,
+    available_usdc: Decimal | None,
+) -> Decimal:
+    """Effective bankroll = ``min(链上 available, .env soft cap)``。
+
+    available 缺失（早期启动 / paper / replay）时退化为 portfolio_budget_usdc
+    保持向后兼容。负值兜底到 0——Kelly 公式遇到 bankroll<=0 自动 reject。
+    """
+
+    if available_usdc is None:
+        bankroll = portfolio_budget_usdc
+    else:
+        bankroll = min(available_usdc, portfolio_budget_usdc)
+    if bankroll < Decimal("0"):
+        return Decimal("0")
+    return bankroll
 
 
 def _entry_account_inputs(

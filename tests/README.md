@@ -19,7 +19,7 @@
 - FAK partial fill 只对成交 shares 挂 SELL。
 - FAK no fill 会释放预算并重新分配。
 - open BUY 异常会触发 cancel。
-- 等权分配不会让早发现 market 超过 `max_market_usdc`。
+- Kelly 分配不会让早发现 market 超过 `bankroll × kelly_max_position_fraction`。
 - User WS 断线后恢复必须完成 reconcile 才允许继续买入。
 - DB 写入失败不阻塞订单提交，但 outbox 可重试。
 - Admin API 大查询、数据库慢写入、日志落盘变慢时，FAK BUY 提交路径仍不被阻塞。

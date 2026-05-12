@@ -113,10 +113,15 @@ async def run_virtual_paper_trade(
             trading_service=TradingService(executor=executor),
             account_state_store=account_store,
             portfolio_budget_usdc=_settings_decimal(runtime, "portfolio_budget_usdc"),
-            max_order_usdc=_settings_decimal(runtime, "max_order_usdc"),
-            max_market_usdc=_settings_decimal(runtime, "max_market_usdc"),
-            max_total_usdc=_settings_decimal(runtime, "max_total_usdc"),
-            max_open_orders=_settings_value(runtime, "max_open_orders"),
+            kelly_fraction=_settings_decimal(runtime, "kelly_fraction") or Decimal("0.25"),
+            kelly_max_position_fraction=_settings_decimal(runtime, "kelly_max_position_fraction") or Decimal("0.10"),
+            kelly_min_edge=_settings_decimal(runtime, "kelly_min_edge") or Decimal("0.02"),
+            kelly_min_stake_usdc=_settings_decimal(runtime, "kelly_min_stake_usdc") or Decimal("1"),
+            kelly_allow_round_up_to_market_min=bool(
+                _settings_value(runtime, "kelly_allow_round_up_to_market_min", default=True)
+            ),
+            kelly_round_up_max_overbet_ratio=_settings_decimal(runtime, "kelly_round_up_max_overbet_ratio") or Decimal("1"),
+            kelly_drawdown_halt_fraction=_settings_decimal(runtime, "kelly_drawdown_halt_fraction") or Decimal("0"),
             order_retry_limit=_settings_value(runtime, "order_retry_limit"),
         )
         event = DomainEvent(
@@ -336,9 +341,15 @@ def _build_plan(
         trace_id=f"paper-plan-{uuid4().hex[:8]}",
         portfolio_budget_usdc=_settings_decimal(runtime, "portfolio_budget_usdc"),
         available_usdc=account.available_usdc,
-        max_order_usdc=_settings_decimal(runtime, "max_order_usdc"),
-        max_market_usdc=_settings_decimal(runtime, "max_market_usdc"),
-        max_total_usdc=_settings_decimal(runtime, "max_total_usdc"),
+        kelly_fraction=_settings_decimal(runtime, "kelly_fraction") or Decimal("0.25"),
+        kelly_max_position_fraction=_settings_decimal(runtime, "kelly_max_position_fraction") or Decimal("0.10"),
+        kelly_min_edge=_settings_decimal(runtime, "kelly_min_edge") or Decimal("0.02"),
+        kelly_min_stake_usdc=_settings_decimal(runtime, "kelly_min_stake_usdc") or Decimal("1"),
+        kelly_allow_round_up_to_market_min=bool(
+            _settings_value(runtime, "kelly_allow_round_up_to_market_min", default=True)
+        ),
+        kelly_round_up_max_overbet_ratio=_settings_decimal(runtime, "kelly_round_up_max_overbet_ratio") or Decimal("1"),
+        kelly_drawdown_halt_fraction=_settings_decimal(runtime, "kelly_drawdown_halt_fraction") or Decimal("0"),
         positions=account.positions,
         open_orders=account.open_orders,
         metadata=metadata,
@@ -979,9 +990,11 @@ def _settings_decimal(runtime: Any, name: str) -> Decimal:
     return value if isinstance(value, Decimal) else Decimal(str(value or "0"))
 
 
-def _settings_value(runtime: Any, name: str) -> Any:
+def _settings_value(runtime: Any, name: str, *, default: Any = None) -> Any:
     settings = getattr(runtime, "settings", None)
-    return None if settings is None else getattr(settings, name, None)
+    if settings is None:
+        return default
+    return getattr(settings, name, default)
 
 
 def _empty_market() -> Market:

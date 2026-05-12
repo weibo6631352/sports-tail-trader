@@ -96,12 +96,15 @@ class TradingDecisionWorker:
         account_state_store: AccountStateStore | None = None,
         portfolio_budget_usdc: Decimal = Decimal("0"),
         available_usdc: Decimal | None = None,
-        max_order_usdc: Decimal = Decimal("0"),
-        max_market_usdc: Decimal = Decimal("0"),
-        max_total_usdc: Decimal = Decimal("0"),
+        kelly_fraction: Decimal = Decimal("0.25"),
+        kelly_max_position_fraction: Decimal = Decimal("0.10"),
+        kelly_min_edge: Decimal = Decimal("0.02"),
+        kelly_min_stake_usdc: Decimal = Decimal("1"),
+        kelly_allow_round_up_to_market_min: bool = True,
+        kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
+        kelly_drawdown_halt_fraction: Decimal = Decimal("0.5"),
         balance_usdc: Decimal | None = None,
         allowance_usdc: Decimal | None = None,
-        max_open_orders: int | None = None,
         order_retry_limit: int | None = None,
         entry_metadata_provider: EntryMetadataProvider | None = None,
         parameter_store: Any | None = None,
@@ -120,12 +123,15 @@ class TradingDecisionWorker:
         # 覆盖。每次 review 前用 property 读出当前值——这样 agent PUT 后立刻生效。
         self._portfolio_budget_usdc_default = portfolio_budget_usdc
         self._available_usdc = available_usdc
-        self._max_order_usdc_default = max_order_usdc
-        self._max_market_usdc_default = max_market_usdc
-        self._max_total_usdc_default = max_total_usdc
+        self._kelly_fraction_default = kelly_fraction
+        self._kelly_max_position_fraction_default = kelly_max_position_fraction
+        self._kelly_min_edge_default = kelly_min_edge
+        self._kelly_min_stake_usdc_default = kelly_min_stake_usdc
+        self._kelly_allow_round_up_default = kelly_allow_round_up_to_market_min
+        self._kelly_round_up_max_overbet_ratio_default = kelly_round_up_max_overbet_ratio
+        self._kelly_drawdown_halt_fraction_default = kelly_drawdown_halt_fraction
         self._balance_usdc = balance_usdc
         self._allowance_usdc = allowance_usdc
-        self._max_open_orders_default = max_open_orders
         self._order_retry_limit_default = order_retry_limit
         self._parameter_store = parameter_store
         self._entry_metadata_provider = entry_metadata_provider
@@ -152,20 +158,43 @@ class TradingDecisionWorker:
         return self._param_override("portfolio_budget_usdc", self._portfolio_budget_usdc_default)
 
     @property
-    def _max_order_usdc(self) -> Decimal:
-        return self._param_override("max_order_usdc", self._max_order_usdc_default)
+    def _kelly_fraction(self) -> Decimal:
+        return self._param_override("kelly_fraction", self._kelly_fraction_default)
 
     @property
-    def _max_market_usdc(self) -> Decimal:
-        return self._param_override("max_market_usdc", self._max_market_usdc_default)
+    def _kelly_max_position_fraction(self) -> Decimal:
+        return self._param_override(
+            "kelly_max_position_fraction", self._kelly_max_position_fraction_default
+        )
 
     @property
-    def _max_total_usdc(self) -> Decimal:
-        return self._param_override("max_total_usdc", self._max_total_usdc_default)
+    def _kelly_min_edge(self) -> Decimal:
+        return self._param_override("kelly_min_edge", self._kelly_min_edge_default)
 
     @property
-    def _max_open_orders(self) -> int | None:
-        return self._param_override("max_open_orders", self._max_open_orders_default)
+    def _kelly_min_stake_usdc(self) -> Decimal:
+        return self._param_override(
+            "kelly_min_stake_usdc", self._kelly_min_stake_usdc_default
+        )
+
+    @property
+    def _kelly_allow_round_up(self) -> bool:
+        return self._param_override(
+            "kelly_allow_round_up_to_market_min", self._kelly_allow_round_up_default
+        )
+
+    @property
+    def _kelly_round_up_max_overbet_ratio(self) -> Decimal:
+        return self._param_override(
+            "kelly_round_up_max_overbet_ratio",
+            self._kelly_round_up_max_overbet_ratio_default,
+        )
+
+    @property
+    def _kelly_drawdown_halt_fraction(self) -> Decimal:
+        return self._param_override(
+            "kelly_drawdown_halt_fraction", self._kelly_drawdown_halt_fraction_default
+        )
 
     @property
     def _order_retry_limit(self) -> int | None:
@@ -238,9 +267,13 @@ class TradingDecisionWorker:
             available_usdc=(
                 self._available_usdc if self._available_usdc is not None else snapshot_available_usdc(snapshot)
             ),
-            max_order_usdc=self._max_order_usdc,
-            max_market_usdc=self._max_market_usdc,
-            max_total_usdc=self._max_total_usdc,
+            kelly_fraction=self._kelly_fraction,
+            kelly_max_position_fraction=self._kelly_max_position_fraction,
+            kelly_min_edge=self._kelly_min_edge,
+            kelly_min_stake_usdc=self._kelly_min_stake_usdc,
+            kelly_allow_round_up_to_market_min=self._kelly_allow_round_up,
+            kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
+            kelly_drawdown_halt_fraction=self._kelly_drawdown_halt_fraction,
             positions=(snapshot.positions if snapshot is not None else tuple(self._positions_provider())),
             open_orders=(
                 snapshot.open_orders if snapshot is not None else tuple(self._open_orders_provider())
@@ -313,10 +346,14 @@ class TradingDecisionWorker:
             allowance_usdc=(
                 self._allowance_usdc if self._allowance_usdc is not None else snapshot_allowance(snapshot)
             ),
-            max_order_usdc=self._max_order_usdc,
-            max_market_usdc=self._max_market_usdc,
-            max_total_usdc=self._max_total_usdc,
-            max_open_orders=self._max_open_orders,
+            bankroll_usdc=_resolve_bankroll_for_review(
+                portfolio_budget_usdc=self._portfolio_budget_usdc,
+                snapshot=snapshot,
+            ),
+            kelly_max_position_fraction=self._kelly_max_position_fraction,
+            kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
+            peak_bankroll_usdc=(snapshot.peak_bankroll_usdc if snapshot is not None else None),
+            kelly_drawdown_halt_fraction=self._kelly_drawdown_halt_fraction,
             order_retry_limit=self._order_retry_limit,
             operation=plan.intent.side.value.lower(),
         )
@@ -850,10 +887,14 @@ class TradingDecisionWorker:
             allowance_usdc=(
                 self._allowance_usdc if self._allowance_usdc is not None else snapshot_allowance(snapshot)
             ),
-            max_order_usdc=self._max_order_usdc,
-            max_market_usdc=self._max_market_usdc,
-            max_total_usdc=self._max_total_usdc,
-            max_open_orders=self._max_open_orders,
+            bankroll_usdc=_resolve_bankroll_for_review(
+                portfolio_budget_usdc=self._portfolio_budget_usdc,
+                snapshot=snapshot,
+            ),
+            kelly_max_position_fraction=self._kelly_max_position_fraction,
+            kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
+            peak_bankroll_usdc=(snapshot.peak_bankroll_usdc if snapshot is not None else None),
+            kelly_drawdown_halt_fraction=self._kelly_drawdown_halt_fraction,
             order_retry_limit=self._order_retry_limit,
             operation=intent.side.value.lower(),
         )
@@ -919,6 +960,23 @@ def _match_open_orders(
         for order in open_orders
         if order.condition_id == condition_id and order.token_id == token_id
     )
+
+
+def _resolve_bankroll_for_review(
+    *,
+    portfolio_budget_usdc: Decimal,
+    snapshot: AccountSnapshot | None,
+) -> Decimal:
+    """与 EntryPlanner 内 ``_resolve_bankroll`` 一致的口径，避免 RiskManager 与
+    EntryPlanner 用不同的 bankroll 数。"""
+
+    if snapshot is None:
+        bankroll = portfolio_budget_usdc
+    else:
+        bankroll = min(snapshot.available_usdc, portfolio_budget_usdc)
+    if bankroll < Decimal("0"):
+        return Decimal("0")
+    return bankroll
 
 
 def _match_position_for_event(

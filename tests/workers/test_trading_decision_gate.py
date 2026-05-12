@@ -419,9 +419,12 @@ def test_entry_signal_scale_in_plan_is_not_dropped_while_exit_order_is_open() ->
             trading_decision_service=decision_service,
             trading_service=TradingService(executor=executor),
             account_state_store=account_state,
-            max_order_usdc=Decimal("5"),
-            max_market_usdc=Decimal("20"),
-            max_total_usdc=Decimal("20"),
+            # Kelly sizing 替代旧 max_order/market/total_usdc 三层硬上限。
+            # bankroll = min(account.available, portfolio_budget) = 10；
+            # kelly_max_position_fraction=1.0 让单笔 BUY 可达 bankroll 全额（intent=3 USDC < 10）。
+            portfolio_budget_usdc=Decimal("10"),
+            kelly_max_position_fraction=Decimal("1"),
+            kelly_drawdown_halt_fraction=Decimal("0"),
         )
         worker._market_lifecycle[market.condition_id] = MarketLifecycle.FOLLOW_UP_ORDER_OPEN
 
@@ -448,9 +451,10 @@ def test_entry_signal_scale_in_plan_is_dropped_while_market_lifecycle_is_paused(
             trading_decision_service=decision_service,
             trading_service=TradingService(executor=executor),
             account_state_store=account_state,
-            max_order_usdc=Decimal("5"),
-            max_market_usdc=Decimal("20"),
-            max_total_usdc=Decimal("20"),
+            # Kelly sizing：与 scale_in 通过路径同构；本用例验证 PAUSED 阶段 plan 被丢弃。
+            portfolio_budget_usdc=Decimal("10"),
+            kelly_max_position_fraction=Decimal("1"),
+            kelly_drawdown_halt_fraction=Decimal("0"),
         )
         worker._market_lifecycle[market.condition_id] = MarketLifecycle.PAUSED
 
@@ -540,9 +544,12 @@ def test_retryable_entry_rejection_keeps_market_observable_for_next_signal() -> 
             trading_decision_service=decision_service,
             trading_service=TradingService(executor=executor),
             account_state_store=account_state,
-            max_order_usdc=Decimal("5"),
-            max_market_usdc=Decimal("20"),
-            max_total_usdc=Decimal("20"),
+            # Kelly sizing：bankroll=10，kelly_max_position_fraction=1.0 让 5 USDC intent 通过 cap。
+            # 第一轮 ask depth=1（1 share × 0.99 = 0.99 USDC）触发 liquidity_insufficient；
+            # 第二轮 ask depth=20 → 通过。
+            portfolio_budget_usdc=Decimal("10"),
+            kelly_max_position_fraction=Decimal("1"),
+            kelly_drawdown_halt_fraction=Decimal("0"),
         )
 
         first_result = await worker.process_event(_entry_signal_event(event_id="event-retryable-1"))

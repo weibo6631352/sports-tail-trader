@@ -37,10 +37,21 @@ async def _set(store: ParameterStore, **kwargs: Any) -> Any:
 
 def test_registry_contains_expected_specs() -> None:
     assert get_spec("settings", "portfolio_budget_usdc") is not None
-    assert get_spec("settings", "max_order_usdc") is not None
+    # Kelly sizing 替代了旧 max_order/market/total/open_orders 静态上限；白名单
+    # 现在收 kelly_* 系列 + bankroll 相关参数。
+    assert get_spec("settings", "kelly_fraction") is not None
+    assert get_spec("settings", "kelly_max_position_fraction") is not None
+    assert get_spec("settings", "kelly_min_edge") is not None
+    assert get_spec("settings", "kelly_min_stake_usdc") is not None
+    assert get_spec("settings", "kelly_drawdown_halt_fraction") is not None
     assert get_spec("strategy", "tail_outright_min_edge_bps") is not None
     assert get_spec("strategy", "tail_outright_min_profit_per_share") is not None
     assert get_spec("settings", "wallet_private_key") is None  # 不在白名单
+    # 旧静态上限字段必须从白名单中移除——agent 不能再 PUT 这些已删除的 Settings 字段。
+    assert get_spec("settings", "max_order_usdc") is None
+    assert get_spec("settings", "max_market_usdc") is None
+    assert get_spec("settings", "max_total_usdc") is None
+    assert get_spec("settings", "max_open_orders") is None
 
 
 def test_unknown_param_raises_key_error() -> None:
@@ -51,8 +62,9 @@ def test_unknown_param_raises_key_error() -> None:
 
 def test_coerce_negative_decimal_rejected() -> None:
     store = ParameterStore()
+    # portfolio_budget_usdc 用 _coerce_decimal_non_negative，负数应抛 "non-negative"。
     with pytest.raises(ValueError, match="non-negative"):
-        asyncio.run(_set(store, scope="settings", key="max_order_usdc", value="-5"))
+        asyncio.run(_set(store, scope="settings", key="portfolio_budget_usdc", value="-5"))
 
 
 def test_coerce_probability_above_one_rejected() -> None:
@@ -63,17 +75,20 @@ def test_coerce_probability_above_one_rejected() -> None:
 
 def test_set_then_get_returns_override() -> None:
     store = ParameterStore()
-    asyncio.run(_set(store, scope="settings", key="max_order_usdc", value="50"))
-    assert store.get("settings", "max_order_usdc") == Decimal("50")
-    assert store.has_override("settings", "max_order_usdc") is True
+    asyncio.run(_set(store, scope="settings", key="portfolio_budget_usdc", value="50"))
+    assert store.get("settings", "portfolio_budget_usdc") == Decimal("50")
+    assert store.has_override("settings", "portfolio_budget_usdc") is True
 
 
 def test_clear_falls_back_to_default() -> None:
     store = ParameterStore()
-    asyncio.run(_set(store, scope="settings", key="max_order_usdc", value="50"))
-    asyncio.run(store.clear(scope="settings", key="max_order_usdc"))
-    assert store.has_override("settings", "max_order_usdc") is False
-    assert store.get("settings", "max_order_usdc", default=Decimal("10")) == Decimal("10")
+    asyncio.run(_set(store, scope="settings", key="portfolio_budget_usdc", value="50"))
+    asyncio.run(store.clear(scope="settings", key="portfolio_budget_usdc"))
+    assert store.has_override("settings", "portfolio_budget_usdc") is False
+    assert (
+        store.get("settings", "portfolio_budget_usdc", default=Decimal("10"))
+        == Decimal("10")
+    )
 
 
 def test_event_bus_receives_override_event() -> None:
@@ -99,12 +114,14 @@ def test_event_bus_receives_override_event() -> None:
 
 def test_registry_payload_includes_override_state() -> None:
     store = ParameterStore()
-    asyncio.run(_set(store, scope="settings", key="max_market_usdc", value="200"))
+    # 用一个真实存在的 kelly_* 字段验证 override 显示——用 kelly_min_edge 因为
+    # 它的 coerce 容忍 0-1 之间任意 Decimal，不会被语义校验额外拒。
+    asyncio.run(_set(store, scope="settings", key="kelly_min_edge", value="0.05"))
     items = store.registry_payload()
     by_key = {(item["scope"], item["key"]): item for item in items}
-    target = by_key[("settings", "max_market_usdc")]
+    target = by_key[("settings", "kelly_min_edge")]
     assert target["override"] is not None
-    assert target["override"]["value"] == "200"
+    assert target["override"]["value"] == "0.05"
     untouched = by_key[("settings", "portfolio_budget_usdc")]
     assert untouched["override"] is None
 
@@ -130,7 +147,7 @@ def http_client() -> tuple[TestClient, ParameterStore]:
 def test_route_set_then_list_overrides(http_client: tuple[TestClient, ParameterStore]) -> None:
     client, _ = http_client
     response = client.put(
-        "/parameters/settings/max_order_usdc",
+        "/parameters/settings/portfolio_budget_usdc",
         json={"value": "25", "operator": "test"},
     )
     assert response.status_code == 200
@@ -140,7 +157,7 @@ def test_route_set_then_list_overrides(http_client: tuple[TestClient, ParameterS
     assert response.status_code == 200
     overrides = response.json()["overrides"]
     assert len(overrides) == 1
-    assert overrides[0]["key"] == "max_order_usdc"
+    assert overrides[0]["key"] == "portfolio_budget_usdc"
 
 
 def test_route_unknown_param_returns_404(http_client: tuple[TestClient, ParameterStore]) -> None:
@@ -156,7 +173,7 @@ def test_route_unknown_param_returns_404(http_client: tuple[TestClient, Paramete
 def test_route_invalid_value_returns_422(http_client: tuple[TestClient, ParameterStore]) -> None:
     client, _ = http_client
     response = client.put(
-        "/parameters/settings/max_order_usdc",
+        "/parameters/settings/portfolio_budget_usdc",
         json={"value": "-1", "operator": "test"},
     )
     assert response.status_code == 422
@@ -164,11 +181,11 @@ def test_route_invalid_value_returns_422(http_client: tuple[TestClient, Paramete
 
 def test_route_delete_clears_override(http_client: tuple[TestClient, ParameterStore]) -> None:
     client, store = http_client
-    client.put("/parameters/settings/max_order_usdc", json={"value": "25"})
-    response = client.delete("/parameters/settings/max_order_usdc")
+    client.put("/parameters/settings/portfolio_budget_usdc", json={"value": "25"})
+    response = client.delete("/parameters/settings/portfolio_budget_usdc")
     assert response.status_code == 200
     assert response.json()["cleared"] is True
-    assert store.has_override("settings", "max_order_usdc") is False
+    assert store.has_override("settings", "portfolio_budget_usdc") is False
 
 
 def test_route_503_when_store_missing() -> None:

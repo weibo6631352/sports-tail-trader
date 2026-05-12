@@ -78,8 +78,8 @@ def test_readiness_warns_when_available_balance_cannot_cover_configured_order_si
         readiness=_Readiness(),
         settings=SimpleNamespace(
             portfolio_budget_usdc=Decimal("1000000"),
-            max_order_usdc=Decimal("5"),
-            max_market_usdc=Decimal("20"),
+            kelly_max_position_fraction=Decimal("0.10"),
+            kelly_min_stake_usdc=Decimal("5"),
         ),
         account_state_store=_AccountStore(account),
         event_bus=None,

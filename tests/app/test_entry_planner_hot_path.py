@@ -41,9 +41,13 @@ def test_entry_plan_hot_path_does_not_read_orderbooks_for_entire_registry() -> N
         trace_id="trace-hot-path",
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0.02"),
+        kelly_min_stake_usdc=Decimal("1"),
+        kelly_allow_round_up_to_market_min=True,
+        kelly_round_up_max_overbet_ratio=Decimal("1"),
+        kelly_drawdown_halt_fraction=Decimal("0.5"),
     )
 
     assert set(read_tokens).issubset(set(focus_market.token_ids))

@@ -22,6 +22,20 @@ class Allocation:
     reason: str = ""
     idempotency_key: str | None = None
     release_reason: str = ""
+    # Kelly 决策审计字段（见 ``domain/kelly.py:KellyStake``）。
+    # 全部 optional：旧 record-only / skip 路径不强制提供完整 Kelly 上下文，
+    # 但任何被 EntryPlanner 接受的入场分配都应填齐 prob_p / price_c / f_star / edge。
+    prob_p: Decimal | None = None
+    prob_confidence: Decimal | None = None
+    price_c: Decimal | None = None
+    edge_net: Decimal | None = None
+    edge_gross: Decimal | None = None
+    fee_per_share_usdc: Decimal | None = None
+    kelly_f_star: Decimal | None = None
+    effective_kelly_fraction: Decimal | None = None
+    effective_min_stake_usdc: Decimal | None = None
+    capped_by: str | None = None
+    is_round_up_overbet: bool = False
 
 
 @dataclass(frozen=True, slots=True)

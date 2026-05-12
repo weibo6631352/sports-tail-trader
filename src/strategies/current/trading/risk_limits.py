@@ -51,6 +51,7 @@ def _apply_tail_risk_limits(
             metadata=context.metadata,
             account_snapshot=context.account_snapshot,
             now=context.now,
+            bankroll_usdc=context.bankroll_usdc or Decimal("0"),
         )
         if allocation.condition_id == focus_condition_id and allocation.token_id == focus_token_id:
             focus_metadata.update(risk_decision.metadata or {})

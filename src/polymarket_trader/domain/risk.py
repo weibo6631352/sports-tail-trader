@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Iterable
 
-from polymarket_trader.domain.allocation import AllocationPlan, current_exposure_usdc
+from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.fees import calculate_trade_fee
 from polymarket_trader.domain.market import Market, TradingStatus
 from polymarket_trader.domain.order import Order, OrderIntent, OrderSide, OrderStatus, OrderType
@@ -62,10 +62,15 @@ class RiskManager:
         open_orders_count: int | None = None,
         retry_count: int = 0,
         order_retry_limit: int | None = None,
-        max_order_usdc: Decimal | None = None,
-        max_market_usdc: Decimal | None = None,
-        max_total_usdc: Decimal | None = None,
-        max_open_orders: int | None = None,
+        # Kelly 风控参数：bankroll 来自 ``min(account.available, settings.portfolio_budget)``；
+        # max_position_fraction 替代旧 max_order/market/total_usdc 的三层硬上限；
+        # round_up_max_overbet_ratio 同步放宽 RiskManager 的 effective cap，避免
+        # 与 Kelly 引擎的 round-up 路径不一致；peak / drawdown_halt 实现 §5 drawdown lockout。
+        bankroll_usdc: Decimal | None = None,
+        kelly_max_position_fraction: Decimal | None = None,
+        kelly_round_up_max_overbet_ratio: Decimal | None = None,
+        peak_bankroll_usdc: Decimal | None = None,
+        kelly_drawdown_halt_fraction: Decimal | None = None,
         min_order_size: Decimal | None = None,
     ) -> RiskDecision:
         # 这里只读本地快照和热状态；P0 路径不允许为了下单临时打 REST 或查数据库。
@@ -138,19 +143,16 @@ class RiskManager:
         if decision is not None:
             return decision
 
-        market_exposure_usdc = current_exposure_usdc(
-            position,
-            _filter_open_orders_for_subject(open_orders, intent),
-        )
-        decision = self._check_exposure_limits(
+        decision = self._check_kelly_constraints(
             intent,
             checks,
             notional_usdc=notional_usdc,
-            market_exposure_usdc=market_exposure_usdc,
             portfolio_total_invested_usdc=portfolio_total_invested_usdc,
-            max_order_usdc=max_order_usdc,
-            max_market_usdc=max_market_usdc,
-            max_total_usdc=max_total_usdc,
+            bankroll_usdc=bankroll_usdc,
+            kelly_max_position_fraction=kelly_max_position_fraction,
+            kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
+            peak_bankroll_usdc=peak_bankroll_usdc,
+            kelly_drawdown_halt_fraction=kelly_drawdown_halt_fraction,
         )
         if decision is not None:
             return decision
@@ -158,8 +160,6 @@ class RiskManager:
         decision = self._check_operational_limits(
             intent,
             checks,
-            open_orders_count=open_orders_count,
-            max_open_orders=max_open_orders,
             retry_count=retry_count,
             order_retry_limit=order_retry_limit,
         )
@@ -467,18 +467,57 @@ class RiskManager:
         )
         return None
 
-    def _check_exposure_limits(
+    def _check_kelly_constraints(
         self,
         intent: OrderIntent,
         checks: list[RiskCheck],
         *,
         notional_usdc: Decimal,
-        market_exposure_usdc: Decimal,
         portfolio_total_invested_usdc: Decimal,
-        max_order_usdc: Decimal | None,
-        max_market_usdc: Decimal | None,
-        max_total_usdc: Decimal | None,
+        bankroll_usdc: Decimal | None,
+        kelly_max_position_fraction: Decimal | None,
+        kelly_round_up_max_overbet_ratio: Decimal | None,
+        peak_bankroll_usdc: Decimal | None,
+        kelly_drawdown_halt_fraction: Decimal | None,
     ) -> RiskDecision | None:
+        """Kelly 框架风控：替代旧 max_order/market/total_usdc 三层硬上限。
+
+        三道闸：
+        1. drawdown lockout：bankroll < peak × halt_fraction 时拒任意新仓（含 BUY/SELL 不区分）。
+        2. single position cap：单笔 BUY notional ≤ bankroll × kelly_max_position_fraction。
+        3. total exposure：已开 + 本笔 ≤ bankroll。
+
+        Kelly 自身的 (p,c,edge,f*,min_edge,round-up) 由 EntryPlanner / 策略侧 ``kelly_stake``
+        实现并写入 ``Allocation``。RiskManager 只做 caller 已经服从 Kelly 公式的最终边界校验，
+        防止策略侧旁路 Kelly 公式直接送 over-bet 的 intent。
+        """
+
+        # drawdown lockout 在 BUY/SELL 之前就要拒，否则 SELL 可能放大问题。
+        if (
+            kelly_drawdown_halt_fraction is not None
+            and kelly_drawdown_halt_fraction > Decimal("0")
+            and peak_bankroll_usdc is not None
+            and peak_bankroll_usdc > Decimal("0")
+            and bankroll_usdc is not None
+        ):
+            halt_threshold = peak_bankroll_usdc * kelly_drawdown_halt_fraction
+            if bankroll_usdc < halt_threshold and intent.side == OrderSide.BUY:
+                return self._fail(
+                    trace_id=intent.trace_id,
+                    checks=checks,
+                    name="drawdown_lockout_gate",
+                    reason="drawdown_lockout_active",
+                    field="bankroll.drawdown",
+                    value={
+                        "bankroll_usdc": bankroll_usdc,
+                        "peak_bankroll_usdc": peak_bankroll_usdc,
+                        "halt_threshold": halt_threshold,
+                        "halt_fraction": kelly_drawdown_halt_fraction,
+                    },
+                    suggested_action="wait_recovery_or_manual_review",
+                    retryable=False,
+                )
+
         if intent.side != OrderSide.BUY:
             checks.append(
                 RiskCheck(
@@ -489,49 +528,59 @@ class RiskManager:
                 )
             )
             return None
-        if max_order_usdc is not None and notional_usdc > max_order_usdc:
+
+        if bankroll_usdc is None or bankroll_usdc <= Decimal("0"):
             return self._fail(
                 trace_id=intent.trace_id,
                 checks=checks,
-                name="single_order_gate",
-                reason="single_order_limit_reached",
-                field="intent.amount_usdc",
-                value={"notional_usdc": notional_usdc, "max_order_usdc": max_order_usdc},
-                suggested_action="reduce_size",
+                name="bankroll_gate",
+                reason="bankroll_non_positive",
+                field="bankroll_usdc",
+                value={"bankroll_usdc": bankroll_usdc},
+                suggested_action="fund_or_reduce_budget",
                 retryable=False,
             )
-        if (
-            max_market_usdc is not None
-            and market_exposure_usdc + notional_usdc > max_market_usdc
-        ):
-            return self._fail(
-                trace_id=intent.trace_id,
-                checks=checks,
-                name="single_market_gate",
-                reason="market_limit_reached",
-                field="market.exposure_usdc",
-                value={
-                    "exposure_usdc": market_exposure_usdc,
-                    "notional_usdc": notional_usdc,
-                    "max_market_usdc": max_market_usdc,
-                },
-                suggested_action="reduce_size",
-                retryable=False,
+
+        if kelly_max_position_fraction is not None and kelly_max_position_fraction > Decimal("0"):
+            # Kelly engine 在 round-up 路径里允许单笔 over-bet 到
+            # ``position_cap × round_up_max_overbet_ratio``；RiskManager 这条线必须同步
+            # 放宽，否则 Kelly 接受的合法 round-up 在风控层会被拒，造成不一致。
+            overbet_ratio = (
+                kelly_round_up_max_overbet_ratio
+                if kelly_round_up_max_overbet_ratio is not None
+                and kelly_round_up_max_overbet_ratio > Decimal("0")
+                else Decimal("1")
             )
-        if (
-            max_total_usdc is not None
-            and portfolio_total_invested_usdc + notional_usdc > max_total_usdc
-        ):
+            position_cap = bankroll_usdc * kelly_max_position_fraction * overbet_ratio
+            if notional_usdc > position_cap:
+                return self._fail(
+                    trace_id=intent.trace_id,
+                    checks=checks,
+                    name="kelly_position_cap_gate",
+                    reason="kelly_position_cap_exceeded",
+                    field="intent.amount_usdc",
+                    value={
+                        "notional_usdc": notional_usdc,
+                        "bankroll_usdc": bankroll_usdc,
+                        "max_position_fraction": kelly_max_position_fraction,
+                        "round_up_max_overbet_ratio": overbet_ratio,
+                        "position_cap_usdc": position_cap,
+                    },
+                    suggested_action="reduce_size",
+                    retryable=False,
+                )
+
+        if portfolio_total_invested_usdc + notional_usdc > bankroll_usdc:
             return self._fail(
                 trace_id=intent.trace_id,
                 checks=checks,
-                name="total_limit_gate",
-                reason="total_limit_reached",
+                name="bankroll_total_gate",
+                reason="bankroll_overspent",
                 field="portfolio.total_invested_usdc",
                 value={
                     "portfolio_total_invested_usdc": portfolio_total_invested_usdc,
                     "notional_usdc": notional_usdc,
-                    "max_total_usdc": max_total_usdc,
+                    "bankroll_usdc": bankroll_usdc,
                 },
                 suggested_action="reduce_size",
                 retryable=False,
@@ -543,23 +592,9 @@ class RiskManager:
         intent: OrderIntent,
         checks: list[RiskCheck],
         *,
-        open_orders_count: int,
-        max_open_orders: int | None,
         retry_count: int,
         order_retry_limit: int | None,
     ) -> RiskDecision | None:
-        if max_open_orders is not None and open_orders_count >= max_open_orders:
-            return self._fail(
-                trace_id=intent.trace_id,
-                checks=checks,
-                name="open_orders_gate",
-                reason="open_orders_limit_reached",
-                field="open_orders_count",
-                value={"open_orders_count": open_orders_count, "max_open_orders": max_open_orders},
-                suggested_action="cancel_open_orders",
-                retryable=False,
-            )
-
         if retry_count >= 0 and order_retry_limit is not None and retry_count >= order_retry_limit:
             return self._fail(
                 trace_id=intent.trace_id,
@@ -1044,18 +1079,6 @@ def _orderbook_depth_usdc(orderbook: OrderbookSnapshot, *, price_cap: Decimal) -
     return depth_usdc
 
 
-def _filter_open_orders_for_subject(
-    open_orders: tuple[Order, ...],
-    intent: OrderIntent,
-) -> tuple[Order, ...]:
-    subject_orders: list[Order] = []
-    for order in open_orders:
-        if order.condition_id != intent.condition_id:
-            continue
-        if order.token_id != intent.token_id:
-            continue
-        subject_orders.append(order)
-    return tuple(subject_orders)
 
 
 def _open_buy_orders_for_subject(

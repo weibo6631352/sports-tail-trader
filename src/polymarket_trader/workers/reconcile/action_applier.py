@@ -129,7 +129,6 @@ class ReconcileActionApplier:
             archived=market.trading_status == TradingStatus.CLOSED,
             balance_usdc=account_snapshot.balance_usdc,
             allowance_usdc=account_snapshot.allowance_usdc,
-            max_open_orders=None,
             min_order_size=market.min_order_size,
             operation=trade_intent.side.value.lower(),
         )

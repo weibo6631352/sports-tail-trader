@@ -88,9 +88,16 @@ def _run(events: tuple[ShadowEvent, ...], *, ledger: PaperVirtualLedger | None =
             ledger=ledger,
             starting_balance_usdc=Decimal("10"),
             portfolio_budget_usdc=Decimal("10"),
-            max_order_usdc=Decimal("10"),
-            max_market_usdc=Decimal("10"),
-            max_total_usdc=Decimal("10"),
+            # 把 Kelly 调到上限，让 totals_over_locked 这种高 edge 候选能在 10 USDC
+            # bankroll 上实际开仓；prob_confidence 由策略侧固定（0.5），所以
+            # effective_kappa = kelly_fraction × 0.5 = 0.5，单笔上限 = bankroll × 0.5。
+            kelly_fraction=Decimal("1"),
+            kelly_max_position_fraction=Decimal("1"),
+            kelly_min_edge=Decimal("0.02"),
+            kelly_min_stake_usdc=Decimal("1"),
+            kelly_allow_round_up_to_market_min=True,
+            kelly_round_up_max_overbet_ratio=Decimal("1"),
+            kelly_drawdown_halt_fraction=Decimal("0.5"),
         )
     ), ledger
 
@@ -106,11 +113,14 @@ def test_single_event_triggers_buy_fill_and_updates_ledger() -> None:
     frame = report.frames[0]
     assert frame.error is None
     assert frame.entry_order_status == "full_fill"
-    # 10 USDC × ask 0.98 → 撮合 10/0.98 ≈ 10.204 shares；账户花光 10
-    assert Decimal(frame.entry_spent_usdc) == Decimal("10")
-    assert ledger.available_usdc == Decimal("0")
-    assert ledger.position_for("over") > Decimal("10")
-    assert ledger.cost_for("over") == Decimal("10")
+    # Kelly：bankroll=10, kelly_fraction=1, prob_confidence=0.5（策略侧固定），
+    # f*≈1（implied fair=1.0 vs ask=0.98），effective_kappa=0.5 → raw_stake=5；
+    # position_cap=10 不再压制 → 期望成交 5 USDC、≈5.102 shares。
+    spent = Decimal(frame.entry_spent_usdc)
+    assert spent == Decimal("5")
+    assert ledger.available_usdc == Decimal("10") - spent
+    assert ledger.position_for("over") > Decimal("5")
+    assert ledger.cost_for("over") == spent
 
 
 def test_multiple_events_accumulate_in_ledger() -> None:

@@ -10,29 +10,117 @@ from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.risk import RiskManager
 
 
-def test_buy_entry_respects_budget_exposure_limits() -> None:
+def test_buy_entry_rejected_when_notional_exceeds_kelly_position_cap() -> None:
+    """单笔 BUY notional > bankroll × kelly_max_position_fraction → kelly_position_cap_exceeded。
+
+    旧 single_order_limit_reached 是绝对 USDC 上限；Kelly 改为 bankroll 比例。
+    bankroll=10、cap_fraction=0.10 → 单笔上限 1 USDC；本笔 3 USDC 超过即拒。
+    """
+
     decision = RiskManager().check_order_intent(
         BuyOrderIntent(
             strategy_id="sports_tail",
-            trace_id="trace-buy-budget",
+            trace_id="trace-buy-kelly-cap",
             condition_id="condition",
             token_id="yes",
             price=Decimal("0.99"),
             amount_usdc=Decimal("3"),
         ),
         market=_market(),
-        max_order_usdc=Decimal("1"),
-        max_market_usdc=Decimal("1"),
-        max_total_usdc=Decimal("1"),
+        bankroll_usdc=Decimal("10"),
+        kelly_max_position_fraction=Decimal("0.10"),
         balance_usdc=Decimal("0"),
         allowance_usdc=Decimal("0"),
     )
 
     assert decision.passed is False
-    assert decision.reason == "single_order_limit_reached"
+    assert decision.reason == "kelly_position_cap_exceeded"
 
 
-def test_sell_exit_does_not_consume_buy_budget_or_balance() -> None:
+def test_buy_entry_rejected_when_total_invested_exceeds_bankroll() -> None:
+    """已投 + 本笔 > bankroll → bankroll_overspent。Kelly 框架下整个组合不得超 bankroll。"""
+
+    decision = RiskManager().check_order_intent(
+        BuyOrderIntent(
+            strategy_id="sports_tail",
+            trace_id="trace-buy-bankroll-overspent",
+            condition_id="condition",
+            token_id="yes",
+            price=Decimal("0.50"),
+            amount_usdc=Decimal("0.5"),
+        ),
+        market=_market(),
+        bankroll_usdc=Decimal("10"),
+        # 本笔 0.5 USDC < cap (10 × 0.10 = 1)，但已投 9.6 + 0.5 = 10.1 > bankroll 10。
+        kelly_max_position_fraction=Decimal("0.10"),
+        portfolio_total_invested_usdc=Decimal("9.6"),
+        balance_usdc=Decimal("10"),
+        allowance_usdc=Decimal("10"),
+    )
+
+    assert decision.passed is False
+    assert decision.reason == "bankroll_overspent"
+
+
+def test_buy_entry_rejected_when_bankroll_is_non_positive() -> None:
+    """bankroll <= 0 → bankroll_non_positive。Kelly 公式分母为 0 等同 "未配置资金"。"""
+
+    decision = RiskManager().check_order_intent(
+        BuyOrderIntent(
+            strategy_id="sports_tail",
+            trace_id="trace-buy-bankroll-zero",
+            condition_id="condition",
+            token_id="yes",
+            price=Decimal("0.50"),
+            amount_usdc=Decimal("1"),
+        ),
+        market=_market(),
+        bankroll_usdc=Decimal("0"),
+        kelly_max_position_fraction=Decimal("0.10"),
+        balance_usdc=Decimal("10"),
+        allowance_usdc=Decimal("10"),
+    )
+
+    assert decision.passed is False
+    assert decision.reason == "bankroll_non_positive"
+
+
+def test_buy_entry_rejected_under_drawdown_lockout() -> None:
+    """bankroll < peak × halt_fraction → drawdown_lockout_active。BUY 触发，SELL 不触发。
+
+    Drawdown lockout 在 BUY/SELL 校验前就要拒，避免亏损中继续放大新仓。
+    """
+
+    decision = RiskManager().check_order_intent(
+        BuyOrderIntent(
+            strategy_id="sports_tail",
+            trace_id="trace-buy-drawdown",
+            condition_id="condition",
+            token_id="yes",
+            price=Decimal("0.50"),
+            amount_usdc=Decimal("0.5"),
+        ),
+        market=_market(),
+        # peak=100、halt_fraction=0.5 → halt 阈值 50；当前 bankroll=40 < 50 → 锁仓。
+        bankroll_usdc=Decimal("40"),
+        peak_bankroll_usdc=Decimal("100"),
+        kelly_drawdown_halt_fraction=Decimal("0.5"),
+        kelly_max_position_fraction=Decimal("0.10"),
+        balance_usdc=Decimal("40"),
+        allowance_usdc=Decimal("40"),
+    )
+
+    assert decision.passed is False
+    assert decision.reason == "drawdown_lockout_active"
+
+
+def test_sell_exit_is_not_constrained_by_kelly_position_cap_or_bankroll() -> None:
+    """SELL 不消耗 bankroll，Kelly 框架 (cap/bankroll) 只管 BUY；SELL 直接放行。
+
+    旧 max_order/market/total 也对 SELL 退出无效，但语义不同；现在 _check_kelly_constraints
+    在 intent.side != BUY 时直接 append buy_budget_gate(passed=True) 跳过。
+    """
+
     decision = RiskManager().check_order_intent(
         SellOrderIntent(
             strategy_id="sports_tail",
@@ -50,9 +138,8 @@ def test_sell_exit_does_not_consume_buy_budget_or_balance() -> None:
             shares=Decimal("3"),
             cost_usdc=Decimal("3"),
         ),
-        max_order_usdc=Decimal("1"),
-        max_market_usdc=Decimal("1"),
-        max_total_usdc=Decimal("1"),
+        bankroll_usdc=Decimal("0"),
+        kelly_max_position_fraction=Decimal("0.10"),
         balance_usdc=Decimal("0"),
         allowance_usdc=Decimal("0"),
     )
@@ -166,9 +253,8 @@ def test_buy_min_order_uses_share_size_not_usdc_amount() -> None:
             amount_usdc=Decimal("2"),
         ),
         market=_market(min_order_size=Decimal("5")),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        bankroll_usdc=Decimal("100"),
+        kelly_max_position_fraction=Decimal("0.10"),
         balance_usdc=Decimal("10"),
         allowance_usdc=Decimal("10"),
     )
@@ -189,9 +275,8 @@ def test_buy_min_order_rejects_when_converted_share_size_is_too_small() -> None:
             amount_usdc=Decimal("2"),
         ),
         market=_market(min_order_size=Decimal("5")),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        bankroll_usdc=Decimal("100"),
+        kelly_max_position_fraction=Decimal("0.10"),
         balance_usdc=Decimal("10"),
         allowance_usdc=Decimal("10"),
     )
@@ -224,9 +309,8 @@ def test_buy_gtc_post_only_maker_bid_does_not_require_taker_ask_depth() -> None:
             asks=(PriceLevel(price=Decimal("0.999"), size=Decimal("450.68")),),
             received_at=datetime(2026, 4, 30, tzinfo=timezone.utc),
         ),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        bankroll_usdc=Decimal("100"),
+        kelly_max_position_fraction=Decimal("0.10"),
         balance_usdc=Decimal("10"),
         allowance_usdc=Decimal("10"),
     )
@@ -255,9 +339,8 @@ def test_buy_taker_rejects_when_balance_cannot_cover_fee_estimate() -> None:
             asks=(PriceLevel(price=Decimal("0.001"), size=Decimal("10000")),),
             received_at=datetime(2026, 4, 30, tzinfo=timezone.utc),
         ),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        bankroll_usdc=Decimal("100"),
+        kelly_max_position_fraction=Decimal("0.10"),
         balance_usdc=Decimal("4.4261"),
         allowance_usdc=Decimal("10"),
     )
@@ -279,9 +362,8 @@ def test_buy_rejects_dust_notional_below_clob_floor() -> None:
             amount_usdc=Decimal("0.0073"),
         ),
         market=_market(min_order_size=Decimal("5")).with_tick_size(Decimal("0.001")),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        bankroll_usdc=Decimal("100"),
+        kelly_max_position_fraction=Decimal("0.10"),
         balance_usdc=Decimal("1"),
         allowance_usdc=Decimal("1"),
     )
@@ -316,9 +398,8 @@ def test_buy_entry_rejects_when_exit_order_is_already_open_for_same_token() -> N
                 order_id="exit-order",
             ),
         ),
-        max_order_usdc=Decimal("5"),
-        max_market_usdc=Decimal("5"),
-        max_total_usdc=Decimal("5"),
+        bankroll_usdc=Decimal("100"),
+        kelly_max_position_fraction=Decimal("0.10"),
         balance_usdc=Decimal("10"),
         allowance_usdc=Decimal("10"),
     )
@@ -353,13 +434,11 @@ def test_buy_entry_allows_unrelated_open_buy_order() -> None:
                 order_id="old-buy-order",
             ),
         ),
-        max_order_usdc=Decimal("5"),
-        max_market_usdc=Decimal("5"),
-        max_total_usdc=Decimal("20"),
+        bankroll_usdc=Decimal("100"),
+        kelly_max_position_fraction=Decimal("0.10"),
         balance_usdc=Decimal("10"),
         allowance_usdc=Decimal("10"),
         open_orders_count=1,
-        max_open_orders=10,
     )
 
     assert decision.passed is True
@@ -400,9 +479,8 @@ def test_controlled_scale_in_buy_can_pass_open_exit_gate_when_explicitly_allowed
                 order_id="exit-order",
             ),
         ),
-        max_order_usdc=Decimal("5"),
-        max_market_usdc=Decimal("20"),
-        max_total_usdc=Decimal("20"),
+        bankroll_usdc=Decimal("100"),
+        kelly_max_position_fraction=Decimal("0.10"),
         balance_usdc=Decimal("10"),
         allowance_usdc=Decimal("10"),
     )
@@ -428,9 +506,8 @@ def test_buy_rejects_gtc_without_post_only_to_block_resting_buy() -> None:
             post_only=False,
         ),
         market=_market(min_order_size=Decimal("1")),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        bankroll_usdc=Decimal("100"),
+        kelly_max_position_fraction=Decimal("0.10"),
         balance_usdc=Decimal("10"),
         allowance_usdc=Decimal("10"),
     )

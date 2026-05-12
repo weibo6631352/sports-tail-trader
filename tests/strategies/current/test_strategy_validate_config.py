@@ -22,14 +22,15 @@ def _settings(**overrides) -> Settings:
         signer_private_key="0x" + "1" * 64,
         polymarket_funder_address="0x" + "1" * 40,
         portfolio_budget_usdc=Decimal("100"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("20"),
-        max_total_usdc=Decimal("100"),
-        max_open_orders=5,
+        # Kelly 取代旧 max_order/market/total/open_orders 静态上限；
+        # 这里用 Settings 默认 kelly_* 字段，仅显式 portfolio_budget_usdc 让
+        # validate_config 在 startup 阶段能区分 "未配置 bankroll" 和 "配置但=0"。
         extension_module="strategies.current.manifest:manifest",
     )
     base.update(overrides)
-    return Settings(**base)
+    # _env_file=None 隔离用户 .env：开发机 .env 可能仍残留旧字段或与测试无关的真值；
+    # 测试只断言 validate_config 自身行为，不应受 .env 内容影响。
+    return Settings(_env_file=None, **base)
 
 
 def _strategy(config: CurrentStrategyConfig | None = None) -> CurrentStrategy:

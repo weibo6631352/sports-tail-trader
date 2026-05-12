@@ -16,8 +16,8 @@
 | 分组 | 示例 | 说明 |
 | --- | --- | --- |
 | Polymarket 地址 | `POLYMARKET_CLOB_HOST`、`POLYMARKET_MARKET_WS` | 外部 API / WS 地址 |
-| 组合预算 | `PORTFOLIO_BUDGET_USDC`、`MAX_ORDER_USDC`、`MAX_MARKET_USDC` | 控制总预算、单笔和单 market 上限 |
-| 框架风控阈值 | `MAX_OPEN_ORDERS` | 运行时公共风控门禁 |
+| Bankroll 软上限 | `PORTFOLIO_BUDGET_USDC` | bankroll = min(链上 USDC, 此值) |
+| Kelly sizing | `KELLY_FRACTION`、`KELLY_MAX_POSITION_FRACTION`、`KELLY_MIN_EDGE`、`KELLY_MIN_STAKE_USDC`、`KELLY_DRAWDOWN_HALT_FRACTION` | Kelly 公式参数（替代旧 max_order/market/total_usdc + max_open_orders） |
 | 同步与重试 | `MARKET_SYNC_INTERVAL_SECONDS`、`ORDER_RETRY_LIMIT` | reconcile 与失败处理 |
 | 体育直播状态源 | `SPORTS_LIVE_STATE_ENABLED`、`SPORTS_LIVE_STATE_LEAGUES` | 外部比分/阶段事实输入，不承载策略阈值 |
 | 性能隔离 | `TRADING_EVENT_QUEUE_MAX_SIZE`、`TRADING_WORKER_THREADS` | 交易主链路与后台维护 / 异步支撑队列及执行器隔离 |
@@ -40,8 +40,8 @@
 ## 自动交易闸门
 
 - `validate_startup_readiness` 会在 `WALLET_PRIVATE_KEY` 为空时阻止系统进入 `ready_to_trade=true`。
-- `PORTFOLIO_BUDGET_USDC`、`MAX_ORDER_USDC`、`MAX_MARKET_USDC`、`MAX_TOTAL_USDC`、`MAX_OPEN_ORDERS` 任一不大于 `0` 时，系统不会进入自动交易态。
-- `MAX_ORDER_USDC`、`MAX_MARKET_USDC` 和 `MAX_TOTAL_USDC` 需要覆盖目标市场的 `min_order_size`；Polymarket 体育市场常见最小下单金额为 `5` USDC，低于该值时即使策略发现 `auto_execute` 机会也会被风控拒绝。
+- `PORTFOLIO_BUDGET_USDC` 不大于 `0` 时系统不会进入自动交易态——Kelly 引擎在 bankroll<=0 时拒新仓但不报错，启动期把它升级为 blocking 避免"看起来在跑但永远不下单"。
+- Kelly sizing 不再用绝对 USDC 上限；`KELLY_MAX_POSITION_FRACTION` × bankroll 是单市场仓位天花板，`KELLY_MIN_STAKE_USDC` + `market.min_order_size × price` 决定每笔下单下限。详见 [`src/polymarket_trader/domain/kelly.py`](../src/polymarket_trader/domain/kelly.py) docstring。
 - `POLYMARKET_API_KEY`、`POLYMARKET_API_SECRET`、`POLYMARKET_API_PASSPHRASE` 只填部分字段时，系统不会进入自动交易态。
 - `POLYMARKET_SIGNATURE_TYPE` 为 `1` 或 `2` 但未填写 `POLYMARKET_FUNDER_ADDRESS` 时，系统不会进入自动交易态。
 - `SPORTS_LIVE_STATE_ENABLED=true` 时，`SPORTS_LIVE_STATE_SOURCES` 只支持 `espn,nba,nhl,mlb,sofascore,thesportsdb`，且 `SPORTS_LIVE_STATE_LEAGUES` 至少需要一个可由启用源覆盖的联赛代码；配置错误会阻止系统进入自动交易态。
@@ -152,8 +152,10 @@
 
 可调白名单（详见 `src/polymarket_trader/app/parameter_store.py`）：
 
-- `settings.{portfolio_budget_usdc, max_order_usdc, max_market_usdc,
-  max_total_usdc, max_open_orders, order_retry_limit, audit_retention_days}`
+- `settings.{portfolio_budget_usdc, kelly_fraction, kelly_max_position_fraction,
+  kelly_min_edge, kelly_min_stake_usdc, kelly_allow_round_up_to_market_min,
+  kelly_round_up_max_overbet_ratio, kelly_drawdown_halt_fraction,
+  order_retry_limit, audit_retention_days}`
 - `strategy.{tail_outright_min_edge_bps, tail_outright_max_entry_price,
   tail_outright_min_orderbook_depth_usdc, tail_outright_exit_edge_target,
   tail_outright_min_profit_per_share, entry_no_price_max,

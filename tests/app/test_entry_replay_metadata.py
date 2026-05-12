@@ -42,9 +42,13 @@ def test_entry_replay_fixture_metadata_drives_tail_plan(tmp_path: Path) -> None:
                 "budgets": {
                     "portfolio_budget_usdc": "10",
                     "available_usdc": "10",
-                    "max_order_usdc": "10",
-                    "max_market_usdc": "10",
-                    "max_total_usdc": "10",
+                    "kelly_fraction": "0.25",
+                    "kelly_max_position_fraction": "1",
+                    "kelly_min_edge": "0.02",
+                    "kelly_min_stake_usdc": "1",
+                    "kelly_allow_round_up_to_market_min": True,
+                    "kelly_round_up_max_overbet_ratio": "1",
+                    "kelly_drawdown_halt_fraction": "0.5",
                 },
                 "target": {
                     "condition_id": "totals-condition",

@@ -15,6 +15,13 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Polymarket 钱包对 Exchange 的 ERC20 approval 通常是 max(uint256) ≈ 1.16e77，
+# 远超 ``account_snapshots.allowance_usdc NUMERIC(38, 18)``（max ≈ 1e20）。
+# Kelly 仅用 ``min(balance, allowance)``，超大 allowance 等价"effectively unlimited"，
+# 在内存与持久化两层都 cap 到 1e18（≫ Polymarket 全市场 TVL，足够任何实际下单）。
+_ALLOWANCE_CAP_USDC = Decimal("1000000000000000000")  # 1e18
+
+
 class AccountStateStore:
     """Maintains copy-on-write account snapshots for P0 readers.
 
@@ -34,6 +41,9 @@ class AccountStateStore:
         self._fills: dict[str, Fill] = {}
         self._balance_usdc = Decimal("0")
         self._allowance_usdc = Decimal("0")
+        # peak_bankroll_usdc 单调维护：取 effective_bankroll = min(balance, allowance) -
+        # open_buy_reserved_usdc，每次刷新时取 max。Kelly drawdown lockout 用此基准。
+        self._peak_bankroll_usdc = Decimal("0")
         self._user_ws_connected = False
         self._allow_new_entries = False
         self._market_pauses: dict[str, MarketPause] = {}
@@ -53,7 +63,13 @@ class AccountStateStore:
             if balance_usdc is not None:
                 self._balance_usdc = balance_usdc
             if allowance_usdc is not None:
-                self._allowance_usdc = allowance_usdc
+                # Cap 到 NUMERIC(38, 18) 可表示的"effectively unlimited"——见模块顶部
+                # ``_ALLOWANCE_CAP_USDC`` 注释。max-uint256 approval 是常见情况。
+                self._allowance_usdc = (
+                    min(allowance_usdc, _ALLOWANCE_CAP_USDC)
+                    if allowance_usdc > _ALLOWANCE_CAP_USDC
+                    else allowance_usdc
+                )
             return self._publish_snapshot_locked()
 
     def upsert_position(self, position: Position) -> AccountSnapshot:
@@ -157,7 +173,10 @@ class AccountStateStore:
         return self._user_ws_connected and self._last_reconcile_at is not None
 
     def _publish_snapshot_locked(self) -> AccountSnapshot:
-        snapshot = AccountSnapshot(
+        # peak_bankroll_usdc 单调上升——drawdown lockout 把 peak 当作历史最高水位。
+        # 这里复用 AccountSnapshot.available_usdc 的口径（min(balance, allowance) -
+        # open_buy_reserved_usdc）以保持下游 bankroll 计算一致。
+        provisional = AccountSnapshot(
             balance_usdc=self._balance_usdc,
             allowance_usdc=self._allowance_usdc,
             positions=tuple(self._positions.values()),
@@ -168,6 +187,10 @@ class AccountStateStore:
             market_pauses=tuple(self._market_pauses.values()),
             last_reconcile_at=self._last_reconcile_at,
         )
+        current_bankroll = provisional.available_usdc
+        if current_bankroll > self._peak_bankroll_usdc:
+            self._peak_bankroll_usdc = current_bankroll
+        snapshot = replace(provisional, peak_bankroll_usdc=self._peak_bankroll_usdc)
         self._snapshot = snapshot
         return snapshot
 

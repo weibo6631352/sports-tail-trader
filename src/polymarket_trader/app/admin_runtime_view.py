@@ -260,14 +260,28 @@ class AdminRuntimeView:
         return ()
 
     def _configured_entry_floor_usdc(self) -> Decimal | None:
+        """Kelly 框架下"账户余额低于 floor 就告警"的提示阈值。
+
+        Kelly 没有"单笔下单上限"概念；用 ``kelly_min_stake_usdc`` 或
+        ``portfolio_budget_usdc × kelly_max_position_fraction`` 中较小者作为告警下限——
+        低于此值时几乎所有 Kelly 候选都会因 stake_below_min 被拒。
+        """
+
         settings = self._settings()
         if settings is None:
             return None
-        candidates = []
-        for name in ("max_order_usdc", "max_market_usdc", "portfolio_budget_usdc"):
-            value = _decimal_or_none(getattr(settings, name, None))
-            if value is not None and value > Decimal("0"):
-                candidates.append(value)
+        candidates: list[Decimal] = []
+        budget = _decimal_or_none(getattr(settings, "portfolio_budget_usdc", None))
+        max_position_fraction = _decimal_or_none(
+            getattr(settings, "kelly_max_position_fraction", None)
+        )
+        if budget is not None and max_position_fraction is not None and max_position_fraction > 0:
+            position_floor = budget * max_position_fraction
+            if position_floor > Decimal("0"):
+                candidates.append(position_floor)
+        min_stake = _decimal_or_none(getattr(settings, "kelly_min_stake_usdc", None))
+        if min_stake is not None and min_stake > Decimal("0"):
+            candidates.append(min_stake)
         if not candidates:
             return None
         return min(candidates)

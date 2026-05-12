@@ -433,10 +433,11 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     db_session_factory = build_session_factory(settings.database_url)
     persistence_repository = DatabasePersistenceRepository(db_session_factory)
     account_state_store = AccountStateStore()
-    account_state_store.update_balances(
-        balance_usdc=settings.portfolio_budget_usdc,
-        allowance_usdc=settings.portfolio_budget_usdc,
-    )
+    # 不预填假 balance：reconcile worker 会在启动后立刻调
+    # ``clob_client.get_balance_allowance()`` 写入真实链上 USDC。预填会让
+    # ``peak_bankroll_usdc`` 被 placeholder 值锚住，等真实 balance 写入后立刻
+    # 触发 drawdown lockout（peak=placeholder >> 真实 balance）。在 reconcile
+    # 拿到第一个权威值前，bankroll=0 → Kelly 全拒，正是安全态。
     lifecycle_bus = InProcessLifecycleBus()
     from polymarket_trader.app.parameter_store import ParameterStore
 
@@ -546,10 +547,13 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         trading_service=trading_service,
         account_state_store=account_state_store,
         portfolio_budget_usdc=settings.portfolio_budget_usdc,
-        max_order_usdc=settings.max_order_usdc,
-        max_market_usdc=settings.max_market_usdc,
-        max_total_usdc=settings.max_total_usdc,
-        max_open_orders=settings.max_open_orders,
+        kelly_fraction=settings.kelly_fraction,
+        kelly_max_position_fraction=settings.kelly_max_position_fraction,
+        kelly_min_edge=settings.kelly_min_edge,
+        kelly_min_stake_usdc=settings.kelly_min_stake_usdc,
+        kelly_allow_round_up_to_market_min=settings.kelly_allow_round_up_to_market_min,
+        kelly_round_up_max_overbet_ratio=settings.kelly_round_up_max_overbet_ratio,
+        kelly_drawdown_halt_fraction=settings.kelly_drawdown_halt_fraction,
         order_retry_limit=settings.order_retry_limit,
         entry_metadata_provider=entry_metadata_for_event,
         parameter_store=parameter_store,

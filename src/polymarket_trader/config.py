@@ -87,14 +87,33 @@ class Settings(BaseSettings):
     extension_module: str | None = None
     extension_config_path: str | None = None
 
-    # 预算相关默认值保持 0，避免在未明确配置前进入自动交易；其余风控阈值对齐示例推荐值。
+    # portfolio_budget_usdc 语义：bankroll 软上限。实际 bankroll = min(链上可用 USDC,
+    # portfolio_budget_usdc)。设 0 时 Kelly 拒新仓（启动安全态）。Kelly 引擎在
+    # ``domain/kelly.py``——见该模块 docstring 公式。
     portfolio_budget_usdc: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
-    max_order_usdc: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
-    max_market_usdc: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
-    max_total_usdc: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
     market_sync_interval_seconds: int = Field(default=60, ge=1)
     order_retry_limit: int = Field(default=2, ge=0)
-    max_open_orders: int = Field(default=0, ge=0)
+
+    # Kelly sizing 框架参数（策略层不再用绝对 USDC 上限；改用 bankroll fraction）
+    # κ 默认 0.25 = quarter Kelly：模型不确定性下的工业标准（max drawdown 约半 full Kelly）。
+    kelly_fraction: Decimal = Field(default=Decimal("0.25"), gt=Decimal("0"), le=Decimal("1"))
+    # 单市场不超过 bankroll 的 fraction（隐式上限并发头寸数 ≈ 1/fraction）。
+    kelly_max_position_fraction: Decimal = Field(default=Decimal("0.10"), gt=Decimal("0"), le=Decimal("1"))
+    # 最低 edge 阈值；实测 edge < 200 bps 时 Kelly 公式对 p 估计误差极敏感，不下单。
+    kelly_min_edge: Decimal = Field(default=Decimal("0.02"), ge=Decimal("0"))
+    # 框架硬下限 USDC；实际 effective_min_stake = max(此值, market.min_order_size × price)。
+    kelly_min_stake_usdc: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
+    # Kelly 推荐 stake < market min 时是否凑齐到 market min（轻度 over-bet）。
+    # 关闭时这类候选直接 reject，bankroll 较小阶段会出现"全市场都下不了"的尴尬。
+    kelly_allow_round_up_to_market_min: bool = True
+    # 凑齐金额上限 = position_cap × ratio。1.0=凑齐金额最多到 cap；> 1 时让 RiskManager
+    # 的 effective position cap 同步放宽（== max_position_fraction × ratio）——这是
+    # bankroll 极小阶段（如 5 USDC）唯一能下单的方式，相当于显式接受单笔 over-bet。
+    # 没有上限：用户用大值（如 10）等价"放弃单仓纪律线"，由 RiskManager 的
+    # bankroll_overspent 总额闸门兜底。
+    kelly_round_up_max_overbet_ratio: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
+    # drawdown lockout：bankroll 跌破 peak × halt_fraction 时拒新仓。0 关闭。
+    kelly_drawdown_halt_fraction: Decimal = Field(default=Decimal("0.5"), ge=Decimal("0"), le=Decimal("1"))
 
     # audit_events 表保留期（天）。实测 sports_live_state_recorded + market_discovered
     # 每天累积百万级 row，长期运行会让查询变慢且占用大量磁盘。retention job 每天跑
@@ -398,24 +417,17 @@ class Settings(BaseSettings):
                 )
             )
 
-        # 资金边界不允许默认为 0 进入真实交易，否则虽然能启动，但不会形成明确的风险上限。
-        for field_name, label in (
-            ("portfolio_budget_usdc", "组合预算"),
-            ("max_order_usdc", "单笔下单上限"),
-            ("max_market_usdc", "单市场上限"),
-            ("max_total_usdc", "总仓上限"),
-            ("max_open_orders", "最大未完成订单数"),
-        ):
-            value = getattr(self, field_name)
-            if value <= 0:
-                blocking_issues.append(
-                    ConfigIssue(
-                        field=field_name,
-                        code="non_positive_limit",
-                        message=f"{label} 必须大于 0，启动阶段禁止自动下单",
-                        value=value,
-                    )
+        # bankroll 软上限不允许 0 进入真实交易；Kelly 引擎在 bankroll=0 时拒新仓但不报错，
+        # 启动期把它升级为 blocking issue，避免运行中"看起来在跑但永远不下单"的迷惑。
+        if self.portfolio_budget_usdc <= 0:
+            blocking_issues.append(
+                ConfigIssue(
+                    field="portfolio_budget_usdc",
+                    code="non_positive_limit",
+                    message="bankroll 软上限 portfolio_budget_usdc 必须大于 0，启动阶段禁止自动下单",
+                    value=self.portfolio_budget_usdc,
                 )
+            )
 
         if self.order_retry_limit < 0:
             blocking_issues.append(

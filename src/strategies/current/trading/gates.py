@@ -152,6 +152,7 @@ def _tail_entry_gate(
         metadata={**context.metadata, **metadata},
         account_snapshot=context.account_snapshot,
         now=context.now,
+        bankroll_usdc=context.bankroll_usdc or Decimal("0"),
     )
     metadata.update(risk_decision.metadata or {})
     if not risk_decision.passed:

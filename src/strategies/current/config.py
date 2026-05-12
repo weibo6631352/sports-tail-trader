@@ -68,9 +68,10 @@ class CurrentStrategyConfig:
             live 市场进入扫尾候选前允许的最长封盘剩余秒数。默认 3600 秒，
             用于把远离封盘的真实直播赛事留在全量发现里，但不进入实时交易候选。
         tail_max_*:
-            体育扫尾策略级风险上限，用于约束同一比赛、同一联赛和当日新增
-            暴露。框架级 `MAX_ORDER_USDC / MAX_MARKET_USDC / MAX_TOTAL_USDC`
-            仍由 RiskManager 做最终门禁。
+            体育扫尾策略级相关性硬上限，用于约束同一比赛、同一联赛和当日新增
+            暴露（替代旧绝对 USDC，改为 bankroll fraction + 绝对 floor）。
+            框架级 Kelly 单仓 cap (`KELLY_MAX_POSITION_FRACTION`) 仍由
+            RiskManager 做最终门禁。
         tail_min_expected_profit_*:
             入场前按买入价格和买入金额估算等待权威结算的毛利润和资金占用效率。
             如果结算持有收益太低，策略只在可挂出满足最小毛利润的 profit-take
@@ -164,9 +165,21 @@ class CurrentStrategyConfig:
     tail_min_moneyline_lead: int = 6
     tail_mlb_eighth_moneyline_min_lead: int = 2
     tail_min_spread_safety_margin: Decimal = Decimal("2")
-    tail_max_event_exposure_usdc: Decimal = Decimal("25")
-    tail_max_league_exposure_usdc: Decimal = Decimal("75")
-    tail_max_daily_entry_usdc: Decimal = Decimal("150")
+    # 相关性硬上限（与 Kelly 单市场 cap 互补）：单一事件 / 联赛 / 日新增 限额
+    # = bankroll × fraction。bankroll 涨大时 cap 同步放大；bankroll 极小时 cap
+    # 接近 0 但是用绝对 USDC floor 兜底，避免极小 bankroll 阶段每个 cap 都拒。
+    tail_max_event_exposure_fraction: Decimal = Decimal("0.25")
+    tail_max_league_exposure_fraction: Decimal = Decimal("0.75")
+    tail_max_daily_entry_fraction: Decimal = Decimal("1.5")
+    tail_max_event_exposure_min_floor_usdc: Decimal = Decimal("5")
+    tail_max_league_exposure_min_floor_usdc: Decimal = Decimal("10")
+    tail_max_daily_entry_min_floor_usdc: Decimal = Decimal("25")
+    # 单场景 (single-game tail) implied fair value 公式：``cap = fair × (1 - edge_required)``
+    # 解出 fair。500 bps = 5% 表示策略相信"fair 比 cap 至少高 5%"。
+    # 用于 Kelly sizing 的 prob_p。outright path 直接用 the-odds-api 真概率。
+    tail_implied_min_edge_bps: int = 500
+    # tail implied_p 的不确定性 → κ 缩放（confidence）。0.5 = 半 κ。outright path 用 1.0。
+    tail_implied_prob_confidence: Decimal = Decimal("0.5")
     tail_max_consecutive_losses: int = 3
     tail_scale_in_budget_fraction: Decimal = Decimal("0.5")
     tail_scale_in_max_buy_fills: int = 2

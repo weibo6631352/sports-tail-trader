@@ -10,9 +10,14 @@ from dataclasses import replace
 from decimal import Decimal
 
 from polymarket_trader.domain.allocation import Allocation, AllocationPlan
+from polymarket_trader.domain.kelly import implied_fair_value_from_price_cap
 from polymarket_trader.extension_api import EntrySizing, ExtensionContext, ExtensionDecision
 
-from strategies.current.allocation import AllocationMarketSnapshot, equal_weight_plan
+from strategies.current.allocation import (
+    AllocationMarketSnapshot,
+    ProbView,
+    kelly_plan,
+)
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.exit_plan import build_exit_plan_metadata, exit_price_for_context
 
@@ -41,15 +46,21 @@ from .risk_limits import _apply_tail_risk_limits
 
 
 def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> EntrySizing:
-    """为当前 market 计算本轮可用入场预算。
+    """为当前 market 计算本轮可用入场预算（Kelly sizing）。
 
-    采用“等权分配”：先找出所有可参与分配的候选市场，再在这些市场之间平均分配预算。
+    流程：
+    1. 走原有 tail / scale-in 门禁过滤候选；通过的进入 eligible_snapshots。
+    2. ``prob_provider`` 把 tail price_cap + min_edge 反推 implied_fair_value，
+       作为 Kelly 公式吃的 ``prob_p``；prob_confidence=tail_implied_prob_confidence
+       （默认 0.5）抑制 implied 的不确定性。
+    3. ``kelly_plan`` 按 f_star 降序逐笔分配，bankroll 扣减保证不并发 over-bet。
+    4. ``_apply_tail_risk_limits`` 套相关性硬上限（事件 / 联赛 / 日新增）。
     """
 
-    portfolio_budget_usdc = context.portfolio_budget_usdc or _metadata_decimal(
-        context,
-        "portfolio_budget_usdc",
-    )
+    # EntryPlanner 是 ExtensionContext 的唯一构造方，所有 kelly_* / bankroll
+    # 字段都在 ``_sizing_context`` 里强制写入。缺失只能是契约违反，直接抛错
+    # 让 supervisor 抓到，比静默返回 missing_xxx 更早暴露问题。
+    portfolio_budget_usdc = context.portfolio_budget_usdc
     if portfolio_budget_usdc is None:
         return _empty_sizing(context, reason="missing_portfolio_budget")
 
@@ -64,25 +75,32 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
             reason="missing_market_state",
         )
 
-    available_usdc = context.available_usdc or _metadata_decimal(context, "available_usdc")
-    if available_usdc is None:
-        available_usdc = portfolio_budget_usdc
-
-    max_order_usdc = context.max_order_usdc or _metadata_decimal(context, "max_order_usdc")
-    if max_order_usdc is None:
-        return _empty_sizing(context, reason="missing_max_order_usdc")
-
-    max_market_usdc = context.max_market_usdc or _metadata_decimal(context, "max_market_usdc")
-    if max_market_usdc is None:
-        return _empty_sizing(context, reason="missing_max_market_usdc")
-
-    max_total_usdc = context.max_total_usdc or _metadata_decimal(context, "max_total_usdc")
-    if max_total_usdc is None:
-        return _empty_sizing(context, reason="missing_max_total_usdc")
+    bankroll_usdc = context.bankroll_usdc
+    if bankroll_usdc is None:
+        bankroll_usdc = portfolio_budget_usdc
+    kelly_fraction = context.kelly_fraction
+    kelly_max_position_fraction = context.kelly_max_position_fraction
+    kelly_min_edge = context.kelly_min_edge if context.kelly_min_edge is not None else Decimal("0")
+    kelly_min_stake_usdc = context.kelly_min_stake_usdc
+    if (
+        kelly_fraction is None
+        or kelly_max_position_fraction is None
+        or kelly_min_stake_usdc is None
+    ):
+        raise ValueError(
+            "ExtensionContext 缺少 Kelly 配置字段——EntryPlanner 应当强制写入"
+        )
+    kelly_allow_round_up = (
+        context.kelly_allow_round_up_to_market_min
+        if context.kelly_allow_round_up_to_market_min is not None
+        else True
+    )
+    kelly_round_up_max_overbet_ratio = context.kelly_round_up_max_overbet_ratio or Decimal("1")
 
     eligible_snapshots: list[AllocationMarketSnapshot] = []
     skipped_allocations: dict[tuple[str, str], Allocation] = {}
     sizing_metadata: dict[str, object] = {}
+    snapshot_price_cap: dict[tuple[str, str], Decimal] = {}
     for snapshot in candidate_snapshots:
         price_cap = _tail_price_cap(
             config,
@@ -90,6 +108,7 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
             snapshot.token_id,
             locked_outcome_signal=_tail_locked_outcome_signal(context),
         )
+        snapshot_price_cap[(snapshot.condition_id, snapshot.token_id)] = price_cap
         buyable_liquidity_usdc = _ask_depth_notional(
             snapshot.orderbook,
             price_cap=price_cap,
@@ -133,14 +152,37 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
             continue
         eligible_snapshots.append(replace(snapshot_for_allocation, liquidity_usdc=buyable_liquidity_usdc))
 
-    eligible_plan = equal_weight_plan(
+    implied_min_edge_required = Decimal(config.tail_implied_min_edge_bps) / Decimal("10000")
+    implied_prob_confidence = config.tail_implied_prob_confidence
+
+    def _prob_provider(snap: AllocationMarketSnapshot) -> ProbView:
+        cap = snapshot_price_cap.get((snap.condition_id, snap.token_id))
+        if cap is None:
+            cap = _tail_price_cap(
+                config,
+                snap.market,
+                snap.token_id,
+                locked_outcome_signal=_tail_locked_outcome_signal(context),
+            )
+        implied_p = implied_fair_value_from_price_cap(cap, min_edge_required=implied_min_edge_required)
+        return ProbView(
+            prob_p=implied_p,
+            prob_confidence=implied_prob_confidence,
+            source="tail_implied",
+        )
+
+    eligible_plan = kelly_plan(
         trace_id=context.trace_id,
+        bankroll_usdc=bankroll_usdc,
         portfolio_budget_usdc=portfolio_budget_usdc,
         markets=tuple(eligible_snapshots),
-        available_usdc=available_usdc,
-        max_order_usdc=max_order_usdc,
-        max_market_usdc=max_market_usdc,
-        max_total_usdc=max_total_usdc,
+        prob_provider=_prob_provider,
+        kelly_fraction=kelly_fraction,
+        kelly_max_position_fraction=kelly_max_position_fraction,
+        kelly_min_edge=kelly_min_edge,
+        kelly_min_stake_usdc=kelly_min_stake_usdc,
+        kelly_allow_round_up_to_market_min=kelly_allow_round_up,
+        kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
     )
     plan = _merge_allocation_plan(
         trace_id=context.trace_id,

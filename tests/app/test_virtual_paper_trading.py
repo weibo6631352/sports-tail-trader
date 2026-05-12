@@ -50,7 +50,11 @@ def test_virtual_paper_trade_uses_real_runtime_and_only_virtualizes_final_submit
     assert result["paper_pnl"]["basis"] == "entry_fill_vs_follow_up_limit_net_after_taker_fees"
     assert result["paper_pnl"]["realized"] is False
     assert result["paper_pnl"]["profitable"] is True
-    assert result["paper_pnl"]["projected_net_pnl_usdc"] == "0.102040816326530612"
+    # Kelly sizing：bankroll=10, kelly_max_position_fraction=1.0 理论可全仓，但
+    # strategies/current 的 tail_max_event_exposure_min_floor_usdc=5 接管 event cap
+    # （bankroll × 0.25 = 2.5 < floor 5），实际 stake = 5 USDC。
+    # shares = 5 / 0.98 ≈ 5.10204；exit @ 0.99 → projected pnl ≈ 5.10204 × 0.01。
+    assert result["paper_pnl"]["projected_net_pnl_usdc"] == "0.051020408163265306"
     # 测试用 Market 未配置 fee_rate_bps，所以 fee 为 0；Decimal("0").quantize 序列化为 "0E-18"
     assert Decimal(result["paper_pnl"]["fees_paid_usdc"]) == Decimal("0")
 
@@ -196,11 +200,18 @@ def _runtime_with_real_like_candidate() -> SimpleNamespace:
     )
     return SimpleNamespace(
         settings=SimpleNamespace(
+            # Kelly sizing 框架替代旧 max_order/market/total/open_orders 静态上限。
+            # bankroll = portfolio_budget = 10 USDC；单仓 fraction=1.0 让单笔可用满额，
+            # 重现旧测试单 BUY 用满 10 USDC 的预期 PnL；min_edge=0 让小 edge 也通过；
+            # round_up=True 允许 Kelly 推荐 stake < market.min_order 时凑齐到 cap。
             portfolio_budget_usdc=Decimal("10"),
-            max_order_usdc=Decimal("10"),
-            max_market_usdc=Decimal("10"),
-            max_total_usdc=Decimal("10"),
-            max_open_orders=10,
+            kelly_fraction=Decimal("1"),
+            kelly_max_position_fraction=Decimal("1"),
+            kelly_min_edge=Decimal("0"),
+            kelly_min_stake_usdc=Decimal("1"),
+            kelly_allow_round_up_to_market_min=True,
+            kelly_round_up_max_overbet_ratio=Decimal("1"),
+            kelly_drawdown_halt_fraction=Decimal("0"),
             order_retry_limit=2,
         ),
         registry=registry,

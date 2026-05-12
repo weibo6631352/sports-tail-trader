@@ -39,6 +39,22 @@ from polymarket_trader.workers.trading_decision import (
 )
 
 
+def _resolve_admin_bankroll(account: Any, portfolio_budget_usdc: Any) -> Decimal:
+    """同 EntryPlanner / worker 一致的 bankroll 口径。Admin/manual 入口同样要走 Kelly。"""
+
+    cap = portfolio_budget_usdc if isinstance(portfolio_budget_usdc, Decimal) else Decimal(
+        str(portfolio_budget_usdc) if portfolio_budget_usdc is not None else "0"
+    )
+    available = getattr(account, "available_usdc", None)
+    if available is None:
+        bankroll = cap
+    else:
+        bankroll = min(available, cap)
+    if bankroll < Decimal("0"):
+        return Decimal("0")
+    return bankroll
+
+
 class AdminControlsMixin:
     """受控人工操作。每个方法仍经过统一交易主链路。"""
 
@@ -205,10 +221,11 @@ class AdminControlsMixin:
             classification_passed=True,
             balance_usdc=snapshot_available_usdc(account),
             allowance_usdc=snapshot_allowance(account),
-            max_order_usdc=self._settings_value("max_order_usdc"),
-            max_market_usdc=self._settings_value("max_market_usdc"),
-            max_total_usdc=self._settings_value("max_total_usdc"),
-            max_open_orders=self._settings_value("max_open_orders"),
+            bankroll_usdc=_resolve_admin_bankroll(account, self._settings_value("portfolio_budget_usdc")),
+            kelly_max_position_fraction=self._settings_value("kelly_max_position_fraction"),
+            kelly_round_up_max_overbet_ratio=self._settings_value("kelly_round_up_max_overbet_ratio"),
+            peak_bankroll_usdc=getattr(account, "peak_bankroll_usdc", None),
+            kelly_drawdown_halt_fraction=self._settings_value("kelly_drawdown_halt_fraction"),
             order_retry_limit=self._settings_value("order_retry_limit"),
             operation="admin_confirm_entry",
         )
@@ -639,10 +656,11 @@ class AdminControlsMixin:
             classification_passed=True,
             balance_usdc=snapshot_available_usdc(account),
             allowance_usdc=snapshot_allowance(account),
-            max_order_usdc=self._settings_value("max_order_usdc"),
-            max_market_usdc=self._settings_value("max_market_usdc"),
-            max_total_usdc=self._settings_value("max_total_usdc"),
-            max_open_orders=self._settings_value("max_open_orders"),
+            bankroll_usdc=_resolve_admin_bankroll(account, self._settings_value("portfolio_budget_usdc")),
+            kelly_max_position_fraction=self._settings_value("kelly_max_position_fraction"),
+            kelly_round_up_max_overbet_ratio=self._settings_value("kelly_round_up_max_overbet_ratio"),
+            peak_bankroll_usdc=getattr(account, "peak_bankroll_usdc", None),
+            kelly_drawdown_halt_fraction=self._settings_value("kelly_drawdown_halt_fraction"),
             order_retry_limit=self._settings_value("order_retry_limit"),
         )
         result = review.order_result

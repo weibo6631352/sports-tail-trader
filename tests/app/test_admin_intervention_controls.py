@@ -304,10 +304,14 @@ def test_force_exit_position_uses_best_bid_and_calls_trading_service_sell() -> N
             trading_service=trading_service,
             market_ws_worker=_FakeMarketWs(),
             settings=SimpleNamespace(
-                max_order_usdc=Decimal("100"),
-                max_market_usdc=Decimal("100"),
-                max_total_usdc=Decimal("100"),
-                max_open_orders=5,
+                portfolio_budget_usdc=Decimal("100"),
+                kelly_fraction=Decimal("0.25"),
+                kelly_max_position_fraction=Decimal("0.10"),
+                kelly_min_edge=Decimal("0.02"),
+                kelly_min_stake_usdc=Decimal("1"),
+                kelly_allow_round_up_to_market_min=True,
+                kelly_round_up_max_overbet_ratio=Decimal("1"),
+                kelly_drawdown_halt_fraction=Decimal("0.5"),
                 order_retry_limit=1,
             ),
         )

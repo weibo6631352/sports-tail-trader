@@ -42,13 +42,14 @@ class _DummyAdminService:
 
 def _make_app(*, admin_token: str | None) -> FastAPI:
     settings = Settings(
+        # 显式跳过本地 .env，避免本机 dev 环境里残留的 MAX_ORDER_USDC / MAX_*
+        # 等已删除字段被 pydantic-settings extra="forbid" 拒掉。
+        _env_file=None,
         admin_api_token=SecretStr(admin_token) if admin_token else None,
         expose_openapi_docs=False,
+        # Kelly sizing 替代旧静态上限：bankroll = portfolio_budget；这里只验证 admin
+        # token / rate limit，sizing 字段保持默认值即可。
         portfolio_budget_usdc="10",
-        max_order_usdc="10",
-        max_market_usdc="10",
-        max_total_usdc="10",
-        max_open_orders=10,
         wallet_private_key=SecretStr("dummy"),
     )
     runtime = _DummyRuntime()

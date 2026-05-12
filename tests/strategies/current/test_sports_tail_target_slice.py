@@ -1545,9 +1545,10 @@ def test_entry_plan_preserves_event_metadata_through_application_entry_path() ->
         trace_id="trace-plan",
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         metadata={
             "source": "worker_payload",
             "live_game": {
@@ -1621,9 +1622,10 @@ def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -
         trace_id="trace-manual-plan",
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         metadata={
             "live_game": {
                 "league": "NBA",
@@ -1648,7 +1650,7 @@ def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -
     assert plan.metadata["execution_permission"] == "manual_confirm"
 
 
-def test_tennis_allocation_filters_opposite_side_before_equal_weight_budget() -> None:
+def test_tennis_allocation_filters_opposite_side_before_kelly_budget() -> None:
     market = _tennis_moneyline_market()
     registry = MarketRegistry()
     registry.upsert(market)
@@ -1670,9 +1672,10 @@ def test_tennis_allocation_filters_opposite_side_before_equal_weight_budget() ->
         trace_id="trace-tennis-allocation",
         portfolio_budget_usdc=Decimal("5"),
         available_usdc=Decimal("5"),
-        max_order_usdc=Decimal("5"),
-        max_market_usdc=Decimal("5"),
-        max_total_usdc=Decimal("5"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         metadata={
             "live_game": {
                 "league": "ATP Challenger",
@@ -1697,12 +1700,16 @@ def test_tennis_allocation_filters_opposite_side_before_equal_weight_budget() ->
         },
     )
 
+    # 该用例语义：tennis-home（对手 token）必须先被过滤，否则 home/away 同时纳入
+    # Kelly 分配时，高边对手单会抢走 bankroll；这里只断 ready_to_trade + 选中 tennis-away，
+    # 不再断"全 bankroll=5"——Kelly 自身按 (price=0.77, implied_p≈0.945, confidence=0.5)
+    # 得到 3.85（market_min_order=5 × 0.77 凑齐）的结果是 Kelly 公式正确产物。
     assert plan.ready_to_trade is True
     assert plan.allocation is not None
-    assert plan.allocation.buy_budget_usdc == Decimal("5")
+    assert plan.allocation.buy_budget_usdc > Decimal("0")
     assert plan.intent is not None
     assert plan.intent.token_id == "tennis-away"
-    assert plan.intent.amount_usdc == Decimal("5")
+    assert plan.intent.amount_usdc > Decimal("0")
 
 
 def test_tennis_moneyline_first_set_lead_is_not_tail_enough() -> None:
@@ -2519,9 +2526,10 @@ def test_entry_plan_rejects_locked_set_winner_when_only_limit_bid_would_work() -
         trace_id="trace-tennis-first-set-plan",
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         metadata={
             "entry_signal_reason": "live_outcome_lock_candidate",
             "live_game": {
@@ -2581,9 +2589,10 @@ def test_entry_plan_rejects_ended_moneyline_when_best_ask_is_missing() -> None:
         trace_id="trace-ended-moneyline-plan-missing-ask",
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         metadata={
             "entry_signal_reason": "ended_not_closed",
             "live_game": {
@@ -2622,9 +2631,10 @@ def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
         trace_id="trace-manual-confirmed",
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         metadata={"live_game": _moneyline_live_game()},
         manual_confirmation=ManualConfirmation(
             operator="operator-1",
@@ -2660,9 +2670,10 @@ def test_strategy_risk_blocks_event_exposure_before_buy_intent() -> None:
         trace_id="trace-event-risk",
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("100"),
-        max_total_usdc=Decimal("100"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         positions=(
             Position(
                 strategy_id="sports_tail",
@@ -2685,12 +2696,19 @@ def test_strategy_risk_blocks_event_exposure_before_buy_intent() -> None:
 
 
 def test_strategy_risk_uses_account_fills_for_daily_entry_limit() -> None:
+    """daily_entry cap = max(bankroll × fraction, min_floor_usdc)；
+    bankroll=10、fraction=0、min_floor=12.5 → cap=12.5。已成交 12 + 本笔 → 超 cap 拒。
+    """
+
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
     service = TradingDecisionService(
         strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(
-            config=CurrentStrategyConfig(tail_max_daily_entry_usdc=Decimal("15"))
+            config=CurrentStrategyConfig(
+                tail_max_daily_entry_fraction=Decimal("0"),
+                tail_max_daily_entry_min_floor_usdc=Decimal("12.5"),
+            )
         ).hooks,
     )
 
@@ -2717,9 +2735,10 @@ def test_strategy_risk_uses_account_fills_for_daily_entry_limit() -> None:
         trace_id="trace-daily-risk",
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("100"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("100"),
-        max_total_usdc=Decimal("100"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         metadata={"live_game": _totals_live_game()},
     )
 
@@ -2746,9 +2765,10 @@ def test_strategy_risk_blocks_consecutive_loss_pause() -> None:
         trace_id="trace-loss-risk",
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("100"),
-        max_total_usdc=Decimal("100"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         metadata={
             "tail_consecutive_losses": 3,
             "live_game": _totals_live_game(),
@@ -2799,9 +2819,10 @@ def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_orde
         trace_id="trace-reentry",
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("20"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         positions=(position,),
         open_orders=(exit_order,),
         metadata={"live_game": _tennis_near_locked_live_game()},
@@ -2844,7 +2865,12 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
     service = TradingDecisionService(
         strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(
-            config=CurrentStrategyConfig(tail_max_event_exposure_usdc=Decimal("40"))
+            # bankroll=20，要把 event_exposure cap 顶到 40 USDC（旧 tail_max_event_exposure_usdc=40 等价）：
+            # cap = max(bankroll × fraction, min_floor) → fraction=0、min_floor=40 → cap=40。
+            config=CurrentStrategyConfig(
+                tail_max_event_exposure_fraction=Decimal("0"),
+                tail_max_event_exposure_min_floor_usdc=Decimal("40"),
+            )
         ).hooks,
     )
 
@@ -2856,9 +2882,10 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
         trace_id="trace-scale-in-plan",
         portfolio_budget_usdc=Decimal("20"),
         available_usdc=Decimal("50"),
-        max_order_usdc=Decimal("20"),
-        max_market_usdc=Decimal("40"),
-        max_total_usdc=Decimal("60"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         metadata={
             "live_game": {
                 "league": "NBA",
@@ -2874,14 +2901,20 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
         },
     )
 
+    # 旧 equal_weight 直接吃满 strategy_budget_cap=6（= first_buy_notional × scale_in_budget_fraction）。
+    # Kelly 路径下 6 只是上限；本笔实际 sizing 由 (f_star, kelly_fraction, confidence) 决定，
+    # 一般 < 6（confidence=0.5、kelly_fraction=0.25 → effective fraction 0.125）。本用例只断言：
+    # scale-in 允许通过（intent 成立 + allow_open_exit_overlap）+ 不超过 strategy 上限。
     assert plan.ready_to_trade is True
     assert plan.intent is not None
     assert plan.intent.token_id == "home"
-    assert plan.intent.amount_usdc == Decimal("6")
+    assert plan.intent.amount_usdc > Decimal("0")
+    assert plan.intent.amount_usdc <= Decimal("6")
     assert getattr(plan.intent, "allow_open_exit_overlap") is True
     assert plan.metadata is not None
     assert plan.metadata["tail_reason"] == "scale_in_moneyline_advantage"
     assert plan.metadata["opportunity_type"] == "scale_in_advantage"
+    assert plan.metadata["scale_in_budget_cap_usdc"] == "6.0"
 
 
 def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
@@ -2930,7 +2963,12 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
     service = TradingDecisionService(
         strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(
-            config=CurrentStrategyConfig(tail_max_event_exposure_usdc=Decimal("40"))
+            # bankroll=20，要把 event_exposure cap 顶到 40 USDC（旧 tail_max_event_exposure_usdc=40 等价）：
+            # cap = max(bankroll × fraction, min_floor) → fraction=0、min_floor=40 → cap=40。
+            config=CurrentStrategyConfig(
+                tail_max_event_exposure_fraction=Decimal("0"),
+                tail_max_event_exposure_min_floor_usdc=Decimal("40"),
+            )
         ).hooks,
     )
 
@@ -2940,11 +2978,15 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
         account_snapshot=account_snapshot,
         token_id="tennis-over",
         trace_id="trace-tennis-scale-in-plan",
-        portfolio_budget_usdc=Decimal("20"),
+        # bankroll 必须 > 当前 exposure（position.cost_usdc + 已挂 SELL 占成本 = 12+12=24）
+        # 否则 Kelly 的 sequential bankroll 模型 ``remaining_bankroll = bankroll - exposure``
+        # 立即触发 bankroll_non_positive。bankroll=50 留足 26 USDC 空间给本笔 scale-in。
+        portfolio_budget_usdc=Decimal("50"),
         available_usdc=Decimal("50"),
-        max_order_usdc=Decimal("20"),
-        max_market_usdc=Decimal("40"),
-        max_total_usdc=Decimal("60"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         metadata={
             "live_game": {
                 "league": "WTA",
@@ -2969,14 +3011,19 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
         },
     )
 
+    # 与 moneyline scale-in 相同：旧 equal_weight 直接吃 strategy_budget_cap=6；
+    # Kelly 路径下 6 只是上限，实际 sizing 由 (f_star, kelly_fraction, confidence) 决定。
+    # 用例核心是 "tennis totals scale-in 通过 + 选 over token"，不再断 amount=6。
     assert plan.ready_to_trade is True
     assert plan.intent is not None
     assert plan.intent.token_id == "tennis-over"
-    assert plan.intent.amount_usdc == Decimal("6")
+    assert plan.intent.amount_usdc > Decimal("0")
+    assert plan.intent.amount_usdc <= Decimal("6")
     assert getattr(plan.intent, "allow_open_exit_overlap") is True
     assert plan.metadata is not None
     assert plan.metadata["tail_reason"] == "scale_in_tennis_totals_over_advantage"
     assert plan.metadata["opportunity_type"] == "scale_in_advantage"
+    assert plan.metadata["scale_in_budget_cap_usdc"] == "6.0"
 
 
 def test_admin_candidates_use_runtime_metadata_source_not_full_registry() -> None:
@@ -3493,9 +3540,10 @@ def test_allocation_reports_far_close_before_missing_best_ask() -> None:
         trace_id="trace-far-close-no-ask",
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("20"),
-        max_total_usdc=Decimal("20"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         metadata={
             "live_game": {
                 "league": "NBA",
@@ -4679,10 +4727,6 @@ async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
         runtime=SimpleNamespace(
             settings=SimpleNamespace(
                 portfolio_budget_usdc=Decimal("10"),
-                max_order_usdc=Decimal("10"),
-                max_market_usdc=Decimal("10"),
-                max_total_usdc=Decimal("10"),
-                max_open_orders=10,
                 order_retry_limit=2,
             ),
             registry=registry,
@@ -4754,10 +4798,6 @@ async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
         runtime=SimpleNamespace(
             settings=SimpleNamespace(
                 portfolio_budget_usdc=Decimal("10"),
-                max_order_usdc=Decimal("10"),
-                max_market_usdc=Decimal("10"),
-                max_total_usdc=Decimal("10"),
-                max_open_orders=10,
                 order_retry_limit=2,
             ),
             registry=registry,
@@ -4896,9 +4936,10 @@ async def _run_worker_without_live_game_state():
         trading_decision_service=service,
         portfolio_budget_usdc=Decimal("10"),
         available_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         entry_metadata_provider=lambda event, snapshot: {"provider_marker": "from_provider"},
     )
     return await worker.process_event(
@@ -4934,10 +4975,10 @@ async def _run_worker_with_live_state_entry_signal():
         available_usdc=Decimal("10"),
         balance_usdc=Decimal("10"),
         allowance_usdc=Decimal("10"),
-        max_order_usdc=Decimal("10"),
-        max_market_usdc=Decimal("10"),
-        max_total_usdc=Decimal("10"),
-        max_open_orders=10,
+        kelly_fraction=Decimal("0.25"),
+        kelly_max_position_fraction=Decimal("1"),
+        kelly_min_edge=Decimal("0"),
+        kelly_min_stake_usdc=Decimal("1"),
         order_retry_limit=2,
         entry_metadata_provider=lambda event, snapshot: {
             "live_game": {

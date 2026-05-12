@@ -37,10 +37,13 @@ def check_tail_entry_risk(
     metadata: Mapping[str, object],
     account_snapshot: object | None = None,
     now: datetime | None = None,
+    bankroll_usdc: Decimal = Decimal("0"),
 ) -> SportsRiskDecision:
-    """检查体育扫尾业务风险上限。
+    """检查体育扫尾业务风险上限（相关性硬上限）。
 
-    该函数只读本地快照和 metadata，不请求外部服务。
+    与 Kelly 单市场 cap 互补：Kelly 控制单笔 sizing；这里控制"同事件 / 同联赛 /
+    单日"的相关性敞口。caps = ``max(bankroll × fraction, min_floor_usdc)``，
+    bankroll 涨大时同步放大；bankroll 极小时 floor 接管避免 cap=0 全拒。
     """
 
     risk_metadata = _base_metadata(
@@ -63,24 +66,41 @@ def check_tail_entry_risk(
     if config.tail_max_consecutive_losses >= 0 and consecutive_losses >= config.tail_max_consecutive_losses:
         return _reject("consecutive_loss_pause", risk_metadata)
 
+    event_cap = _bankroll_fraction_cap(
+        bankroll_usdc=bankroll_usdc,
+        fraction=config.tail_max_event_exposure_fraction,
+        min_floor_usdc=config.tail_max_event_exposure_min_floor_usdc,
+    )
     event_exposure = _event_exposure_usdc(market, candidate_snapshots)
     event_after = event_exposure + buy_budget_usdc
     risk_metadata["event_exposure_usdc"] = str(event_exposure)
     risk_metadata["event_exposure_after_usdc"] = str(event_after)
-    risk_metadata["max_event_exposure_usdc"] = str(config.tail_max_event_exposure_usdc)
-    if event_after > config.tail_max_event_exposure_usdc:
+    risk_metadata["max_event_exposure_usdc"] = str(event_cap)
+    risk_metadata["max_event_exposure_fraction"] = str(config.tail_max_event_exposure_fraction)
+    if event_after > event_cap:
         return _reject("event_exposure_limit", risk_metadata)
 
+    league_cap = _bankroll_fraction_cap(
+        bankroll_usdc=bankroll_usdc,
+        fraction=config.tail_max_league_exposure_fraction,
+        min_floor_usdc=config.tail_max_league_exposure_min_floor_usdc,
+    )
     league = _league_key(market, metadata)
     league_exposure = _league_exposure_usdc(league, candidate_snapshots)
     league_after = league_exposure + buy_budget_usdc
     risk_metadata["league"] = league
     risk_metadata["league_exposure_usdc"] = str(league_exposure)
     risk_metadata["league_exposure_after_usdc"] = str(league_after)
-    risk_metadata["max_league_exposure_usdc"] = str(config.tail_max_league_exposure_usdc)
-    if league_after > config.tail_max_league_exposure_usdc:
+    risk_metadata["max_league_exposure_usdc"] = str(league_cap)
+    risk_metadata["max_league_exposure_fraction"] = str(config.tail_max_league_exposure_fraction)
+    if league_after > league_cap:
         return _reject("league_exposure_limit", risk_metadata)
 
+    daily_cap = _bankroll_fraction_cap(
+        bankroll_usdc=bankroll_usdc,
+        fraction=config.tail_max_daily_entry_fraction,
+        min_floor_usdc=config.tail_max_daily_entry_min_floor_usdc,
+    )
     daily_entry_usdc = _daily_entry_usdc(
         metadata,
         account_snapshot=account_snapshot,
@@ -91,12 +111,25 @@ def check_tail_entry_risk(
     daily_after = daily_entry_usdc + buy_budget_usdc
     risk_metadata["daily_entry_usdc"] = str(daily_entry_usdc)
     risk_metadata["daily_entry_after_usdc"] = str(daily_after)
-    risk_metadata["max_daily_entry_usdc"] = str(config.tail_max_daily_entry_usdc)
-    if daily_after > config.tail_max_daily_entry_usdc:
+    risk_metadata["max_daily_entry_usdc"] = str(daily_cap)
+    risk_metadata["max_daily_entry_fraction"] = str(config.tail_max_daily_entry_fraction)
+    if daily_after > daily_cap:
         return _reject("daily_entry_limit", risk_metadata)
 
     risk_metadata["risk_reason"] = "passed"
     return SportsRiskDecision(passed=True, metadata=risk_metadata)
+
+
+def _bankroll_fraction_cap(
+    *,
+    bankroll_usdc: Decimal,
+    fraction: Decimal,
+    min_floor_usdc: Decimal,
+) -> Decimal:
+    """fraction × bankroll 与绝对 floor 取较大者。bankroll 极小时 floor 接管。"""
+
+    fraction_cap = bankroll_usdc * fraction if bankroll_usdc > Decimal("0") else Decimal("0")
+    return max(fraction_cap, min_floor_usdc)
 
 
 def _reject(reason: str, metadata: dict[str, object]) -> SportsRiskDecision:

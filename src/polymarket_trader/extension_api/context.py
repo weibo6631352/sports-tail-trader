@@ -68,11 +68,24 @@ class AccountView:
 
 @dataclass(frozen=True, slots=True)
 class BudgetView:
+    """传给策略 hook 的资金视图。
+
+    ``bankroll_usdc`` = ``min(account.available_usdc, settings.portfolio_budget_usdc)``，
+    Kelly 公式直接吃这个值。``portfolio_budget_usdc`` / ``available_usdc`` 仅作上下文展示，
+    策略不应再用它们做仓位决策——所有 sizing 走 ``kelly_*`` 字段。
+    """
+
     portfolio_budget_usdc: Decimal | None = None
     available_usdc: Decimal | None = None
-    max_order_usdc: Decimal | None = None
-    max_market_usdc: Decimal | None = None
-    max_total_usdc: Decimal | None = None
+    bankroll_usdc: Decimal | None = None
+    kelly_fraction: Decimal | None = None
+    kelly_max_position_fraction: Decimal | None = None
+    kelly_min_edge: Decimal | None = None
+    kelly_min_stake_usdc: Decimal | None = None
+    kelly_allow_round_up_to_market_min: bool | None = None
+    kelly_round_up_max_overbet_ratio: Decimal | None = None
+    kelly_drawdown_halt_fraction: Decimal | None = None
+    peak_bankroll_usdc: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,9 +121,15 @@ class ExtensionContext:
     now: datetime | None = None
     portfolio_budget_usdc: Decimal | None = None
     available_usdc: Decimal | None = None
-    max_order_usdc: Decimal | None = None
-    max_market_usdc: Decimal | None = None
-    max_total_usdc: Decimal | None = None
+    bankroll_usdc: Decimal | None = None
+    kelly_fraction: Decimal | None = None
+    kelly_max_position_fraction: Decimal | None = None
+    kelly_min_edge: Decimal | None = None
+    kelly_min_stake_usdc: Decimal | None = None
+    kelly_allow_round_up_to_market_min: bool | None = None
+    kelly_round_up_max_overbet_ratio: Decimal | None = None
+    kelly_drawdown_halt_fraction: Decimal | None = None
+    peak_bankroll_usdc: Decimal | None = None
     allocation_plan: AllocationPlan | None = None
     allocation: Allocation | None = None
     amount_usdc: Decimal | None = None
@@ -140,9 +159,15 @@ class ExtensionContext:
         return BudgetView(
             portfolio_budget_usdc=self.portfolio_budget_usdc,
             available_usdc=self.available_usdc,
-            max_order_usdc=self.max_order_usdc,
-            max_market_usdc=self.max_market_usdc,
-            max_total_usdc=self.max_total_usdc,
+            bankroll_usdc=self.bankroll_usdc,
+            kelly_fraction=self.kelly_fraction,
+            kelly_max_position_fraction=self.kelly_max_position_fraction,
+            kelly_min_edge=self.kelly_min_edge,
+            kelly_min_stake_usdc=self.kelly_min_stake_usdc,
+            kelly_allow_round_up_to_market_min=self.kelly_allow_round_up_to_market_min,
+            kelly_round_up_max_overbet_ratio=self.kelly_round_up_max_overbet_ratio,
+            kelly_drawdown_halt_fraction=self.kelly_drawdown_halt_fraction,
+            peak_bankroll_usdc=self.peak_bankroll_usdc,
         )
 
     @property
