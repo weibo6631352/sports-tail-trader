@@ -10,8 +10,6 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-import pytest
-
 from polymarket_trader.domain.sports_live import (
     LiveEvent,
     LiveEventKind,
@@ -76,9 +74,6 @@ def test_fusion_status_majority_vote_across_three_sources() -> None:
 def test_fusion_trusted_source_ended_overrides_other_live() -> None:
     """trusted（mlb）主张 ENDED；非 trusted 主张 LIVE → 取 ENDED。"""
     trusted = _team_event(source="mlb", status=SportsLiveGameStatus.ENDED, home_score=5, away_score=3, league="MLB")
-    trusted_event = type(trusted)(
-        **{**trusted.__dict__, "sport": "baseball"}  # tweak sport just to confirm pass-through
-    ) if hasattr(trusted, "__dict__") else trusted
     other = _team_event(source="sofascore", status=SportsLiveGameStatus.LIVE, home_score=4, away_score=3, league="MLB")
 
     async def run() -> SportsLiveSnapshot:
