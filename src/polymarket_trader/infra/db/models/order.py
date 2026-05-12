@@ -156,8 +156,8 @@ class OrderModel(Base, TimestampMixin):
             condition_id=order.condition_id,
             token_id=order.token_id,
             market_slug=order.market_slug,
-            side="" if order.side is None else order.side.value,
-            order_type="" if order.order_type is None else order.order_type.value,
+            side=order.side.value,
+            order_type=order.order_type.value,
             price=order.price or Decimal("0"),
             amount_usdc=order.requested_amount_usdc,
             size_shares=order.requested_size_shares,
@@ -169,12 +169,12 @@ class OrderModel(Base, TimestampMixin):
             status=order.status.value,
             idempotency_key=(
                 _db_key(order.intent.idempotency_key)
-                if order.intent and getattr(order.intent, "idempotency_key", None)
+                if order.intent and order.intent.idempotency_key
                 else None
             ),
             reason=order.reason,
             post_only=(
-                bool(getattr(order.intent, "post_only", False))
+                order.intent.post_only
                 if order.intent is not None
                 else _json_bool(payload.get("post_only"))
             ),
@@ -182,14 +182,26 @@ class OrderModel(Base, TimestampMixin):
         )
 
     def to_domain(self) -> Order:
+        try:
+            side = OrderSide(self.side)
+        except ValueError as exc:
+            raise ValueError(f"orders[order_key={self.order_key}] invalid side={self.side!r}") from exc
+        try:
+            order_type = OrderType(self.order_type)
+        except ValueError as exc:
+            raise ValueError(f"orders[order_key={self.order_key}] invalid order_type={self.order_type!r}") from exc
+        try:
+            status = OrderStatus(self.status)
+        except ValueError as exc:
+            raise ValueError(f"orders[order_key={self.order_key}] invalid status={self.status!r}") from exc
         return Order(
             strategy_id=self.strategy_id,
             trace_id=self.trace_id,
             condition_id=self.condition_id,
             token_id=self.token_id,
             market_slug=self.market_slug,
-            side=OrderSide(self.side),
-            order_type=OrderType(self.order_type),
+            side=side,
+            order_type=order_type,
             price=_decimal(self.price) or Decimal("0"),
             amount_usdc=_decimal(self.amount_usdc),
             size_shares=_decimal(self.size_shares),
@@ -198,7 +210,7 @@ class OrderModel(Base, TimestampMixin):
             notional_usdc=_decimal(self.notional_usdc),
             order_id=self.order_id,
             trade_id=self.trade_id,
-            status=OrderStatus(self.status),
+            status=status,
             idempotency_key=self.idempotency_key,
             reason=self.reason,
             post_only=bool(self.post_only),

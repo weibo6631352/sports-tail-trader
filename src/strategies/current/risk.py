@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Mapping
 
 from polymarket_trader.domain.allocation import current_exposure_usdc
@@ -288,7 +288,7 @@ def _decimal_metadata(
             continue
         try:
             return Decimal(str(value))
-        except Exception:
+        except (ValueError, TypeError, InvalidOperation):
             continue
     return default
 
@@ -304,6 +304,6 @@ def _int_metadata(
             continue
         try:
             return int(value)
-        except Exception:
+        except (ValueError, TypeError):
             continue
     return default

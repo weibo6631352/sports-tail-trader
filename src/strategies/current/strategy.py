@@ -13,6 +13,9 @@ from decimal import Decimal
 import re
 from typing import Any, Mapping
 
+from polymarket_trader.domain.order import ManagedOrderIntent
+from polymarket_trader.domain.orderbook import OrderbookSnapshot
+
 from polymarket_trader.extension_api.lifecycle import LifecycleEnvelope as _LifecycleEnvelope, LifecycleEvent as _LifecycleEvent
 from polymarket_trader.extension_api import (
     AccountSnapshotView,
@@ -23,6 +26,7 @@ from polymarket_trader.extension_api import (
     ExtensionSpec,
     LiveStateHooks,
     LiveStateMatch,
+    MarketTokenView,
     RecoveryDecision,
     ExtensionContext,
     ExtensionDecision,
@@ -43,12 +47,15 @@ from strategies.current.discovery import (
 )
 from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata, exit_price_for_context
 from strategies.current.live_state import build_live_state_match
-from strategies.current.outcomes import describe_sports_market
+from strategies.current.outcomes import SportsMarketDescriptor, describe_sports_market
+from strategies.current.allocation import AllocationMarketSnapshot, ProbView, kelly_plan
 from strategies.current.outright import (
+    OutrightEvaluation,
     check_outright_entry_risk,
     evaluate_outright_opportunity,
     season_odds_from_metadata,
 )
+from strategies.current.outright.pricing import outright_fair_value
 from strategies.current.parameter_overrides import active_ports_scope, effective_decimal, effective_int
 from strategies.current.recovery import decide_recovery
 from strategies.current.tail.types import ExecutionPermission as _ExecPerm
@@ -69,7 +76,7 @@ class _MockTokenView:
 
     token_id: str
     outcome: str
-    orderbook: Any = None
+    orderbook: OrderbookSnapshot | None = None
 
 
 class CurrentStrategy:
@@ -118,7 +125,7 @@ class CurrentStrategy:
                 )
             except Exception:
                 # 订阅失败不阻断 boot；缺少订阅时 recovery 退化到 stale-age 判断。
-                pass
+                logger.warning("strategy.lifecycle_subscribe_failed", exc_info=True)
         self._spec = ExtensionSpec(
             strategy_id=STRATEGY_ID,
             name="current",
@@ -356,13 +363,11 @@ class CurrentStrategy:
             return size_entry(self._config, context)
 
     def _size_outright_entry(self, context: ExtensionContext) -> EntrySizing:
-        """Outright family sizing 当前**不走 Kelly**——用固定预算包络 +
-        outright/evaluator 的反向定价（fair × (1-edge)）做 entry_price_cap。
+        """Outright family Kelly sizing。
 
-        未来工作：把 outright 接通 Kelly：``ProbProvider`` 取
-        ``outright_fair_value()`` 真概率（conf=1.0），与 single-game tail 共用
-        ``kelly_plan`` 路径，删除此独立 sizing 分支。当前阶段 outright
-        ``ExecutionPermission.RECORD_ONLY`` 是默认值，不会真实下单。
+        用赛季赔率 ``outright_fair_value()`` 作为真概率（conf=1.0）喂 Kelly 公式，
+        与 single-game tail 共用 ``kelly_plan`` 路径。Outright 使用独立预算包络，
+        不占用 single_game 资金。
         """
 
         config = self._config
@@ -376,21 +381,84 @@ class CurrentStrategy:
                 ),
                 reason="outright_budget_zero",
             )
-        return EntrySizing(
-            allocation_plan=AllocationPlan(
-                trace_id=context.trace_id,
-                total_budget_usdc=budget,
-                reason="outright_sizing",
-            ),
-            reason="outright_sizing",
-            metadata={
-                "outright_budget_usdc": str(budget),
-                "outright_per_market_usdc": str(
-                    min(budget, config.tail_outright_max_per_market_usdc)
+
+        market = context.market
+        if market is None:
+            return EntrySizing(
+                allocation_plan=AllocationPlan(
+                    trace_id=context.trace_id,
+                    total_budget_usdc=budget,
+                    reason="outright_missing_market",
                 ),
-                "kelly_path": "not_applied",  # 审计标记：outright 未接 Kelly
-            },
+                reason="outright_missing_market",
+            )
+
+        kelly_fraction = context.kelly_fraction
+        kelly_max_position_fraction = context.kelly_max_position_fraction
+        kelly_min_stake_usdc = context.kelly_min_stake_usdc
+        if kelly_fraction is None or kelly_max_position_fraction is None or kelly_min_stake_usdc is None:
+            # Kelly 参数由 EntryPlanner 注入；缺失说明框架契约违反，记录并退化到平坦预算。
+            logger.warning(
+                "outright_sizing.missing_kelly_params: trace_id=%s condition_id=%s",
+                context.trace_id,
+                market.condition_id,
+            )
+            return EntrySizing(
+                allocation_plan=AllocationPlan(
+                    trace_id=context.trace_id,
+                    total_budget_usdc=budget,
+                    reason="outright_sizing_no_kelly_params",
+                ),
+                reason="outright_sizing_no_kelly_params",
+                metadata={
+                    "outright_budget_usdc": str(budget),
+                    "kelly_path": "not_applied",
+                },
+            )
+
+        snapshot = season_odds_from_metadata(context.metadata or {})
+        token_views = tuple(context.market_token_views or ())
+        outcome_by_token: dict[str, str] = {
+            tv.token_id: (tv.outcome or "") for tv in token_views if tv.token_id
+        }
+
+        per_market_cap = min(budget, config.tail_outright_max_per_market_usdc)
+        market_snapshots: list[AllocationMarketSnapshot] = []
+        for tv in token_views:
+            if not tv.token_id:
+                continue
+            ob = tv.orderbook
+            best_ask = ob.best_ask if ob is not None else None
+            market_snapshots.append(AllocationMarketSnapshot(
+                market=market,
+                token_id=tv.token_id,
+                orderbook=ob,
+                best_ask=best_ask,
+                strategy_budget_cap_usdc=per_market_cap,
+            ))
+
+        def _prob_provider(snap: AllocationMarketSnapshot) -> ProbView:
+            outcome_label = outcome_by_token.get(snap.token_id, "")
+            if snapshot is None or not outcome_label:
+                return ProbView(prob_p=None, prob_confidence=Decimal("0"), source="outright_real_missing")
+            fair_value = outright_fair_value(snapshot, outcome_label)
+            if fair_value is None:
+                return ProbView(prob_p=None, prob_confidence=Decimal("0"), source="outright_real_missing")
+            # 赛季赔率是真实概率（非 implied），conf=1.0 不做折扣。
+            return ProbView(prob_p=fair_value, prob_confidence=Decimal("1"), source="outright_real")
+
+        plan = kelly_plan(
+            trace_id=context.trace_id,
+            bankroll_usdc=context.bankroll_usdc or budget,
+            portfolio_budget_usdc=budget,
+            markets=tuple(market_snapshots),
+            prob_provider=_prob_provider,
+            kelly_fraction=kelly_fraction,
+            kelly_max_position_fraction=kelly_max_position_fraction,
+            kelly_min_edge=context.kelly_min_edge or Decimal("0"),
+            kelly_min_stake_usdc=kelly_min_stake_usdc,
         )
+        return EntrySizing(allocation_plan=plan, reason="outright_kelly")
 
     def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
         """根据盘口和预算生成 BUY 决策。
@@ -446,8 +514,8 @@ class CurrentStrategy:
             permission if budget_unlocked else _ExecPerm.RECORD_ONLY
         )
         now = context.now or datetime.now(timezone.utc)
-        best_accept: tuple[Any, Any] | None = None  # (evaluation, token_view)
-        first_reject: Any | None = None
+        best_accept: tuple[tuple[Decimal, OutrightEvaluation], MarketTokenView] | None = None
+        first_reject: tuple[OutrightEvaluation, MarketTokenView] | None = None
         for token_view in token_views:
             orderbook = token_view.orderbook
             best_ask = orderbook.best_ask if orderbook is not None else None
@@ -479,8 +547,8 @@ class CurrentStrategy:
                 else Decimal("0")
             )
             # buyable_ask_depth 返回的是 shares 数；按价格折算成 USDC 才能与 min_orderbook_depth_usdc 比较。
-            ask_for_calc = best_ask if best_ask is not None else Decimal("1")
-            buyable_usdc = buyable * ask_for_calc
+            # best_ask 为 None 时 buyable 必然为 0（无 ask），直接置零避免语义混乱。
+            buyable_usdc = buyable * best_ask if best_ask is not None else Decimal("0")
             # Runtime override 优先于 frozen config——让 agent 通过 PUT
             # /parameters/strategy/{key} 实时调阈值。无 port 或无 override 时
             # 行为与原来完全一致。
@@ -561,8 +629,12 @@ class CurrentStrategy:
                 },
             )
         # AUTO_EXECUTE：构造 BUY。预算/合约级 RiskManager 仍是最终门禁；本函数只生成 intent。
-        budget = config.tail_outright_budget_usdc
-        proposed_amount = min(budget, config.tail_outright_max_per_market_usdc)
+        # 优先从 kelly_plan 分配结果读金额；fallback 到 config 硬上限（兼容 sizing 降级路径）。
+        allocation = context.allocation
+        if allocation is not None and allocation.buy_budget_usdc > Decimal("0"):
+            proposed_amount = allocation.buy_budget_usdc
+        else:
+            proposed_amount = min(config.tail_outright_budget_usdc, config.tail_outright_max_per_market_usdc)
         if proposed_amount <= Decimal("0"):
             return ExtensionDecision.skip(
                 reason="outright_budget_exhausted",
@@ -583,8 +655,9 @@ class CurrentStrategy:
             existing_event_exposure_usdc=existing_event_exposure,
             max_per_market_usdc=config.tail_outright_max_per_market_usdc,
             max_event_correlation_usdc=config.tail_outright_max_event_correlation_usdc,
-            max_total_outright_usdc=budget,
+            max_total_outright_usdc=config.tail_outright_budget_usdc,
             max_hold_horizon_days=config.tail_outright_max_hold_horizon_days,
+            min_remaining_days=config.tail_outright_min_remaining_days,
         )
         if risk_reject is not None:
             return ExtensionDecision.skip(
@@ -820,11 +893,12 @@ def build_strategy(
     )
 
 
-def _order_intent_metadata(intent: object | None) -> Mapping[str, Any]:
+def _order_intent_metadata(intent: ManagedOrderIntent | None) -> Mapping[str, Any]:
     """读取成交来源 intent 上的透传 metadata。"""
 
-    metadata = getattr(intent, "metadata", None)
-    return metadata if isinstance(metadata, Mapping) else {}
+    if intent is None:
+        return {}
+    return intent.metadata
 
 
 def _decimal_from_metadata(value: object) -> Decimal | None:
@@ -921,7 +995,7 @@ def _build_strategy_summary(metadata: Mapping[str, Any]) -> StrategySummary:
 def _market_tail_window_bypass_reason(
     market: Market,
     event: LiveEvent,
-    descriptor: Any,
+    descriptor: SportsMarketDescriptor,
     config: CurrentStrategyConfig,
 ) -> str | None:
     """返回可绕过远期 endDate 粗筛的直播尾盘原因。"""
@@ -933,7 +1007,7 @@ def _market_tail_window_bypass_reason(
     return None
 
 
-def _market_can_lock_before_tail_window(market: Market, event: LiveEvent, descriptor: Any) -> bool:
+def _market_can_lock_before_tail_window(market: Market, event: LiveEvent, descriptor: SportsMarketDescriptor) -> bool:
     """判断 market 是否存在不依赖比赛封盘时间的数学锁定机会。"""
 
     status = event.status.value.lower()
@@ -955,7 +1029,7 @@ def _market_can_lock_before_tail_window(market: Market, event: LiveEvent, descri
 def _market_has_live_tail_state(
     market: Market,
     event: LiveEvent,
-    descriptor: Any,
+    descriptor: SportsMarketDescriptor,
     config: CurrentStrategyConfig,
 ) -> bool:
     """判断直播状态是否已达到策略尾盘条件，但结果尚未完全数学锁定。"""
@@ -1005,6 +1079,8 @@ def _tennis_moneyline_tail_state_reached(state: TennisGameState) -> bool:
         return False
     home_sets = state.home_sets_won
     away_sets = state.away_sets_won
+    if home_sets is None or away_sets is None:
+        return False
     if home_games >= 5 and home_games - away_games >= 2 and home_sets - away_sets >= 1:
         return True
     return away_games >= 5 and away_games - home_games >= 2 and away_sets - home_sets >= 1
@@ -1022,7 +1098,7 @@ def _tennis_set_winner_tail_state_reached(market: Market, state: TennisGameState
     return max(home_games, away_games) >= 5 and abs(home_games - away_games) >= 2
 
 
-def _totals_market_is_already_over(market: Market, event: LiveEvent, descriptor: Any) -> bool:
+def _totals_market_is_already_over(market: Market, event: LiveEvent, descriptor: SportsMarketDescriptor) -> bool:
     line = descriptor.line
     if line is None:
         return False

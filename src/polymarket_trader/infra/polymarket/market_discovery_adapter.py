@@ -146,7 +146,7 @@ def normalize_token_ids(value: Any) -> tuple[str, ...]:
         if text.startswith("[") and text.endswith("]"):
             try:
                 parsed = loads(text)
-            except Exception:
+            except ValueError:
                 return (text,)
             return normalize_token_ids(parsed)
         return (text,)

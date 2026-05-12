@@ -52,9 +52,17 @@ def outright_exit_price_target(
 ) -> Decimal:
     """退出目标价：fair_value 上方留 buffer 平仓，或至少高于入场价 + 最小利润。"""
 
+    if min_profit_per_share <= 0:
+        raise ValueError(f"min_profit_per_share must be positive, got {min_profit_per_share}")
     target_by_edge = fair_value + exit_edge_target
     target_by_floor = entry_price + min_profit_per_share
-    return _clamp(max(target_by_edge, target_by_floor))
+    result = _clamp(max(target_by_edge, target_by_floor))
+    if result <= entry_price:
+        raise ValueError(
+            f"exit_price_target={result} <= entry_price={entry_price}; "
+            f"fair_value={fair_value} exit_edge={exit_edge_target} min_profit={min_profit_per_share}"
+        )
+    return result
 
 
 def _clamp(value: Decimal) -> Decimal:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from polymarket_trader.domain.market import Market
 from polymarket_trader.extension_api import ExtensionContext, ExtensionPorts
 
 from strategies.current.config import CurrentStrategyConfig
@@ -57,6 +58,6 @@ def _tail_locked_outcome_signal(context: ExtensionContext) -> bool:
     }
 
 
-def _is_tennis_set_winner_market(market) -> bool:
-    text = str(getattr(market, "market_slug", "") or "").strip().lower().replace("_", " ").replace("-", " ")
+def _is_tennis_set_winner_market(market: Market) -> bool:
+    text = (market.market_slug or "").strip().lower().replace("_", " ").replace("-", " ")
     return "set winner" in text or "first set winner" in text

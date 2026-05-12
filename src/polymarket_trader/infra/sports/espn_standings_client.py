@@ -13,6 +13,7 @@ ESPN standings path 形如:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -33,6 +34,8 @@ from polymarket_trader.infra.sports.common import (
     normalize_sports_data_error,
     utc_now,
 )
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "https://site.api.espn.com"
 _DEFAULT_LEAGUE_PATHS: dict[str, str] = {
@@ -78,6 +81,7 @@ class EspnStandingsClient:
             try:
                 payload = await self._get_standings(league)
             except Exception:
+                logger.warning("espn_standings_client.fetch_failed", extra={"league": league}, exc_info=True)
                 continue
             standings = parse_espn_standings_payload(
                 payload,

@@ -34,8 +34,14 @@ def build_signed_order(
     exported: dict[str, Any],
     request: OrderExecutionRequest,
 ) -> Any:
+    # py-clob-client-v2 的 order_args/market_order_args 强制要求 float。
+    # 策略层（round_to_tick）在构造请求前已将价格/数量对齐到 tick_size（≥ 0.01），
+    # 因此 float 转换引入的精度误差（≤ 1 ULP ≈ 1e-15）远小于最小 tick 粒度。
     requested_order_type = order_type_text(request.order_type).upper()
-    official_order_type = getattr(exported["order_type"], requested_order_type)
+    order_type_enum = exported["order_type"]
+    if not hasattr(order_type_enum, requested_order_type):
+        raise ValueError(f"order type {requested_order_type!r} not supported by clob client")
+    official_order_type = getattr(order_type_enum, requested_order_type)
 
     if request.side == OrderSide.BUY:
         if request.amount_usdc is None:

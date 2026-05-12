@@ -1,18 +1,18 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from inspect import isawaitable
 from typing import Any, Iterable
 from uuid import uuid4
 
+from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.events import (
     DomainEvent,
     DomainEventType,
     OutboxPriority,
 )
-
-from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import (
     BuyOrderIntent,
@@ -23,6 +23,8 @@ from polymarket_trader.domain.order import (
     OrderIntent,
     OrderResult,
     OrderResultStatus,
+    OrderSide,
+    OrderType,
     ReplaceOrderIntent,
     SellOrderIntent,
 )
@@ -31,6 +33,8 @@ from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.risk import RiskDecision, RiskManager
 from polymarket_trader.extension_api.lifecycle import LifecycleEvent
 from polymarket_trader.runtime.lifecycle_bus import LifecyclePublisher
+
+logger = logging.getLogger(__name__)
 
 
 class TradingService:
@@ -273,6 +277,7 @@ class TradingService:
 
                     asyncio.ensure_future(result)
         except Exception:
+            logger.debug("trading_service.publish_risk_event_failed", exc_info=True)
             return
 
     def _publish_lifecycle(
@@ -568,7 +573,7 @@ def _coerce_decimal(value: object | None) -> Decimal | None:
         return value
     try:
         return Decimal(str(value))
-    except Exception:
+    except (ValueError, TypeError, InvalidOperation):
         return None
 
 
@@ -576,27 +581,23 @@ def _coerce_decimal_or_zero(value: object | None) -> Decimal:
     return _coerce_decimal(value) or Decimal("0")
 
 
-def _coerce_side(value: object | None):
+def _coerce_side(value: object | None) -> OrderSide | None:
     if value is None:
         return None
+    if isinstance(value, OrderSide):
+        return value
     try:
-        from polymarket_trader.domain.order import OrderSide
-
-        if isinstance(value, OrderSide):
-            return value
         return OrderSide(str(value))
-    except Exception:
+    except ValueError:
         return None
 
 
-def _coerce_order_type(value: object | None):
+def _coerce_order_type(value: object | None) -> OrderType | None:
     if value is None:
         return None
+    if isinstance(value, OrderType):
+        return value
     try:
-        from polymarket_trader.domain.order import OrderType
-
-        if isinstance(value, OrderType):
-            return value
         return OrderType(str(value))
-    except Exception:
+    except ValueError:
         return None

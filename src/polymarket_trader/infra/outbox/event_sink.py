@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
-from polymarket_trader.domain.events import DomainEventType, OutboxEvent
+from polymarket_trader.domain.events import DomainEventType, EventEnvelope, OutboxEvent
 
 logger = logging.getLogger(__name__)
 # 未知 event_type 警告频次去重，避免 worker 循环刷屏。1024 个不同 type 是天花板。
@@ -75,16 +75,15 @@ def build_domain_event_outbox_sink(outbox: OutboxSink) -> Callable[[int, Any], N
 
 
 def _to_outbox_event(priority: int, event: Any) -> OutboxEvent | None:
-    event_type = getattr(event, "event_type", None)
-    event_id = getattr(event, "event_id", None)
-    trace_id = getattr(event, "trace_id", None)
-    if event_type is None or event_id is None or trace_id is None:
+    if not isinstance(event, EventEnvelope):
         return None
-    event_type_text = str(event_type).strip()
+    event_type_text = str(event.event_type).strip()
+    if not event_type_text:
+        return None
     if event_type_text not in _PERSISTABLE_EVENT_TYPES:
         # 上游新增 event_type 但忘改 _PERSISTABLE_EVENT_TYPES 会导致事件静默丢失，
         # 上线后只能事后才发现「audit 漏了」。这里记一次 warning（按 type 去重避免刷屏）。
-        if event_type_text and event_type_text not in _unknown_event_types_warned:
+        if event_type_text not in _unknown_event_types_warned:
             _unknown_event_types_warned.add(event_type_text)
             logger.warning(
                 "outbox_sink: dropping non-persistable event_type=%s (add to _PERSISTABLE_EVENT_TYPES if audit needed)",
@@ -95,16 +94,16 @@ def _to_outbox_event(priority: int, event: Any) -> OutboxEvent | None:
     if not isinstance(payload, Mapping):
         payload = {}
     return OutboxEvent(
-        trace_id=str(trace_id),
+        trace_id=event.trace_id,
         event_type=event_type_text,
-        idempotency_key=str(event_id),
-        event_id=str(event_id),
-        market_slug=_text(getattr(event, "market_slug", None)),
-        event_slug=_text(getattr(event, "event_slug", None)),
-        condition_id=_text(getattr(event, "condition_id", None)),
-        token_id=_text(getattr(event, "token_id", None)),
-        reason=_text(getattr(event, "reason", None)),
-        created_at=_datetime(getattr(event, "created_at", None)),
+        idempotency_key=event.event_id,
+        event_id=event.event_id,
+        market_slug=_text(event.market_slug),
+        event_slug=_text(event.event_slug),
+        condition_id=_text(event.condition_id),
+        token_id=_text(event.token_id),
+        reason=_text(event.reason),
+        created_at=_datetime(event.created_at),
         priority=priority,
         payload=_project_payload(event_type_text, payload),
     )

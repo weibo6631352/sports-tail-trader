@@ -8,11 +8,12 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 import hashlib
 import logging
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from polymarket_trader.api.routes.stream import SseSubscriptionRegistry
 from polymarket_trader.app.market_service import MarketService
@@ -22,15 +23,19 @@ from polymarket_trader.app.extension_host import load_extension
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
 from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.config import ConfigIssue, ConfigLoadError, Settings, StartupReadiness, load_settings
-from polymarket_trader.domain.events import DomainEvent, OutboxPriority
+from polymarket_trader.domain.events import AuditEvent, DomainEvent, OutboxPriority
+from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.market import Market
 from polymarket_trader.infra.db import (
     AccountSnapshotRepository,
+    AuditEventRepository,
     DatabasePersistenceRepository,
     FillRepository,
     MarketRepository,
     OrderRepository,
     PositionRepository,
+    RepositoryPage,
+    build_engine,
     build_session_factory,
 )
 from polymarket_trader.infra.outbox.local_queue import LocalOutbox
@@ -57,6 +62,7 @@ from polymarket_trader.infra.sports import (
     NbaLiveScoreboardClient,
     NhlScoreApiClient,
     PandascoreLiveClient,
+    SeasonOddsClient,
     SofaScoreLiveClient,
     SportsLiveAggregateClient,
     TennisLiveDataClient,
@@ -84,6 +90,7 @@ from polymarket_trader.runtime.discovery_runner import (
     run_market_discovery_scan,
 )
 from polymarket_trader.app.decision_recorder import DecisionEventRecorder
+from polymarket_trader.app.parameter_store import ParameterStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
 from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics as _sync_runtime_metrics
@@ -97,7 +104,7 @@ from polymarket_trader.extension_api import BusinessExtension
 from polymarket_trader.workers.market_discovery_worker import MarketDiscoveryWorker
 from polymarket_trader.workers.market_ws import MarketWsWorker
 from polymarket_trader.workers.persistence import PersistenceWorker
-from polymarket_trader.workers.reconcile import ReconcileWorker
+from polymarket_trader.workers.reconcile import ReconcileWorker, ReconcileWorkerResult
 from polymarket_trader.workers.sports_live_state_worker import SportsLiveStateWorker
 from polymarket_trader.workers.sports_season_odds_worker import SportsSeasonOddsWorker
 from polymarket_trader.workers.sports_season_state_worker import SportsSeasonStateWorker
@@ -139,6 +146,7 @@ class RuntimeComponents:
     event_bus: EventBus
     registry: MarketRegistry
     outbox: LocalOutbox
+    db_engine: AsyncEngine
     db_session_factory: async_sessionmaker[AsyncSession]
     persistence_repository: DatabasePersistenceRepository
     persistence_worker: PersistenceWorker
@@ -170,16 +178,16 @@ class RuntimeComponents:
     season_state_store: SeasonStateStore | None = None
     season_state_worker: SportsSeasonStateWorker | None = None
     season_odds_worker: SportsSeasonOddsWorker | None = None
-    season_state_client: Any | None = None
-    season_odds_client: Any | None = None
-    parameter_store: Any | None = None
+    season_state_client: EspnStandingsClient | None = None
+    season_odds_client: SeasonOddsClient | None = None
+    parameter_store: ParameterStore | None = None
 
 
 def _build_sports_live_state_client(
     settings: Settings,
     *,
-    league_source_priority: Any | None = None,
-    trusted_sources: Any | None = None,
+    league_source_priority: Mapping[str, Sequence[str]] | None = None,
+    trusted_sources: Sequence[str] | None = None,
 ) -> SportsLiveAggregateClient:
     """按配置构建多源体育直播状态聚合器。
 
@@ -328,8 +336,8 @@ def _build_season_state_worker(
     settings: Settings,
     *,
     store: SeasonStateStore,
-    lifecycle_bus: Any,
-) -> tuple[SportsSeasonStateWorker, Any] | tuple[None, None]:
+    lifecycle_bus: InProcessLifecycleBus,
+) -> tuple[SportsSeasonStateWorker, EspnStandingsClient] | tuple[None, None]:
     """按 settings 装配 sports_season_state_worker；未启用时返回 (None, None)。
 
     第二项是底层 httpx-backed client，用于运行时 shutdown 时关闭，避免泄漏连接。
@@ -369,8 +377,8 @@ def _build_season_odds_worker(
     *,
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
-    extension: Any,
-) -> tuple[SportsSeasonOddsWorker, Any] | tuple[None, None]:
+    extension: BusinessExtension,
+) -> tuple[SportsSeasonOddsWorker, SeasonOddsClient] | tuple[None, None]:
     """按 settings 装配 sports_season_odds_worker；缺 api_key 或未启用 outright 时返回 (None, None)。
 
     第二项是底层 httpx-backed odds client，用于运行时 shutdown 时关闭。
@@ -389,18 +397,19 @@ def _build_season_odds_worker(
             if r.strip()
         ),
     )
-    def _is_outright(market: Any) -> bool:
+    def _is_outright(market: Market) -> bool:
         try:
             decision = extension.hooks.select_market(market)
         except Exception:
+            logger.debug("season_odds_worker._is_outright_failed", extra={"condition_id": market.condition_id}, exc_info=True)
             return False
         return bool(decision.selected) and decision.metadata.get("market_family") == "outright"
 
-    def _sport_key(market: Any) -> str | None:
+    def _sport_key(market: Market) -> str | None:
         # 简单映射：从 tags / category 推断。NBA/NHL/NFL/MLB 等明确 league 直接转 TheOddsAPI sport_key。
         text = " ".join(filter(None, (
-            getattr(market, "category", None) or "",
-            *(getattr(market, "tags", ()) or ()),
+            market.category or "",
+            *(market.tags or ()),
         ))).lower()
         if "nba" in text or "basketball" in text:
             return "basketball_nba"
@@ -414,8 +423,8 @@ def _build_season_odds_worker(
             return "soccer_epl"
         return None
 
-    def _market_key(market: Any) -> str:
-        return getattr(market, "event_slug", None) or getattr(market, "market_slug", None) or ""
+    def _market_key(market: Market) -> str:
+        return market.event_slug or market.market_slug or ""
 
     worker = SportsSeasonOddsWorker(
         odds_client=client,
@@ -430,17 +439,14 @@ def _build_season_odds_worker(
     return worker, client
 
 
-def _validate_extension_config(extension: Any, settings: Settings) -> tuple[ConfigIssue, ...]:
+def _validate_extension_config(extension: BusinessExtension, settings: Settings) -> tuple[ConfigIssue, ...]:
     """如扩展实现了 ConfigValidator 协议，则在启动期收集其拒绝原因。
 
     与 ``Settings.validate_startup_readiness`` 互补：把策略侧的最小可执行集
     校验（比如 discovery 列表是否为空）也前移到启动期，避免上线后才暴露。
     """
 
-    validate = getattr(extension, "validate_config", None)
-    if not callable(validate):
-        return ()
-    issues = validate(settings)
+    issues = extension.validate_config(settings)
     if not issues:
         return ()
     return tuple(issues)
@@ -489,6 +495,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     event_bus.bind_persistence_sink(build_domain_event_outbox_sink(outbox))
     sse_subscription_registry = SseSubscriptionRegistry()
     event_bus.add_broadcast_listener(sse_subscription_registry.broadcast)
+    db_engine = build_engine(settings.database_url)
     db_session_factory = build_session_factory(settings.database_url)
     persistence_repository = DatabasePersistenceRepository(db_session_factory)
     account_state_store = AccountStateStore()
@@ -498,8 +505,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # 触发 drawdown lockout（peak=placeholder >> 真实 balance）。在 reconcile
     # 拿到第一个权威值前，bankroll=0 → Kelly 全拒，正是安全态。
     lifecycle_bus = InProcessLifecycleBus()
-    from polymarket_trader.app.parameter_store import ParameterStore
-
     parameter_store = ParameterStore(event_bus=event_bus)
     extension_ports = build_extension_ports(
         registry=registry,
@@ -651,7 +656,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         if live_state_hooks is None:
             logger.warning(
                 "sports live state sync skipped because extension does not implement LiveStateHooks",
-                extra={"extension": getattr(extension.spec, "name", "unknown")},
+                extra={"extension": extension.spec.name},
             )
         else:
             league_source_priority = live_state_hooks.league_source_affinity
@@ -721,6 +726,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         event_bus=event_bus,
         registry=registry,
         outbox=outbox,
+        db_engine=db_engine,
         db_session_factory=db_session_factory,
         persistence_repository=persistence_repository,
         persistence_worker=persistence_worker,
@@ -870,10 +876,8 @@ async def shutdown_runtime(runtime: RuntimeComponents) -> None:
     if runtime.season_odds_client is not None:
         with suppress(Exception):
             await runtime.season_odds_client.aclose()
-    bind = getattr(runtime.db_session_factory, "kw", {}).get("bind")
-    if bind is not None:
-        with suppress(Exception):
-            await bind.dispose()
+    with suppress(Exception):
+        await runtime.db_engine.dispose()
     runtime.trading_thread_pool.shutdown(wait=False, cancel_futures=True)
     runtime.maintenance_thread_pool.shutdown(wait=False, cancel_futures=True)
     runtime.maintenance_process_pool.shutdown(wait=False, cancel_futures=True)
@@ -1144,7 +1148,7 @@ async def _run_supervised_loop(
     runtime: RuntimeComponents,
     *,
     name: str,
-    runner: Any,
+    runner: Callable[[], Awaitable[None]],
 ) -> None:
     runtime.supervisor.heartbeat_worker(name, detail="starting")
     try:
@@ -1219,7 +1223,7 @@ def _coalesce_reconcile_scope(
     condition_ids: list[str] = []
     seen_condition_ids: set[str] = set()
     for event in events:
-        condition_id = getattr(event, "condition_id", None)
+        condition_id = event.condition_id
         if not condition_id:
             return source, trigger, None
         if condition_id in seen_condition_ids:
@@ -1268,7 +1272,7 @@ async def _run_reconcile_once(
     trigger_event: DomainEvent | None = None,
     condition_ids: tuple[str, ...] | None = None,
     refresh_market_authority: bool = True,
-) -> Any:
+) -> ReconcileWorkerResult:
     runtime.supervisor.heartbeat_worker("reconcile", detail=source)
     started_at = asyncio.get_running_loop().time()
     try:
@@ -1438,9 +1442,8 @@ async def _run_settlement_scan(runtime: RuntimeComponents) -> None:
     """运行一次结算扫描。任何异常仅记日志——不阻塞 supervisor。"""
 
     from polymarket_trader.app.settlement_scanner import SettlementScannerService
-    from polymarket_trader.infra.db import AuditEventRepository, PositionRepository
 
-    async def _list_positions() -> list[Any]:
+    async def _list_positions() -> list[Position]:
         try:
             async with runtime.db_session_factory() as session:
                 page = await PositionRepository(session).list_positions_snapshot(
@@ -1452,7 +1455,7 @@ async def _run_settlement_scan(runtime: RuntimeComponents) -> None:
             logger.warning("settlement_scanner.positions_query_failed", exc_info=True)
             return []
 
-    async def _audit_query(**kwargs: Any) -> Any:
+    async def _audit_query(**kwargs: Any) -> RepositoryPage[AuditEvent]:
         async with runtime.db_session_factory() as session:
             return await AuditEventRepository(session).list_audit_events_snapshot(**kwargs)
 

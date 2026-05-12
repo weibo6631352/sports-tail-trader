@@ -177,11 +177,10 @@ class PolymarketWebSocketClient:
                 await asyncio.sleep(self._reconnect_delay_s)
 
 
-async def _maybe_await(value: Awaitable[None] | None | Any) -> None:
+async def _maybe_await(value: Awaitable[None] | None) -> None:
     if value is None:
         return
-    if hasattr(value, "__await__"):
-        await value
+    await value
 
 
 def _normalize_ws_error(exc: Exception, *, uri: str) -> PolymarketClientError:

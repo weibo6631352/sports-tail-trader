@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 from itertools import count
 
@@ -9,6 +10,8 @@ from polymarket_trader.domain.events import (
     OutboxEvent,
     sanitize_raw_response,
 )
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_ENQUEUE_TIMEOUT = 0.01
 DEFAULT_RAW_RESPONSE_SUMMARY_LIMIT = OUTBOX_RAW_RESPONSE_SUMMARY_LIMIT
@@ -156,7 +159,8 @@ class LocalOutbox:
             try:
                 self._ready.put_nowait((int(event.priority), next(self._sequence), event.event_id))
             except asyncio.QueueFull:
-                pass
+                # _has_capacity() 检查后仍 QueueFull 说明并发写入竞态，退化到 retained 路径。
+                logger.warning("outbox.queue_full_toctou: event_id=%s priority=%s", event.event_id, event.priority)
             else:
                 self._store_pending(event)
                 return True

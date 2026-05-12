@@ -115,16 +115,15 @@ def test_config_load_error_carries_extension_issues() -> None:
     assert "empty_enabled_market_types" in payload_codes
 
 
-def test_validate_config_returns_empty_tuple_when_callable_missing() -> None:
-    """没有实现 validate_config 的扩展不应被当作失败。"""
+def test_validate_config_returns_empty_tuple_when_no_issues() -> None:
+    """validate_config 返回空序列时应返回空 tuple。"""
 
     from polymarket_trader.main import _validate_extension_config
 
-    class DummyExtension:
-        spec = None
-        hooks = None
+    config = replace(CurrentStrategyConfig(), tail_enabled_market_types=("moneyline",))
+    strategy = _strategy(config)
 
-    issues = _validate_extension_config(DummyExtension(), _settings())
+    issues = _validate_extension_config(strategy, _settings())
 
     assert issues == ()
 

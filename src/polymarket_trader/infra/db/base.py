@@ -201,7 +201,7 @@ def _order_key(order: Order | OrderResult) -> str:
         )) or ""
     if order.order_id:
         return order.order_id
-    if order.intent is not None and getattr(order.intent, "idempotency_key", None):
+    if order.intent is not None and order.intent.idempotency_key:
         return _db_key(order.intent.idempotency_key) or ""
     return _db_key("|".join(
         [

@@ -36,6 +36,7 @@ class OutrightRejectReason(StrEnum):
     LIQUIDITY_BELOW_MIN = "liquidity_below_min"
     OUTCOME_RESOLVED = "outcome_resolved"
     HOLD_HORIZON_EXCEEDED = "hold_horizon_exceeded"
+    MIN_REMAINING_DAYS_NOT_MET = "min_remaining_days_not_met"
     EVENT_CORRELATION_CAP = "event_correlation_cap"
     TOTAL_BUDGET_EXHAUSTED = "total_budget_exhausted"
     PER_MARKET_CAP_EXCEEDED = "per_market_cap_exceeded"

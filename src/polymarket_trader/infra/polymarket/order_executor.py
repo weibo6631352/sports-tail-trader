@@ -385,7 +385,10 @@ class PolymarketOrderExecutor:
             return existing_result
         if existing_task is not None:
             return await self._await_task(existing_task, request, intent)
-        assert task is not None
+        if task is None:
+            raise RuntimeError(
+                f"order_executor: task not created for idempotency_key={request.idempotency_key!r}"
+            )
         return await self._await_task(task, request, intent)
 
     async def _await_task(
@@ -677,6 +680,7 @@ class PolymarketOrderExecutor:
             self._outbox.put_nowait(event)
         except Exception:
             # Outbox 失败不能挡住交易热路径；执行器仍然继续返回订单结果。
+            logger.warning("order_executor.outbox_enqueue_failed", exc_info=True)
             return
 
     async def _invoke_adapter(

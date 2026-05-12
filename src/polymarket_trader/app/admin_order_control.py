@@ -102,7 +102,8 @@ class AdminOrderController:
         )
         if failure is not None:
             return failure
-        assert market is not None
+        if market is None:
+            raise RuntimeError(f"replace_order: market not resolved for order_id={order_id}")
 
         requested_size_shares = size_shares or order_open_shares(source_order)
         if requested_size_shares is None or requested_size_shares <= Decimal("0"):

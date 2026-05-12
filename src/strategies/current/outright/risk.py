@@ -23,6 +23,7 @@ def check_outright_entry_risk(
     max_event_correlation_usdc: Decimal,
     max_total_outright_usdc: Decimal,
     max_hold_horizon_days: int,
+    min_remaining_days: int,
 ) -> OutrightRejectReason | None:
     """通过 → 返回 None；不通过 → 返回拒绝原因。
 
@@ -30,6 +31,8 @@ def check_outright_entry_risk(
       由调用侧聚合，本函数不负责取值（避免依赖外部 state）。
     - ``market_end_at`` 已通过 endDate 推断（Polymarket / live worker 双向修正
       过的真值），按它判断 hold horizon。
+    - ``min_remaining_days`` 下界：剩余天数不足时拒绝入场，避免流动性窗口过短
+      导致无法以合理价格平仓。
     """
 
     if market_end_at is not None:
@@ -37,9 +40,11 @@ def check_outright_entry_risk(
         normalized_now = _to_utc(now)
         if normalized_end <= normalized_now:
             return OutrightRejectReason.MARKET_END_PASSED
-        horizon_seconds = (normalized_end - normalized_now).total_seconds()
-        if horizon_seconds > max_hold_horizon_days * 86400:
+        remaining_seconds = (normalized_end - normalized_now).total_seconds()
+        if remaining_seconds > max_hold_horizon_days * 86400:
             return OutrightRejectReason.HOLD_HORIZON_EXCEEDED
+        if min_remaining_days > 0 and remaining_seconds < min_remaining_days * 86400:
+            return OutrightRejectReason.MIN_REMAINING_DAYS_NOT_MET
     if existing_outright_exposure_usdc + proposed_amount_usdc > max_total_outright_usdc:
         return OutrightRejectReason.TOTAL_BUDGET_EXHAUSTED
     if existing_event_exposure_usdc + proposed_amount_usdc > max_event_correlation_usdc:
