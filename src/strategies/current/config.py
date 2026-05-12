@@ -177,9 +177,23 @@ class CurrentStrategyConfig:
     # 单场景 (single-game tail) implied fair value 公式：``cap = fair × (1 - edge_required)``
     # 解出 fair。500 bps = 5% 表示策略相信"fair 比 cap 至少高 5%"。
     # 用于 Kelly sizing 的 prob_p。outright path 直接用 the-odds-api 真概率。
+    #
+    # 与 ``tail_outright_min_edge_bps`` 数学功能相同（required edge），但作用范围不同：
+    # 这个用于 tail single-game 反推 implied prob_p；outright_min_edge_bps 用于
+    # outright family 在 fair_value 已知后算 entry_price_cap。outright 接通 Kelly 后
+    # （B9 / 未来工作）再考虑统一字段。
     tail_implied_min_edge_bps: int = 500
-    # tail implied_p 的不确定性 → κ 缩放（confidence）。0.5 = 半 κ。outright path 用 1.0。
+    # tail implied_p 的不确定性 → κ 缩放（confidence）。0.5 = 半 κ baseline。
+    # 实际 conf = base × min(1, ask_depth / depth_baseline_usdc) × max(0.25, 1 - spread/spread_widening)
+    # 流动性薄 / 价差宽时进一步收缩，符合"implied_p 在低质量盘口里更不可靠"。
+    # outright path 当前不走 Kelly（_size_outright_entry 用固定 budget 包络 +
+    # outright/evaluator 的反向定价），不消费此字段；未来 outright 接通 Kelly 时
+    # 应直接用 the-odds-api 真概率 + conf=1.0（B9 / 未来工作）。
     tail_implied_prob_confidence: Decimal = Decimal("0.5")
+    # 流动性 baseline：ask_depth >= 此值时不再缩 conf；不到时按比例缩。25 USDC ≈ 5 shares × 0.50。
+    tail_implied_conf_depth_baseline_usdc: Decimal = Decimal("25")
+    # spread 容忍：spread > 此值时 conf 衰减到 25%；spread=0 时不缩。
+    tail_implied_conf_spread_widening: Decimal = Decimal("0.05")
     tail_max_consecutive_losses: int = 3
     tail_scale_in_budget_fraction: Decimal = Decimal("0.5")
     tail_scale_in_max_buy_fills: int = 2

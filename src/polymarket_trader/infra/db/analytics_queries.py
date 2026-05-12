@@ -327,10 +327,69 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+async def fetch_kelly_calibration(
+    session: AsyncSession,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    strategy_id: str | None = None,
+) -> dict[str, Any]:
+    """Kelly implied_p 校准统计——用于检测策略 prob_p 估计的系统性偏倚。
+
+    扫描窗口内的 ``allocations``，按 raw_payload.kelly 子键取出每笔分配的
+    ``prob_p`` / ``price_c`` / ``edge_net``。配对同 condition / token 的最近
+    fills 推算实际成交价 vs implied fair。返回：
+
+    * sample_size：样本数
+    * mean_implied_p：策略平均 implied_p
+    * mean_realized_price_lag_seconds：从分配到 fill 的平均延迟
+    * mean_edge_net：策略宣称的平均 edge
+
+    注：完整 Brier score 需要 market 终态结算结果（非本函数职责，需
+    ``positions.settled_zero_value`` 关联），先返回前置指标。
+    """
+
+    strategy_clause = " AND a.strategy_id = :strategy_id" if strategy_id is not None else ""
+    sql = f"""
+        SELECT
+            COUNT(*) AS sample_size,
+            AVG((a.raw_payload->'kelly'->>'prob_p')::numeric) AS mean_implied_p,
+            AVG((a.raw_payload->'kelly'->>'edge_net')::numeric) AS mean_edge_net,
+            AVG((a.raw_payload->'kelly'->>'price_c')::numeric) AS mean_price_c
+        FROM allocations a
+        WHERE a.created_at >= :window_start
+          AND a.created_at < :window_end
+          AND a.buy_budget_usdc > 0
+          AND a.raw_payload ? 'kelly'
+          {strategy_clause}
+    """
+    params: dict[str, Any] = {
+        "window_start": window_start,
+        "window_end": window_end,
+    }
+    if strategy_id is not None:
+        params["strategy_id"] = strategy_id
+    row = (await session.execute(text(sql), params)).first()
+    if row is None:
+        return {
+            "sample_size": 0,
+            "mean_implied_p": None,
+            "mean_edge_net": None,
+            "mean_price_c": None,
+        }
+    return {
+        "sample_size": int(row[0] or 0),
+        "mean_implied_p": _as_float(row[1]),
+        "mean_edge_net": _as_float(row[2]),
+        "mean_price_c": _as_float(row[3]),
+    }
+
+
 __all__: Sequence[str] = (
     "FUNNEL_STAGES",
     "REJECTION_EVENT_TITLES",
     "fetch_funnel_counts",
     "fetch_rejection_reasons",
     "fetch_execution_quality",
+    "fetch_kelly_calibration",
 )

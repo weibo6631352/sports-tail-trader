@@ -6,6 +6,7 @@ from typing import Iterable
 
 from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.fees import calculate_trade_fee
+from polymarket_trader.domain.kelly import effective_position_cap_usdc
 from polymarket_trader.domain.market import Market, TradingStatus
 from polymarket_trader.domain.order import Order, OrderIntent, OrderSide, OrderStatus, OrderType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
@@ -568,16 +569,19 @@ class RiskManager:
             )
 
         if kelly_max_position_fraction is not None and kelly_max_position_fraction > Decimal("0"):
-            # Kelly engine 在 round-up 路径里允许单笔 over-bet 到
-            # ``position_cap × round_up_max_overbet_ratio``；RiskManager 这条线必须同步
-            # 放宽，否则 Kelly 接受的合法 round-up 在风控层会被拒，造成不一致。
+            # 单笔硬上限——与 ``domain/kelly.py:effective_position_cap_usdc`` 共用
+            # 公式，避免双侧闸门漂移。round-up 路径会让 overbet_ratio > 1 同步放宽。
             overbet_ratio = (
                 kelly_round_up_max_overbet_ratio
                 if kelly_round_up_max_overbet_ratio is not None
                 and kelly_round_up_max_overbet_ratio > Decimal("0")
                 else Decimal("1")
             )
-            position_cap = bankroll_usdc * kelly_max_position_fraction * overbet_ratio
+            position_cap = effective_position_cap_usdc(
+                bankroll_usdc=bankroll_usdc,
+                max_position_fraction=kelly_max_position_fraction,
+                round_up_max_overbet_ratio=overbet_ratio,
+            )
             if notional_usdc > position_cap:
                 return self._fail(
                     trace_id=intent.trace_id,
@@ -1009,13 +1013,17 @@ def _normalize_portfolio_total(
     allocation_plan: AllocationPlan | None,
     portfolio_total_invested_usdc: Decimal | None,
 ) -> Decimal:
-    if portfolio_total_invested_usdc is None and allocation_plan is not None:
-        portfolio_total_invested_usdc = allocation_plan.allocated_budget_usdc - _intent_notional_usdc(
-            intent
-        )
-    if portfolio_total_invested_usdc is None:
-        portfolio_total_invested_usdc = Decimal("0")
-    if portfolio_total_invested_usdc < Decimal("0"):
+    """Caller 应显式传 ``portfolio_total_invested_usdc``——基于 snapshot 真实 exposure
+    （持仓 + open BUY），而非从 allocation_plan 反推。
+
+    旧逻辑用 ``plan.allocated_budget_usdc - intent.notional`` 推断"已投"，但 Kelly
+    sequential bankroll 模型下 ``allocated_budget_usdc`` 是本轮**拟分配**总额，并非
+    已成交持仓——会让 bankroll_overspent 闸门误算。``intent`` / ``allocation_plan``
+    形参保留是为了未来可能的 contract test，目前只取 caller 显式值或 0。
+    """
+
+    del intent, allocation_plan  # 显式标注：旧反推路径已废弃，参数仅保留签名。
+    if portfolio_total_invested_usdc is None or portfolio_total_invested_usdc < Decimal("0"):
         return Decimal("0")
     return portfolio_total_invested_usdc
 

@@ -40,7 +40,7 @@ from .gates import (
     _tail_allocation_gate,
     _tail_entry_gate,
 )
-from .helpers import _metadata_decimal, _metadata_text
+from .helpers import _metadata_text
 from .pricing import _tail_locked_outcome_signal, _tail_price_cap
 from .risk_limits import _apply_tail_risk_limits
 
@@ -153,7 +153,9 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
         eligible_snapshots.append(replace(snapshot_for_allocation, liquidity_usdc=buyable_liquidity_usdc))
 
     implied_min_edge_required = Decimal(config.tail_implied_min_edge_bps) / Decimal("10000")
-    implied_prob_confidence = config.tail_implied_prob_confidence
+    implied_prob_confidence_base = config.tail_implied_prob_confidence
+    depth_baseline = config.tail_implied_conf_depth_baseline_usdc
+    spread_widening = config.tail_implied_conf_spread_widening
 
     def _prob_provider(snap: AllocationMarketSnapshot) -> ProbView:
         cap = snapshot_price_cap.get((snap.condition_id, snap.token_id))
@@ -165,9 +167,24 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
                 locked_outcome_signal=_tail_locked_outcome_signal(context),
             )
         implied_p = implied_fair_value_from_price_cap(cap, min_edge_required=implied_min_edge_required)
+        # 动态 conf：流动性薄 / 价差宽时 implied_p 更不可靠 → κ 进一步收缩。
+        # 公式 = base × min(1, depth/baseline) × max(0.25, 1 - spread/widening)
+        # baseline=25, widening=0.05 → conf 范围 [base/8, base]。
+        depth_factor = Decimal("1")
+        if snap.liquidity_usdc is not None and depth_baseline > Decimal("0"):
+            ratio = snap.liquidity_usdc / depth_baseline
+            if ratio < Decimal("1"):
+                depth_factor = ratio if ratio > Decimal("0") else Decimal("0")
+        spread_factor = Decimal("1")
+        if snap.spread is not None and spread_widening > Decimal("0"):
+            shrink = snap.spread / spread_widening
+            spread_factor = max(Decimal("0.25"), Decimal("1") - shrink) if shrink < Decimal("1") else Decimal("0.25")
+        confidence = implied_prob_confidence_base * depth_factor * spread_factor
+        if confidence < Decimal("0"):
+            confidence = Decimal("0")
         return ProbView(
             prob_p=implied_p,
-            prob_confidence=implied_prob_confidence,
+            prob_confidence=confidence,
             source="tail_implied",
         )
 
@@ -236,7 +253,7 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         return ExtensionDecision.skip(reason="price_above_entry_max")
     entry_price = best_ask
 
-    amount_usdc = context.amount_usdc or _metadata_decimal(context, "amount_usdc", "buy_budget_usdc")
+    amount_usdc = context.amount_usdc
     if amount_usdc is None or amount_usdc <= Decimal("0"):
         return ExtensionDecision.skip(reason="missing_entry_amount")
 
@@ -282,7 +299,7 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
     if not config.auto_exit_enabled:
         return ExtensionDecision.skip(reason="settlement_only_exit_disabled")
 
-    size_shares = context.size_shares or _metadata_decimal(context, "size_shares")
+    size_shares = context.size_shares
     if size_shares is not None and size_shares > Decimal("0"):
         uncovered_shares = size_shares
     elif context.position is not None:

@@ -271,6 +271,9 @@ class AdminRuntimeView:
         if settings is None:
             return None
         candidates: list[Decimal] = []
+        # admin_runtime_view 在测试和早期 boot 阶段可能拿到不完整的 settings——
+        # ``getattr(..., None)`` 不是字段默认值（不会与 Settings field default 漂移），
+        # None 仅表示"该字段缺失，跳过"；不污染语义。
         budget = _decimal_or_none(getattr(settings, "portfolio_budget_usdc", None))
         max_position_fraction = _decimal_or_none(
             getattr(settings, "kelly_max_position_fraction", None)

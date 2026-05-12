@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
 
@@ -93,7 +92,10 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         metadata: Mapping[str, Any] | None = None,
         manual_confirmation: "ManualConfirmation | None" = None,
     ):
-        settings = getattr(self.runtime, "settings", None)
+        # runtime.settings 是 main.py 启动后绑定的强字段——admin 路径不可能在
+        # settings 缺失时执行。kelly_* 全部走 settings 直读，避免 getattr default
+        # 制造第二份字段默认值（与 Settings field default 漂移）。
+        settings = self.runtime.settings
         return self._trading_decision_service().build_entry_plan(
             market=market,
             orderbook=orderbook,
@@ -102,15 +104,15 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             account_snapshot=None,
             token_id=token_id,
             trace_id=trace_id,
-            portfolio_budget_usdc=getattr(settings, "portfolio_budget_usdc", Decimal("0")),
+            portfolio_budget_usdc=settings.portfolio_budget_usdc,
             available_usdc=account.available_usdc,
-            kelly_fraction=getattr(settings, "kelly_fraction", Decimal("0.25")),
-            kelly_max_position_fraction=getattr(settings, "kelly_max_position_fraction", Decimal("0.10")),
-            kelly_min_edge=getattr(settings, "kelly_min_edge", Decimal("0.02")),
-            kelly_min_stake_usdc=getattr(settings, "kelly_min_stake_usdc", Decimal("1")),
-            kelly_allow_round_up_to_market_min=getattr(settings, "kelly_allow_round_up_to_market_min", True),
-            kelly_round_up_max_overbet_ratio=getattr(settings, "kelly_round_up_max_overbet_ratio", Decimal("1")),
-            kelly_drawdown_halt_fraction=getattr(settings, "kelly_drawdown_halt_fraction", Decimal("0.5")),
+            kelly_fraction=settings.kelly_fraction,
+            kelly_max_position_fraction=settings.kelly_max_position_fraction,
+            kelly_min_edge=settings.kelly_min_edge,
+            kelly_min_stake_usdc=settings.kelly_min_stake_usdc,
+            kelly_allow_round_up_to_market_min=settings.kelly_allow_round_up_to_market_min,
+            kelly_round_up_max_overbet_ratio=settings.kelly_round_up_max_overbet_ratio,
+            kelly_drawdown_halt_fraction=settings.kelly_drawdown_halt_fraction,
             positions=account.positions,
             open_orders=account.open_orders,
             metadata=metadata if metadata is not None else self._entry_metadata_for_market(market),

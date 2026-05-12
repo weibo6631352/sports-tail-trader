@@ -349,6 +349,15 @@ class CurrentStrategy:
             return size_entry(self._config, context)
 
     def _size_outright_entry(self, context: ExtensionContext) -> EntrySizing:
+        """Outright family sizing 当前**不走 Kelly**——用固定预算包络 +
+        outright/evaluator 的反向定价（fair × (1-edge)）做 entry_price_cap。
+
+        未来工作：把 outright 接通 Kelly：``ProbProvider`` 取
+        ``outright_fair_value()`` 真概率（conf=1.0），与 single-game tail 共用
+        ``kelly_plan`` 路径，删除此独立 sizing 分支。当前阶段 outright
+        ``ExecutionPermission.RECORD_ONLY`` 是默认值，不会真实下单。
+        """
+
         config = self._config
         budget = config.tail_outright_budget_usdc
         if budget <= Decimal("0"):
@@ -372,6 +381,7 @@ class CurrentStrategy:
                 "outright_per_market_usdc": str(
                     min(budget, config.tail_outright_max_per_market_usdc)
                 ),
+                "kelly_path": "not_applied",  # 审计标记：outright 未接 Kelly
             },
         )
 

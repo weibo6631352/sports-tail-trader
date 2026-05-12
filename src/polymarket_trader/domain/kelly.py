@@ -201,7 +201,13 @@ def kelly_stake(
     raw_stake = bankroll_usdc * effective_kappa * f_star
     capped_by: str | None = None
 
-    position_cap = bankroll_usdc * max_position_fraction
+    # 单笔硬上限——RiskManager 同款公式（``effective_position_cap_usdc``），保持双侧
+    # 闸门口径绝对一致。round_up 路径的 overbet ratio 不在 raw 截断里用，只在
+    # 凑齐分支用——见下方 round-up 处理。
+    position_cap = effective_position_cap_usdc(
+        bankroll_usdc=bankroll_usdc,
+        max_position_fraction=max_position_fraction,
+    )
     stake = raw_stake
     if stake > position_cap:
         stake = position_cap
@@ -268,6 +274,24 @@ def kelly_stake(
         is_round_up_overbet=is_round_up_overbet,
         reject_reason=None,
     )
+
+
+def effective_position_cap_usdc(
+    *,
+    bankroll_usdc: Decimal,
+    max_position_fraction: Decimal,
+    round_up_max_overbet_ratio: Decimal = _ONE,
+) -> Decimal:
+    """Kelly engine 与 RiskManager 共用的单笔上限计算——避免"两边各算一次"漂移。
+
+    ``effective_cap = bankroll × max_position_fraction × max(1, overbet_ratio)``。
+    overbet_ratio 默认 1（不放宽）；> 1 时让风控同步接受 round-up 路径的 over-bet。
+    """
+
+    base_cap = bankroll_usdc * max_position_fraction
+    if round_up_max_overbet_ratio > _ONE:
+        return base_cap * round_up_max_overbet_ratio
+    return base_cap
 
 
 def implied_fair_value_from_price_cap(
@@ -355,5 +379,6 @@ __all__ = [
     "KellySide",
     "KellyStake",
     "kelly_stake",
+    "effective_position_cap_usdc",
     "implied_fair_value_from_price_cap",
 ]

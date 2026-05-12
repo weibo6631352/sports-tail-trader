@@ -98,8 +98,19 @@ def kelly_plan(
     budget_changes: list[MarketBuyBudgetChanged] = []
     plan_reason = ""
 
-    # 初步过 skip filter，并记录已开仓 exposure（用于 §1 sequential bankroll 扣减）
-    eligible: list[AllocationMarketSnapshot] = []
+    # 单次扫描：一遍出 (skip_reason / exposure / prob_view / price_c / kelly_estimate)
+    # 全部信息；避免之前"skip filter loop + estimate loop + alloc loop"三次重算
+    # current_exposure 与 _compute_kelly。kelly_estimate 用初始 remaining_bankroll
+    # 仅作排序键——真分配阶段再用滚动 remaining_bankroll 重算 stake。
+    @dataclass(slots=True)
+    class _Candidate:
+        snapshot: AllocationMarketSnapshot
+        exposure_usdc: Decimal
+        prob_view: ProbView
+        price_c: Decimal
+        estimate_f_star: Decimal
+
+    eligible: list[_Candidate] = []
     open_exposure_total = Decimal("0")
     for snapshot in market_snapshots:
         exposure_usdc = current_exposure_usdc(snapshot.position, snapshot.open_orders)
@@ -122,33 +133,10 @@ def kelly_plan(
                 )
             )
             continue
-        eligible.append(snapshot)
-
-    if not eligible:
-        plan_reason = "no_eligible_market"
-        return AllocationPlan(
-            trace_id=trace_id,
-            total_budget_usdc=portfolio_budget_usdc,
-            allocations=tuple(allocations),
-            budget_changes=tuple(budget_changes),
-            reason=plan_reason,
-        )
-
-    # §1 sequential bankroll：从总 bankroll 扣已开仓 exposure 得到本轮可用
-    # remaining_bankroll；后续每分配一笔再扣减。
-    remaining_bankroll = bankroll_usdc - open_exposure_total
-    if remaining_bankroll < Decimal("0"):
-        remaining_bankroll = Decimal("0")
-
-    # 对 eligible 跑 Kelly 决策（用同一 remaining_bankroll 估算 f_star，便于排序）
-    # 真正分配在排序后的循环里，逐笔扣减 remaining_bankroll。
-    candidates: list[tuple[AllocationMarketSnapshot, ProbView, Decimal | None, KellyStake | None, Decimal]] = []
-    for snapshot in eligible:
         prob_view = prob_provider(snapshot)
         price_c = snapshot.best_ask if snapshot.best_ask is not None else (
             snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
         )
-        exposure_usdc = current_exposure_usdc(snapshot.position, snapshot.open_orders)
         if prob_view.prob_p is None or price_c is None or price_c <= Decimal("0"):
             allocations.append(
                 _reject_allocation(
@@ -160,31 +148,43 @@ def kelly_plan(
                 )
             )
             continue
-        # 估算用——真分配时再用 remaining_bankroll
-        stake_estimate = _compute_kelly(
+        # f_star 与 bankroll 无关，只看 (p, c)；用任意非零 bankroll 跑一次拿 f_star 排序键。
+        # bankroll=1 让 ``raw_stake`` 微小不影响排序，但 f_star 准确反映 edge/denom。
+        estimate = _compute_kelly(
             snapshot=snapshot,
-            bankroll_usdc=remaining_bankroll,
+            bankroll_usdc=Decimal("1"),
             prob_view=prob_view,
             price_c=price_c,
             kelly_fraction=kelly_fraction,
             kelly_max_position_fraction=kelly_max_position_fraction,
             kelly_min_edge=kelly_min_edge,
-            kelly_min_stake_usdc=kelly_min_stake_usdc,
-            kelly_allow_round_up_to_market_min=kelly_allow_round_up_to_market_min,
-            kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
+            kelly_min_stake_usdc=Decimal("0"),
+            kelly_allow_round_up_to_market_min=False,
+            kelly_round_up_max_overbet_ratio=Decimal("1"),
         )
-        candidates.append((snapshot, prob_view, price_c, stake_estimate, exposure_usdc))
+        eligible.append(_Candidate(snapshot, exposure_usdc, prob_view, price_c, estimate.f_star))
 
-    # 按 f_star 降序排序——edge 大的先吃 bankroll
-    candidates.sort(
-        key=lambda item: item[3].f_star if item[3] is not None else Decimal("-1"),
-        reverse=True,
-    )
+    if not eligible:
+        plan_reason = "no_eligible_market"
+        return AllocationPlan(
+            trace_id=trace_id,
+            total_budget_usdc=portfolio_budget_usdc,
+            allocations=tuple(allocations),
+            budget_changes=tuple(budget_changes),
+            reason=plan_reason,
+        )
 
-    # §1 sequential bankroll：逐笔分配，每笔后扣减 remaining_bankroll
-    for snapshot, prob_view, price_c, _estimate, exposure_usdc in candidates:
-        if price_c is None or prob_view.prob_p is None:
-            continue
+    remaining_bankroll = bankroll_usdc - open_exposure_total
+    if remaining_bankroll < Decimal("0"):
+        remaining_bankroll = Decimal("0")
+
+    eligible.sort(key=lambda item: item.estimate_f_star, reverse=True)
+
+    for candidate in eligible:
+        snapshot = candidate.snapshot
+        prob_view = candidate.prob_view
+        price_c = candidate.price_c
+        exposure_usdc = candidate.exposure_usdc
         stake = _compute_kelly(
             snapshot=snapshot,
             bankroll_usdc=remaining_bankroll,
