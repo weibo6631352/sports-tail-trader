@@ -65,7 +65,6 @@ class TailRejectReason(StrEnum):
     UNSUPPORTED_MARKET_TYPE = "unsupported_market_type"
     UNSUPPORTED_MARKET_SIDE = "unsupported_market_side"
     UNSUPPORTED_MARKET_SCOPE = "unsupported_market_scope"
-    SERIES_MARKET_NOT_AUTO_TRADABLE = "series_market_not_auto_tradable"
     OUTRIGHT_MARKET_NOT_AUTO_TRADABLE = "outright_market_not_auto_tradable"
     ESPORTS_MARKET_NOT_AUTO_TRADABLE = "esports_market_not_auto_tradable"
     UNSUPPORTED_MARKET_FAMILY = "unsupported_market_family"

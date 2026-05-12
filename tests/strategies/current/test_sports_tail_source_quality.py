@@ -54,6 +54,9 @@ def test_tail_rejects_live_source_conflict() -> None:
 
 
 def test_tail_rejects_non_single_game_market_before_score_lock_logic() -> None:
+    # series family 由 ``strategy._decide_series_entry`` → ``series.evaluator`` 处理，
+    # 不会再到达 tail 评估器；这里只是验证 tail 防御性兜底——如果有人把 SERIES
+    # snapshot 喂进 tail，也必须显式拒绝、不能静默放行。
     game = LiveGameState(
         league="NHL",
         home_name="Anaheim Ducks",
@@ -77,7 +80,7 @@ def test_tail_rejects_non_single_game_market_before_score_lock_logic() -> None:
     result = evaluate_tail_opportunity(game, market, policy=TailPolicy())
 
     assert result.accepted is False
-    assert result.reason == "series_market_not_auto_tradable"
+    assert result.reason == "unsupported_market_family"
     assert result.metadata["market_family"] == "series"
 
 

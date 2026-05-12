@@ -56,6 +56,10 @@ from strategies.current.outright import (
     season_odds_from_metadata,
 )
 from strategies.current.outright.pricing import outright_fair_value
+from strategies.current.series import (
+    SeriesCandidate,
+    evaluate_series_opportunity,
+)
 from strategies.current.parameter_overrides import active_ports_scope, effective_decimal, effective_int
 from strategies.current.recovery import decide_recovery
 from strategies.current.tail.types import ExecutionPermission as _ExecPerm
@@ -483,6 +487,14 @@ class CurrentStrategy:
                 self._decide_outright_entry(context),
                 default_kind=DecisionKind.ENTRY,
             )
+        if descriptor is not None and descriptor.market_family.value == "series":
+            # series 在本 worktree 阶段只产 record-only 决策（``*_MODEL_PENDING``）。
+            # decision_kind=ENTRY 与 outright 同义：表示这是 decide_entry 路径上的产物，
+            # 真正是否构造 BUY 由 ExtensionDecision.action 决定（当前永远 SKIP）。
+            return _enrich_decision(
+                self._decide_series_entry(context),
+                default_kind=DecisionKind.ENTRY,
+            )
         with active_ports_scope(self._ports):
             return _enrich_decision(decide_entry(self._config, context), default_kind=DecisionKind.ENTRY)
 
@@ -689,7 +701,74 @@ class CurrentStrategy:
             },
         )
 
+    def _decide_series_entry(self, context: ExtensionContext) -> ExtensionDecision:
+        """series 子包驱动的入场决策（worktree 2 阶段：record-only 骨架）。
 
+        遍历每个 outcome，对每个 token 跑一次 evaluator 拿到 record-only 拒绝原因；
+        全部 reject 时取第一个作为 SKIP reason 供 audit。本阶段所有子类型都返回
+        ``*_MODEL_PENDING``，真实定价 / 风控 / 下单在 Worktree 3-4 接线。
+        """
+
+        market = context.market
+        if market is None:
+            return ExtensionDecision.skip(reason="series_missing_market")
+        token_views = tuple(context.market_token_views or ())
+        outcomes = market.outcomes
+        if not token_views and not outcomes:
+            return ExtensionDecision.skip(
+                reason="series_missing_outcomes",
+                metadata={"market_family": "series"},
+            )
+        # 框架真实驱动时 market_token_views 必填；测试场景仅给 outcomes 时，构造
+        # 一份只包含 token_id/outcome 的 ``MarketTokenView`` 当 fallback，避免与
+        # 生产路径在类型上分叉。
+        if not token_views:
+            token_views = tuple(
+                MarketTokenView(token_id=o.token_id, outcome=o.outcome)
+                for o in outcomes
+            )
+
+        first_evaluation = None
+        first_token_view = None
+        for token_view in token_views:
+            candidate = SeriesCandidate(
+                market=market,
+                outcome_label=token_view.outcome,
+                token_id=token_view.token_id,
+            )
+            evaluation = evaluate_series_opportunity(candidate)
+            if evaluation.accepted:
+                # 当前阶段不会发生：所有子类型都返回 *_MODEL_PENDING reject。
+                # 真实 BUY 接线在 Worktree 3-4 落地，那时按 sub_type 走对应定价 + 风控。
+                raise NotImplementedError(
+                    "series accepted path wired in worktree 3-4 once SeriesState/winner_model land"
+                )
+            if first_evaluation is None:
+                first_evaluation = evaluation
+                first_token_view = token_view
+
+        if first_evaluation is None or first_token_view is None:
+            return ExtensionDecision.skip(
+                reason="series_no_candidates",
+                metadata={"market_family": "series"},
+            )
+
+        return ExtensionDecision.skip(
+            reason=first_evaluation.reject_reason.value if first_evaluation.reject_reason else "series_unclassified",
+            metadata={
+                "market_family": "series",
+                "series_sub_type": first_evaluation.sub_type.value,
+                "series_reject_reason": (
+                    first_evaluation.reject_reason.value
+                    if first_evaluation.reject_reason
+                    else None
+                ),
+                "series_accepted": False,
+                "series_metadata": dict(first_evaluation.metadata),
+                "token_id": first_token_view.token_id,
+                "outcome_label": first_token_view.outcome,
+            },
+        )
 
     def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
         """根据持仓状态生成 SELL 决策。"""

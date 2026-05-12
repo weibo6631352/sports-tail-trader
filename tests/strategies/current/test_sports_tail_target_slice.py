@@ -502,10 +502,12 @@ def test_universe_excludes_non_single_game_markets_from_auto_strategy_scope() ->
         "esports": select_market(config, _esports_series_market()),
     }
 
+    # series family 不在 single_game/outright universe 白名单内；universe 排除原因来自
+    # outcomes._market_family_reason，真正的子类型拒绝原因走 series.evaluator。
     assert decisions["series_winner"].selected is False
-    assert decisions["series_winner"].reason == "series_market_not_auto_tradable"
+    assert decisions["series_winner"].reason == "series_market_pending_model"
     assert decisions["series_totals"].selected is False
-    assert decisions["series_totals"].reason == "series_market_not_auto_tradable"
+    assert decisions["series_totals"].reason == "series_market_pending_model"
     # Outright 不再静默排除：纳入候选 + 标记 market_family=outright，进入 outright 子包评估。
     assert decisions["outright"].selected is True
     assert decisions["outright"].metadata.get("market_family") == "outright"
@@ -908,6 +910,8 @@ def test_real_polymarket_grand_slam_comparison_prop_is_outright_moneyline() -> N
 
 
 def test_entry_rejects_series_market_before_single_game_live_score_can_create_buy() -> None:
+    # 现在 series 分派由 ``CurrentStrategy.decide_entry`` 接管；``trading.decide_entry``
+    # 仅作为 single_game 兜底路径，对 series family 应直接 SKIP 并带 family metadata。
     market = _series_winner_market()
     orderbook = _orderbook(token_id="series-home", best_ask=Decimal("0.45"))
 
@@ -925,7 +929,7 @@ def test_entry_rejects_series_market_before_single_game_live_score_can_create_bu
     )
 
     assert decision.action.value == "skip"
-    assert decision.reason == "series_market_not_auto_tradable"
+    assert decision.reason == "series_market_pending_model"
     assert decision.metadata["market_family"] == "series"
 
 

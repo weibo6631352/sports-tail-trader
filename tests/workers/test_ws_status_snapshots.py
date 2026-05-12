@@ -151,7 +151,7 @@ def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None
         metadata={"live_game": {"status": "ended"}},
         source="test",
         live_state_signal_allowed=False,
-        live_state_signal_reason="series_market_not_auto_tradable",
+        live_state_signal_reason="series_market_pending_model",
         live_state_phase="ended",
         live_state_payload={"status": "ended"},
     )

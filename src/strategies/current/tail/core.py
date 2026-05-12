@@ -126,10 +126,10 @@ def _action_for_permission(permission: ExecutionPermission) -> TailAction:
 
 
 def _market_family_reject_reason(market_family: SportsMarketFamily) -> TailRejectReason | None:
+    # series family 由 ``strategy._decide_series_entry`` → ``series.evaluator`` 处理，
+    # 不会再到达 tail 评估器；防御性归到 UNSUPPORTED_MARKET_FAMILY，避免静默放行。
     if market_family == SportsMarketFamily.SINGLE_GAME:
         return None
-    if market_family == SportsMarketFamily.SERIES:
-        return TailRejectReason.SERIES_MARKET_NOT_AUTO_TRADABLE
     if market_family == SportsMarketFamily.OUTRIGHT:
         return TailRejectReason.OUTRIGHT_MARKET_NOT_AUTO_TRADABLE
     if market_family == SportsMarketFamily.ESPORTS:

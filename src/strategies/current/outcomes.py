@@ -135,18 +135,13 @@ def _market_family(market: Market, text: str) -> SportsMarketFamily:
         ),
     ):
         return SportsMarketFamily.ESPORTS
-    series_phrases = (
-        "who will win series",
-        "win series",
-        "series winner",
-        "games o u",
-        "games ou",
-        "game handicap",
-    )
-    if (_contains_any(text, series_phrases) and not _is_tennis_text(combined_text)) or (
-        " total games " in f" {text} " and not _is_tennis_text(combined_text)
-    ):
-        return SportsMarketFamily.SERIES
+    # tennis "total games" 是单场 totals 盘口，不是系列赛——先排除再进 classifier。
+    # series 关键词单一来源在 ``series.classifier``；本函数不再硬编码列表，避免双口径。
+    if not _is_tennis_text(combined_text):
+        from strategies.current.series import SeriesSubType, classify_series_sub_type
+
+        if classify_series_sub_type(market) != SeriesSubType.OTHER:
+            return SportsMarketFamily.SERIES
     if _contains_any(
         text,
         (
@@ -172,7 +167,10 @@ def _market_family_reason(market_family: SportsMarketFamily) -> str:
     if market_family == SportsMarketFamily.SINGLE_GAME:
         return "market_selected"
     if market_family == SportsMarketFamily.SERIES:
-        return "series_market_not_auto_tradable"
+        # series 走 ``strategy._decide_series_entry`` → ``series.evaluator``。本字段是
+        # universe 排除的展示原因（family 不在 single_game / outright 白名单时使用），
+        # 真正的拒绝原因走 evaluator 的 ``SeriesRejectReason``。
+        return "series_market_pending_model"
     if market_family == SportsMarketFamily.OUTRIGHT:
         return "outright_market_not_auto_tradable"
     if market_family == SportsMarketFamily.ESPORTS:

@@ -30,7 +30,7 @@ def test_prunes_paused_filtered_market_without_exposure() -> None:
 def test_keeps_paused_filtered_market_with_exposure() -> None:
     market = _market().with_trading_status(
         TradingStatus.PAUSED,
-        reject_reason="series_market_not_auto_tradable",
+        reject_reason="series_market_pending_model",
     )
     account = AccountSnapshot(
         positions=(
