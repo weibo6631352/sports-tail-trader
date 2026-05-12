@@ -1,0 +1,48 @@
+{
+  "items": [
+    {
+      "order_id": "ord-aaaa-1111-2222-3333-444444444444",
+      "trade_id": "trade-aaaa-1111",
+      "trace_id": "trace-aaaa-1111",
+      "market_slug": "nba-lakers-vs-celtics-2026-05-12",
+      "condition_id": "0xcond0000000000000000000000000000000000000000000000000000000000a1",
+      "token_id": "111111111111111111111",
+      "strategy_id": "tail_v1",
+      "side": "BUY",
+      "order_type": "GTC",
+      "status": "OPEN",
+      "price": "0.5800",
+      "size_shares": "120.00",
+      "filled_shares": "20.00",
+      "remaining_shares": "100.00",
+      "notional_usdc": "69.60",
+      "reason": "tail_entry",
+      "created_at": "2026-05-12T00:00:00Z",
+      "submitted_at": "2026-05-12T00:00:01Z"
+    },
+    {
+      "order_id": "ord-bbbb-5555-6666-7777-888888888888",
+      "trade_id": "trade-bbbb-2222",
+      "trace_id": "trace-bbbb-2222",
+      "market_slug": "mlb-yankees-vs-redsox-2026-05-12",
+      "condition_id": "0xcond0000000000000000000000000000000000000000000000000000000000b2",
+      "token_id": "222222222222222222222",
+      "strategy_id": "tail_v1",
+      "side": "SELL",
+      "order_type": "GTC",
+      "status": "OPEN",
+      "price": "0.6500",
+      "size_shares": "80.00",
+      "filled_shares": "0",
+      "remaining_shares": "80.00",
+      "notional_usdc": "52.00",
+      "reason": "tail_exit",
+      "created_at": "2026-05-12T00:00:02Z",
+      "submitted_at": "2026-05-12T00:00:03Z"
+    }
+  ],
+  "total": 2,
+  "limit": 100,
+  "offset": 0,
+  "has_more": false
+}

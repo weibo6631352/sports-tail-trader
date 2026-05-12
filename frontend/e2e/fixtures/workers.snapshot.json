@@ -1,0 +1,33 @@
+{
+  "automatic_trading_enabled": true,
+  "worker_health": [
+    {
+      "name": "trading_decision_worker",
+      "priority": "P0",
+      "state": "running",
+      "healthy": true,
+      "last_error": null,
+      "queue_depth": 0
+    },
+    {
+      "name": "persistence_worker",
+      "priority": "P1",
+      "state": "running",
+      "healthy": true,
+      "last_error": null,
+      "queue_depth": 3
+    },
+    {
+      "name": "market_discovery_worker",
+      "priority": "P1",
+      "state": "paused",
+      "healthy": false,
+      "last_error": "rate_limited",
+      "queue_depth": 12
+    }
+  ],
+  "queue_depths": {
+    "decisions": 0,
+    "outbox": 3
+  }
+}

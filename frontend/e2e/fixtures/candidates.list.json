@@ -1,0 +1,62 @@
+{
+  "items": [
+    {
+      "condition_id": "0xcond0000000000000000000000000000000000000000000000000000000000a1",
+      "token_id": "111111111111111111111",
+      "market_slug": "nba-lakers-vs-celtics-2026-05-12",
+      "market_type": "moneyline",
+      "league": "NBA",
+      "game_status": "live",
+      "action": "enter",
+      "execution_permission": "auto",
+      "accepted": true,
+      "confirmable": false,
+      "reason": "edge_above_threshold",
+      "fair_value": "0.6200",
+      "entry_price": "0.5800",
+      "size_shares": "120.00",
+      "strategy_id": "tail_v1",
+      "badges": ["tail"]
+    },
+    {
+      "condition_id": "0xcond0000000000000000000000000000000000000000000000000000000000b2",
+      "token_id": "222222222222222222222",
+      "market_slug": "mlb-yankees-vs-redsox-2026-05-12",
+      "market_type": "totals",
+      "league": "MLB",
+      "game_status": "live",
+      "action": "enter",
+      "execution_permission": "manual",
+      "accepted": false,
+      "confirmable": true,
+      "reason": "needs_manual_confirm",
+      "fair_value": "0.5500",
+      "entry_price": "0.5100",
+      "size_shares": "80.00",
+      "strategy_id": "tail_v1",
+      "badges": []
+    },
+    {
+      "condition_id": "0xcond0000000000000000000000000000000000000000000000000000000000c3",
+      "token_id": "333333333333333333333",
+      "market_slug": "epl-arsenal-vs-chelsea-2026-05-12",
+      "market_type": "moneyline",
+      "league": "EPL",
+      "game_status": "live",
+      "action": "exit",
+      "execution_permission": "record_only",
+      "accepted": false,
+      "confirmable": false,
+      "reason": "below_min_edge_bps",
+      "fair_value": "0.4500",
+      "entry_price": "0.4900",
+      "size_shares": "60.00",
+      "strategy_id": "tail_v1",
+      "badges": []
+    }
+  ],
+  "total": 3,
+  "limit": 100,
+  "offset": 0,
+  "has_more": false
+}

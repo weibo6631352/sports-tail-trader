@@ -1,0 +1,14 @@
+{
+  "equity_usdc": "12345.67",
+  "notional_usdc": "8000.00",
+  "cash_usdc": "4345.67",
+  "available_usdc": "4000.00",
+  "allowance_usdc": "100000.00",
+  "net_value_usdc": "12345.67",
+  "realized_pnl_usdc": "210.50",
+  "cash_pnl_usdc": "-15.20",
+  "position_count": 7,
+  "open_position_count": 5,
+  "redeemable_position_count": 2,
+  "updated_at": "2026-05-12T00:00:00Z"
+}
