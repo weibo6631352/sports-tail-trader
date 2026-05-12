@@ -1,0 +1,7 @@
+{
+  "ready": true,
+  "market_ws_connected": true,
+  "user_ws_connected": true,
+  "trading_client_ready": true,
+  "trading_status": "running"
+}

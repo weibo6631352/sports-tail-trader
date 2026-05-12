@@ -1,0 +1,13 @@
+{
+  "orders_queued": 100,
+  "orders_signed": 98,
+  "orders_submitted": 97,
+  "orders_acked": 95,
+  "fills_total": 80,
+  "decisions_total": 1200,
+  "decisions_accepted": 100,
+  "decisions_rejected": 1100,
+  "sse_active_subscribers": 4,
+  "sse_dropped_events_total": 0,
+  "sse_subscriber_cap": 64
+}

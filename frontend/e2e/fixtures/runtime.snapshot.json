@@ -1,0 +1,28 @@
+{
+  "settings": {
+    "extension_module": "src.strategies.current",
+    "strategy_id": "tail_v1",
+    "phase": "running",
+    "automatic_trading_enabled": true,
+    "paper_trading": false
+  },
+  "identity": {
+    "wallet_address": "0xAbC0000000000000000000000000000000000001",
+    "funder_address": "0xFun0000000000000000000000000000000000002",
+    "profile_name": "e2e-fixture",
+    "profile_pseudonym": "e2e",
+    "profile_avatar": null
+  },
+  "readiness": {
+    "ready": true,
+    "market_ws_connected": true,
+    "user_ws_connected": true,
+    "trading_client_ready": true,
+    "trading_status": "running"
+  },
+  "ready": true,
+  "automatic_trading_enabled": true,
+  "trading_status": "running",
+  "phase": "running",
+  "active_market_count": 42
+}
