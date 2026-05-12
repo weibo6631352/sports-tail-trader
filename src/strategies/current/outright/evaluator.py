@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Mapping
 
+from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
 
 from strategies.current.outright.pricing import (
@@ -31,8 +32,7 @@ from strategies.current.tail.types import ExecutionPermission
 def evaluate_outright_opportunity(
     *,
     snapshot: SeasonOddsSnapshot | None,
-    market_slug: str,
-    condition_id: str,
+    market: Market,
     outcome_label: str,
     token_id: str,
     best_ask: Decimal | None,
@@ -50,8 +50,8 @@ def evaluate_outright_opportunity(
     """评估一个 outright outcome 是否值得入场。"""
 
     candidate = OutrightCandidate(
-        market_slug=market_slug,
-        condition_id=condition_id,
+        market_slug=market.market_slug,
+        condition_id=market.condition_id,
         outcome_label=outcome_label,
         token_id=token_id,
         metadata=dict(extra_metadata or {}),
@@ -65,9 +65,15 @@ def evaluate_outright_opportunity(
             OutrightRejectReason.STALE_SEASON_ODDS,
             metadata={"snapshot_age_seconds": age},
         )
-    fair_value = outright_fair_value(snapshot, outcome_label)
+    pricing_result = outright_fair_value(snapshot, market, outcome_label)
+    fair_value = pricing_result.value
     if fair_value is None:
-        return _reject(candidate, OutrightRejectReason.ODDS_OUTCOME_NOT_MAPPED)
+        # 拒绝原因来自 pricing：区分 OUTRIGHT_TEAM_NOT_RESOLVED /
+        # SEASON_ODDS_INCOMPLETE / ODDS_OUTCOME_NOT_MAPPED，供 §10 审计。
+        return _reject(
+            candidate,
+            pricing_result.reject or OutrightRejectReason.ODDS_OUTCOME_NOT_MAPPED,
+        )
     if best_ask is None:
         return _reject(candidate, OutrightRejectReason.MISSING_BEST_ASK, fair_value=fair_value)
     if buyable_liquidity_usdc < min_orderbook_depth_usdc:

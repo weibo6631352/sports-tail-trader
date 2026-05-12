@@ -30,6 +30,8 @@ class OutrightRejectReason(StrEnum):
     MISSING_SEASON_ODDS = "missing_season_odds"
     STALE_SEASON_ODDS = "stale_season_odds"
     ODDS_OUTCOME_NOT_MAPPED = "odds_outcome_not_mapped"
+    OUTRIGHT_TEAM_NOT_RESOLVED = "outright_team_not_resolved"
+    SEASON_ODDS_INCOMPLETE = "season_odds_incomplete"
     INSUFFICIENT_EDGE = "insufficient_edge"
     PRICE_ABOVE_FAIR = "price_above_fair"
     MISSING_BEST_ASK = "missing_best_ask"

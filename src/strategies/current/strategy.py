@@ -554,8 +554,7 @@ class CurrentStrategy:
             # 行为与原来完全一致。
             evaluation = evaluate_outright_opportunity(
                 snapshot=snapshot,
-                market_slug=market.market_slug,
-                condition_id=market.condition_id,
+                market=market,
                 outcome_label=token_view.outcome,
                 token_id=token_view.token_id,
                 best_ask=best_ask,

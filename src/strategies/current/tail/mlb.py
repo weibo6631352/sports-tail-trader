@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from polymarket_trader.domain.sports_live import BaseballGameState
+from strategies.current._shared.team_normalize import normalize_team_name
 from strategies.sports_framework import (
     LiveGameState,
     SportsMarketSide,
@@ -197,7 +198,7 @@ def _baseball_offense_side(
     game: LiveGameState,
     state: BaseballGameState,
 ) -> SportsMarketSide | None:
-    offense_team = _normalize_team_name(state.offense_team)
+    offense_team = normalize_team_name(state.offense_team)
     if offense_team:
         if offense_team in _team_name_aliases(game.home_name):
             return SportsMarketSide.HOME
@@ -212,13 +213,9 @@ def _baseball_offense_side(
 
 
 def _team_name_aliases(name: str) -> set[str]:
-    normalized = _normalize_team_name(name)
+    normalized = normalize_team_name(name)
     tokens = normalized.split()
     return {
         normalized,
         tokens[-1] if tokens else "",
     } - {""}
-
-
-def _normalize_team_name(value: str | None) -> str:
-    return " ".join(str(value or "").lower().replace("&", " and ").split())

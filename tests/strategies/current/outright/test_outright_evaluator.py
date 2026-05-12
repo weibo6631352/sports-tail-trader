@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from polymarket_trader.domain.market import Market, MarketOutcome
 from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
 from strategies.current.outright.evaluator import evaluate_outright_opportunity
 from strategies.current.outright.types import (
@@ -23,12 +24,19 @@ def _snapshot(observed_at: datetime, probs: dict[str, str]) -> SeasonOddsSnapsho
     )
 
 
+def _market(slug: str = "nba-championship-2026-celtics", cond: str = "cond-1") -> Market:
+    return Market(
+        condition_id=cond,
+        market_slug=slug,
+        outcomes=(MarketOutcome(token_id="t", outcome="Celtics"),),
+    )
+
+
 def test_evaluator_accepts_market_with_sufficient_edge() -> None:
     snap = _snapshot(_NOW, {"Celtics": "0.40"})
     result = evaluate_outright_opportunity(
         snapshot=snap,
-        market_slug="nba-championship-2026-celtics",
-        condition_id="cond-1",
+        market=_market(),
         outcome_label="Celtics",
         token_id="tok-celtics",
         best_ask=Decimal("0.30"),  # ~25% edge
@@ -52,8 +60,7 @@ def test_evaluator_accepts_market_with_sufficient_edge() -> None:
 def test_evaluator_rejects_when_snapshot_missing() -> None:
     result = evaluate_outright_opportunity(
         snapshot=None,
-        market_slug="m",
-        condition_id="c",
+        market=_market("m", "c"),
         outcome_label="X",
         token_id="t",
         best_ask=Decimal("0.50"),
@@ -76,8 +83,7 @@ def test_evaluator_rejects_stale_snapshot() -> None:
     snap = _snapshot(stale, {"X": "0.40"})
     result = evaluate_outright_opportunity(
         snapshot=snap,
-        market_slug="m",
-        condition_id="c",
+        market=_market("m", "c"),
         outcome_label="X",
         token_id="t",
         best_ask=Decimal("0.30"),
@@ -99,8 +105,7 @@ def test_evaluator_rejects_insufficient_edge() -> None:
     snap = _snapshot(_NOW, {"X": "0.40"})
     result = evaluate_outright_opportunity(
         snapshot=snap,
-        market_slug="m",
-        condition_id="c",
+        market=_market("m", "c"),
         outcome_label="X",
         token_id="t",
         best_ask=Decimal("0.39"),  # only 2.5% below fair, not enough vs 5% required
@@ -122,8 +127,7 @@ def test_evaluator_rejects_when_liquidity_below_min() -> None:
     snap = _snapshot(_NOW, {"X": "0.40"})
     result = evaluate_outright_opportunity(
         snapshot=snap,
-        market_slug="m",
-        condition_id="c",
+        market=_market("m", "c"),
         outcome_label="X",
         token_id="t",
         best_ask=Decimal("0.30"),
@@ -145,8 +149,7 @@ def test_record_only_permission_returns_record_action_when_accepted() -> None:
     snap = _snapshot(_NOW, {"X": "0.40"})
     result = evaluate_outright_opportunity(
         snapshot=snap,
-        market_slug="m",
-        condition_id="c",
+        market=_market("m", "c"),
         outcome_label="X",
         token_id="t",
         best_ask=Decimal("0.30"),

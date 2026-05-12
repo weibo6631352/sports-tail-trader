@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from polymarket_trader.domain.market import Market, MarketOutcome
 from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
 from strategies.current.outright.pricing import (
     outright_entry_price_cap,
@@ -20,14 +21,28 @@ def _snapshot(probs: dict[str, str]) -> SeasonOddsSnapshot:
     )
 
 
+def _market() -> Market:
+    return Market(
+        condition_id="cond",
+        market_slug="m",
+        outcomes=(MarketOutcome(token_id="t", outcome="Celtics"),),
+    )
+
+
 def test_fair_value_returns_probability() -> None:
     snap = _snapshot({"Celtics": "0.45"})
-    assert outright_fair_value(snap, "Celtics") == Decimal("0.45")
+    result = outright_fair_value(snap, _market(), "Celtics")
+    assert result.value == Decimal("0.45")
+    assert result.reject is None
 
 
 def test_fair_value_returns_none_when_outcome_missing() -> None:
     snap = _snapshot({"Celtics": "0.45"})
-    assert outright_fair_value(snap, "Lakers") is None
+    result = outright_fair_value(snap, _market(), "Lakers")
+    assert result.value is None
+    # 非 YES/NO 且 snapshot 无此 key → 旧契约：ODDS_OUTCOME_NOT_MAPPED
+    from strategies.current.outright.types import OutrightRejectReason
+    assert result.reject == OutrightRejectReason.ODDS_OUTCOME_NOT_MAPPED
 
 
 def test_entry_price_cap_subtracts_edge() -> None:

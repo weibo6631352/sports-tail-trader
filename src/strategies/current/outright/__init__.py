@@ -12,15 +12,18 @@ from strategies.current.outright.types import (
 from strategies.current.outright.evaluator import evaluate_outright_opportunity
 from strategies.current.outright.match import match_season_state, season_odds_from_metadata
 from strategies.current.outright.pricing import (
+    OutrightFairValue,
     outright_entry_price_cap,
     outright_exit_price_target,
     outright_fair_value,
 )
 from strategies.current.outright.risk import check_outright_entry_risk
+from strategies.current.outright.team_resolver import resolve_market_team
 
 __all__ = [
     "OutrightAction",
     "OutrightEvaluation",
+    "OutrightFairValue",
     "OutrightRejectReason",
     "check_outright_entry_risk",
     "evaluate_outright_opportunity",
@@ -28,5 +31,6 @@ __all__ = [
     "outright_entry_price_cap",
     "outright_exit_price_target",
     "outright_fair_value",
+    "resolve_market_team",
     "season_odds_from_metadata",
 ]
