@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
+# 固定时间戳，让快照时间不再随墙钟漂移；具体瞬间任意，仅作 metadata。
+_FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
+
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.infra.polymarket import PolymarketClientError
@@ -80,7 +83,7 @@ def test_market_orderbook_falls_back_to_rest_when_hot_snapshot_has_no_quotes() -
             best_ask=None,
             bids=(),
             asks=(),
-            received_at=datetime.now(timezone.utc),
+            received_at=_FIXED_NOW,
         )
         rest_snapshot = OrderbookSnapshot(
             token_id="token-1",
@@ -92,7 +95,7 @@ def test_market_orderbook_falls_back_to_rest_when_hot_snapshot_has_no_quotes() -
             best_ask_size=Decimal("200"),
             bids=(PriceLevel(price=Decimal("0.52"), size=Decimal("100")),),
             asks=(PriceLevel(price=Decimal("0.53"), size=Decimal("200")),),
-            received_at=datetime.now(timezone.utc),
+            received_at=_FIXED_NOW,
         )
         client = _RestOrderbookClient(rest_snapshot)
         service = AdminService(

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from freezegun import freeze_time
+
 from polymarket_trader.app.market_service import MarketService
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.market import Market
@@ -66,6 +68,7 @@ def _raw_market(*, end_date: datetime) -> dict[str, object]:
     }
 
 
+@freeze_time("2026-05-12T00:00:00Z")
 def test_market_service_does_not_subscribe_new_expired_idle_market() -> None:
     registry = MarketRegistry()
     market_ws_worker = MarketWsWorker(registry=registry)
