@@ -152,13 +152,10 @@ export const marketsApi = {
       signal,
     }),
   pricesHistory: (
-    params: {
-      token_id: string
-      start_ts?: number
-      end_ts?: number
-      interval?: string
-      fidelity?: number
-    },
+    params: { token_id: string; fidelity?: number } & (
+      | { interval: string; start_ts?: number; end_ts?: number }
+      | { interval?: never; start_ts: number; end_ts?: number }
+    ),
     signal?: AbortSignal,
   ) =>
     apiClient.get<PricesHistory>('/markets/prices-history', {

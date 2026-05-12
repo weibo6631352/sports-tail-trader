@@ -135,6 +135,11 @@ async def get_market_prices_history(
     service: AdminService = Depends(get_admin_service),
     _rate: None = Depends(rate_limit(endpoint="prices_history", qps=2.0, burst=5)),
 ) -> dict[str, object]:
+    if interval is None and start_ts is None:
+        raise HTTPException(
+            status_code=422,
+            detail="prices_history_requires_time_filter: provide interval or start_ts",
+        )
     if start_ts is not None and end_ts is not None and start_ts > end_ts:
         raise HTTPException(status_code=422, detail="start_ts must be <= end_ts")
     try:
