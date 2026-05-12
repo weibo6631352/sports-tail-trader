@@ -235,6 +235,33 @@ _register(ParameterSpec(
 ))
 _register(ParameterSpec(
     scope="strategy",
+    key="tail_implied_min_edge_bps",
+    description=(
+        "Single-game tail implied fair value 公式 cap=fair×(1-edge_required) 中的 edge bps。"
+        "默认 500=5%；操盘手运行时调宽（如 200=2%）让更多 cap 边缘市场进入 Kelly 候选。"
+    ),
+    coerce=_coerce_positive_int,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_implied_prob_confidence",
+    description=(
+        "tail implied_p 的 base confidence（0-1），后续按盘口 depth/spread 动态衰减。"
+        "默认 0.5；操盘手运行时调到 0.7-0.8 提高 implied 信任度（小账户激进期）。"
+    ),
+    coerce=_coerce_probability,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_implied_conf_depth_baseline_usdc",
+    description=(
+        "tail implied conf depth 衰减 baseline。ask_depth >= 此值时不再缩 conf；不到时按比例缩。"
+        "默认 25；小 bankroll 阶段薄盘是常态可调到 5。"
+    ),
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="strategy",
     key="tail_outright_budget_usdc",
     description=(
         "Outright family（赛季冠军 / 球员奖项等长期市场）总预算上限（USDC）。"

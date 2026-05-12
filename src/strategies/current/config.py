@@ -184,6 +184,7 @@ class CurrentStrategyConfig:
     # 这个用于 tail single-game 反推 implied prob_p；outright_min_edge_bps 用于
     # outright family 在 fair_value 已知后算 entry_price_cap。outright 接通 Kelly 后
     # （B9 / 未来工作）再考虑统一字段。
+    # 操盘手运行时调宽走 ParameterStore override，不动默认。
     tail_implied_min_edge_bps: int = 500
     # tail implied_p 的不确定性 → κ 缩放（confidence）。0.5 = 半 κ baseline。
     # 实际 conf = base × min(1, ask_depth / depth_baseline_usdc) × max(0.25, 1 - spread/spread_widening)
@@ -191,6 +192,7 @@ class CurrentStrategyConfig:
     # outright path 当前不走 Kelly（_size_outright_entry 用固定 budget 包络 +
     # outright/evaluator 的反向定价），不消费此字段；未来 outright 接通 Kelly 时
     # 应直接用 the-odds-api 真概率 + conf=1.0（B9 / 未来工作）。
+    # 操盘手运行时调宽走 ParameterStore override，不动默认。
     tail_implied_prob_confidence: Decimal = Decimal("0.5")
     # 流动性 baseline：ask_depth >= 此值时不再缩 conf；不到时按比例缩。25 USDC ≈ 5 shares × 0.50。
     tail_implied_conf_depth_baseline_usdc: Decimal = Decimal("25")

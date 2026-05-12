@@ -15,6 +15,15 @@ logger = logging.getLogger(__name__)
 _SUBSCRIPTION_REFRESH_SECONDS = 5.0
 _MARKET_WS_LIVE_STATUSES = {"live", "ended"}
 _MARKET_WS_TAIL_WINDOW_SECONDS = 3600.0
+# Polymarket 自身 active+open 的 sports market 也直接放行，不再 100% 依赖外部
+# sports_live_state（SofaScore/ESPN 不覆盖 ATP Challenger/ITF/WTA125 等冷门赛事，
+# 也常被 Cloudflare 屏蔽）。窗口比 _MARKET_WS_TAIL_WINDOW_SECONDS 宽——这里只是
+# 决定"是否值得订阅 WS"，进入入场判定后还会被策略层过滤。
+_MARKET_WS_POLY_ACTIVE_WINDOW_SECONDS = 21600.0  # 6h
+# 订阅数上限：避免 polymarket WS 限流 / 队列爆炸。Sports tail 模式实际同时
+# 关注的 live market 通常 <50；200 留充裕余量但有硬护栏。超出时按 end_date 升序
+# 截断（最快结束的优先订阅）。
+_MARKET_WS_MAX_SUBSCRIPTIONS = 200
 
 
 def _offer_to_ws_queue(
@@ -67,23 +76,54 @@ def market_ws_subscription_token_ids(runtime: Any) -> tuple[str, ...]:
     """返回 market WS 需要订阅的 token。
 
     全量 market 发现负责扩大机会池；market WS 只承载交易热路径所需盘口。
-    因此这里按“已有风险敞口”或“直播源已进入可交易观察状态”收窄订阅范围，
-    避免把全量 registry 直接压到 Polymarket WS 上造成反复重连。
+    收窄订阅范围避免把全量 registry 压到 Polymarket WS 限流。订阅条件：
+    1. 账户已有敞口
+    2. sports_live_state 已标记 live/ended（外部源覆盖时优先）
+    3. **Polymarket 自身 active+open + endDate 在 6h 窗口内**（兜底——
+       SofaScore 屏蔽 / ESPN 不覆盖 Challenger 时仍能订阅）
+
+    超 _MARKET_WS_MAX_SUBSCRIPTIONS=200 时按 end_date 升序截断（最近结束的优先）。
     """
 
     account_snapshot = _account_snapshot(runtime)
     exposed_condition_ids, exposed_token_ids = _account_exposure_keys(account_snapshot)
-    token_ids: set[str] = set()
+    now = _utc_now()
+    candidates: list[tuple[float, tuple[str, ...]]] = []
     for market in runtime.registry.snapshot().markets:
         if not _market_requires_market_ws(
             runtime,
             market,
             exposed_condition_ids=exposed_condition_ids,
             exposed_token_ids=exposed_token_ids,
+            now=now,
         ):
             continue
-        token_ids.update(token_id for token_id in market.token_ids if token_id)
-    return tuple(sorted(token_ids))
+        market_token_ids = tuple(token_id for token_id in market.token_ids if token_id)
+        if not market_token_ids:
+            continue
+        # 按 end_date 升序排（near-end 优先）；缺 end_date 排到最后。
+        end_ts = float("inf")
+        end = getattr(market, "end_date", None)
+        if end is not None:
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            end_ts = end.timestamp()
+        candidates.append((end_ts, market_token_ids))
+    candidates.sort(key=lambda item: item[0])
+
+    token_ids: list[str] = []
+    seen: set[str] = set()
+    for _, market_token_ids in candidates:
+        for token_id in market_token_ids:
+            if token_id in seen:
+                continue
+            seen.add(token_id)
+            token_ids.append(token_id)
+            if len(token_ids) >= _MARKET_WS_MAX_SUBSCRIPTIONS:
+                break
+        if len(token_ids) >= _MARKET_WS_MAX_SUBSCRIPTIONS:
+            break
+    return tuple(token_ids)
 
 
 def _account_snapshot(runtime: Any) -> Any | None:
@@ -119,27 +159,52 @@ def _market_requires_market_ws(
     *,
     exposed_condition_ids: set[str],
     exposed_token_ids: set[str],
+    now: datetime | None = None,
 ) -> bool:
     if market.condition_id in exposed_condition_ids or any(
         token_id in exposed_token_ids for token_id in market.token_ids
     ):
         return True
+    now = now or _utc_now()
     record = _entry_metadata_record_for_market(runtime, market)
-    if record is None:
+    if record is not None:
+        # record 存在 = 外部 live state 已覆盖此 market，按原 live state 判定不放兜底；
+        # 显式拒（signal_allowed=False）必须立刻 return 避免 polymarket 兜底误绕过。
+        signal_reason = (record.live_state_signal_reason or "").strip()
+        if record.live_state_signal_allowed is False and signal_reason != "market_end_too_far":
+            return False
+        phase = (record.live_state_phase or "").strip().lower()
+        if phase == "ended":
+            return True
+        if phase in _MARKET_WS_LIVE_STATUSES:
+            if record.live_state_signal_allowed is True:
+                return True
+            if phase == "live" and signal_reason == "market_end_too_far":
+                return True
+            if _market_end_within_tail_window(market, now=now):
+                return True
+        # record 存在但 phase 不匹配（如 scheduled 未开赛）—— 不订阅。
         return False
-    signal_reason = (record.live_state_signal_reason or "").strip()
-    if record.live_state_signal_allowed is False and signal_reason != "market_end_too_far":
+    # record 不存在 = 外部 live state 没覆盖（典型：ATP Challenger / WTA 125 / ITF
+    # 这些 ESPN 不收录、SofaScore 又被 Cloudflare 403 屏蔽的冷门赛事）。
+    # 用 Polymarket 自身 active+open + endDate 在 6h 窗口作为兜底订阅信号。
+    return _market_active_in_polymarket(market, now=now)
+
+
+def _market_active_in_polymarket(market: Any, *, now: datetime) -> bool:
+    if not getattr(market, "active", True):
         return False
-    phase = (record.live_state_phase or "").strip().lower()
-    if phase == "ended":
-        return True
-    if phase not in _MARKET_WS_LIVE_STATUSES:
+    if getattr(market, "closed", False):
         return False
-    if record.live_state_signal_allowed is True:
-        return True
-    if phase == "live" and signal_reason == "market_end_too_far":
-        return True
-    return _market_end_within_tail_window(market, now=_utc_now())
+    end = getattr(market, "end_date", None)
+    if end is None:
+        # 无 end_date 通常是赛季级 outright 市场——长期不订阅 WS 避免占用名额。
+        return False
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    seconds_until_end = (end.astimezone(timezone.utc) - now.astimezone(timezone.utc)).total_seconds()
+    # 已过 end_date 但还没 closed 的市场仍允许订阅（结算可能滞后），不限下边界。
+    return seconds_until_end <= _MARKET_WS_POLY_ACTIVE_WINDOW_SECONDS
 
 
 def _market_end_within_tail_window(market: Any, *, now: datetime) -> bool:
