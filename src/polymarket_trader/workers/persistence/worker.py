@@ -18,6 +18,22 @@ from .records import (
 
 logger = logging.getLogger(__name__)
 
+# Repository 契约必须提供的 (batch_method, single_method) 名称表。
+# infra/db/persistence.py 内 single 永远是 batch 的 list 包装；这里固定查表，
+# 不在 worker 端做 hasattr 探测兜底（CLAUDE.md §8）。
+_REPOSITORY_METHOD_NAMES: dict[str, tuple[str, str]] = {
+    "audit": ("save_audit_events", "save_audit_event"),
+    "market": ("save_market_snapshots", "save_market_snapshot"),
+    "account": ("save_account_snapshots", "save_account_snapshot"),
+    "orderbook": ("save_orderbook_snapshots", "save_orderbook_snapshot"),
+    "order": ("save_orders", "save_order"),
+    "fill": ("save_fills", "save_fill"),
+    "position": ("save_positions", "save_position"),
+    "allocation": ("save_allocations", "save_allocation"),
+    "decision": ("save_decision_records", "save_decision_record"),
+    "outbox": ("save_outbox_events", "save_outbox_event"),
+}
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -501,28 +517,17 @@ class PersistenceWorker:
         return counts
 
     def _select_repository_method(self, kind: str, *, batch: bool) -> str | None:
-        method_names = {
-            "audit": ("save_audit_events", "save_audit_event"),
-            "market": ("save_market_snapshots", "save_market_snapshot"),
-            "account": ("save_account_snapshots", "save_account_snapshot"),
-            "orderbook": ("save_orderbook_snapshots", "save_orderbook_snapshot"),
-            "order": ("save_orders", "save_order"),
-            "fill": ("save_fills", "save_fill"),
-            "position": ("save_positions", "save_position"),
-            "allocation": ("save_allocations", "save_allocation"),
-            "decision": ("save_decision_records", "save_decision_record"),
-            "outbox": ("save_outbox_events", "save_outbox_event"),
-        }
-        candidates = method_names.get(kind)
-        if candidates is None:
+        """返回 repository 上对应 (kind, batch) 的方法名。
+
+        Repository 契约固定提供 batch + single 一对方法（infra 端 single 永远是
+        batch 的 list 包装）；不做 hasattr 探测兜底——契约缺失视为编程错误，
+        ``_invoke_repository_method`` 内部抛 AttributeError。
+        """
+
+        method_names = _REPOSITORY_METHOD_NAMES.get(kind)
+        if method_names is None:
             return None
-        preferred = candidates[0] if batch else candidates[1]
-        if self._repository is not None and hasattr(self._repository, preferred):
-            return preferred
-        fallback = candidates[1] if batch else candidates[0]
-        if self._repository is not None and hasattr(self._repository, fallback):
-            return fallback
-        return None
+        return method_names[0] if batch else method_names[1]
 
     async def _invoke_repository_method(self, method_name: str, argument: Any) -> Any:
         if self._repository is None:

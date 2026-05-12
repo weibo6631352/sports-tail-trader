@@ -204,7 +204,7 @@ async def _run_with_stub_repo(repo: _StubRepo, **kwargs: Any) -> dict[str, Any]:
     service = AdminService().bind_runtime(_FakeRuntime(with_db=True))
 
     async def _fake_with_repos(_self: AdminService, callback: Any) -> Any:
-        # admin_query_mixin.list_decisions 只通过 repos.decision 访问 repo。
+        # admin_query.list_decisions 只通过 repos.decision 访问 repo。
         return await callback(_FakeRepoGroup(decision_repo=repo))
 
     # AdminService 是 frozen dataclass —— 不能直接对实例 setattr，挂到类层；

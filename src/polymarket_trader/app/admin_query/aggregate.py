@@ -1,8 +1,7 @@
 """聚合所有 admin 查询子 mixin。
 
-最终形态：``class AdminQueryMixin(<sub_mixin_1>, <sub_mixin_2>, ...): pass``。
-拆分推进期间，未抽取的方法仍由 ``admin_query_mixin`` 模块的旧类承担；通过
-旧类继承本聚合类，将子 mixin 提供的方法注入到 AdminService 现有的继承链中。
+``class AdminQueryMixin(<sub_mixin_1>, <sub_mixin_2>, ...): pass``——AdminService
+直接继承本聚合类拿到所有 admin 查询方法。
 """
 
 from __future__ import annotations

@@ -23,7 +23,7 @@ from polymarket_trader.api.routes.markets import router as markets_router
 from polymarket_trader.api.routes.operations import router as operations_router
 from polymarket_trader.api.routes.outbox import router as outbox_router
 from polymarket_trader.api.routes.runtime import router as runtime_router
-from polymarket_trader.app.admin_query_mixin import (
+from polymarket_trader.app.admin_query._helpers import (
     _compute_latency_payload,
     _percentile,
 )

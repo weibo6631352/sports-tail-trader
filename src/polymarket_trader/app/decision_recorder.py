@@ -29,9 +29,8 @@ class _OutboxSink(Protocol):
 class DecisionEventRecorder:
     """同步把 hook 决策投递到 outbox。
 
-    满足 ``ExtensionHooks`` 旁路 hook 录制契约的 ``record(...)`` 接口（兼容旧
-    ``DecisionRecorder`` Protocol），但内部不维护任何缓冲：每次 record 直接
-    构造 ``OutboxEvent`` 并 ``put_nowait``。
+    满足 ``ExtensionHooks`` 旁路 hook 录制契约的 ``record(...)`` 接口，内部
+    不维护任何缓冲：每次 record 直接构造 ``OutboxEvent`` 并 ``put_nowait``。
     """
 
     __slots__ = ("_outbox", "_strategy_id")
