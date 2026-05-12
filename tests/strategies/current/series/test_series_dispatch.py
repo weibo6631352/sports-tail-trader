@@ -74,14 +74,16 @@ def _series_game_handicap_market() -> Market:
     )
 
 
-def test_series_winner_dispatch_returns_skip_with_winner_pending() -> None:
+def test_series_winner_dispatch_skips_when_state_missing() -> None:
+    # Worktree 3：WINNER classifier 命中后，缺 SeriesState（worker 未写入 metadata）
+    # 走 MISSING_SERIES_STATE 可审计拒绝；不构造 BUY、不旁路风控。
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
     decision = strategy.decide_entry(_context(_series_winner_market()))
 
     assert decision.action == ExtensionAction.SKIP
     assert decision.metadata.get("market_family") == "series"
     assert decision.metadata.get("series_sub_type") == "winner"
-    assert decision.metadata.get("series_reject_reason") == "winner_model_pending"
+    assert decision.metadata.get("series_reject_reason") == "missing_series_state"
     assert decision.metadata.get("series_accepted") is False
 
 

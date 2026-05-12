@@ -271,6 +271,23 @@ class CurrentStrategyConfig:
     tail_outright_entry_maker_max_resting_seconds: int = 86400
     tail_outright_min_orderbook_depth_usdc: Decimal = Decimal("100")
 
+    # Series WINNER family 配置。默认 budget=0 + RECORD_ONLY；与 outright 同样
+    # 双 flip（permission=AUTO_EXECUTE + budget>0）才会真实下单。Worktree 3 阶段
+    # 只接通 WINNER；TOTAL_GAMES / GAME_HANDICAP 仍 record-only。
+    tail_series_winner_execution_permission: ExecutionPermission = ExecutionPermission.RECORD_ONLY
+    tail_series_winner_min_edge_bps: int = 800  # 8% —— 系列赛波动比单场 outright 更大
+    tail_series_winner_max_entry_price: Decimal = Decimal("0.95")
+    tail_series_winner_budget_usdc: Decimal = Decimal("0")
+    tail_series_winner_max_per_market_usdc: Decimal = Decimal("25")
+    tail_series_winner_max_event_correlation_usdc: Decimal = Decimal("40")
+    tail_series_winner_min_orderbook_depth_usdc: Decimal = Decimal("50")
+    tail_series_winner_max_state_age_seconds: int = 3600  # 1h：比赛日内 state 应频繁刷新
+    tail_series_winner_max_game_odds_age_seconds: int = 7200  # 2h
+    tail_series_winner_max_hold_horizon_days: int = 30
+    tail_series_winner_min_remaining_days: int = 0  # 系列赛剩余比赛随时可成交
+    tail_series_winner_exit_edge_target: Decimal = Decimal("0.05")
+    tail_series_winner_min_profit_per_share: Decimal = Decimal("0.02")
+
     # league-aware 源亲和：aggregate_client 用此覆盖默认全局源优先级表。
     # 仅当前体育扫尾策略关心；framework Settings 不持有，CLAUDE.md §10。
     league_source_affinity: Mapping[str, tuple[str, ...]] = field(

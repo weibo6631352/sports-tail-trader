@@ -29,14 +29,16 @@ def _candidate(question: str, outcomes: tuple[tuple[str, str], ...] = (("tok-a",
     )
 
 
-def test_winner_sub_type_returns_winner_model_pending() -> None:
+def test_winner_sub_type_without_state_returns_missing_series_state() -> None:
+    # 不注入 inputs / state → record-only：classifier 判到 WINNER 但缺 state
+    # 后立即 MISSING_SERIES_STATE，不再走 *_MODEL_PENDING 占位。
     evaluation = evaluate_series_opportunity(_candidate("Who will win the series?"))
 
     assert evaluation.accepted is False
     assert evaluation.sub_type == SeriesSubType.WINNER
-    assert evaluation.reject_reason == SeriesRejectReason.WINNER_MODEL_PENDING
+    assert evaluation.reject_reason == SeriesRejectReason.MISSING_SERIES_STATE
     assert evaluation.metadata["sub_type"] == "winner"
-    assert evaluation.metadata["reject_reason"] == "winner_model_pending"
+    assert evaluation.metadata["reject_reason"] == "missing_series_state"
 
 
 def test_total_games_sub_type_returns_total_games_model_pending() -> None:

@@ -58,8 +58,15 @@ from strategies.current.outright import (
 from strategies.current.outright.pricing import outright_fair_value
 from strategies.current.series import (
     SeriesCandidate,
+    SeriesEvaluation,
+    SeriesEvaluatorInputs,
+    check_series_entry_risk,
+    derive_single_game_prob,
     evaluate_series_opportunity,
+    series_state_from_metadata,
+    series_win_probability,
 )
+from strategies.current.series.team_resolver import resolve_series_team
 from strategies.current.parameter_overrides import active_ports_scope, effective_decimal, effective_int
 from strategies.current.recovery import decide_recovery
 from strategies.current.tail.types import ExecutionPermission as _ExecPerm
@@ -356,13 +363,15 @@ class CurrentStrategy:
     def size_entry(self, context: ExtensionContext) -> EntrySizing:
         """为当前 market 生成入场预算分配结果。
 
-        outright family 走独立预算包络 ``tail_outright_budget_usdc``，与 single_game
-        互不挤占。预算=0 时返回空 sizing；>0 时按 per-market 上限平分。
+        outright / series family 各自走独立预算包络，与 single_game 互不挤占。
+        预算=0 时返回空 sizing；>0 时按 per-market 上限平分并接入 Kelly。
         """
 
         descriptor = describe_sports_market(context.market) if context.market else None
         if descriptor is not None and descriptor.market_family.value == "outright":
             return self._size_outright_entry(context)
+        if descriptor is not None and descriptor.market_family.value == "series":
+            return self._size_series_entry(context)
         with active_ports_scope(self._ports):
             return size_entry(self._config, context)
 
@@ -468,6 +477,123 @@ class CurrentStrategy:
             kelly_min_stake_usdc=kelly_min_stake_usdc,
         )
         return EntrySizing(allocation_plan=plan, reason="outright_kelly")
+
+    def _size_series_entry(self, context: ExtensionContext) -> EntrySizing:
+        """Series WINNER Kelly sizing。
+
+        与 outright 同构：用 series_win_probability(state, p_per_game) 作为真概率
+        （conf=1.0）喂 Kelly 公式。budget=0 / 缺 state / 缺 p_per_game → 空 sizing。
+        """
+
+        config = self._config
+        budget = config.tail_series_winner_budget_usdc
+        if budget <= Decimal("0"):
+            return EntrySizing(
+                allocation_plan=AllocationPlan(
+                    trace_id=context.trace_id,
+                    total_budget_usdc=budget,
+                    reason="series_winner_budget_zero",
+                ),
+                reason="series_winner_budget_zero",
+            )
+
+        market = context.market
+        if market is None:
+            return EntrySizing(
+                allocation_plan=AllocationPlan(
+                    trace_id=context.trace_id,
+                    total_budget_usdc=budget,
+                    reason="series_missing_market",
+                ),
+                reason="series_missing_market",
+            )
+
+        kelly_fraction = context.kelly_fraction
+        kelly_max_position_fraction = context.kelly_max_position_fraction
+        kelly_min_stake_usdc = context.kelly_min_stake_usdc
+        if kelly_fraction is None or kelly_max_position_fraction is None or kelly_min_stake_usdc is None:
+            # 框架契约违反——EntryPlanner 应注入 Kelly 参数；缺失记日志并降级。
+            logger.warning(
+                "series_sizing.missing_kelly_params: trace_id=%s condition_id=%s",
+                context.trace_id,
+                market.condition_id,
+            )
+            return EntrySizing(
+                allocation_plan=AllocationPlan(
+                    trace_id=context.trace_id,
+                    total_budget_usdc=budget,
+                    reason="series_sizing_no_kelly_params",
+                ),
+                reason="series_sizing_no_kelly_params",
+                metadata={
+                    "series_budget_usdc": str(budget),
+                    "kelly_path": "not_applied",
+                },
+            )
+
+        metadata = context.metadata or {}
+        state = series_state_from_metadata(metadata)
+        now = context.now or datetime.now(timezone.utc)
+        token_views = tuple(context.market_token_views or ())
+        outcome_by_token: dict[str, str] = {
+            tv.token_id: (tv.outcome or "") for tv in token_views if tv.token_id
+        }
+
+        per_market_cap = min(budget, config.tail_series_winner_max_per_market_usdc)
+        market_snapshots: list[AllocationMarketSnapshot] = []
+        for tv in token_views:
+            if not tv.token_id:
+                continue
+            ob = tv.orderbook
+            best_ask = ob.best_ask if ob is not None else None
+            market_snapshots.append(AllocationMarketSnapshot(
+                market=market,
+                token_id=tv.token_id,
+                orderbook=ob,
+                best_ask=best_ask,
+                strategy_budget_cap_usdc=per_market_cap,
+            ))
+
+        def _prob_provider(snap: AllocationMarketSnapshot) -> ProbView:
+            outcome_label = outcome_by_token.get(snap.token_id, "")
+            if state is None or not outcome_label:
+                return ProbView(prob_p=None, prob_confidence=Decimal("0"), source="series_real_missing_state")
+            side = resolve_series_team(snap.market, outcome_label, state)
+            if side is None:
+                return ProbView(
+                    prob_p=None,
+                    prob_confidence=Decimal("0"),
+                    source="series_real_rejected:series_team_not_resolved",
+                )
+            derived = derive_single_game_prob(
+                state=state,
+                metadata=metadata,
+                season_snapshot=None,
+                now=now,
+                max_game_odds_age_seconds=config.tail_series_winner_max_game_odds_age_seconds,
+            )
+            if derived is None:
+                return ProbView(
+                    prob_p=None,
+                    prob_confidence=Decimal("0"),
+                    source="series_real_rejected:missing_series_odds",
+                )
+            team_a_p = series_win_probability(state, derived.p_a)
+            fair = team_a_p if side == "team_a" else Decimal(1) - team_a_p
+            return ProbView(prob_p=fair, prob_confidence=Decimal("1"), source="series_real")
+
+        plan = kelly_plan(
+            trace_id=context.trace_id,
+            bankroll_usdc=context.bankroll_usdc or budget,
+            portfolio_budget_usdc=budget,
+            markets=tuple(market_snapshots),
+            prob_provider=_prob_provider,
+            kelly_fraction=kelly_fraction,
+            kelly_max_position_fraction=kelly_max_position_fraction,
+            kelly_min_edge=context.kelly_min_edge or Decimal("0"),
+            kelly_min_stake_usdc=kelly_min_stake_usdc,
+        )
+        return EntrySizing(allocation_plan=plan, reason="series_winner_kelly")
 
     def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
         """根据盘口和预算生成 BUY 决策。
@@ -702,11 +828,12 @@ class CurrentStrategy:
         )
 
     def _decide_series_entry(self, context: ExtensionContext) -> ExtensionDecision:
-        """series 子包驱动的入场决策（worktree 2 阶段：record-only 骨架）。
+        """Series 子包驱动的入场决策。
 
-        遍历每个 outcome，对每个 token 跑一次 evaluator 拿到 record-only 拒绝原因；
-        全部 reject 时取第一个作为 SKIP reason 供 audit。本阶段所有子类型都返回
-        ``*_MODEL_PENDING``，真实定价 / 风控 / 下单在 Worktree 3-4 接线。
+        Worktree 3 接通 WINNER：evaluator 注入完整 inputs（盘口 / 配置 /
+        season snapshot），accepted 路径走 Kelly + check_series_entry_risk →
+        BUY，最终仍由框架 RiskManager 与 OrderExecutor 把关；reject 路径仍
+        返回带可审计原因的 SKIP。TOTAL_GAMES / GAME_HANDICAP 仍 record-only。
         """
 
         market = context.market
@@ -719,54 +846,167 @@ class CurrentStrategy:
                 reason="series_missing_outcomes",
                 metadata={"market_family": "series"},
             )
-        # 框架真实驱动时 market_token_views 必填；测试场景仅给 outcomes 时，构造
-        # 一份只包含 token_id/outcome 的 ``MarketTokenView`` 当 fallback，避免与
-        # 生产路径在类型上分叉。
         if not token_views:
             token_views = tuple(
                 MarketTokenView(token_id=o.token_id, outcome=o.outcome)
                 for o in outcomes
             )
 
-        first_evaluation = None
-        first_token_view = None
+        config = self._config
+        permission = config.tail_series_winner_execution_permission
+        budget_unlocked = config.tail_series_winner_budget_usdc > Decimal("0")
+        # 双闸门：缺 budget 或 permission != AUTO_EXECUTE 视为 record-only，
+        # evaluator 仍跑出 fair_value 供审计；不构造 BUY。
+        auto_enabled = budget_unlocked and permission.value == "auto_execute"
+        now = context.now or datetime.now(timezone.utc)
+        ctx_meta = context.metadata or {}
+
+        inputs_template = SeriesEvaluatorInputs(
+            best_ask=None,
+            buyable_liquidity_usdc=Decimal("0"),
+            now=now,
+            min_edge_bps=config.tail_series_winner_min_edge_bps,
+            max_entry_price=config.tail_series_winner_max_entry_price,
+            min_orderbook_depth_usdc=config.tail_series_winner_min_orderbook_depth_usdc,
+            max_series_state_age_seconds=config.tail_series_winner_max_state_age_seconds,
+            max_game_odds_age_seconds=config.tail_series_winner_max_game_odds_age_seconds,
+            season_snapshot=None,
+        )
+
+        best_accept: tuple[tuple[Decimal, SeriesEvaluation], MarketTokenView] | None = None
+        first_reject: tuple[SeriesEvaluation, MarketTokenView] | None = None
         for token_view in token_views:
+            orderbook = token_view.orderbook
+            best_ask = orderbook.best_ask if orderbook is not None else None
+            buyable = (
+                orderbook.buyable_ask_depth(max_price=config.tail_series_winner_max_entry_price)
+                if orderbook is not None
+                else Decimal("0")
+            )
+            buyable_usdc = buyable * best_ask if best_ask is not None else Decimal("0")
+            inputs = SeriesEvaluatorInputs(
+                best_ask=best_ask,
+                buyable_liquidity_usdc=buyable_usdc,
+                now=inputs_template.now,
+                min_edge_bps=inputs_template.min_edge_bps,
+                max_entry_price=inputs_template.max_entry_price,
+                min_orderbook_depth_usdc=inputs_template.min_orderbook_depth_usdc,
+                max_series_state_age_seconds=inputs_template.max_series_state_age_seconds,
+                max_game_odds_age_seconds=inputs_template.max_game_odds_age_seconds,
+                season_snapshot=None,
+            )
+            # candidate.metadata 必须挂上 context.metadata，evaluator 在那里读取
+            # SeriesState / GameOdds 等 worker 写入的快照。
             candidate = SeriesCandidate(
                 market=market,
                 outcome_label=token_view.outcome,
                 token_id=token_view.token_id,
+                metadata=ctx_meta,
             )
-            evaluation = evaluate_series_opportunity(candidate)
+            evaluation = evaluate_series_opportunity(candidate, inputs=inputs)
             if evaluation.accepted:
-                # 当前阶段不会发生：所有子类型都返回 *_MODEL_PENDING reject。
-                # 真实 BUY 接线在 Worktree 3-4 落地，那时按 sub_type 走对应定价 + 风控。
-                raise NotImplementedError(
-                    "series accepted path wired in worktree 3-4 once SeriesState/winner_model land"
-                )
-            if first_evaluation is None:
-                first_evaluation = evaluation
-                first_token_view = token_view
+                edge = (evaluation.fair_value or Decimal(0)) - (best_ask or Decimal(0))
+                if best_accept is None or edge > best_accept[0][0]:
+                    best_accept = ((edge, evaluation), token_view)
+            elif first_reject is None:
+                first_reject = (evaluation, token_view)
 
-        if first_evaluation is None or first_token_view is None:
+        if best_accept is None:
+            evaluation, token_view = first_reject if first_reject else (None, None)
+            if evaluation is None or token_view is None:
+                return ExtensionDecision.skip(
+                    reason="series_no_candidates",
+                    metadata={"market_family": "series"},
+                )
             return ExtensionDecision.skip(
-                reason="series_no_candidates",
+                reason=evaluation.reject_reason.value if evaluation.reject_reason else "series_unclassified",
+                metadata={
+                    "market_family": "series",
+                    "series_sub_type": evaluation.sub_type.value,
+                    "series_reject_reason": (
+                        evaluation.reject_reason.value if evaluation.reject_reason else None
+                    ),
+                    "series_accepted": False,
+                    "series_metadata": dict(evaluation.metadata),
+                    "token_id": token_view.token_id,
+                    "outcome_label": token_view.outcome,
+                },
+            )
+
+        (_edge, evaluation), token_view = best_accept
+        if not auto_enabled:
+            # accepted 但 permission/budget 未解锁 → RECORD_ONLY 视图，下游不构造 BUY。
+            return ExtensionDecision.skip(
+                reason=f"series_record_only_{permission.value}",
+                metadata={
+                    "market_family": "series",
+                    "series_sub_type": evaluation.sub_type.value,
+                    "series_accepted": True,
+                    "series_metadata": dict(evaluation.metadata),
+                    "budget_unlocked": budget_unlocked,
+                    "execution_permission": permission.value,
+                    "token_id": token_view.token_id,
+                    "outcome_label": token_view.outcome,
+                },
+            )
+
+        # AUTO_EXECUTE：先做策略侧 risk 前置（暴露细粒度审计），框架 RiskManager
+        # 仍是最终门禁——这里只产 BUY intent，不绕过任何上层风控。
+        allocation = context.allocation
+        if allocation is not None and allocation.buy_budget_usdc > Decimal("0"):
+            proposed_amount = allocation.buy_budget_usdc
+        else:
+            proposed_amount = min(
+                config.tail_series_winner_budget_usdc,
+                config.tail_series_winner_max_per_market_usdc,
+            )
+        if proposed_amount <= Decimal("0"):
+            return ExtensionDecision.skip(
+                reason="series_budget_exhausted",
                 metadata={"market_family": "series"},
             )
 
-        return ExtensionDecision.skip(
-            reason=first_evaluation.reject_reason.value if first_evaluation.reject_reason else "series_unclassified",
+        existing_series_exposure = (
+            _decimal_from_metadata(ctx_meta.get("series_total_exposure_usdc")) or Decimal("0")
+        )
+        existing_event_exposure = (
+            _decimal_from_metadata(ctx_meta.get("series_event_exposure_usdc")) or Decimal("0")
+        )
+        risk_reject = check_series_entry_risk(
+            now=now,
+            market_end_at=market.end_date,
+            proposed_amount_usdc=proposed_amount,
+            existing_series_exposure_usdc=existing_series_exposure,
+            existing_event_exposure_usdc=existing_event_exposure,
+            max_per_market_usdc=config.tail_series_winner_max_per_market_usdc,
+            max_event_correlation_usdc=config.tail_series_winner_max_event_correlation_usdc,
+            max_total_series_usdc=config.tail_series_winner_budget_usdc,
+            max_hold_horizon_days=config.tail_series_winner_max_hold_horizon_days,
+            min_remaining_days=config.tail_series_winner_min_remaining_days,
+        )
+        if risk_reject is not None:
+            return ExtensionDecision.skip(
+                reason=f"series_{risk_reject.value}",
+                metadata={
+                    "market_family": "series",
+                    "series_reject_reason": risk_reject.value,
+                    "series_metadata": dict(evaluation.metadata),
+                },
+            )
+
+        entry_price = _series_entry_price(evaluation, fallback=config.tail_series_winner_max_entry_price)
+        return ExtensionDecision.buy(
+            reason="series_winner_entry_accepted",
+            token_id=evaluation.candidate.token_id,
+            price=entry_price,
+            amount_usdc=proposed_amount,
+            market_slug=market.market_slug,
+            decision_kind=DecisionKind.ENTRY,
             metadata={
                 "market_family": "series",
-                "series_sub_type": first_evaluation.sub_type.value,
-                "series_reject_reason": (
-                    first_evaluation.reject_reason.value
-                    if first_evaluation.reject_reason
-                    else None
-                ),
-                "series_accepted": False,
-                "series_metadata": dict(first_evaluation.metadata),
-                "token_id": first_token_view.token_id,
-                "outcome_label": first_token_view.outcome,
+                "series_sub_type": evaluation.sub_type.value,
+                "series_metadata": dict(evaluation.metadata),
+                "series_fair_value": str(evaluation.fair_value) if evaluation.fair_value else None,
             },
         )
 
@@ -993,6 +1233,16 @@ def _decimal_from_metadata(value: object) -> Decimal | None:
         return Decimal(str(value))
     except Exception:
         return None
+
+
+def _series_entry_price(evaluation: SeriesEvaluation, *, fallback: Decimal) -> Decimal:
+    """从 series evaluation metadata 还原 entry_price_cap，缺失时退到配置 fallback。"""
+
+    cap_text = evaluation.metadata.get("entry_price_cap") if evaluation.metadata else None
+    cap = _decimal_from_metadata(cap_text)
+    if cap is not None and cap > Decimal("0"):
+        return cap
+    return fallback
 
 
 def _effective_tick_size(context: ExtensionContext) -> Decimal | None:

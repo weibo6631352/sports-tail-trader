@@ -40,18 +40,26 @@ class SeriesRejectReason(StrEnum):
     SUBTYPE_UNCLASSIFIED = "subtype_unclassified"
     # 系列赛热态（比分、剩余场次等）缺失——模型无法给出 fair_value。
     MISSING_SERIES_STATE = "missing_series_state"
-    # 第三方系列赛赔率缺失——反向定价无锚点。
+    STALE_SERIES_STATE = "stale_series_state"
+    # 单场胜率 (p_per_game) 缺失——无法把系列赛胜率算出来。
     MISSING_SERIES_ODDS = "missing_series_odds"
     STALE_SERIES_ODDS = "stale_series_odds"
+    # 系列赛 outcome 文本既不是球队名也无法从市场文本反推到 team_a/team_b。
+    SERIES_TEAM_NOT_RESOLVED = "series_team_not_resolved"
+    MISSING_BEST_ASK = "missing_best_ask"
     INSUFFICIENT_EDGE = "insufficient_edge"
     PRICE_ABOVE_FAIR = "price_above_fair"
     LIQUIDITY_BELOW_MIN = "liquidity_below_min"
     MARKET_END_PASSED = "market_end_passed"
     HOLD_HORIZON_EXCEEDED = "hold_horizon_exceeded"
+    MIN_REMAINING_DAYS_NOT_MET = "min_remaining_days_not_met"
     OUTCOME_RESOLVED = "outcome_resolved"
     SOURCE_CONFLICT = "source_conflict"
-    # 各子类型模型接线尚未落地（Worktree 3-4 替换为真实拒绝/接受路径）。
-    WINNER_MODEL_PENDING = "winner_model_pending"
+    # 预算 / 相关性硬上限（与 outright 同语义）。
+    TOTAL_BUDGET_EXHAUSTED = "total_budget_exhausted"
+    EVENT_CORRELATION_CAP = "event_correlation_cap"
+    PER_MARKET_CAP_EXCEEDED = "per_market_cap_exceeded"
+    # 子类型尚未接线（Worktree 4 落 TOTAL_GAMES / HANDICAP；本 worktree 只接 WINNER）。
     TOTAL_GAMES_MODEL_PENDING = "total_games_model_pending"
     HANDICAP_MODEL_PENDING = "handicap_model_pending"
 

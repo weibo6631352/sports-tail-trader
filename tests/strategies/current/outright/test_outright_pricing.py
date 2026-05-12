@@ -5,8 +5,8 @@ from decimal import Decimal
 
 from polymarket_trader.domain.market import Market, MarketOutcome
 from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
+from strategies.current._shared.edge_gates import entry_price_cap
 from strategies.current.outright.pricing import (
-    outright_entry_price_cap,
     outright_exit_price_target,
     outright_fair_value,
 )
@@ -46,7 +46,7 @@ def test_fair_value_returns_none_when_outcome_missing() -> None:
 
 
 def test_entry_price_cap_subtracts_edge() -> None:
-    cap = outright_entry_price_cap(
+    cap = entry_price_cap(
         Decimal("0.40"),
         min_edge_bps=500,  # 5%
         max_entry_price=Decimal("0.85"),
@@ -56,7 +56,7 @@ def test_entry_price_cap_subtracts_edge() -> None:
 
 
 def test_entry_price_cap_respects_strategy_ceiling() -> None:
-    cap = outright_entry_price_cap(
+    cap = entry_price_cap(
         Decimal("0.95"),
         min_edge_bps=100,
         max_entry_price=Decimal("0.85"),

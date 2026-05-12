@@ -172,6 +172,21 @@ class Settings(BaseSettings):
     sports_season_odds_interval_seconds: int = Field(default=1800, ge=300)
     sports_season_odds_ttl_seconds: int = Field(default=1800, ge=60)
 
+    # 系列赛热态子系统：服务于 series WINNER 实盘定价。10 分钟级 cadence。
+    sports_series_state_enabled: bool = False
+    sports_series_state_base_url: str = "https://site.api.espn.com"
+    sports_series_state_interval_seconds: int = Field(default=600, ge=60)
+    sports_series_state_ttl_seconds: int = Field(default=600, ge=60)
+    sports_series_state_timeout_s: float = Field(default=5.0, ge=0.5)
+
+    # 单场 h2h 赔率源：TheOddsAPI v4 markets=h2h，driving series winner p_per_game。
+    sports_game_odds_provider: str = "theoddsapi"
+    sports_game_odds_api_key: SecretStr | None = None
+    sports_game_odds_base_url: str = "https://api.the-odds-api.com"
+    sports_game_odds_regions: str = "us,eu"
+    sports_game_odds_interval_seconds: int = Field(default=1800, ge=300)
+    sports_game_odds_ttl_seconds: int = Field(default=1800, ge=60)
+
     # 性能与优先级字段必须始终有限制，避免无界队列、无界等待和热路径阻塞。
     enable_uvloop: bool = True
     trading_event_queue_max_size: int = Field(default=1000, ge=1)
