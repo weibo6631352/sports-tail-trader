@@ -1,8 +1,8 @@
 """TheSportsDB 公开赛程源适配器。
 
 TheSportsDB 的免费 eventsday API 能提供部分联赛的当日赛程、比分和粗粒度状态。
-本适配器只把可验证字段转换成内部 DTO，不推断剩余秒数，也不把国家或场馆字段
-加入队伍匹配别名，避免把冠军归属、国家归属市场误配成具体球队比赛。
+本适配器只把可验证字段转换成内部 ``LiveEvent``，不推断剩余秒数，也不把国家或
+场馆字段加入队伍匹配别名，避免把冠军归属、国家归属市场误配成具体球队比赛。
 """
 
 from __future__ import annotations
@@ -15,12 +15,13 @@ from typing import Any
 import httpx
 
 from polymarket_trader.domain.sports_live import (
-    SportsLiveGame,
+    LiveEvent,
+    LiveEventKind,
+    Participant,
     SportsLiveGameStatus,
     SportsLiveSnapshot,
     SportsLiveSourceHealth,
     SportsLiveSourceStatus,
-    SportsLiveTeam,
 )
 from polymarket_trader.infra.sports.common import (
     SportsDataRateLimitError,
@@ -50,9 +51,28 @@ _LEAGUE_ALIASES: dict[str, tuple[str, ...] | None] = {
     "baseball": None,
 }
 
+# TheSportsDB strSport → 内部 sport 命名空间（与 espn / sofascore 一致）。
+_SPORT_NAMESPACE: dict[str, str] = {
+    "ice hockey": "ice-hockey",
+    "hockey": "ice-hockey",
+    "baseball": "baseball",
+    "basketball": "basketball",
+    "american football": "american-football",
+    "football": "football",
+    "soccer": "football",
+    "tennis": "tennis",
+    "cricket": "cricket",
+    "rugby": "rugby",
+    "rugby union": "rugby",
+    "rugby league": "rugby",
+    "esports": "esports",
+    "mma": "mma",
+    "boxing": "boxing",
+}
+
 
 class TheSportsDbLiveClient:
-    """读取 TheSportsDB eventsday API 并归一化成内部比赛状态。"""
+    """读取 TheSportsDB eventsday API 并归一化成 ``LiveEvent`` 列表。"""
 
     def __init__(
         self,
@@ -96,7 +116,7 @@ class TheSportsDbLiveClient:
         if self._owns_client:
             await self._client.aclose()
 
-    async def list_games(self) -> SportsLiveSnapshot:
+    async def list_events(self) -> SportsLiveSnapshot:
         """拉取配置 sport 的 UTC 当前日赛程。"""
 
         observed_at = utc_now(self._now_provider)
@@ -105,16 +125,16 @@ class TheSportsDbLiveClient:
                 self._cached_snapshot or SportsLiveSnapshot(
                     source="thesportsdb",
                     observed_at=observed_at,
-                    games=(),
+                    events=(),
                 ),
                 health=SportsLiveSourceHealth.CACHED,
             )
         date_text = observed_at.strftime("%Y-%m-%d")
-        games: list[SportsLiveGame] = []
+        events: list[LiveEvent] = []
         try:
             for sport in self._sports:
                 payload = await self._get_eventsday(sport, date_text=date_text)
-                games.extend(
+                events.extend(
                     parse_thesportsdb_events_payload(
                         payload,
                         sport=sport,
@@ -128,13 +148,13 @@ class TheSportsDbLiveClient:
                     self._cached_snapshot or SportsLiveSnapshot(
                         source="thesportsdb",
                         observed_at=observed_at,
-                        games=(),
+                        events=(),
                     ),
                     health=SportsLiveSourceHealth.CACHED,
                 )
             if isinstance(exc, SportsDataRateLimitError):
                 snapshot = self._snapshot_with_status(
-                    SportsLiveSnapshot(source="thesportsdb", observed_at=observed_at, games=()),
+                    SportsLiveSnapshot(source="thesportsdb", observed_at=observed_at, events=()),
                     health=SportsLiveSourceHealth.RATE_LIMITED,
                     success=False,
                     last_error=str(exc),
@@ -142,12 +162,12 @@ class TheSportsDbLiveClient:
                 self._cached_snapshot = snapshot
                 return snapshot
             raise
-        snapshot = SportsLiveSnapshot(source="thesportsdb", observed_at=observed_at, games=tuple(games))
+        snapshot = SportsLiveSnapshot(source="thesportsdb", observed_at=observed_at, events=tuple(events))
         snapshot = self._snapshot_with_status(
             snapshot,
             health=(
                 SportsLiveSourceHealth.SUCCESS_WITH_LIVE_DATA
-                if snapshot.games
+                if snapshot.events
                 else SportsLiveSourceHealth.SUCCESS_EMPTY
             ),
         )
@@ -175,13 +195,13 @@ class TheSportsDbLiveClient:
         return SportsLiveSnapshot(
             source="thesportsdb",
             observed_at=snapshot.observed_at,
-            games=snapshot.games,
+            events=snapshot.events,
             source_statuses=(
                 SportsLiveSourceStatus(
                     source="thesportsdb",
                     success=success,
                     health=health,
-                    games_seen=len(snapshot.games),
+                    events_seen=len(snapshot.events),
                     observed_at=snapshot.observed_at,
                     last_error=last_error,
                 ),
@@ -221,55 +241,72 @@ def parse_thesportsdb_events_payload(
     sport: str,
     league_codes: Sequence[str] = (),
     observed_at: datetime | None = None,
-) -> tuple[SportsLiveGame, ...]:
-    """把 TheSportsDB eventsday payload 转成内部比赛 DTO。"""
+) -> tuple[LiveEvent, ...]:
+    """把 TheSportsDB eventsday payload 转成 ``LiveEvent`` 列表。"""
 
     observed_at = observed_at or datetime.now(timezone.utc)
     raw_events = payload.get("events")
     if not isinstance(raw_events, Sequence) or isinstance(raw_events, (str, bytes)):
         return ()
     allowed_aliases = _allowed_league_aliases(league_codes)
-    games: list[SportsLiveGame] = []
+    events: list[LiveEvent] = []
     for raw_event in raw_events:
         if not isinstance(raw_event, Mapping):
             continue
         if not _event_matches_leagues(raw_event, allowed_aliases):
             continue
-        game = _parse_event(raw_event, sport=sport, observed_at=observed_at)
-        if game is not None:
-            games.append(game)
-    return tuple(games)
+        event = _parse_event(raw_event, sport=sport, observed_at=observed_at)
+        if event is not None:
+            events.append(event)
+    return tuple(events)
 
 
-def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datetime) -> SportsLiveGame | None:
+def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datetime) -> LiveEvent | None:
     home_name = first_text(raw_event, "strHomeTeam")
     away_name = first_text(raw_event, "strAwayTeam")
     if home_name is None or away_name is None:
         return None
     raw_status = first_text(raw_event, "strStatus", "strProgress") or ""
     status = _map_status(raw_status)
-    return SportsLiveGame(
+    event_id = first_text(raw_event, "idEvent") or ""
+    home_id = first_text(raw_event, "idHomeTeam")
+    away_id = first_text(raw_event, "idAwayTeam")
+    league_text = first_text(raw_event, "strLeague") or sport
+    sport_text = first_text(raw_event, "strSport") or sport
+    event_start_time = _parse_event_datetime(raw_event)
+    return LiveEvent(
         source="thesportsdb",
-        source_event_id=str(raw_event.get("idEvent") or ""),
+        source_event_id=event_id,
+        kind=LiveEventKind.TEAM_MATCH,
         league=_league_name(raw_event, sport=sport),
-        home=SportsLiveTeam(
-            name=home_name,
-            score=int_value(raw_event.get("intHomeScore")) or 0,
-            display_name=home_name,
-        ),
-        away=SportsLiveTeam(
-            name=away_name,
-            score=int_value(raw_event.get("intAwayScore")) or 0,
-            display_name=away_name,
+        sport=_sport_namespace(sport_text),
+        participants=(
+            Participant(
+                role="home",
+                name=home_name,
+                score=int_value(raw_event.get("intHomeScore")) or 0,
+                display_name=home_name,
+                external_ids={"thesportsdb": home_id} if home_id else {},
+            ),
+            Participant(
+                role="away",
+                name=away_name,
+                score=int_value(raw_event.get("intAwayScore")) or 0,
+                display_name=away_name,
+                external_ids={"thesportsdb": away_id} if away_id else {},
+            ),
         ),
         status=status,
         period=_period_label(raw_status),
         seconds_remaining=None,
         observed_at=observed_at,
+        event_start_time=event_start_time,
+        event_name=first_text(raw_event, "strEvent") or "",
+        external_ids={"thesportsdb": event_id} if event_id else {},
         raw_status=raw_status,
         source_payload={
-            "sport": sport,
-            "league": raw_event.get("strLeague"),
+            "sport": _sport_namespace(sport_text),
+            "league": league_text,
             "league_id": raw_event.get("idLeague"),
             "event_slug": raw_event.get("strEvent"),
             "start_time_utc": raw_event.get("strTimestamp"),
@@ -317,6 +354,13 @@ def _league_name(raw_event: Mapping[str, Any], *, sport: str) -> str:
     if len(normalized) <= 5 and re.fullmatch(r"[A-Za-z0-9 ._-]+", normalized):
         return normalized.upper().replace("_", "-")
     return normalized
+
+
+def _sport_namespace(sport_text: str | None) -> str:
+    if not sport_text:
+        return ""
+    key = sport_text.strip().lower()
+    return _SPORT_NAMESPACE.get(key, key.replace(" ", "-"))
 
 
 def _allowed_league_aliases(league_codes: Sequence[str]) -> set[str] | None:
@@ -378,6 +422,26 @@ def _normalize_sports(values: Sequence[str]) -> tuple[str, ...]:
 
 def _normalize_alias(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _parse_event_datetime(raw_event: Mapping[str, Any]) -> datetime | None:
+    text = first_text(raw_event, "strTimestamp")
+    if text:
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    date_text = first_text(raw_event, "dateEvent")
+    time_text = first_text(raw_event, "strTime")
+    if date_text:
+        candidate = f"{date_text}T{time_text or '00:00:00'}".replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(candidate)
+            return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
 
 
 def _snapshot_age_seconds(snapshot: SportsLiveSnapshot, observed_at: datetime) -> float:

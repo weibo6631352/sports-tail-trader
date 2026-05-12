@@ -1,6 +1,8 @@
 """ESPN scoreboard REST 适配器。
 
-该模块只负责协议访问和字段归一化，不判断盘口、仓位或是否交易。
+该模块只负责协议访问和字段归一化，不判断盘口、仓位或是否交易。team-pair 类
+联赛产出 ``LiveEvent(kind=TEAM_MATCH)``；赛车类联赛产出 ``LiveEvent(kind=RACE)``，
+两者共用 LiveEvent 模型，参与者用 ``Participant`` 表达。
 """
 
 from __future__ import annotations
@@ -14,12 +16,12 @@ import httpx
 
 from polymarket_trader.domain.sports_live import (
     CricketGameState,
-    SportsLiveDriverPosition,
-    SportsLiveGame,
+    LiveEvent,
+    LiveEventKind,
+    Participant,
+    RaceState,
     SportsLiveGameStatus,
-    SportsLiveRaceEvent,
     SportsLiveSnapshot,
-    SportsLiveTeam,
 )
 from polymarket_trader.infra.sports.common import (
     SportsDataClientError,
@@ -50,7 +52,7 @@ _DEFAULT_LEAGUE_PATHS: dict[str, str] = {
     "intl-odi": "/apis/site/v2/sports/cricket/intl-odi/scoreboard",
     "ipl": "/apis/site/v2/sports/cricket/ipl/scoreboard",
     "bbl": "/apis/site/v2/sports/cricket/bbl/scoreboard",
-    # 赛车：field event 形态，不能映射 team-pair；走 SportsLiveRaceEvent 单独通路。
+    # 赛车：field event 形态，每个 competitor 是 driver + team；按 RACE kind 输出。
     "f1": "/apis/site/v2/sports/racing/f1/scoreboard",
     "nascar": "/apis/site/v2/sports/racing/nascar-premier/scoreboard",
     "indycar": "/apis/site/v2/sports/racing/irl/scoreboard",
@@ -72,6 +74,31 @@ _LEAGUE_SECONDS = {
     "nfl": (4, 15 * 60),
     "ncaaf": (4, 15 * 60),
     "nhl": (3, 20 * 60),
+}
+
+# league_code → 内部 sport 命名空间；用于 LiveEvent.sport 字段。
+_LEAGUE_SPORT: dict[str, str] = {
+    "nba": "basketball",
+    "wnba": "basketball",
+    "ncaamb": "basketball",
+    "ncaawb": "basketball",
+    "nfl": "american-football",
+    "ncaaf": "american-football",
+    "nhl": "ice-hockey",
+    "mlb": "baseball",
+    "atp": "tennis",
+    "wta": "tennis",
+    "ufc": "mma",
+    "mma": "mma",
+    "rugby": "rugby",
+    "intl-test": "cricket",
+    "intl-t20i": "cricket",
+    "intl-odi": "cricket",
+    "ipl": "cricket",
+    "bbl": "cricket",
+    "f1": "motorsport",
+    "nascar": "motorsport",
+    "indycar": "motorsport",
 }
 
 
@@ -114,13 +141,8 @@ class EspnScoreboardClient:
         if self._owns_client:
             await self._client.aclose()
 
-    async def list_games(self) -> SportsLiveSnapshot:
-        """拉取所有配置联赛的当前 scoreboard。
-
-        team-pair 类联赛产出 ``SportsLiveGame``；赛车类联赛产出
-        ``SportsLiveRaceEvent``（不能映射 home/away）。两类在同一 snapshot 里
-        分别放在 ``games`` 与 ``race_events`` 字段。
-        """
+    async def list_events(self) -> SportsLiveSnapshot:
+        """拉取所有配置联赛的当前 scoreboard，输出统一 ``LiveEvent`` 集合。"""
 
         observed_at = self._now()
         scoreboard_dates = _scoreboard_dates(
@@ -129,10 +151,8 @@ class EspnScoreboardClient:
             days_before=self._date_window_days_before,
             days_after=self._date_window_days_after,
         )
-        games: list[SportsLiveGame] = []
-        race_events: list[SportsLiveRaceEvent] = []
+        events: list[LiveEvent] = []
         seen_event_keys: set[tuple[str, str]] = set()
-        seen_race_keys: set[tuple[str, str]] = set()
         failures: list[SportsDataClientError] = []
         successful_requests = 0
         for league in self._leagues:
@@ -143,35 +163,23 @@ class EspnScoreboardClient:
                     failures.append(exc)
                     continue
                 successful_requests += 1
-                if league in _RACE_LEAGUES:
-                    for race in parse_espn_race_payload(
-                        payload,
-                        league=league,
-                        observed_at=observed_at,
-                    ):
-                        race_key = (race.league, race.source_event_id)
-                        if race.source_event_id and race_key in seen_race_keys:
-                            continue
-                        seen_race_keys.add(race_key)
-                        race_events.append(race)
-                    continue
-                for game in parse_espn_scoreboard_payload(
+                parser = parse_espn_race_payload if league in _RACE_LEAGUES else parse_espn_scoreboard_payload
+                for event in parser(
                     payload,
                     league=league,
                     observed_at=observed_at,
                 ):
-                    event_key = (game.league, game.source_event_id)
-                    if game.source_event_id and event_key in seen_event_keys:
+                    event_key = (event.league, event.source_event_id)
+                    if event.source_event_id and event_key in seen_event_keys:
                         continue
                     seen_event_keys.add(event_key)
-                    games.append(game)
+                    events.append(event)
         if successful_requests <= 0 and failures:
             raise failures[0]
         return SportsLiveSnapshot(
             source="espn",
             observed_at=observed_at,
-            games=tuple(games),
-            race_events=tuple(race_events),
+            events=tuple(events),
         )
 
     async def _get_scoreboard(self, league: str, *, scoreboard_date: str) -> Mapping[str, Any]:
@@ -203,8 +211,8 @@ def parse_espn_scoreboard_payload(
     *,
     league: str,
     observed_at: datetime | None = None,
-) -> tuple[SportsLiveGame, ...]:
-    """把 ESPN scoreboard 原始 payload 转成内部直播比赛 DTO。
+) -> tuple[LiveEvent, ...]:
+    """把 ESPN scoreboard 原始 payload 转成内部 ``LiveEvent`` DTO（team-pair 形态）。
 
     该函数供运行时 client 和离线真实样本校验复用。它不发起网络请求，也不判断
     盘口或交易机会，便于把采集到的 ESPN JSON 固定成回归样本。
@@ -212,17 +220,17 @@ def parse_espn_scoreboard_payload(
 
     observed_at = observed_at or datetime.now(timezone.utc)
     league = _normalize_league_code(league)
-    events = payload.get("events")
-    if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
+    raw_events = payload.get("events")
+    if not isinstance(raw_events, Sequence) or isinstance(raw_events, (str, bytes)):
         return ()
-    games: list[SportsLiveGame] = []
-    for event in events:
+    events: list[LiveEvent] = []
+    for event in raw_events:
         if not isinstance(event, Mapping):
             continue
-        game = _parse_event(event, league=league, observed_at=observed_at)
-        if game is not None:
-            games.append(game)
-    return tuple(games)
+        parsed = _parse_event(event, league=league, observed_at=observed_at)
+        if parsed is not None:
+            events.append(parsed)
+    return tuple(events)
 
 
 def _parse_event(
@@ -230,7 +238,7 @@ def _parse_event(
     *,
     league: str,
     observed_at: datetime,
-) -> SportsLiveGame | None:
+) -> LiveEvent | None:
     competitions = event.get("competitions")
     if not isinstance(competitions, Sequence) or not competitions:
         return None
@@ -240,8 +248,8 @@ def _parse_event(
     competitors = competition.get("competitors")
     if not isinstance(competitors, Sequence):
         return None
-    home = _team_from_competitors(competitors, home_away="home")
-    away = _team_from_competitors(competitors, home_away="away")
+    home = _participant_from_competitors(competitors, role="home")
+    away = _participant_from_competitors(competitors, role="away")
     if home is None or away is None:
         return None
 
@@ -265,18 +273,24 @@ def _parse_event(
         else None
     )
 
-    return SportsLiveGame(
+    source_event_id = str(event.get("id") or competition.get("id") or "")
+    event_start_time = _parse_iso_datetime(event.get("date") or competition.get("date"))
+    return LiveEvent(
         source="espn",
-        source_event_id=str(event.get("id") or competition.get("id") or ""),
+        source_event_id=source_event_id,
+        kind=LiveEventKind.TEAM_MATCH,
         league=league.upper(),
-        home=home,
-        away=away,
-        cricket_state=cricket_state,
+        sport=_LEAGUE_SPORT.get(league, league),
+        participants=(home, away),
         status=status,
         period=period,
         seconds_remaining=seconds_remaining,
         observed_at=observed_at,
+        event_start_time=event_start_time,
+        event_name=_first_text(event, "name", "shortName") or "",
+        external_ids={"espn": source_event_id} if source_event_id else {},
         raw_status=raw_status,
+        cricket_state=cricket_state,
         source_payload={
             "event_id": event.get("id"),
             "name": event.get("name"),
@@ -291,11 +305,11 @@ def parse_espn_race_payload(
     *,
     league: str,
     observed_at: datetime | None = None,
-) -> tuple[SportsLiveRaceEvent, ...]:
-    """把 ESPN 赛车 scoreboard 转成 ``SportsLiveRaceEvent`` 序列。
+) -> tuple[LiveEvent, ...]:
+    """把 ESPN 赛车 scoreboard 转成 ``LiveEvent(kind=RACE)`` 序列。
 
     赛车类 scoreboard 与 team-pair 类不同：
-    - 每个 event 含 ``competitions[0].competitors`` 数组，但每个 competitor 是
+    - 每个 event 含 ``competitions[0].competitors`` 数组，每个 competitor 是
       "车手 + 车队"（athlete + team），并且没有 home/away 标记；
     - linescore / score 字段是位次而非比分；
     - 圈数 / 总圈数在 ``competitions[0].status.{period,detail}`` 或
@@ -304,17 +318,17 @@ def parse_espn_race_payload(
 
     observed_at = observed_at or datetime.now(timezone.utc)
     league = _normalize_league_code(league)
-    events = payload.get("events")
-    if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
+    raw_events = payload.get("events")
+    if not isinstance(raw_events, Sequence) or isinstance(raw_events, (str, bytes)):
         return ()
-    races: list[SportsLiveRaceEvent] = []
-    for event in events:
+    events: list[LiveEvent] = []
+    for event in raw_events:
         if not isinstance(event, Mapping):
             continue
         race = _parse_race_event(event, league=league, observed_at=observed_at)
         if race is not None:
-            races.append(race)
-    return tuple(races)
+            events.append(race)
+    return tuple(events)
 
 
 def _parse_race_event(
@@ -322,7 +336,7 @@ def _parse_race_event(
     *,
     league: str,
     observed_at: datetime,
-) -> SportsLiveRaceEvent | None:
+) -> LiveEvent | None:
     competitions = event.get("competitions")
     if not isinstance(competitions, Sequence) or not competitions:
         return None
@@ -340,37 +354,46 @@ def _parse_race_event(
     total_laps = _int_value(competition.get("totalLaps") or competition.get("scheduledLaps"))
     competitors = competition.get("competitors")
     competitors_seq = competitors if isinstance(competitors, Sequence) else ()
-    drivers: list[SportsLiveDriverPosition] = []
+    drivers: list[Participant] = []
     leader_driver: str | None = None
     leader_team: str | None = None
     for competitor in competitors_seq:
-        position = _driver_position_from(competitor)
-        if position is None:
+        driver = _driver_participant_from(competitor)
+        if driver is None:
             continue
-        drivers.append(position)
-        if leader_driver is None and position.position == 1:
-            leader_driver = position.driver
-            leader_team = position.team
+        drivers.append(driver)
+        if leader_driver is None and driver.position == 1:
+            leader_driver = driver.name
+            leader_team = driver.team
     if leader_driver is None and drivers:
         # 按 position 排序后取第一个非空 position 作为 leader 兜底
         ordered = sorted(drivers, key=lambda d: d.position or 10**6)
-        leader_driver = ordered[0].driver
+        leader_driver = ordered[0].name
         leader_team = ordered[0].team
     event_name = _first_text(event, "name", "shortName") or league.upper()
-    return SportsLiveRaceEvent(
-        source="espn",
-        source_event_id=str(event.get("id") or competition.get("id") or ""),
-        league=league.upper(),
-        event_name=event_name,
-        status=status,
+    source_event_id = str(event.get("id") or competition.get("id") or "")
+    event_start_time = _parse_iso_datetime(event.get("date") or competition.get("date"))
+    race_state = RaceState(
         leader_driver=leader_driver,
         leader_team=leader_team,
         laps_completed=laps_completed,
         total_laps=total_laps,
         status_flag=_first_text(status_payload, "flagState", "detail"),
+    )
+    return LiveEvent(
+        source="espn",
+        source_event_id=source_event_id,
+        kind=LiveEventKind.RACE,
+        league=league.upper(),
+        sport=_LEAGUE_SPORT.get(league, "motorsport"),
+        participants=tuple(drivers),
+        status=status,
         observed_at=observed_at,
+        event_start_time=event_start_time,
+        event_name=event_name,
+        external_ids={"espn": source_event_id} if source_event_id else {},
         raw_status=raw_status,
-        drivers=tuple(drivers),
+        race_state=race_state,
         source_payload={
             "start_time_utc": event.get("date") or competition.get("date"),
             "venue": _first_text(competition.get("venue") or {}, "fullName", "displayName") if isinstance(competition.get("venue"), Mapping) else None,
@@ -378,7 +401,7 @@ def _parse_race_event(
     )
 
 
-def _driver_position_from(competitor: Any) -> SportsLiveDriverPosition | None:
+def _driver_participant_from(competitor: Any) -> Participant | None:
     if not isinstance(competitor, Mapping):
         return None
     athlete = competitor.get("athlete")
@@ -391,26 +414,21 @@ def _driver_position_from(competitor: Any) -> SportsLiveDriverPosition | None:
     team_payload = competitor.get("team")
     team_mapping = team_payload if isinstance(team_payload, Mapping) else {}
     team_name = _first_text(team_mapping, "displayName", "name", "shortDisplayName")
-    position = _int_value(competitor.get("status", {}).get("position") if isinstance(competitor.get("status"), Mapping) else None)
+    status_payload = competitor.get("status") if isinstance(competitor.get("status"), Mapping) else None
+    position = _int_value(status_payload.get("position") if status_payload else None)
     if position is None:
         position = _int_value(competitor.get("position"))
-    laps_completed = _int_value(
-        competitor.get("lapsCompleted")
-        or (competitor.get("status", {}).get("laps") if isinstance(competitor.get("status"), Mapping) else None)
-    )
-    gap_to_leader = _first_text(competitor, "behindBy", "gap")
-    status_label = (
-        _first_text(competitor.get("status") or {}, "displayName", "shortName")
-        if isinstance(competitor.get("status"), Mapping)
-        else None
-    )
-    return SportsLiveDriverPosition(
-        driver=driver_name,
+    athlete_id = _first_text(athlete_mapping, "id") or _first_text(competitor, "id")
+    external_ids: dict[str, str] = {}
+    if athlete_id:
+        external_ids["espn_athlete"] = athlete_id
+    return Participant(
+        role="driver",
+        name=driver_name,
         position=position,
         team=team_name,
-        laps_completed=laps_completed,
-        gap_to_leader=gap_to_leader,
-        status=status_label,
+        display_name=driver_name,
+        external_ids=external_ids,
     )
 
 
@@ -511,15 +529,15 @@ def _cricket_overs_parts(raw: Any) -> tuple[int | None, int | None]:
         return None, None
 
 
-def _team_from_competitors(
+def _participant_from_competitors(
     competitors: Sequence[Any],
     *,
-    home_away: str,
-) -> SportsLiveTeam | None:
+    role: str,
+) -> Participant | None:
     for item in competitors:
         if not isinstance(item, Mapping):
             continue
-        if str(item.get("homeAway") or "").lower() != home_away:
+        if str(item.get("homeAway") or "").lower() != role:
             continue
         team = item.get("team")
         team_payload = team if isinstance(team, Mapping) else {}
@@ -529,8 +547,13 @@ def _team_from_competitors(
             "displayName",
             "shortDisplayName",
             "abbreviation",
-        ) or home_away
-        return SportsLiveTeam(
+        ) or role
+        team_id = _first_text(team_payload, "id")
+        external_ids: dict[str, str] = {}
+        if team_id:
+            external_ids["espn"] = team_id
+        return Participant(
+            role=role,
             name=name,
             score=_int_value(item.get("score")) or 0,
             display_name=_first_text(team_payload, "displayName"),
@@ -545,6 +568,7 @@ def _team_from_competitors(
                 )
                 if value
             ),
+            external_ids=external_ids,
         )
     return None
 
@@ -701,3 +725,18 @@ def _first_text(payload: Mapping[str, Any], *keys: str) -> str | None:
         if text:
             return text
     return None
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)

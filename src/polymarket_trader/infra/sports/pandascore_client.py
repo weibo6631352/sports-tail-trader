@@ -1,6 +1,6 @@
 """Pandascore 电子竞技直播比分适配器。
 
-把 Pandascore ``/lives`` 与 ``/matches/running`` 响应归一化成内部体育直播 DTO。
+把 Pandascore ``/lives`` 与 ``/matches/running`` 响应归一化成内部 ``LiveEvent``。
 ESPORTS family 在 SportsMarketFamily 中已分类，但今天没有任何 provider 提供
 实时数据；Pandascore 是覆盖最广的 esports 数据源（CS2/Dota2/LoL/Valorant 等）。
 
@@ -18,12 +18,13 @@ import httpx
 
 from polymarket_trader.domain.sports_live import (
     EsportsGameState,
-    SportsLiveGame,
+    LiveEvent,
+    LiveEventKind,
+    Participant,
     SportsLiveGameStatus,
     SportsLiveSnapshot,
     SportsLiveSourceHealth,
     SportsLiveSourceStatus,
-    SportsLiveTeam,
 )
 from polymarket_trader.infra.sports.common import (
     SportsDataRateLimitError,
@@ -38,7 +39,7 @@ _LIVES_PATH = "/lives"
 
 
 class PandascoreLiveClient:
-    """读取 Pandascore live 列表并归一化成 SportsLiveGame。
+    """读取 Pandascore live 列表并归一化成 ``LiveEvent(kind=TEAM_MATCH, sport="esports")``。
 
     Pandascore videogame slug → league name 映射保留原 slug 大写形式
     （CS2 / DOTA2 / LOL / VALORANT / R6 / KING_OF_GLORY 等），便于策略层 league
@@ -85,20 +86,20 @@ class PandascoreLiveClient:
 
         return bool(self._api_token)
 
-    async def list_games(self) -> SportsLiveSnapshot:
+    async def list_events(self) -> SportsLiveSnapshot:
         """拉取当前所有进行中的电竞比赛。"""
 
         observed_at = utc_now(self._now_provider)
         if not self.enabled:
             return _snapshot_with_status(
-                SportsLiveSnapshot(source="pandascore", observed_at=observed_at, games=()),
+                SportsLiveSnapshot(source="pandascore", observed_at=observed_at, events=()),
                 health=SportsLiveSourceHealth.FAILED,
                 success=False,
                 last_error="pandascore_token_missing",
             )
         if self._is_cache_fresh(observed_at):
             return _snapshot_with_status(
-                self._cached_snapshot or SportsLiveSnapshot(source="pandascore", observed_at=observed_at, games=()),
+                self._cached_snapshot or SportsLiveSnapshot(source="pandascore", observed_at=observed_at, events=()),
                 health=SportsLiveSourceHealth.CACHED,
             )
         try:
@@ -106,12 +107,12 @@ class PandascoreLiveClient:
         except Exception as exc:
             if self._is_cache_usable_after_error(observed_at):
                 return _snapshot_with_status(
-                    self._cached_snapshot or SportsLiveSnapshot(source="pandascore", observed_at=observed_at, games=()),
+                    self._cached_snapshot or SportsLiveSnapshot(source="pandascore", observed_at=observed_at, events=()),
                     health=SportsLiveSourceHealth.CACHED,
                 )
             if isinstance(exc, SportsDataRateLimitError):
                 snapshot = _snapshot_with_status(
-                    SportsLiveSnapshot(source="pandascore", observed_at=observed_at, games=()),
+                    SportsLiveSnapshot(source="pandascore", observed_at=observed_at, events=()),
                     health=SportsLiveSourceHealth.RATE_LIMITED,
                     success=False,
                     last_error=str(exc),
@@ -119,7 +120,7 @@ class PandascoreLiveClient:
                 self._cached_snapshot = snapshot
                 return snapshot
             raise
-        games = parse_pandascore_lives_payload(
+        events = parse_pandascore_lives_payload(
             payload,
             observed_at=observed_at,
             videogame_slug_filter=self._videogame_slugs,
@@ -127,13 +128,13 @@ class PandascoreLiveClient:
         snapshot = SportsLiveSnapshot(
             source="pandascore",
             observed_at=observed_at,
-            games=games,
+            events=events,
         )
         snapshot = _snapshot_with_status(
             snapshot,
             health=(
                 SportsLiveSourceHealth.SUCCESS_WITH_LIVE_DATA
-                if snapshot.games
+                if snapshot.events
                 else SportsLiveSourceHealth.SUCCESS_EMPTY
             ),
         )
@@ -182,8 +183,8 @@ def parse_pandascore_lives_payload(
     *,
     observed_at: datetime | None = None,
     videogame_slug_filter: Sequence[str] = (),
-) -> tuple[SportsLiveGame, ...]:
-    """把 Pandascore live payload 转成内部直播比赛 DTO。
+) -> tuple[LiveEvent, ...]:
+    """把 Pandascore live payload 转成 ``LiveEvent`` 序列。
 
     Pandascore 顶层 ``/lives`` 返回数组，每项含 ``match`` mapping；如果端点返回
     了 ``{"data": [...]}`` 结构，也兼容性解包。
@@ -196,22 +197,22 @@ def parse_pandascore_lives_payload(
         candidates = list(payload)
     else:
         return ()
-    games: list[SportsLiveGame] = []
+    events: list[LiveEvent] = []
     filter_set = {slug.strip().lower() for slug in videogame_slug_filter if str(slug).strip()}
     for item in candidates:
         if not isinstance(item, Mapping):
             continue
         match_payload = item.get("match") if isinstance(item.get("match"), Mapping) else item
-        game = _parse_match(match_payload, observed_at=observed_at)
-        if game is None:
+        event = _parse_match(match_payload, observed_at=observed_at)
+        if event is None:
             continue
-        if filter_set and game.league.lower() not in filter_set:
+        if filter_set and event.league.lower() not in filter_set:
             continue
-        games.append(game)
-    return tuple(games)
+        events.append(event)
+    return tuple(events)
 
 
-def _parse_match(match: Mapping[str, Any], *, observed_at: datetime) -> SportsLiveGame | None:
+def _parse_match(match: Mapping[str, Any], *, observed_at: datetime) -> LiveEvent | None:
     opponents = match.get("opponents")
     if not isinstance(opponents, Sequence) or len(opponents) < 2:
         return None
@@ -224,23 +225,25 @@ def _parse_match(match: Mapping[str, Any], *, observed_at: datetime) -> SportsLi
     away_id = away_payload.get("id")
     home_score = _result_score_for(results, home_id)
     away_score = _result_score_for(results, away_id)
-    home = SportsLiveTeam(
+    home = Participant(
+        role="home",
         name=str(home_payload.get("name") or "home"),
         score=home_score,
         display_name=first_text(home_payload, "name"),
         abbreviation=first_text(home_payload, "acronym"),
         short_name=first_text(home_payload, "acronym"),
-        location=None,
         aliases=tuple(value for value in (first_text(home_payload, "slug"),) if value),
+        external_ids=({"pandascore": str(home_id)} if home_id is not None else {}),
     )
-    away = SportsLiveTeam(
+    away = Participant(
+        role="away",
         name=str(away_payload.get("name") or "away"),
         score=away_score,
         display_name=first_text(away_payload, "name"),
         abbreviation=first_text(away_payload, "acronym"),
         short_name=first_text(away_payload, "acronym"),
-        location=None,
         aliases=tuple(value for value in (first_text(away_payload, "slug"),) if value),
+        external_ids=({"pandascore": str(away_id)} if away_id is not None else {}),
     )
     videogame_slug = _videogame_slug(match)
     league = videogame_slug.upper() if videogame_slug else "ESPORTS"
@@ -259,16 +262,26 @@ def _parse_match(match: Mapping[str, Any], *, observed_at: datetime) -> SportsLi
     )
     raw_status = first_text(match, "status") or status_raw or ""
     period_label = _period_label(games_seq, status)
-    return SportsLiveGame(
+    match_id = match.get("id")
+    source_event_id = str(match_id or match.get("slug") or "")
+    event_start_time = _parse_iso_datetime(match.get("begin_at"))
+    external_ids: dict[str, str] = {}
+    if match_id is not None:
+        external_ids["pandascore"] = str(match_id)
+    return LiveEvent(
         source="pandascore",
-        source_event_id=str(match.get("id") or match.get("slug") or ""),
+        source_event_id=source_event_id,
+        kind=LiveEventKind.TEAM_MATCH,
         league=league,
-        home=home,
-        away=away,
+        sport="esports",
+        participants=(home, away),
         status=status,
         period=period_label,
         seconds_remaining=None,
         observed_at=observed_at,
+        event_start_time=event_start_time,
+        event_name=str(match.get("name") or _tournament_name(match) or ""),
+        external_ids=external_ids,
         raw_status=raw_status,
         esports_state=esports_state,
         source_payload={
@@ -400,6 +413,21 @@ def _begin_timestamp(value: Any) -> float | None:
     return parsed.timestamp()
 
 
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
 def _snapshot_with_status(
     snapshot: SportsLiveSnapshot,
     *,
@@ -410,13 +438,13 @@ def _snapshot_with_status(
     return SportsLiveSnapshot(
         source="pandascore",
         observed_at=snapshot.observed_at,
-        games=snapshot.games,
+        events=snapshot.events,
         source_statuses=(
             SportsLiveSourceStatus(
                 source="pandascore",
                 success=success,
                 health=health,
-                games_seen=len(snapshot.games),
+                events_seen=len(snapshot.events),
                 observed_at=snapshot.observed_at,
                 last_error=last_error,
             ),
