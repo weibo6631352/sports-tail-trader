@@ -171,6 +171,18 @@ class _OpenOrdersClient:
     async def get_balance_allowance(self) -> None:
         return None
 
+    async def get_orderbook(
+        self,
+        token_id: str,
+        *,
+        market_slug: str | None = None,
+        condition_id: str | None = None,
+    ) -> None:
+        return None
+
+    async def get_fee_rate(self, token_id: str) -> int | None:
+        return None
+
 
 class _TerminalLiveStateHooks(_NoopHooks):
     def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:

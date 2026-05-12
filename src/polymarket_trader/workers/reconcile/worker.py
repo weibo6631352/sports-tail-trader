@@ -413,7 +413,7 @@ class ReconcileWorker:
             if prune_reason is None:
                 continue
             self._registry.remove_market(market.condition_id)
-            if self._market_ws_worker is not None and hasattr(self._market_ws_worker, "untrack_market"):
+            if self._market_ws_worker is not None:
                 self._market_ws_worker.untrack_market(market.token_ids)
             logger.info(
                 "pruned unsubscribable market from runtime tracking",

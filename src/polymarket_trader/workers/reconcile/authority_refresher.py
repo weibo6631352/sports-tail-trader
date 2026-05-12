@@ -532,7 +532,7 @@ class ReconcileAuthorityRefresher:
         market: Market,
         failures: list[AuthoritativeRefreshFailure],
     ) -> tuple[OrderbookSnapshot, ...]:
-        if self._clob_client is None or not hasattr(self._clob_client, "get_orderbook"):
+        if self._clob_client is None:
             return ()
         snapshots: list[OrderbookSnapshot] = []
         for token_id in market.token_ids:
@@ -628,7 +628,7 @@ class ReconcileAuthorityRefresher:
         market: Market,
         failures: list[AuthoritativeRefreshFailure],
     ) -> int | None:
-        if self._clob_client is None or not hasattr(self._clob_client, "get_fee_rate"):
+        if self._clob_client is None:
             return None
         token_id = next(iter(market.token_ids), None)
         if token_id is None:
