@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,7 +19,7 @@ from uuid import uuid4
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import (
-    SportsLiveGame,
+    LiveEvent,
     SportsLiveSnapshot,
     SportsLiveSourceHealth,
     SportsLiveSourceStatus,
@@ -35,12 +35,16 @@ from polymarket_trader.serialization import jsonable
 
 # audit dedupe LRU 容量：同一场比赛只在"状态字段"真实变化时落 audit_events，避免
 # 5s 心跳级噪音淹没 audit 表（实测 sports_live_state_recorded 占 audit 99%+）。
-# 8k 远超并发直播场数；触顶意味着异常多 game 突然同时直播或 hash 冲突。
+# 8k 远超并发直播场数；触顶意味着异常多 event 突然同时直播或 hash 冲突。
 _LIVE_STATE_AUDIT_DEDUPE_CAPACITY = 8_192
+
+# recent_match_sources 环形缓冲容量：admin/校准 harness 拉最近 N 个匹配的源选择
+# 信息（primary_source / contributing_sources / confidence / conflict_count）。
+_RECENT_MATCH_SOURCES_CAPACITY = 256
 
 SportsLiveSnapshotProvider = Callable[[], Awaitable[SportsLiveSnapshot]]
 SportsLiveStateMatcher = Callable[
-    [Market, tuple[SportsLiveGame, ...]],
+    [Market, tuple[LiveEvent, ...]],
     LiveStateMatch | None,
 ]
 
@@ -62,7 +66,7 @@ class SportsLiveSyncResult:
     source: str
     started_at: datetime
     completed_at: datetime
-    games_seen: int
+    events_seen: int
     markets_seen: int
     matches: int
     records_written: int
@@ -111,14 +115,14 @@ class SportsLiveStateWorker:
         self._last_success_at: datetime | None = None
         self._last_error: str | None = None
         self._consecutive_failures = 0
-        self._last_games_seen = 0
+        self._last_events_seen = 0
         self._last_markets_seen = 0
         self._last_matches = 0
         self._last_records_written = 0
         self._last_unmatched_markets = 0
         self._last_entry_signals_published = 0
         self._last_source_statuses: tuple[SportsLiveSourceStatus, ...] = ()
-        self._last_games: tuple[SportsLiveGame, ...] = ()
+        self._last_events: tuple[LiveEvent, ...] = ()
         # 上轮各 source 的健康度，用于检测 evicted 状态转换；只在新 EVICTED 时
         # 发出 LIVE_STATE_SOURCE_EVICTED 一次，避免每轮重复刷生命周期。
         self._previous_source_health: dict[str, SportsLiveSourceHealth] = {}
@@ -127,6 +131,11 @@ class SportsLiveStateWorker:
         # audit dedupe：condition_id → 上次发布的 state-hash。仅在 hash 变化时
         # emit sports_live_state_recorded，让审计反映"真实状态变化"而不是 5s 心跳。
         self._last_audit_state_hash: OrderedDict[str, str] = OrderedDict()
+        # 缺口 1 接线：近期每 market 实际匹配到的源选择信息（admin/校准 harness 读）。
+        # 环形缓冲优先 FIFO，超容量自动丢弃最旧条目。
+        self._recent_match_sources: deque[dict[str, Any]] = deque(
+            maxlen=_RECENT_MATCH_SOURCES_CAPACITY
+        )
 
     async def sync_once(self) -> SportsLiveSyncResult | None:
         """执行一次同步；供 scheduler 和测试直接驱动。"""
@@ -148,7 +157,7 @@ class SportsLiveStateWorker:
             self._consecutive_failures = 0
             self._last_success_at = result.completed_at
             self._last_completed_at = result.completed_at
-            self._last_games_seen = result.games_seen
+            self._last_events_seen = result.events_seen
             self._last_markets_seen = result.markets_seen
             self._last_matches = result.matches
             self._last_records_written = result.records_written
@@ -159,10 +168,10 @@ class SportsLiveStateWorker:
         finally:
             self._running = False
 
-    def last_games(self) -> tuple[SportsLiveGame, ...]:
-        """返回最近一次成功同步的直播比赛集合，供高意图 discovery 只读使用。"""
+    def last_events(self) -> tuple[LiveEvent, ...]:
+        """返回最近一次成功同步的直播事件集合，供高意图 discovery 只读使用。"""
 
-        return self._last_games
+        return self._last_events
 
     def status_snapshot(self) -> SportsLiveSyncStatus:
         """返回轻量运行态快照，不做 I/O。"""
@@ -176,7 +185,7 @@ class SportsLiveStateWorker:
             last_success_at=self._last_success_at,
             last_error=self._last_error,
             consecutive_failures=self._consecutive_failures,
-            last_games_seen=self._last_games_seen,
+            last_events_seen=self._last_events_seen,
             last_markets_seen=self._last_markets_seen,
             last_matches=self._last_matches,
             last_records_written=self._last_records_written,
@@ -186,6 +195,19 @@ class SportsLiveStateWorker:
             source_statuses=self._last_source_statuses,
         )
 
+    def recent_match_sources(self, *, limit: int | None = None) -> tuple[dict[str, Any], ...]:
+        """返回最近匹配过的 market 对应的源选择信息只读快照。
+
+        每条 dict 含 ``condition_id`` / ``primary_source`` / ``contributing_sources``
+        / ``confidence`` / ``conflict_count``。admin runtime view 据此暴露
+        per-market 源选择可观测性（缺口 1）。``limit`` 为 None 时返回全部缓冲条目。
+        """
+
+        items = list(self._recent_match_sources)
+        if limit is not None and limit >= 0:
+            items = items[-limit:]
+        return tuple(items)
+
     async def _apply_snapshot(
         self,
         snapshot: SportsLiveSnapshot,
@@ -193,7 +215,7 @@ class SportsLiveStateWorker:
         started_at: datetime,
     ) -> SportsLiveSyncResult:
         markets = self._registry.snapshot().markets
-        matches = await self._match_markets(markets, snapshot.games)
+        matches = await self._match_markets(markets, snapshot.events)
         records_written = 0
         entry_signals = 0
         for match in matches:
@@ -211,6 +233,7 @@ class SportsLiveStateWorker:
                 live_state_payload=dict(match.payload),
             )
             records_written += 1
+            self._record_match_sources(match)
             self._track_entry_signal_market(match=match)
             entry_signals += await self._publish_entry_signal_events(match=match)
             self._publish_live_state_lifecycle(match=match)
@@ -219,13 +242,13 @@ class SportsLiveStateWorker:
             await self._publish_sports_live_state_recorded(snapshot=snapshot, match=match)
 
         completed_at = _utc_now()
-        self._last_games = snapshot.games
+        self._last_events = snapshot.events
         self._publish_source_health_lifecycle(snapshot.source_statuses, observed_at=snapshot.observed_at)
         return SportsLiveSyncResult(
             source=snapshot.source,
             started_at=started_at,
             completed_at=completed_at,
-            games_seen=len(snapshot.games),
+            events_seen=len(snapshot.events),
             markets_seen=len(markets),
             matches=len(matches),
             records_written=records_written,
@@ -234,19 +257,33 @@ class SportsLiveStateWorker:
             source_statuses=snapshot.source_statuses,
         )
 
+    def _record_match_sources(self, match: LiveStateMatch) -> None:
+        """缺口 1：每个匹配产生 per-market 源选择条目，供 admin / 校准 harness 复盘。"""
+
+        event = match.event
+        self._recent_match_sources.append(
+            {
+                "condition_id": match.market.condition_id,
+                "market_slug": match.market.market_slug,
+                "primary_source": match.primary_source or event.source,
+                "contributing_sources": list(
+                    match.contributing_sources or event.contributing_sources
+                ),
+                "confidence": float(match.confidence),
+                "conflict_count": len(event.source_conflicts),
+                "phase": match.phase,
+                "signal_allowed": match.signal_allowed,
+                "signal_reason": match.signal_reason,
+            }
+        )
+
     def _publish_source_health_lifecycle(
         self,
         statuses: tuple[SportsLiveSourceStatus, ...],
         *,
         observed_at: datetime,
     ) -> None:
-        """发出 source eviction 与全源不可用的生命周期事件。
-
-        - 只在某 source 由非 EVICTED 状态转入 EVICTED 时发一次 LIVE_STATE_SOURCE_EVICTED，
-          避免每轮重复刷。
-        - 若 statuses 全部为非 success（含 EVICTED/COOLDOWN/RATE_LIMITED/FAILED），
-          视为 ``no_feasible_source``；只在状态变化时发一次 LIVE_STATE_NO_FEASIBLE_SOURCE。
-        """
+        """发出 source eviction 与全源不可用的生命周期事件。"""
 
         if self._lifecycle_bus is None:
             self._no_feasible_source = self._compute_no_feasible_source(statuses)
@@ -296,15 +333,15 @@ class SportsLiveStateWorker:
     async def _match_markets(
         self,
         markets: tuple[Market, ...],
-        games: tuple[SportsLiveGame, ...],
+        events: tuple[LiveEvent, ...],
     ) -> tuple[LiveStateMatch, ...]:
         results: list[LiveStateMatch] = []
         for index, market in enumerate(markets, start=1):
-            match = self._match_live_state(market, games)
+            match = self._match_live_state(market, events)
             if match is not None:
                 results.append(match)
             if index % 10 == 0:
-                # 单轮同步可能需要做 markets x games 的文本匹配；P2 任务必须让出事件循环。
+                # 单轮同步可能需要做 markets x events 的文本匹配；P2 任务必须让出事件循环。
                 await asyncio.sleep(0)
         return tuple(results)
 
@@ -319,11 +356,14 @@ class SportsLiveStateWorker:
             condition_id=market.condition_id,
             market_slug=market.market_slug,
             payload={
-                "source": match.game.source,
-                "source_event_id": match.game.source_event_id,
+                "source": match.event.source,
+                "source_event_id": match.event.source_event_id,
                 "signal_allowed": match.signal_allowed,
                 "signal_reason": match.signal_reason,
                 "phase": match.phase,
+                "primary_source": match.primary_source,
+                "contributing_sources": list(match.contributing_sources),
+                "confidence": float(match.confidence),
                 "payload": dict(match.payload),
             },
         )
@@ -353,8 +393,8 @@ class SportsLiveStateWorker:
             return
         market = match.market
         # dedupe by "稳态字段 hash" — observed_at 每次都变（5s 心跳），不能算进 hash；
-        # 只对 signal_allowed/signal_reason/phase + match.payload 内的 game-state
-        # 字段（score/period/status 等）哈希。相同 hash 跳过 audit。
+        # 只对 signal_allowed/signal_reason/phase + match.payload 内的 event-state
+        # 字段（score/period/status 等）+ primary_source/conflict 摘要哈希。
         state_hash = _audit_state_hash(match)
         previous_hash = self._last_audit_state_hash.get(market.condition_id)
         if previous_hash == state_hash:
@@ -382,6 +422,20 @@ class SportsLiveStateWorker:
                         "signal_allowed": match.signal_allowed,
                         "signal_reason": match.signal_reason,
                         "phase": match.phase,
+                        "primary_source": match.primary_source,
+                        "contributing_sources": list(match.contributing_sources),
+                        "confidence": float(match.confidence),
+                        "source_conflicts": [
+                            {
+                                "field": c.field,
+                                "winner_source": c.winner_source,
+                                "winner_value": c.winner_value,
+                                "loser_source": c.loser_source,
+                                "loser_value": c.loser_value,
+                                "decided_by": c.decided_by,
+                            }
+                            for c in match.event.source_conflicts
+                        ],
                         "match_payload": jsonable(match.payload),
                     },
                 ),
@@ -396,7 +450,7 @@ class SportsLiveStateWorker:
         if not match.signal_allowed:
             return 0
         market = match.market
-        game = match.game
+        event = match.event
         count = 0
         for token_id in market.token_ids:
             await self._event_bus.publish(
@@ -412,8 +466,11 @@ class SportsLiveStateWorker:
                     reason="sports_live_state_updated",
                     payload={
                         "origin": "sports_live_state_worker",
-                        "source": game.source,
-                        "source_event_id": game.source_event_id,
+                        "source": event.source,
+                        "source_event_id": event.source_event_id,
+                        "primary_source": match.primary_source,
+                        "contributing_sources": list(match.contributing_sources),
+                        "confidence": float(match.confidence),
                         "match": jsonable(match.payload),
                         "signal_reason": match.signal_reason,
                     },
@@ -427,23 +484,28 @@ def _audit_state_hash(match: LiveStateMatch) -> str:
     """对一次匹配的"稳态字段"产生哈希，用于 audit dedupe。
 
     observed_at / 5s 心跳无关字段（如 raw_status 文本时间戳）刻意排除——它们每次
-    都变，不能作为去重 key。signal_allowed / signal_reason / phase 是状态层面的
-    变更，必须计入。game-state 字段（home_score/away_score/period/status/
-    seconds_remaining 等）通过 match.payload["live_game"] 透传，整体序列化为
-    JSON 后哈希足够稳定。
+    都变，不能作为去重 key。signal_allowed / signal_reason / phase / primary_source
+    / contributing_sources / confidence / conflict_count 都参与 hash，因为这些
+    是"非心跳变化"——融合主源切换、源信任度变化、冲突变化都要落 audit。
+    event-state 字段（home_score/away_score/period/status/seconds_remaining 等）
+    通过 match.payload["live_game"] 透传，整体序列化为 JSON 后哈希足够稳定。
     """
 
-    game = (match.payload.get("live_game") if isinstance(match.payload, dict) else None) or {}
+    live_game = (match.payload.get("live_game") if isinstance(match.payload, dict) else None) or {}
     # 拷贝并裁掉每次都变的时间字段，让 hash 反映"非心跳变化"。
-    if isinstance(game, dict):
-        game_for_hash = {k: v for k, v in game.items() if k != "observed_at"}
+    if isinstance(live_game, dict):
+        live_game_for_hash = {k: v for k, v in live_game.items() if k != "observed_at"}
     else:
-        game_for_hash = game
+        live_game_for_hash = live_game
     key_payload = {
         "signal_allowed": match.signal_allowed,
         "signal_reason": match.signal_reason,
         "phase": match.phase,
-        "game": game_for_hash,
+        "primary_source": match.primary_source,
+        "contributing_sources": list(match.contributing_sources),
+        "confidence_bucket": round(float(match.confidence), 2),
+        "conflict_count": len(match.event.source_conflicts),
+        "event": live_game_for_hash,
     }
     blob = json.dumps(key_payload, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()

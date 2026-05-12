@@ -18,6 +18,8 @@ from polymarket_trader.workers.sports_live_state_worker import SportsLiveSyncRes
 logger = logging.getLogger(__name__)
 _RUNTIME_MARKET_SAMPLE_LIMIT = 20
 _LOW_ENTRY_FUNDS_WARNING = "available_usdc_below_configured_order_size"
+# admin runtime view 暴露 sports_live_sync.recent_match_sources 的限额；超过则 truncated=True。
+_SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT = 50
 
 
 def _text_or_none(value: Any) -> str | None:
@@ -456,9 +458,22 @@ class AdminRuntimeView:
             status = worker.status_snapshot()
             # 生产路径返回 SportsLiveSyncResult dataclass；test stub 走 jsonable 兜底。
             if isinstance(status, SportsLiveSyncResult):
-                return status.as_dict()
-            payload = jsonable(status)
-            return dict(payload) if isinstance(payload, Mapping) else {"value": payload}
+                snapshot = status.as_dict()
+            else:
+                payload = jsonable(status)
+                snapshot = dict(payload) if isinstance(payload, Mapping) else {"value": payload}
+            # 缺口 1 接线：admin runtime view 暴露 per-market 源选择信息。
+            recent_sources_fn = getattr(worker, "recent_match_sources", None)
+            if callable(recent_sources_fn):
+                recent_sources = list(recent_sources_fn(limit=_SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT))
+                # 后端持续暴露 truncated 标记，便于前端展示"还有更早匹配未展示"。
+                full = recent_sources_fn(limit=None)
+                snapshot["recent_match_sources"] = recent_sources
+                snapshot["recent_match_sources_limit"] = _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT
+                snapshot["recent_match_sources_truncated"] = (
+                    len(full) > _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT
+                )
+            return snapshot
         settings = self._settings()
         return {
             "enabled": bool(getattr(settings, "sports_live_state_enabled", False)),
@@ -473,7 +488,7 @@ class AdminRuntimeView:
                 else None
             ),
             "consecutive_failures": 0,
-            "last_games_seen": 0,
+            "last_events_seen": 0,
             "last_markets_seen": 0,
             "last_matches": 0,
             "last_records_written": 0,
@@ -481,6 +496,9 @@ class AdminRuntimeView:
             "last_entry_signals_published": 0,
             "leagues": list(getattr(settings, "sports_live_state_league_codes", ())),
             "source_statuses": [],
+            "recent_match_sources": [],
+            "recent_match_sources_limit": _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT,
+            "recent_match_sources_truncated": False,
         }
 
     def _market_ws_snapshot(self, token_id: str) -> OrderbookSnapshot | None:
