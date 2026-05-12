@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
 
 from polymarket_trader.domain.events import Fill
+from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.extension_api import ExtensionContext
 
 
 def bid_plus_tick_fallback_ask(
-    orderbook: Any,
+    orderbook: OrderbookSnapshot | None,
     tick_size: Decimal | None,
 ) -> Decimal | None:
     """missing_best_ask 时用 ``best_bid + tick_size`` 估算 fallback ask。
@@ -25,7 +25,7 @@ def bid_plus_tick_fallback_ask(
 
     if orderbook is None or tick_size is None or tick_size <= Decimal("0"):
         return None
-    best_bid = getattr(orderbook, "best_bid", None)
+    best_bid = orderbook.best_bid
     if best_bid is None or best_bid <= Decimal("0"):
         return None
     fallback_ask = best_bid + tick_size
@@ -36,7 +36,7 @@ def bid_plus_tick_fallback_ask(
 
 def bid_plus_tick_fallback_metadata(
     *,
-    orderbook: Any,
+    orderbook: OrderbookSnapshot,
     tick_size: Decimal,
     fallback_ask: Decimal,
 ) -> dict[str, str]:

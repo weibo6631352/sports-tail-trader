@@ -26,11 +26,7 @@ class AdminQueryMixin(
     AdminAnalyticsQueryMixin,
     AdminSportsQueryMixin,
 ):
-    """admin 只读查询方法聚合。
-
-    每次抽取一个子 mixin 时，将其加入到本类的基类元组；当前为骨架，
-    后续 commit 逐步填充。
-    """
+    """admin 只读查询方法聚合。"""
 
     pass
 

@@ -1103,7 +1103,7 @@ def _candidate_live_events_for_market(
     """
 
     sport_codes = _market_sport_codes(market)
-    market_start = _ensure_utc(getattr(market, "game_start_time", None))
+    market_start = _ensure_utc(market.game_start_time)
     filtered: list[LiveEvent] = []
     for event in events:
         if sport_codes and (event_sport := _event_sport_code(event)) is not None and event_sport not in sport_codes:

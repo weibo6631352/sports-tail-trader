@@ -45,7 +45,7 @@ def _resolve(ports: ExtensionPorts | None, key: str, default: Any) -> Any:
     effective_ports = ports if ports is not None else _active_ports.get()
     if effective_ports is None:
         return default
-    port = getattr(effective_ports, "parameter", None)
+    port = effective_ports.parameter
     if port is None:
         return default
     try:

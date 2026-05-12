@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Awaitable, Callable, Protocol, TypeVar, cast
+from typing import Any, Awaitable, Callable, Protocol, TypeVar
 
 from polymarket_trader.app.order_projection import AccountStateProjector
 from polymarket_trader.domain.events import Fill
@@ -32,7 +32,7 @@ class MarketAuthorityClient(Protocol):
         limit: int = 100,
         offset: int = 0,
         timeout_s: float | None = None,
-    ) -> tuple[Any, ...]: ...
+    ) -> tuple[GammaMarketCandidate, ...]: ...
 
 
 class OrderAuthorityClient(Protocol):
@@ -64,10 +64,10 @@ class DataAuthorityClient(Protocol):
 
 
 class GammaMarketCandidate(Protocol):
-    condition_id: str
-    market_slug: str
+    condition_id: str | None
+    market_slug: str | None
     clob_enabled: bool | None
-    outcomes: tuple[Any, ...]
+    outcomes: tuple[MarketOutcome, ...]
 
     def to_market(self) -> Market: ...
 
@@ -793,22 +793,17 @@ async def _await_authority(
 
 
 def _pick_gamma_market(
-    candidates: tuple[object, ...],
+    candidates: tuple[GammaMarketCandidate, ...],
     market: Market,
 ) -> GammaMarketCandidate | None:
     for candidate in candidates:
-        if getattr(candidate, "condition_id", None) == market.condition_id:
-            return cast(GammaMarketCandidate, candidate)
+        if candidate.condition_id == market.condition_id:
+            return candidate
     for candidate in candidates:
-        candidate_outcomes = getattr(candidate, "outcomes", ())
-        candidate_token_ids = tuple(
-            getattr(outcome, "token_id", None)
-            for outcome in candidate_outcomes
-            if getattr(outcome, "token_id", None)
-        )
-        if set(candidate_token_ids).intersection(market.token_ids):
-            return cast(GammaMarketCandidate, candidate)
+        candidate_token_ids = {outcome.token_id for outcome in candidate.outcomes}
+        if candidate_token_ids.intersection(market.token_ids):
+            return candidate
     for candidate in candidates:
-        if getattr(candidate, "market_slug", None) == market.market_slug:
-            return cast(GammaMarketCandidate, candidate)
+        if candidate.market_slug == market.market_slug:
+            return candidate
     return None
