@@ -17,11 +17,14 @@ def test_scheduler_records_last_duration_ms_per_run() -> None:
     async def run() -> tuple[float | None, int]:
         scheduler = Scheduler()
         call_count = 0
+        done = asyncio.Event()
 
         async def job() -> None:
             nonlocal call_count
             call_count += 1
-            await asyncio.sleep(0.005)
+            # 让出一次事件循环，模拟真实工作但不依赖具体 sleep 时长。
+            await asyncio.sleep(0)
+            done.set()
 
         scheduler.register_job(
             "test_job",
@@ -31,13 +34,13 @@ def test_scheduler_records_last_duration_ms_per_run() -> None:
             start=True,
             run_immediately=True,
         )
-        # 给调度器一点时间完成至少一次运行。
-        for _ in range(40):
-            await asyncio.sleep(0.01)
-            snapshot = scheduler.snapshot()
-            duration = snapshot.jobs[0].last_duration_ms
-            if duration is not None:
+        # 等 job 真正跑过一次再读 duration；上限 5s 是 CI 容错，不是预期等待。
+        await asyncio.wait_for(done.wait(), timeout=5.0)
+        # done.set 在 duration 写入之前——再让 scheduler 把 finally 块跑完。
+        for _ in range(10):
+            if scheduler.snapshot().jobs[0].last_duration_ms is not None:
                 break
+            await asyncio.sleep(0)
         await scheduler.shutdown()
         return scheduler.snapshot().jobs[0].last_duration_ms, call_count
 

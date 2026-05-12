@@ -1,13 +1,14 @@
 """C-3 admin token middleware + H-3 rate limiter route-level coverage."""
 from __future__ import annotations
 
-import time
 from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
+from polymarket_trader.api import rate_limit as rate_limit_module
 from polymarket_trader.api.app import create_app
 from polymarket_trader.api.rate_limit import rate_limit
 from polymarket_trader.config import Settings
@@ -129,8 +130,16 @@ def test_rate_limit_blocks_after_burst() -> None:
         assert resp.json()["detail"]["code"] == "rate_limit_exceeded"
 
 
-def test_rate_limit_refills_over_time() -> None:
+def test_rate_limit_refills_over_time(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import Depends
+
+    # 通过 monkeypatch 替换 monotonic，避免依赖墙钟睡眠让 CI 抖动。
+    fake_now = {"t": 1000.0}
+
+    def fake_monotonic() -> float:
+        return fake_now["t"]
+
+    monkeypatch.setattr(rate_limit_module.time, "monotonic", fake_monotonic)
 
     app = FastAPI()
 
@@ -141,6 +150,6 @@ def test_rate_limit_refills_over_time() -> None:
     with TestClient(app) as client:
         assert client.get("/refill").status_code == 200
         assert client.get("/refill").status_code == 429
-        # 100ms 应该 refill 1 token (qps=10)
-        time.sleep(0.12)
+        # 推进虚拟时间 120ms（qps=10 → refill 1.2 token）
+        fake_now["t"] += 0.12
         assert client.get("/refill").status_code == 200
