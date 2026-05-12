@@ -441,11 +441,16 @@ class CurrentStrategy:
             outcome_label = outcome_by_token.get(snap.token_id, "")
             if snapshot is None or not outcome_label:
                 return ProbView(prob_p=None, prob_confidence=Decimal("0"), source="outright_real_missing")
-            fair_value = outright_fair_value(snapshot, outcome_label)
-            if fair_value is None:
-                return ProbView(prob_p=None, prob_confidence=Decimal("0"), source="outright_real_missing")
+            pricing_result = outright_fair_value(snapshot, snap.market, outcome_label)
+            if pricing_result.value is None:
+                source = (
+                    f"outright_real_rejected:{pricing_result.reject.value}"
+                    if pricing_result.reject is not None
+                    else "outright_real_missing"
+                )
+                return ProbView(prob_p=None, prob_confidence=Decimal("0"), source=source)
             # 赛季赔率是真实概率（非 implied），conf=1.0 不做折扣。
-            return ProbView(prob_p=fair_value, prob_confidence=Decimal("1"), source="outright_real")
+            return ProbView(prob_p=pricing_result.value, prob_confidence=Decimal("1"), source="outright_real")
 
         plan = kelly_plan(
             trace_id=context.trace_id,
