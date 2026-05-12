@@ -86,6 +86,8 @@ class CurrentStrategyConfig:
         tail_entry_maker_max_resting_seconds:
             历史遗留开放 BUY 的最长容忍秒数。自动入场 BUY 只走触发式
             FAK 市价单；该参数只用于恢复链路撤掉旧 GTC BUY，避免长期占用资金。
+            撤掉后下一轮 entry signal 会重跑 Kelly（重读最新 bankroll / fair_value），
+            实现"maker 单 staleness → 重新 sizing"闭环（C10）。
         tail_settlement_hold_minutes:
             估算等待权威结算的保守资金占用时间。实盘里市场结束到可结算可能跨越
             数小时，因此这里不只看比赛剩余时间。

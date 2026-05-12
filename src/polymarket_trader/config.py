@@ -109,9 +109,10 @@ class Settings(BaseSettings):
     # 凑齐金额上限 = position_cap × ratio。1.0=凑齐金额最多到 cap；> 1 时让 RiskManager
     # 的 effective position cap 同步放宽（== max_position_fraction × ratio）——这是
     # bankroll 极小阶段（如 5 USDC）唯一能下单的方式，相当于显式接受单笔 over-bet。
-    # 没有上限：用户用大值（如 10）等价"放弃单仓纪律线"，由 RiskManager 的
-    # bankroll_overspent 总额闸门兜底。
-    kelly_round_up_max_overbet_ratio: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
+    # le=100 软上限防误配 1000+；正常上线后应降回 1.0（启用 Kelly 单仓纪律）。
+    kelly_round_up_max_overbet_ratio: Decimal = Field(
+        default=Decimal("1"), gt=Decimal("0"), le=Decimal("100")
+    )
     # drawdown lockout：bankroll 跌破 peak × halt_fraction 时拒新仓。0 关闭。
     kelly_drawdown_halt_fraction: Decimal = Field(default=Decimal("0.5"), ge=Decimal("0"), le=Decimal("1"))
 

@@ -121,6 +121,8 @@ class ExtensionContext:
     now: datetime | None = None
     portfolio_budget_usdc: Decimal | None = None
     available_usdc: Decimal | None = None
+    # Kelly + bankroll 字段统一走 ``budget_view``。framework 内部参数不下放到
+    # ``ExtensionContext`` 顶层——策略未来想换 sizing 算法时这些字段不会成为契约债。
     bankroll_usdc: Decimal | None = None
     kelly_fraction: Decimal | None = None
     kelly_max_position_fraction: Decimal | None = None

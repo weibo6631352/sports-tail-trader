@@ -69,6 +69,11 @@ _PRICE_MAX = Decimal("0.99")
 # (跨模块 ripple)，所以 docstring + comment 强标注。
 _FEE_RATE_DENOMINATOR = Decimal("1000")
 
+# Polymarket tick reality：主流 0.01，少数 prop market 0.001。Kelly 公式需要的
+# 价格 boundary = max(tick, 0.0001 floor)；caller 传 ``market_tick_size`` 时按
+# tick 做端点，避免 0.001-tick 市场被一刀切归类 ``price_out_of_range``。
+_DEFAULT_PRICE_FLOOR = Decimal("0.0001")
+
 
 @dataclass(frozen=True, slots=True)
 class KellyStake:
@@ -106,8 +111,14 @@ def kelly_stake(
     liquidity_usdc: Decimal | None = None,
     allow_round_up_to_market_min: bool = True,
     round_up_max_overbet_ratio: Decimal = _ONE,
+    market_tick_size: Decimal | None = None,
 ) -> KellyStake:
-    """计算单市场 Kelly 仓位。详细公式见模块 docstring。"""
+    """计算单市场 Kelly 仓位。详细公式见模块 docstring。
+
+    ``market_tick_size`` 可选——按市场 tick 动态调整价格端点（C11）。0.01 tick
+    市场端点 [0.01, 0.99]；0.001 tick 市场 [0.001, 0.999]。缺省按硬编码
+    [_PRICE_MIN, _PRICE_MAX] = [0.01, 0.99] 兜底。
+    """
 
     effective_kappa = kelly_fraction * prob_confidence
 
@@ -118,6 +129,13 @@ def kelly_stake(
         market_min_order_size_shares=market_min_order_size_shares,
         price_c=price_c,
     )
+    # tick-aware 价格端点：caller 传 market_tick_size → [tick, 1-tick]；缺省 [0.01, 0.99]。
+    if market_tick_size is not None and market_tick_size > _ZERO:
+        price_min = max(market_tick_size, _DEFAULT_PRICE_FLOOR)
+        price_max = _ONE - market_tick_size
+    else:
+        price_min = _PRICE_MIN
+        price_max = _PRICE_MAX
     if bankroll_usdc <= _ZERO:
         return _reject_with_zero_metrics(
             price_c=price_c,
@@ -127,7 +145,7 @@ def kelly_stake(
             effective_min_stake_usdc=pre_min_stake,
             reason="bankroll_non_positive",
         )
-    if price_c < _PRICE_MIN or price_c > _PRICE_MAX:
+    if price_c < price_min or price_c > price_max:
         return _reject_with_zero_metrics(
             price_c=price_c,
             fair_value_p=fair_value_p,
@@ -294,6 +312,104 @@ def effective_position_cap_usdc(
     return base_cap
 
 
+@dataclass(frozen=True, slots=True)
+class KellyExitSignal:
+    """Kelly 反向 sizing：持仓途中 edge 翻转时给出半止盈 / 反向缩仓建议。
+
+    应用场景：开仓时 fair=0.50, c=0.30 → 看多。持仓中市场涨到 c=0.55，我方
+    fair 不变 → edge 反转（c > p）。继续持有 = 负 Kelly。该函数返回应卖出的
+    shares 比例（``sell_fraction`` ∈ [0,1]）。0 表示继续持有，1 表示全部退出。
+
+    简化模型：``sell_fraction = clip((c - p) / (1 - p), 0, 1)``——Kelly 在反向
+    edge 时的对称解。当前未自动接入策略 decide_exit；调用时机由策略层决定。
+    """
+
+    sell_fraction: Decimal
+    reverse_edge: Decimal
+    reason: str
+
+
+def kelly_exit_signal(
+    *,
+    current_price_c: Decimal,
+    fair_value_p: Decimal,
+    min_reverse_edge: Decimal = Decimal("0.02"),
+) -> KellyExitSignal:
+    """Kelly exit signal——edge 翻转时建议卖出比例。详见 KellyExitSignal docstring。"""
+
+    reverse_edge = current_price_c - fair_value_p
+    if reverse_edge < min_reverse_edge:
+        return KellyExitSignal(
+            sell_fraction=_ZERO,
+            reverse_edge=reverse_edge,
+            reason="hold",
+        )
+    denom = _ONE - fair_value_p
+    if denom <= _ZERO:
+        return KellyExitSignal(sell_fraction=_ONE, reverse_edge=reverse_edge, reason="full_exit")
+    raw = reverse_edge / denom
+    if raw >= _ONE:
+        return KellyExitSignal(sell_fraction=_ONE, reverse_edge=reverse_edge, reason="full_exit")
+    return KellyExitSignal(sell_fraction=raw, reverse_edge=reverse_edge, reason="partial_exit")
+
+
+def apply_vol_scaling(
+    stake_usdc: Decimal,
+    *,
+    realized_vol: Decimal,
+    baseline_vol: Decimal,
+) -> Decimal:
+    """vol-scaling: 高波动市场缩仓——``stake' = stake × min(1, baseline/realized)²``。
+
+    经验法则：σ 翻倍 → stake 减到 1/4。极薄盘口 / 大新闻事件下波动飙升时
+    Kelly 公式假设的 p 估计更不可靠，应额外缩仓。strategy 可调，default 不接入。
+    """
+
+    if realized_vol <= _ZERO or baseline_vol <= _ZERO:
+        return stake_usdc
+    if realized_vol <= baseline_vol:
+        return stake_usdc
+    factor = baseline_vol / realized_vol
+    return stake_usdc * factor * factor
+
+
+def apply_settlement_discount(
+    stake_usdc: Decimal,
+    *,
+    settlement_seconds: int,
+    annualized_rate: Decimal,
+) -> Decimal:
+    """长持仓的资金占用机会成本折现：stake' = stake × (1 - r × T_year)。
+
+    简化模型（线性近似 exp(-rT)）。outright family 长持仓（数月）应折，tail
+    （分钟级）影响可忽略。strategy 可调，default 不接入。
+    """
+
+    if settlement_seconds <= 0 or annualized_rate <= _ZERO:
+        return stake_usdc
+    seconds_per_year = Decimal("31536000")  # 365 × 86400
+    discount = annualized_rate * Decimal(settlement_seconds) / seconds_per_year
+    if discount >= _ONE:
+        return _ZERO
+    return stake_usdc * (_ONE - discount)
+
+
+def apply_dispute_premium(
+    edge: Decimal,
+    *,
+    premium_bps: int,
+) -> Decimal:
+    """争议性市场（如 ambiguous resolution）edge 扣除——要求 N bps 额外补偿。
+
+    Polymarket 历史上有 UMA dispute 案（如 Khamenei 案）。strategy 标记的
+    high-dispute 市场应在原 edge 基础上扣 100-300 bps。default 不接入。
+    """
+
+    if premium_bps <= 0:
+        return edge
+    return edge - Decimal(premium_bps) / Decimal("10000")
+
+
 def implied_fair_value_from_price_cap(
     price_cap: Decimal,
     *,
@@ -380,5 +496,10 @@ __all__ = [
     "KellyStake",
     "kelly_stake",
     "effective_position_cap_usdc",
+    "KellyExitSignal",
+    "kelly_exit_signal",
+    "apply_vol_scaling",
+    "apply_settlement_discount",
+    "apply_dispute_premium",
     "implied_fair_value_from_price_cap",
 ]

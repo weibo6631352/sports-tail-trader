@@ -64,6 +64,61 @@ REJECTION_EVENT_TITLES: tuple[str, ...] = (
 )
 
 
+# Kelly / 风控拒绝原因分类——``fetch_rejection_reasons`` 返回 raw reason，下游
+# admin / dashboard 可用此映射做分桶展示（"Kelly 早拒"vs"风控早拒"vs"账户余额"）。
+# 旧的 single_order_limit_reached / market_limit_reached 等已删除——只保留 Kelly 时代。
+REJECTION_REASON_CATEGORIES: dict[str, str] = {
+    # Kelly engine 早拒
+    "edge_below_min": "kelly_engine",
+    "bankroll_non_positive": "kelly_engine",
+    "kelly_stake_below_min": "kelly_engine",
+    "kelly_below_market_min_no_round_up": "kelly_engine",
+    "bankroll_too_small_for_market_min": "kelly_engine",
+    "price_out_of_range": "kelly_engine",
+    "fair_value_out_of_range": "kelly_engine",
+    "prob_confidence_out_of_range": "kelly_engine",
+    "missing_price_or_prob": "kelly_engine",
+    # 框架风控
+    "kelly_position_cap_exceeded": "risk_framework",
+    "bankroll_overspent": "risk_framework",
+    "drawdown_lockout_active": "risk_framework",
+    "neg_risk_cross_token_open_order": "risk_framework",
+    "neg_risk_cross_token_position": "risk_framework",
+    # 账户 / 余额
+    "balance_insufficient": "account_balance",
+    "allowance_insufficient": "account_balance",
+    # 市场状态
+    "market_not_active": "market_state",
+    "market_not_open": "market_state",
+    "market_resolved": "market_state",
+    "market_cancelled": "market_state",
+    "market_archived": "market_state",
+    "clob_disabled": "market_state",
+    # 流动性 / 价格
+    "liquidity_insufficient": "liquidity",
+    "price_above_tick_limit": "price",
+    "tick_size_invalid": "price",
+    "price_invalid": "price",
+    # 操作 / 重试
+    "retry_limit_reached": "operational",
+    "open_buy_detected": "operational",
+    "open_exit_detected": "operational",
+    "resting_buy_not_allowed": "operational",
+    # 策略级
+    "consecutive_loss_pause": "strategy_risk",
+    "event_exposure_limit": "strategy_risk",
+    "league_exposure_limit": "strategy_risk",
+    "daily_entry_limit": "strategy_risk",
+}
+
+
+def categorize_rejection_reason(reason: str) -> str:
+    """Map raw reason → category bucket。未分类的归 ``other``，便于 dashboard 看到
+    新拒绝原因后扩 mapping。"""
+
+    return REJECTION_REASON_CATEGORIES.get(reason, "other")
+
+
 def _build_market_filter(
     *,
     condition_alias: str,
@@ -388,6 +443,8 @@ async def fetch_kelly_calibration(
 __all__: Sequence[str] = (
     "FUNNEL_STAGES",
     "REJECTION_EVENT_TITLES",
+    "REJECTION_REASON_CATEGORIES",
+    "categorize_rejection_reason",
     "fetch_funnel_counts",
     "fetch_rejection_reasons",
     "fetch_execution_quality",

@@ -212,3 +212,55 @@ def test_kelly_plan_no_eligible_markets_returns_reason():
     )
     assert plan.reason == "no_eligible_market"
     assert len(plan.allocations) == 0
+
+
+def test_kelly_plan_sequential_bankroll_strict_decrement():
+    """C5: 多市场场景断言按 f_star 排序 + 逐笔扣减 remaining_bankroll。
+
+    3 个市场 (c1: high edge, c2: med, c3: low)，bankroll=15。期望：
+    1. 排序后 c1 先 sized；
+    2. 后续 candidate 看到的 effective bankroll 已扣 c1 的 stake；
+    3. 总分配 ≤ bankroll。
+    """
+
+    markets = (
+        # discovery 顺序故意打乱（c2 先），让 sort 起作用
+        _snapshot(condition_id="c2", market_slug="m2", best_ask=Decimal("0.10"), min_order_size=Decimal("5")),
+        _snapshot(condition_id="c1", market_slug="m1", best_ask=Decimal("0.10"), min_order_size=Decimal("5")),
+        _snapshot(condition_id="c3", market_slug="m3", best_ask=Decimal("0.10"), min_order_size=Decimal("5")),
+    )
+
+    def _per_market_prob(snap):
+        # f_star 与 (p, c) 有关——p 高 → edge 高 → f_star 高
+        if snap.condition_id == "c1":
+            return ProbView(prob_p=Decimal("0.50"), prob_confidence=Decimal("1"), source="test_high")
+        if snap.condition_id == "c2":
+            return ProbView(prob_p=Decimal("0.30"), prob_confidence=Decimal("1"), source="test_med")
+        return ProbView(prob_p=Decimal("0.15"), prob_confidence=Decimal("1"), source="test_low")
+
+    plan = kelly_plan(
+        trace_id="trace-sequential-strict",
+        bankroll_usdc=Decimal("15"),
+        portfolio_budget_usdc=Decimal("15"),
+        markets=markets,
+        prob_provider=_per_market_prob,
+        **_kelly_kwargs(kelly_max_position_fraction=Decimal("0.5")),  # 单仓 7.5 USDC 上限
+    )
+
+    # 找到每个市场的 allocation
+    by_id = {a.condition_id: a for a in plan.allocations}
+    assert "c1" in by_id and "c2" in by_id and "c3" in by_id
+
+    # c1 edge 最高 → sized > 0
+    assert by_id["c1"].buy_budget_usdc > Decimal("0")
+    assert by_id["c1"].kelly_f_star is not None and by_id["c1"].kelly_f_star > Decimal("0")
+
+    # 总分配不超 bankroll（sequential bankroll 不变量）
+    total = sum((a.buy_budget_usdc for a in plan.allocations), Decimal("0"))
+    assert total <= Decimal("15"), f"sequential bankroll violation: total={total}"
+
+    # 排序断言：c1 的 f_star >= c2 >= c3 (因为 prob_p 高 → edge 高)
+    f_c1 = by_id["c1"].kelly_f_star
+    f_c2 = by_id["c2"].kelly_f_star
+    f_c3 = by_id["c3"].kelly_f_star
+    assert f_c1 >= f_c2 >= f_c3

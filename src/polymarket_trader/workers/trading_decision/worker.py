@@ -379,6 +379,27 @@ class TradingDecisionWorker:
                 "review": serialize_review(review),
             },
         )
+        # drawdown lockout 专属事件：让运维直接 grep DRAWDOWN_LOCKOUT_TRIGGERED
+        # 而不需从 risk_check_failed reason 字段过滤。每次拒会重复 emit
+        # （非 edge-detection），下游 analytics 用 audit dedup。
+        if (
+            review.risk_decision is not None
+            and not review.risk_decision.passed
+            and review.risk_decision.reason == "drawdown_lockout_active"
+        ):
+            await self._publish(
+                DomainEventType.DRAWDOWN_LOCKOUT_TRIGGERED,
+                trace_id=plan.trace_id,
+                market_slug=plan.market.market_slug,
+                condition_id=plan.market.condition_id,
+                token_id=plan.intent.token_id,
+                reason="drawdown_lockout_active",
+                payload={
+                    "entry_event_id": event.event_id,
+                    "origin": TRADING_DECISION_WORKER_ORIGIN,
+                    "review": serialize_review(review),
+                },
+            )
         result = await self._handle_order_result(
             source_event=event,
             order_result=review.order_result,
