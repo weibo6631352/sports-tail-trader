@@ -9,10 +9,11 @@ from typing import Any
 import httpx
 
 from polymarket_trader.domain.sports_live import (
-    SportsLiveGame,
+    LiveEvent,
+    LiveEventKind,
+    Participant,
     SportsLiveGameStatus,
     SportsLiveSnapshot,
-    SportsLiveTeam,
 )
 from polymarket_trader.infra.sports.common import (
     first_text,
@@ -56,7 +57,7 @@ class NhlScoreApiClient:
         if self._owns_client:
             await self._client.aclose()
 
-    async def list_games(self) -> SportsLiveSnapshot:
+    async def list_events(self) -> SportsLiveSnapshot:
         """拉取 NHL 当前比赛日比分。"""
 
         observed_at = utc_now(self._now_provider)
@@ -68,38 +69,38 @@ class NhlScoreApiClient:
         except Exception as exc:
             raise normalize_sports_data_error(exc, operation=operation) from exc
         payload = json_mapping_from_response(response, operation=operation)
-        games = parse_nhl_score_payload(payload, observed_at=observed_at)
-        return SportsLiveSnapshot(source="nhl", observed_at=observed_at, games=games)
+        events = parse_nhl_score_payload(payload, observed_at=observed_at)
+        return SportsLiveSnapshot(source="nhl", observed_at=observed_at, events=events)
 
 
 def parse_nhl_score_payload(
     payload: Mapping[str, Any],
     *,
     observed_at: datetime | None = None,
-) -> tuple[SportsLiveGame, ...]:
-    """把 NHL score payload 转成内部比赛 DTO。"""
+) -> tuple[LiveEvent, ...]:
+    """把 NHL score payload 转成内部 LiveEvent DTO。"""
 
     observed_at = observed_at or datetime.now(timezone.utc)
     raw_games = payload.get("games")
     if not isinstance(raw_games, Sequence) or isinstance(raw_games, (str, bytes)):
         return ()
-    games: list[SportsLiveGame] = []
+    events: list[LiveEvent] = []
     for raw_game in raw_games:
         if not isinstance(raw_game, Mapping):
             continue
-        game = _parse_game(raw_game, observed_at=observed_at)
-        if game is not None:
-            games.append(game)
-    return tuple(games)
+        event = _parse_game(raw_game, observed_at=observed_at)
+        if event is not None:
+            events.append(event)
+    return tuple(events)
 
 
-def _parse_game(raw_game: Mapping[str, Any], *, observed_at: datetime) -> SportsLiveGame | None:
+def _parse_game(raw_game: Mapping[str, Any], *, observed_at: datetime) -> LiveEvent | None:
     home_payload = raw_game.get("homeTeam")
     away_payload = raw_game.get("awayTeam")
     if not isinstance(home_payload, Mapping) or not isinstance(away_payload, Mapping):
         return None
-    home = _team_from_payload(home_payload)
-    away = _team_from_payload(away_payload)
+    home = _team_from_payload(home_payload, role="home")
+    away = _team_from_payload(away_payload, role="away")
     if home is None or away is None:
         return None
     raw_status = str(raw_game.get("gameState") or "")
@@ -110,12 +111,14 @@ def _parse_game(raw_game: Mapping[str, Any], *, observed_at: datetime) -> Sports
     period = int_value(raw_game.get("period")) or int_value(period_payload.get("number")) or 0
     max_regulation_periods = int_value(period_payload.get("maxRegulationPeriods")) or 3
     status = _map_status(raw_status, clock)
-    return SportsLiveGame(
+    source_event_id = str(raw_game.get("id") or "")
+    return LiveEvent(
         source="nhl",
-        source_event_id=str(raw_game.get("id") or ""),
+        source_event_id=source_event_id,
+        kind=LiveEventKind.TEAM_MATCH,
         league="NHL",
-        home=home,
-        away=away,
+        sport="hockey",
+        participants=(home, away),
         status=status,
         period=f"P{period}" if period > 0 else raw_status,
         seconds_remaining=_seconds_remaining(
@@ -126,6 +129,7 @@ def _parse_game(raw_game: Mapping[str, Any], *, observed_at: datetime) -> Sports
         ),
         observed_at=observed_at,
         raw_status=raw_status,
+        external_ids={"nhl": source_event_id} if source_event_id else {},
         source_payload={
             "game_date": raw_game.get("gameDate"),
             "start_time_utc": raw_game.get("startTimeUTC"),
@@ -134,20 +138,23 @@ def _parse_game(raw_game: Mapping[str, Any], *, observed_at: datetime) -> Sports
     )
 
 
-def _team_from_payload(payload: Mapping[str, Any]) -> SportsLiveTeam | None:
+def _team_from_payload(payload: Mapping[str, Any], *, role: str) -> Participant | None:
     name_payload = payload.get("name")
     name_mapping = name_payload if isinstance(name_payload, Mapping) else {}
     name = first_text(name_mapping, "default") or first_text(payload, "name")
     if name is None:
         return None
     abbreviation = first_text(payload, "abbrev")
-    return SportsLiveTeam(
+    team_id = first_text(payload, "id")
+    return Participant(
+        role=role,
         name=name,
         score=int_value(payload.get("score")) or 0,
         display_name=name,
         abbreviation=abbreviation,
         short_name=name,
         aliases=tuple(alias for alias in (name, abbreviation) if alias),
+        external_ids={"nhl": team_id} if team_id else {},
     )
 
 

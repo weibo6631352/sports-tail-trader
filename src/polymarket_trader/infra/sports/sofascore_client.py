@@ -17,13 +17,14 @@ import httpx
 
 from polymarket_trader.domain.sports_live import (
     BaseballGameState,
+    LiveEvent,
+    LiveEventKind,
+    Participant,
     SoccerGameState,
-    SportsLiveGame,
     SportsLiveGameStatus,
     SportsLiveSnapshot,
     SportsLiveSourceHealth,
     SportsLiveSourceStatus,
-    SportsLiveTeam,
     TennisGameState,
 )
 from polymarket_trader.infra.sports.common import (
@@ -148,13 +149,13 @@ class SofaScoreLiveClient:
         if self._owns_client:
             await self._client.aclose()
 
-    async def list_games(self) -> SportsLiveSnapshot:
+    async def list_events(self) -> SportsLiveSnapshot:
         """拉取配置 sport 的当前 UTC 比赛日数据。"""
 
         observed_at = utc_now(self._now_provider)
         if self._is_cache_fresh(observed_at):
             return self._snapshot_with_status(
-                self._cached_snapshot or SportsLiveSnapshot(source="sofascore", observed_at=observed_at, games=()),
+                self._cached_snapshot or SportsLiveSnapshot(source="sofascore", observed_at=observed_at, events=()),
                 health=SportsLiveSourceHealth.CACHED,
             )
         date_texts = _scheduled_event_dates(
@@ -181,10 +182,10 @@ class SofaScoreLiveClient:
             if not payloads and failures:
                 first_error = next(result for result in results if isinstance(result, Exception))
                 raise first_error
-            games = [
-                game
+            events = [
+                event
                 for sport, payload in payloads
-                for game in parse_sofascore_events_payload(
+                for event in parse_sofascore_events_payload(
                     payload,
                     sport=sport,
                     league_codes=self._league_codes,
@@ -194,12 +195,12 @@ class SofaScoreLiveClient:
         except Exception as exc:
             if self._is_cache_usable_after_error(observed_at):
                 return self._snapshot_with_status(
-                    self._cached_snapshot or SportsLiveSnapshot(source="sofascore", observed_at=observed_at, games=()),
+                    self._cached_snapshot or SportsLiveSnapshot(source="sofascore", observed_at=observed_at, events=()),
                     health=SportsLiveSourceHealth.CACHED,
                 )
             if isinstance(exc, SportsDataRateLimitError):
                 snapshot = self._snapshot_with_status(
-                    SportsLiveSnapshot(source="sofascore", observed_at=observed_at, games=()),
+                    SportsLiveSnapshot(source="sofascore", observed_at=observed_at, events=()),
                     health=SportsLiveSourceHealth.RATE_LIMITED,
                     success=False,
                     last_error=str(exc),
@@ -241,13 +242,13 @@ class SofaScoreLiveClient:
         return SportsLiveSnapshot(
             source="sofascore",
             observed_at=snapshot.observed_at,
-            games=snapshot.games,
+            events=snapshot.events,
             source_statuses=(
                 SportsLiveSourceStatus(
                     source="sofascore",
                     success=success,
                     health=health,
-                    games_seen=len(snapshot.games),
+                    events_seen=len(snapshot.events),
                     observed_at=snapshot.observed_at,
                     last_error=last_error,
                 ),
@@ -294,14 +295,14 @@ def parse_sofascore_events_payload(
     sport: str,
     league_codes: Sequence[str] = (),
     observed_at: datetime | None = None,
-) -> tuple[SportsLiveGame, ...]:
-    """把 SofaScore scheduled-events payload 转成内部比赛 DTO。"""
+) -> tuple[LiveEvent, ...]:
+    """把 SofaScore scheduled-events payload 转成内部 LiveEvent DTO。"""
 
     observed_at = observed_at or datetime.now(timezone.utc)
     raw_events = payload.get("events")
     if not isinstance(raw_events, Sequence) or isinstance(raw_events, (str, bytes)):
         return ()
-    games: list[SportsLiveGame] = []
+    events: list[LiveEvent] = []
     normalized_sport = str(sport).strip().lower()
     allowed_aliases = _allowed_tournament_aliases(league_codes)
     for raw_event in raw_events:
@@ -309,19 +310,19 @@ def parse_sofascore_events_payload(
             continue
         if not _event_matches_leagues(raw_event, allowed_aliases):
             continue
-        game = _parse_event(raw_event, sport=normalized_sport, observed_at=observed_at)
-        if game is not None:
-            games.append(game)
-    return tuple(games)
+        event = _parse_event(raw_event, sport=normalized_sport, observed_at=observed_at)
+        if event is not None:
+            events.append(event)
+    return tuple(events)
 
 
-def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datetime) -> SportsLiveGame | None:
+def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datetime) -> LiveEvent | None:
     home_payload = raw_event.get("homeTeam")
     away_payload = raw_event.get("awayTeam")
     if not isinstance(home_payload, Mapping) or not isinstance(away_payload, Mapping):
         return None
-    home = _team_from_payload(home_payload, raw_event.get("homeScore"))
-    away = _team_from_payload(away_payload, raw_event.get("awayScore"))
+    home = _team_from_payload(home_payload, raw_event.get("homeScore"), role="home")
+    away = _team_from_payload(away_payload, raw_event.get("awayScore"), role="away")
     if home is None or away is None:
         return None
     status_payload = raw_event.get("status")
@@ -332,12 +333,21 @@ def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datet
     tennis_state = _tennis_state_from_payload(raw_event, raw_status=raw_status) if sport == "tennis" else None
     baseball_state = _baseball_state_from_payload(raw_event, raw_status=raw_status) if sport == "baseball" else None
     soccer_state = _soccer_state_from_payload(raw_event, raw_status=raw_status) if sport == "football" else None
-    return SportsLiveGame(
+    source_event_id = str(raw_event.get("id") or raw_event.get("customId") or "")
+    # SofaScore payload 中可能携带的跨源 ID：常见键 mappedTo、externalIds、espnId
+    external_ids: dict[str, str] = {}
+    if source_event_id:
+        external_ids["sofascore"] = source_event_id
+    espn_id = raw_event.get("espnId") or raw_event.get("espn_id")
+    if espn_id:
+        external_ids["espn"] = str(espn_id)
+    return LiveEvent(
         source="sofascore",
-        source_event_id=str(raw_event.get("id") or raw_event.get("customId") or ""),
+        source_event_id=source_event_id,
+        kind=LiveEventKind.TEAM_MATCH,
         league=_league_name(tournament, sport=sport),
-        home=home,
-        away=away,
+        sport=sport,
+        participants=(home, away),
         status=status,
         period=_period_label(sport=sport, raw_status=raw_status),
         seconds_remaining=_seconds_remaining(
@@ -347,6 +357,8 @@ def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datet
         ),
         observed_at=observed_at,
         raw_status=raw_status,
+        event_start_time=_sofascore_event_start_time(raw_event),
+        external_ids=external_ids,
         baseball_state=baseball_state,
         tennis_state=tennis_state,
         soccer_state=soccer_state,
@@ -360,7 +372,20 @@ def _parse_event(raw_event: Mapping[str, Any], *, sport: str, observed_at: datet
     )
 
 
-def _team_from_payload(payload: Mapping[str, Any], score_payload: Any) -> SportsLiveTeam | None:
+def _sofascore_event_start_time(raw_event: Mapping[str, Any]) -> datetime | None:
+    ts = raw_event.get("startTimestamp")
+    if ts is None:
+        return None
+    try:
+        value = float(ts)
+    except (TypeError, ValueError):
+        return None
+    if value > 10_000_000_000:
+        value = value / 1000
+    return datetime.fromtimestamp(value, tz=timezone.utc)
+
+
+def _team_from_payload(payload: Mapping[str, Any], score_payload: Any, *, role: str) -> Participant | None:
     name = first_text(payload, "name", "shortName", "nameCode")
     if name is None:
         return None
@@ -368,7 +393,9 @@ def _team_from_payload(payload: Mapping[str, Any], score_payload: Any) -> Sports
     short_name = first_text(payload, "shortName")
     abbreviation = first_text(payload, "nameCode")
     slug = first_text(payload, "slug")
-    return SportsLiveTeam(
+    team_id = first_text(payload, "id")
+    return Participant(
+        role=role,
         name=name,
         score=_score_value(score_mapping),
         display_name=name,
@@ -376,6 +403,7 @@ def _team_from_payload(payload: Mapping[str, Any], score_payload: Any) -> Sports
         short_name=short_name,
         location=None,
         aliases=tuple(alias for alias in (short_name, abbreviation, _slug_alias(slug)) if alias),
+        external_ids={"sofascore": team_id} if team_id else {},
     )
 
 

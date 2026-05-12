@@ -10,10 +10,11 @@ import httpx
 
 from polymarket_trader.domain.sports_live import (
     BaseballGameState,
-    SportsLiveGame,
+    LiveEvent,
+    LiveEventKind,
+    Participant,
     SportsLiveGameStatus,
     SportsLiveSnapshot,
-    SportsLiveTeam,
 )
 from polymarket_trader.infra.sports.common import (
     first_text,
@@ -56,7 +57,7 @@ class MlbStatsApiClient:
         if self._owns_client:
             await self._client.aclose()
 
-    async def list_games(self) -> SportsLiveSnapshot:
+    async def list_events(self) -> SportsLiveSnapshot:
         """拉取 MLB 当前比赛日 schedule。"""
 
         observed_at = utc_now(self._now_provider)
@@ -71,22 +72,22 @@ class MlbStatsApiClient:
         except Exception as exc:
             raise normalize_sports_data_error(exc, operation=operation) from exc
         payload = json_mapping_from_response(response, operation=operation)
-        games = parse_mlb_schedule_payload(payload, observed_at=observed_at)
-        return SportsLiveSnapshot(source="mlb", observed_at=observed_at, games=games)
+        events = parse_mlb_schedule_payload(payload, observed_at=observed_at)
+        return SportsLiveSnapshot(source="mlb", observed_at=observed_at, events=events)
 
 
 def parse_mlb_schedule_payload(
     payload: Mapping[str, Any],
     *,
     observed_at: datetime | None = None,
-) -> tuple[SportsLiveGame, ...]:
-    """把 MLB schedule payload 转成内部比赛 DTO。"""
+) -> tuple[LiveEvent, ...]:
+    """把 MLB schedule payload 转成内部 LiveEvent DTO。"""
 
     observed_at = observed_at or datetime.now(timezone.utc)
     dates = payload.get("dates")
     if not isinstance(dates, Sequence) or isinstance(dates, (str, bytes)):
         return ()
-    games: list[SportsLiveGame] = []
+    events: list[LiveEvent] = []
     for date_payload in dates:
         if not isinstance(date_payload, Mapping):
             continue
@@ -96,21 +97,21 @@ def parse_mlb_schedule_payload(
         for raw_game in raw_games:
             if not isinstance(raw_game, Mapping):
                 continue
-            game = _parse_game(raw_game, observed_at=observed_at)
-            if game is not None:
-                games.append(game)
-    return tuple(games)
+            event = _parse_game(raw_game, observed_at=observed_at)
+            if event is not None:
+                events.append(event)
+    return tuple(events)
 
 
-def _parse_game(raw_game: Mapping[str, Any], *, observed_at: datetime) -> SportsLiveGame | None:
+def _parse_game(raw_game: Mapping[str, Any], *, observed_at: datetime) -> LiveEvent | None:
     teams = raw_game.get("teams")
     teams_payload = teams if isinstance(teams, Mapping) else {}
     home_payload = teams_payload.get("home")
     away_payload = teams_payload.get("away")
     if not isinstance(home_payload, Mapping) or not isinstance(away_payload, Mapping):
         return None
-    home = _team_from_payload(home_payload)
-    away = _team_from_payload(away_payload)
+    home = _team_from_payload(home_payload, role="home")
+    away = _team_from_payload(away_payload, role="away")
     if home is None or away is None:
         return None
     status_payload = raw_game.get("status")
@@ -119,17 +120,20 @@ def _parse_game(raw_game: Mapping[str, Any], *, observed_at: datetime) -> Sports
     status = _map_status(status_mapping)
     linescore = raw_game.get("linescore")
     linescore_payload = linescore if isinstance(linescore, Mapping) else {}
-    return SportsLiveGame(
+    source_event_id = str(raw_game.get("gamePk") or raw_game.get("gameGuid") or "")
+    return LiveEvent(
         source="mlb",
-        source_event_id=str(raw_game.get("gamePk") or raw_game.get("gameGuid") or ""),
+        source_event_id=source_event_id,
+        kind=LiveEventKind.TEAM_MATCH,
         league="MLB",
-        home=home,
-        away=away,
+        sport="baseball",
+        participants=(home, away),
         status=status,
         period=_period_label(linescore_payload, raw_status),
         seconds_remaining=None,
         observed_at=observed_at,
         raw_status=raw_status,
+        external_ids={"mlb": source_event_id} if source_event_id else {},
         baseball_state=_baseball_state(linescore_payload),
         source_payload={
             "game_date": raw_game.get("gameDate"),
@@ -139,7 +143,7 @@ def _parse_game(raw_game: Mapping[str, Any], *, observed_at: datetime) -> Sports
     )
 
 
-def _team_from_payload(payload: Mapping[str, Any]) -> SportsLiveTeam | None:
+def _team_from_payload(payload: Mapping[str, Any], *, role: str) -> Participant | None:
     team = payload.get("team")
     team_payload = team if isinstance(team, Mapping) else {}
     team_name = first_text(team_payload, "teamName", "clubName", "name")
@@ -148,7 +152,9 @@ def _team_from_payload(payload: Mapping[str, Any]) -> SportsLiveTeam | None:
     full_name = first_text(team_payload, "name") or team_name
     location = first_text(team_payload, "locationName", "franchiseName")
     abbreviation = first_text(team_payload, "abbreviation", "fileCode", "teamCode")
-    return SportsLiveTeam(
+    team_id = first_text(team_payload, "id")
+    return Participant(
+        role=role,
         name=team_name,
         score=int_value(payload.get("score")) or 0,
         display_name=full_name,
@@ -167,6 +173,7 @@ def _team_from_payload(payload: Mapping[str, Any]) -> SportsLiveTeam | None:
             )
             if alias
         ),
+        external_ids={"mlb": team_id} if team_id else {},
     )
 
 

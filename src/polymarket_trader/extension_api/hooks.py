@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.sports_live import SportsLiveGame
+from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.extension_api.context import AccountSnapshotView, ExtensionContext
 from polymarket_trader.extension_api.decisions import (
     EntrySizing,
@@ -60,10 +60,10 @@ class LiveStateHooks(Protocol):
     的装配，不强制非体育策略实现这两个 hook。
     """
 
-    def discovery_queries_for_live_games(
-        self, games: tuple[SportsLiveGame, ...]
+    def discovery_queries_for_live_events(
+        self, events: tuple[LiveEvent, ...]
     ) -> tuple[DiscoveryQuery, ...]: ...
 
     def match_live_state(
-        self, market: Market, games: tuple[SportsLiveGame, ...]
+        self, market: Market, events: tuple[LiveEvent, ...]
     ) -> LiveStateMatch | None: ...

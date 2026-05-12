@@ -1,3 +1,15 @@
+"""体育直播状态的归一化 domain 模型。
+
+LiveEvent 统一覆盖 team_match（NBA/网球/电竞，含 home/away）与 race
+（F1/NASCAR/MotoGP，N 个 driver 参与）与 tournament_field（高尔夫等多人锦标赛）。
+赛车不是 home/away，按 ``kind=RACE`` 走 N 个 ``Participant(role="driver")``；
+匹配链路按 ``kind`` 分支，避免在 dedup/audit/admin 三处各写一遍 team/race 双形态。
+
+聚合融合后，``source`` 记录主源、``contributing_sources`` 记录所有贡献源、
+``source_conflicts`` 记录被压制的字段（一等字段，不藏在 source_payload 字典里
+做 duck-typing fallback）。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,6 +18,19 @@ from enum import StrEnum
 from typing import Any, Mapping
 
 from polymarket_trader.serialization import jsonable
+
+
+class LiveEventKind(StrEnum):
+    """LiveEvent 的形态分类。
+
+    TEAM_MATCH：双方对抗（NBA/MLB/NHL/网球/电竞 BO 系列），有 home/away 概念。
+    RACE：赛车/竞速，N 个 driver，按 position 排位，不存在 home/away。
+    TOURNAMENT_FIELD：高尔夫等多人锦标赛 leaderboard，N 个 player + position。
+    """
+
+    TEAM_MATCH = "team_match"
+    RACE = "race"
+    TOURNAMENT_FIELD = "tournament_field"
 
 
 class SportsLiveGameStatus(StrEnum):
@@ -35,31 +60,46 @@ class SportsLiveSourceHealth(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class SportsLiveTeam:
-    """外部比分源中的队伍或选手信息。"""
+class Participant:
+    """LiveEvent 的参与方（队伍 / 车手 / 选手）。
 
+    ``role`` 由 ``LiveEventKind`` 决定语义：
+      - TEAM_MATCH: "home" / "away"
+      - RACE: "driver"
+      - TOURNAMENT_FIELD: "player"
+    ``external_ids`` 是跨源 ID 映射的关键载体，client 解析时尽量填充已知映射
+    （例如 SofaScore payload 里给出的 ESPN id），便于 ExternalIdIndex 跨源合并。
+    """
+
+    role: str
     name: str
-    score: int
+    score: int | None = None
+    position: int | None = None
     display_name: str | None = None
     abbreviation: str | None = None
     short_name: str | None = None
     location: str | None = None
     aliases: tuple[str, ...] = ()
+    team: str | None = None
+    external_ids: Mapping[str, str] = field(default_factory=dict)
 
     def match_aliases(self) -> tuple[str, ...]:
-        aliases = [
+        """跨源用于 market 文本匹配的别名集合（保持原有拼接规则）。"""
+
+        candidates = [
             self.name,
             self.display_name,
             self.abbreviation,
             self.short_name,
             self.location,
+            self.team,
             *self.aliases,
         ]
         if self.location and self.name:
-            aliases.append(f"{self.location} {self.name}")
+            candidates.append(f"{self.location} {self.name}")
         seen: set[str] = set()
         result: list[str] = []
-        for alias in aliases:
+        for alias in candidates:
             if alias is None:
                 continue
             text = str(alias).strip()
@@ -85,10 +125,7 @@ class BaseballGameState:
 
 @dataclass(frozen=True, slots=True)
 class TennisGameState:
-    """网球比赛盘分、局分和即时分状态。
-
-    域层单一类型源，infra 直播源和策略层共享同一份字段定义。
-    """
+    """网球比赛盘分、局分和即时分状态。"""
 
     home_sets_won: int = 0
     away_sets_won: int = 0
@@ -126,10 +163,10 @@ class TennisGameState:
 
 @dataclass(frozen=True, slots=True)
 class SoccerGameState:
-    """足球（含美式 soccer）比赛节奏状态。
+    """足球比赛节奏状态。
 
-    period 取值范围："first_half" / "second_half" / "extra_time" / "penalties"；
-    clock_minutes 是已进行的本节内分钟（不含补时）。
+    period 取值：first_half / second_half / extra_time / penalties；
+    clock_minutes 是本节内分钟（不含补时）。
     """
 
     period: str | None = None
@@ -144,11 +181,7 @@ class SoccerGameState:
 
 @dataclass(frozen=True, slots=True)
 class EsportsGameState:
-    """电子竞技 best-of-N 系列赛状态。
-
-    best_of 是本场总图数（BO3/BO5/BO7），current_map_index 是当前图序号（从 1 起），
-    map_score 是当前图比分（如 CS2 回合数）。
-    """
+    """电子竞技 best-of-N 系列赛状态。"""
 
     best_of: int | None = None
     current_map_index: int | None = None
@@ -161,13 +194,7 @@ class EsportsGameState:
 
 @dataclass(frozen=True, slots=True)
 class CricketGameState:
-    """板球比赛局面。
-
-    板球以 ``over`` 为投球单位，每个 over 含 6 个合法球。这里用整数
-    ``overs_completed`` + ``balls_in_over`` 分别表示已结束 overs 数和当前
-    over 内已投的合法球数，避免浮点 12.3 表示带来的精度问题。
-    ``target`` 仅在追分（chase）阶段有意义。
-    """
+    """板球比赛局面。整数化 overs/balls 避免 12.3 浮点表示带来的精度问题。"""
 
     current_innings: int | None = None
     batting_side: str | None = None
@@ -181,64 +208,105 @@ class CricketGameState:
 
 
 @dataclass(frozen=True, slots=True)
-class SportsLiveRaceEvent:
-    """赛车/竞速类比赛实时状态（不是 team-pair，独立形态）。
+class RaceState:
+    """赛车/竞速类比赛 race-level 状态。
 
-    与 SportsLiveGame 并存：F1/NASCAR/IndyCar/MotoGP 不能映射为 home/away。
+    driver 位次信息在 ``LiveEvent.participants[role="driver"]`` 中按 position 携带，
+    这里只补充 race 全场字段（圈数、leader、status_flag 如 GREEN/YELLOW/RED/SC 等）。
     """
 
-    source: str
-    source_event_id: str
-    league: str
-    event_name: str
-    status: SportsLiveGameStatus
     leader_driver: str | None = None
     leader_team: str | None = None
     laps_completed: int | None = None
     total_laps: int | None = None
     status_flag: str | None = None
-    observed_at: datetime | None = None
-    raw_status: str | None = None
-    drivers: tuple["SportsLiveDriverPosition", ...] = ()
-    source_payload: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
-class SportsLiveDriverPosition:
-    """赛车比赛中单个车手的瞬时位次。"""
+class ConflictRecord:
+    """聚合融合时被压制的源记录。
 
-    driver: str
-    position: int | None = None
-    team: str | None = None
-    laps_completed: int | None = None
-    gap_to_leader: str | None = None
-    status: str | None = None
+    一等字段，避免下游用 ``source_payload.get("source_conflicts", ())`` 做
+    duck-typing fallback。``decided_by`` 标注融合判定依据：majority / trusted_source /
+    median / priority_tiebreak / freshness。
+    """
+
+    field: str
+    winner_source: str
+    winner_value: Any
+    loser_source: str
+    loser_value: Any
+    decided_by: str
 
 
 @dataclass(frozen=True, slots=True)
-class SportsLiveGame:
-    """策略入场前需要的归一化直播比赛状态。"""
+class LiveEvent:
+    """统一的直播事件归一化模型。
+
+    单源 client 输出为单源 LiveEvent；经 ExternalIdIndex + aggregate 融合后得到
+    全源融合形态：``source`` 为融合主源，``contributing_sources`` 列所有贡献源，
+    ``source_conflicts`` 记录被压制的字段，``external_ids`` 合并所有源的外部 ID。
+    """
 
     source: str
     source_event_id: str
+    kind: LiveEventKind
     league: str
-    home: SportsLiveTeam
-    away: SportsLiveTeam
+    sport: str
+    participants: tuple[Participant, ...]
     status: SportsLiveGameStatus
-    period: str
+    period: str = ""
     seconds_remaining: int | None = None
-    observed_at: datetime | None = None
     raw_status: str | None = None
+    observed_at: datetime | None = None
+    event_start_time: datetime | None = None
+    event_name: str = ""
+    external_ids: Mapping[str, str] = field(default_factory=dict)
     baseball_state: BaseballGameState | None = None
     tennis_state: TennisGameState | None = None
     soccer_state: SoccerGameState | None = None
     esports_state: EsportsGameState | None = None
     cricket_state: CricketGameState | None = None
+    race_state: RaceState | None = None
+    source_conflicts: tuple[ConflictRecord, ...] = ()
+    contributing_sources: tuple[str, ...] = ()
     source_payload: Mapping[str, Any] = field(default_factory=dict)
 
     @property
+    def home(self) -> Participant | None:
+        """team_match 主队便捷访问器；其他 kind 返回 None。"""
+
+        if self.kind != LiveEventKind.TEAM_MATCH:
+            return None
+        for participant in self.participants:
+            if participant.role == "home":
+                return participant
+        return None
+
+    @property
+    def away(self) -> Participant | None:
+        if self.kind != LiveEventKind.TEAM_MATCH:
+            return None
+        for participant in self.participants:
+            if participant.role == "away":
+                return participant
+        return None
+
+    @property
     def total_score(self) -> int:
-        return self.home.score + self.away.score
+        return sum(participant.score or 0 for participant in self.participants)
+
+    @property
+    def drivers(self) -> tuple[Participant, ...]:
+        """race / tournament_field 的参与者按 position 升序。"""
+
+        if self.kind == LiveEventKind.TEAM_MATCH:
+            return ()
+        ordered = sorted(
+            self.participants,
+            key=lambda p: (p.position is None, p.position or 0),
+        )
+        return tuple(ordered)
 
     def as_payload(self) -> dict[str, Any]:
         """返回不含外部原始 payload 的可审计内部快照。"""
@@ -246,19 +314,28 @@ class SportsLiveGame:
         return {
             "source": self.source,
             "source_event_id": self.source_event_id,
+            "kind": self.kind.value,
             "league": self.league,
-            "home": jsonable(self.home),
-            "away": jsonable(self.away),
+            "sport": self.sport,
+            "participants": [jsonable(p) for p in self.participants],
             "status": self.status.value,
             "period": self.period,
             "seconds_remaining": self.seconds_remaining,
-            "observed_at": None if self.observed_at is None else self.observed_at.isoformat(),
             "raw_status": self.raw_status,
+            "observed_at": None if self.observed_at is None else self.observed_at.isoformat(),
+            "event_start_time": (
+                None if self.event_start_time is None else self.event_start_time.isoformat()
+            ),
+            "event_name": self.event_name,
+            "external_ids": dict(self.external_ids),
             "baseball_state": None if self.baseball_state is None else jsonable(self.baseball_state),
             "tennis_state": None if self.tennis_state is None else jsonable(self.tennis_state),
             "soccer_state": None if self.soccer_state is None else jsonable(self.soccer_state),
             "esports_state": None if self.esports_state is None else jsonable(self.esports_state),
             "cricket_state": None if self.cricket_state is None else jsonable(self.cricket_state),
+            "race_state": None if self.race_state is None else jsonable(self.race_state),
+            "source_conflicts": [jsonable(c) for c in self.source_conflicts],
+            "contributing_sources": list(self.contributing_sources),
         }
 
 
@@ -269,27 +346,24 @@ class SportsLiveSourceStatus:
     source: str
     success: bool
     health: SportsLiveSourceHealth = SportsLiveSourceHealth.SUCCESS_WITH_LIVE_DATA
-    games_seen: int = 0
+    events_seen: int = 0
     observed_at: datetime | None = None
     last_error: str | None = None
     cooldown_until: datetime | None = None
     consecutive_failures: int = 0
 
     def as_dict(self) -> dict[str, Any]:
-        """返回可序列化的来源状态。"""
-
         return jsonable(self)
 
 
 @dataclass(frozen=True, slots=True)
 class SportsLiveSnapshot:
-    """一次外部比分源拉取后的归一化比赛集合。"""
+    """一次外部比分源拉取后的归一化事件集合。"""
 
     source: str
     observed_at: datetime
-    games: tuple[SportsLiveGame, ...]
+    events: tuple[LiveEvent, ...]
     source_statuses: tuple[SportsLiveSourceStatus, ...] = ()
-    race_events: tuple[SportsLiveRaceEvent, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,7 +378,7 @@ class SportsLiveSyncStatus:
     last_success_at: datetime | None = None
     last_error: str | None = None
     consecutive_failures: int = 0
-    last_games_seen: int = 0
+    last_events_seen: int = 0
     last_markets_seen: int = 0
     last_matches: int = 0
     last_records_written: int = 0

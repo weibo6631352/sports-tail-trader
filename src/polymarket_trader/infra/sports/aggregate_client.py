@@ -1,23 +1,35 @@
-"""多源体育直播状态聚合器。"""
+"""多源体育直播状态聚合器（external-id 优先 + 加权投票融合）。
+
+职责：
+- 并行拉取所有源（独立超时 + 指数退避冷却 + 冷却期缓存复用）；
+- 用 ExternalIdIndex 按外部 ID 做跨源合并，文本+开赛时间窗作 fallback；
+- 同 group 多源时按"加权 majority vote (status) + trusted-source 比分 + median 兜底"融合；
+- per-league 源亲和：``league_source_priority`` 注入，league-aware 加权；
+- 融合证据用 ``LiveEvent.source_conflicts`` 一等字段记录，``contributing_sources`` 暴露所有源。
+"""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+import re
+from collections import Counter
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-import re
+from statistics import median_low
 from typing import Any
 
 from polymarket_trader.domain.sports_live import (
-    SportsLiveGame,
+    ConflictRecord,
+    LiveEvent,
+    LiveEventKind,
     SportsLiveGameStatus,
-    SportsLiveRaceEvent,
     SportsLiveSnapshot,
     SportsLiveSourceHealth,
     SportsLiveSourceStatus,
 )
 from polymarket_trader.infra.sports.common import utc_now
+from polymarket_trader.infra.sports.external_id_index import ExternalIdIndex
 
 SportsLiveSnapshotProvider = Callable[[], Awaitable[SportsLiveSnapshot]]
 SportsLiveCloser = Callable[[], Awaitable[None]]
@@ -34,17 +46,29 @@ _STATUS_PRIORITY = {
     SportsLiveGameStatus.ENDED: 0,
 }
 
-_SOURCE_PRIORITY = {
+# 全局源优先级表（fallback）。league_source_priority 注入时按 league 覆盖。
+_DEFAULT_SOURCE_PRIORITY: Mapping[str, int] = {
     "nba": 50,
     "nhl": 50,
     "mlb": 50,
     "pandascore": 50,
     "espn": 40,
+    "tennis_live_data": 40,
+    "college_football_data": 40,
+    "ncaa_api": 35,
+    "api_football": 35,
     "sofascore": 30,
+    "fotmob": 25,
     "thesportsdb": 20,
 }
 
-_OFFICIAL_SOURCES = frozenset({"nba", "nhl", "mlb", "espn", "pandascore"})
+# 一律视为官方（高可信）的源；冲突时同等 priority 下仍偏向 official。
+_DEFAULT_OFFICIAL_SOURCES: frozenset[str] = frozenset(
+    {"nba", "nhl", "mlb", "espn", "pandascore", "college_football_data", "ncaa_api"}
+)
+
+# 加权融合中的时间衰减：observed_at 越久权重越低（半衰期 5 分钟）。
+_FRESHNESS_HALF_LIFE_S = 300.0
 
 
 @dataclass
@@ -77,6 +101,8 @@ class SportsLiveAggregateClient:
         cooldown_cap_s: float = 600.0,
         eviction_s: float = 1800.0,
         cooldown_failure_threshold: int = 3,
+        league_source_priority: Mapping[str, Sequence[str]] | None = None,
+        trusted_sources: Sequence[str] | None = None,
     ) -> None:
         self._providers = tuple((str(source).strip().lower(), provider) for source, provider in providers)
         self._closers = tuple(closers)
@@ -88,20 +114,27 @@ class SportsLiveAggregateClient:
         self._cooldown_failure_threshold = max(1, int(cooldown_failure_threshold))
         self._provider_cache: dict[str, SportsLiveSnapshot] = {}
         self._cooldowns: dict[str, _ProviderCooldown] = {}
+        self._league_priority: dict[str, tuple[str, ...]] = {
+            self._league_key(league): tuple(str(s).strip().lower() for s in sources)
+            for league, sources in (league_source_priority or {}).items()
+        }
+        self._trusted_sources: frozenset[str] = (
+            frozenset(str(s).strip().lower() for s in trusted_sources)
+            if trusted_sources
+            else _DEFAULT_OFFICIAL_SOURCES
+        )
 
     async def aclose(self) -> None:
-        """关闭聚合器持有的所有底层 client。"""
-
         if not self._closers:
             return
         await asyncio.gather(*(closer() for closer in self._closers), return_exceptions=True)
 
-    async def list_games(self) -> SportsLiveSnapshot:
-        """拉取所有来源，失败来源只进入 source_statuses，不阻断健康来源。
+    async def list_events(self) -> SportsLiveSnapshot:
+        """拉取所有来源，失败来源进入 source_statuses 但不阻断健康来源。
 
-        Provider 失败累计超过阈值进入冷却，冷却期内被跳过并在 source_statuses
-        上以 ``COOLDOWN`` 报出；冷却累计超过 ``eviction_s`` 则进入 ``EVICTED``。
-        Worker 应根据 EVICTED 状态发出 ``LIVE_STATE_SOURCE_EVICTED`` 生命周期。
+        失败累计超过阈值进入冷却（指数退避，最长 ``cooldown_cap_s``）；冷却期内
+        被跳过但缓存数据仍被复用，避免突然失去覆盖。冷却累计超过 ``eviction_s``
+        标记 EVICTED，由 worker 发出生命周期事件。
         """
 
         observed_at = utc_now(self._now_provider)
@@ -113,6 +146,7 @@ class SportsLiveAggregateClient:
                 cooldown_statuses.append(self._cooldown_status(source, cooldown, observed_at))
                 continue
             active.append((source, provider))
+
         tasks = [
             asyncio.create_task(
                 _provider_snapshot_with_timeout(provider, timeout_s=self._provider_timeout_s),
@@ -121,9 +155,10 @@ class SportsLiveAggregateClient:
             for source, provider in active
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else ()
+
         source_statuses: list[SportsLiveSourceStatus] = list(cooldown_statuses)
-        games: list[SportsLiveGame] = []
-        race_events: list[SportsLiveRaceEvent] = []
+        all_events: list[LiveEvent] = []
+
         for (source, _provider), result in zip(active, results, strict=True):
             if isinstance(result, Exception):
                 self._record_failure(source, error=str(result), observed_at=observed_at)
@@ -131,15 +166,14 @@ class SportsLiveAggregateClient:
                 cached = self._provider_cache.get(source)
                 if cached is not None:
                     source_statuses.append(_cached_source_status(source, cached, last_error=str(result)))
-                    games.extend(cached.games)
-                    race_events.extend(cached.race_events)
+                    all_events.extend(cached.events)
                 else:
                     source_statuses.append(
                         SportsLiveSourceStatus(
                             source=source,
                             success=False,
                             health=SportsLiveSourceHealth.FAILED,
-                            games_seen=0,
+                            events_seen=0,
                             observed_at=observed_at,
                             last_error=str(result),
                             cooldown_until=cooldown.cooldown_until if cooldown else None,
@@ -152,22 +186,332 @@ class SportsLiveAggregateClient:
             source_statuses.append(status)
             if status.success:
                 self._provider_cache[source] = result
-            games.extend(result.games)
-            race_events.extend(result.race_events)
-        # cooldown 期内复用 cached 数据：让上游 worker 仍能感知历史比赛，
-        # 但不再发起对应 provider 的网络请求。
+            all_events.extend(result.events)
+
+        # 冷却期内复用 cached：让上游 worker 仍能感知历史比赛，不发起网络请求。
         for status in cooldown_statuses:
             cached = self._provider_cache.get(status.source)
             if cached is not None and status.health == SportsLiveSourceHealth.COOLDOWN:
-                games.extend(cached.games)
-                race_events.extend(cached.race_events)
+                all_events.extend(cached.events)
+
+        fused = self._fuse(tuple(all_events))
         return SportsLiveSnapshot(
             source="sports_live_aggregate",
             observed_at=observed_at,
-            games=_dedupe_games(tuple(games)),
+            events=fused,
             source_statuses=tuple(source_statuses),
-            race_events=_dedupe_race_events(tuple(race_events)),
         )
+
+    def _fuse(self, events: tuple[LiveEvent, ...]) -> tuple[LiveEvent, ...]:
+        """Two-pass 合并：先按 ExternalIdIndex 分 group，单成员组再走文本+时间桶兜底。"""
+
+        if not events:
+            return ()
+
+        report = ExternalIdIndex.merge(events)
+        # 标记每个 event 当前所属的逻辑组：先按 id-group，单成员组再尝试 text 合并
+        group_of: list[int] = [0] * len(events)
+        for group_id, group in enumerate(report.groups):
+            for idx in group.indices:
+                group_of[idx] = group_id
+
+        # 把单成员组按 (kind, league, sport, team-pair-or-event-name, start-bucket) 文本合并
+        text_keys: dict[tuple[str, str, str, str, str | None], int] = {}
+        next_group = max((g for g in group_of), default=-1) + 1
+        merged_indices: dict[int, list[int]] = {}
+        for idx, event in enumerate(events):
+            current_group = group_of[idx]
+            members = next(
+                (g.indices for g in report.groups if idx in g.indices),
+                (idx,),
+            )
+            if len(members) > 1:
+                merged_indices.setdefault(current_group, []).append(idx)
+                continue
+            key = _text_key(event)
+            existing = text_keys.get(key)
+            if existing is None:
+                text_keys[key] = current_group
+                merged_indices.setdefault(current_group, []).append(idx)
+            else:
+                # 把当前 event 合入既有 text-group
+                group_of[idx] = existing
+                merged_indices.setdefault(existing, []).append(idx)
+
+        # 每个最终 group 内做融合
+        fused_events: list[LiveEvent] = []
+        for group_id, indices in merged_indices.items():
+            if not indices:
+                continue
+            members = tuple(events[i] for i in indices)
+            fused_events.append(self._fuse_group(members))
+        return tuple(fused_events)
+
+    def _fuse_group(self, members: tuple[LiveEvent, ...]) -> LiveEvent:
+        """同一逻辑场的多源融合。
+
+        - 单成员：直接返回，contributing_sources=[source]。
+        - 多成员：按 league-aware priority + freshness 加权；
+          - status: weighted majority vote；
+          - 比分（team_match）：trusted source 优先，否则取所有源 per-side 中位数；
+          - leader_driver（race）：trusted source 优先，否则 priority 高者；
+          - 其他字段：取主源（priority+freshness 最高者）的值；
+          - external_ids / contributing_sources / source_conflicts 全并入主源。
+        """
+
+        if len(members) == 1:
+            sole = members[0]
+            return replace(
+                sole,
+                contributing_sources=(sole.source,),
+                source_conflicts=sole.source_conflicts,
+            )
+
+        league = members[0].league
+        primary = max(members, key=lambda e: self._weight(e, league))
+
+        # status: weighted majority vote
+        status_value, status_conflicts = self._fuse_status(members, primary, league)
+
+        # score / leader fields
+        score_conflicts: list[ConflictRecord] = []
+        participants = primary.participants
+        race_state = primary.race_state
+        if primary.kind == LiveEventKind.TEAM_MATCH:
+            participants, score_conflicts = self._fuse_team_scores(members, primary, league)
+        elif primary.kind == LiveEventKind.RACE:
+            race_state, race_conflicts = self._fuse_race(members, primary, league)
+            score_conflicts = race_conflicts
+
+        # 合并 external_ids
+        merged_ids: dict[str, str] = dict(primary.external_ids)
+        for member in members:
+            for scheme, value in member.external_ids.items():
+                merged_ids.setdefault(scheme, value)
+
+        contributing = tuple(sorted({m.source for m in members}))
+        all_conflicts = (*primary.source_conflicts, *status_conflicts, *score_conflicts)
+
+        return replace(
+            primary,
+            status=status_value,
+            participants=participants,
+            race_state=race_state,
+            external_ids=merged_ids,
+            contributing_sources=contributing,
+            source_conflicts=all_conflicts,
+        )
+
+    def _fuse_status(
+        self,
+        members: tuple[LiveEvent, ...],
+        primary: LiveEvent,
+        league: str,
+    ) -> tuple[SportsLiveGameStatus, tuple[ConflictRecord, ...]]:
+        """加权 majority vote 决 status；trusted 源单独说 ENDED 仍取 ENDED（避免假活跃）。"""
+
+        # trusted 源若主张 ENDED 且其他源仍 LIVE，trusted 优先（防漏抓返场风险已由 audit 留痕）
+        trusted_ended = [
+            m for m in members if m.source in self._trusted_sources and m.status == SportsLiveGameStatus.ENDED
+        ]
+        if trusted_ended:
+            best_trusted = max(trusted_ended, key=lambda e: self._weight(e, league))
+            conflicts: list[ConflictRecord] = []
+            for member in members:
+                if member.source == best_trusted.source:
+                    continue
+                if member.status == SportsLiveGameStatus.ENDED:
+                    continue
+                conflicts.append(
+                    ConflictRecord(
+                        field="status",
+                        winner_source=best_trusted.source,
+                        winner_value=best_trusted.status.value,
+                        loser_source=member.source,
+                        loser_value=member.status.value,
+                        decided_by="trusted_source",
+                    )
+                )
+            return best_trusted.status, tuple(conflicts)
+
+        # 一般情形：weighted majority vote
+        tallies: Counter[SportsLiveGameStatus] = Counter()
+        weight_by_status: dict[SportsLiveGameStatus, float] = {}
+        sources_by_status: dict[SportsLiveGameStatus, list[LiveEvent]] = {}
+        for member in members:
+            w = self._weight(member, league)
+            tallies[member.status] += 1
+            weight_by_status[member.status] = weight_by_status.get(member.status, 0.0) + w
+            sources_by_status.setdefault(member.status, []).append(member)
+        # 按权重排序，权重并列再用 STATUS_PRIORITY 兜底
+        winner_status = max(
+            weight_by_status.keys(),
+            key=lambda s: (weight_by_status[s], _STATUS_PRIORITY.get(s, 0)),
+        )
+        decided_by = "majority" if tallies[winner_status] > 1 else "priority_tiebreak"
+        conflicts = []
+        winner_examples = sources_by_status[winner_status]
+        winner_example = max(winner_examples, key=lambda e: self._weight(e, league))
+        for member in members:
+            if member.status == winner_status:
+                continue
+            conflicts.append(
+                ConflictRecord(
+                    field="status",
+                    winner_source=winner_example.source,
+                    winner_value=winner_status.value,
+                    loser_source=member.source,
+                    loser_value=member.status.value,
+                    decided_by=decided_by,
+                )
+            )
+        return winner_status, tuple(conflicts)
+
+    def _fuse_team_scores(
+        self,
+        members: tuple[LiveEvent, ...],
+        primary: LiveEvent,
+        league: str,
+    ) -> tuple[tuple[Any, ...], list[ConflictRecord]]:
+        """team_match 比分融合：trusted source 优先；否则取 per-side 中位数。"""
+
+        if primary.home is None or primary.away is None:
+            return primary.participants, []
+
+        home_scores: list[tuple[str, int, float]] = []
+        away_scores: list[tuple[str, int, float]] = []
+        for member in members:
+            if member.kind != LiveEventKind.TEAM_MATCH:
+                continue
+            if member.home is not None and member.home.score is not None:
+                home_scores.append((member.source, member.home.score, self._weight(member, league)))
+            if member.away is not None and member.away.score is not None:
+                away_scores.append((member.source, member.away.score, self._weight(member, league)))
+
+        home_score, home_decided = self._pick_score(home_scores)
+        away_score, away_decided = self._pick_score(away_scores)
+
+        new_participants = []
+        for participant in primary.participants:
+            if participant.role == "home" and home_score is not None:
+                new_participants.append(replace(participant, score=home_score))
+            elif participant.role == "away" and away_score is not None:
+                new_participants.append(replace(participant, score=away_score))
+            else:
+                new_participants.append(participant)
+
+        conflicts: list[ConflictRecord] = []
+        winner_home = next((s for s, v, _w in home_scores if v == home_score), primary.source)
+        winner_away = next((s for s, v, _w in away_scores if v == away_score), primary.source)
+        for source, value, _w in home_scores:
+            if value != home_score:
+                conflicts.append(
+                    ConflictRecord(
+                        field="home_score",
+                        winner_source=winner_home,
+                        winner_value=home_score,
+                        loser_source=source,
+                        loser_value=value,
+                        decided_by=home_decided,
+                    )
+                )
+        for source, value, _w in away_scores:
+            if value != away_score:
+                conflicts.append(
+                    ConflictRecord(
+                        field="away_score",
+                        winner_source=winner_away,
+                        winner_value=away_score,
+                        loser_source=source,
+                        loser_value=value,
+                        decided_by=away_decided,
+                    )
+                )
+        return tuple(new_participants), conflicts
+
+    def _pick_score(self, scores: list[tuple[str, int, float]]) -> tuple[int | None, str]:
+        """trusted 优先；否则中位数（中位数防单源跳号比 mean 稳）。"""
+
+        if not scores:
+            return None, "none"
+        trusted_only = [(s, v) for s, v, _w in scores if s in self._trusted_sources]
+        if trusted_only:
+            # 取 trusted 中权重最高那条 score
+            best = max(scores, key=lambda x: (x[0] in self._trusted_sources, x[2]))
+            return best[1], "trusted_source"
+        return median_low([v for _s, v, _w in scores]), "median"
+
+    def _fuse_race(
+        self,
+        members: tuple[LiveEvent, ...],
+        primary: LiveEvent,
+        league: str,
+    ) -> tuple[Any, list[ConflictRecord]]:
+        """race 状态融合：leader 取 trusted 源；否则取主源。"""
+
+        race_members = [m for m in members if m.race_state is not None]
+        if not race_members:
+            return primary.race_state, []
+        trusted = [m for m in race_members if m.source in self._trusted_sources]
+        chosen = (
+            max(trusted, key=lambda e: self._weight(e, league))
+            if trusted
+            else max(race_members, key=lambda e: self._weight(e, league))
+        )
+        decided_by = "trusted_source" if trusted else "priority_tiebreak"
+        conflicts: list[ConflictRecord] = []
+        for member in race_members:
+            if member.source == chosen.source:
+                continue
+            if member.race_state is None:
+                continue
+            if (member.race_state.leader_driver or "") != (chosen.race_state.leader_driver or ""):
+                conflicts.append(
+                    ConflictRecord(
+                        field="leader_driver",
+                        winner_source=chosen.source,
+                        winner_value=chosen.race_state.leader_driver,
+                        loser_source=member.source,
+                        loser_value=member.race_state.leader_driver,
+                        decided_by=decided_by,
+                    )
+                )
+        return chosen.race_state, conflicts
+
+    def _weight(self, event: LiveEvent, league: str) -> float:
+        """加权融合用：源优先级 × 时间衰减（半衰期 ``_FRESHNESS_HALF_LIFE_S`` 秒）。"""
+
+        priority = float(self._source_priority(event.source, league))
+        observed = event.observed_at
+        if observed is None:
+            return priority
+        now = utc_now(self._now_provider)
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        age_s = max(0.0, (now - observed).total_seconds())
+        decay = 0.5 ** (age_s / _FRESHNESS_HALF_LIFE_S)
+        return priority * decay
+
+    def _source_priority(self, source: str, league: str) -> int:
+        """league-aware 源优先级：先查 league 表，缺失则回退全局表。
+
+        league 表里的位置（前面更高）映射成 priority：第 1 位 100，第 2 位 90，...
+        """
+
+        normalized = str(source or "").split(":", maxsplit=1)[0].strip().lower()
+        league_key = self._league_key(league)
+        league_order = self._league_priority.get(league_key)
+        if league_order is not None:
+            try:
+                rank = league_order.index(normalized)
+                return max(10, 100 - rank * 10)
+            except ValueError:
+                pass
+        return _DEFAULT_SOURCE_PRIORITY.get(normalized, 0)
+
+    @staticmethod
+    def _league_key(league: str) -> str:
+        return str(league or "").strip().upper()
 
     def _record_failure(self, source: str, *, error: str, observed_at: datetime) -> None:
         cooldown = self._cooldowns.setdefault(source, _ProviderCooldown())
@@ -182,8 +526,6 @@ class SportsLiveAggregateClient:
         backoff_index = cooldown.consecutive_failures - self._cooldown_failure_threshold
         delay = min(self._cooldown_base_s * (2 ** backoff_index), self._cooldown_cap_s)
         cooldown.cooldown_until = observed_at + timedelta(seconds=delay)
-        # 累计冷却时长超过 eviction 阈值则标记驱逐；状态会在下一轮 cooldown_status
-        # 中报出 EVICTED，由 worker 发出生命周期事件。
         elapsed = (observed_at - (cooldown.first_failure_at or observed_at)).total_seconds()
         if elapsed >= self._eviction_s:
             cooldown.evicted = True
@@ -209,7 +551,7 @@ class SportsLiveAggregateClient:
             source=source,
             success=False,
             health=health,
-            games_seen=0,
+            events_seen=0,
             observed_at=observed_at,
             last_error=cooldown.last_error,
             cooldown_until=cooldown.cooldown_until,
@@ -236,205 +578,76 @@ def _cached_source_status(
     *,
     last_error: str,
 ) -> SportsLiveSourceStatus:
-    """外层 provider 超时时复用上次成功快照，避免清空全体育直播覆盖。"""
-
     return SportsLiveSourceStatus(
         source=source,
         success=True,
         health=SportsLiveSourceHealth.CACHED,
-        games_seen=len(snapshot.games),
+        events_seen=len(snapshot.events),
         observed_at=snapshot.observed_at,
         last_error=last_error,
     )
 
 
-def _dedupe_race_events(events: tuple[SportsLiveRaceEvent, ...]) -> tuple[SportsLiveRaceEvent, ...]:
-    """赛车事件按 (league, source_event_id) 去重；不同 source 的同一场比赛
-    取观测时间最新的一份。赛车没有 team-pair 概念，无需 status 优先级合并。
-    """
-
-    selected: dict[tuple[str, str], SportsLiveRaceEvent] = {}
-    for event in events:
-        key = (event.league.strip().upper(), event.source_event_id)
-        existing = selected.get(key)
-        if existing is None:
-            selected[key] = event
-            continue
-        if event.observed_at is None or existing.observed_at is None:
-            continue
-        if event.observed_at > existing.observed_at:
-            selected[key] = event
-    return tuple(selected.values())
-
-
-def _dedupe_games(games: tuple[SportsLiveGame, ...]) -> tuple[SportsLiveGame, ...]:
-    selected: list[SportsLiveGame] = []
-    for game in games:
-        duplicate_index = _duplicate_index(selected, game)
-        if duplicate_index is None:
-            selected.append(game)
-            continue
-        current = selected[duplicate_index]
-        replacement, conflict = _select_game(current, game)
-        if conflict is None:
-            selected[duplicate_index] = replacement
-            continue
-        selected[duplicate_index] = _with_source_conflict(replacement, conflict)
-    return tuple(selected)
-
-
 def _source_status_from_snapshot(source: str, snapshot: SportsLiveSnapshot) -> SportsLiveSourceStatus:
     for status in snapshot.source_statuses:
         if status.source == source:
-            return replace(status, games_seen=len(snapshot.games), observed_at=status.observed_at or snapshot.observed_at)
+            return replace(
+                status,
+                events_seen=len(snapshot.events),
+                observed_at=status.observed_at or snapshot.observed_at,
+            )
     health = (
         SportsLiveSourceHealth.SUCCESS_WITH_LIVE_DATA
-        if snapshot.games
+        if snapshot.events
         else SportsLiveSourceHealth.SUCCESS_EMPTY
     )
     return SportsLiveSourceStatus(
         source=source,
         success=True,
         health=health,
-        games_seen=len(snapshot.games),
+        events_seen=len(snapshot.events),
         observed_at=snapshot.observed_at,
     )
 
 
-def _select_game(left: SportsLiveGame, right: SportsLiveGame) -> tuple[SportsLiveGame, SportsLiveGame | None]:
-    if _is_official(left.source) and not _is_official(right.source) and left.status != right.status:
-        return left, right
-    if _is_official(right.source) and not _is_official(left.source) and left.status != right.status:
-        return right, left
-    if _selection_score(right) > _selection_score(left):
-        return right, left if left.status != right.status else None
-    return left, right if left.status != right.status else None
+def _text_key(event: LiveEvent) -> tuple[str, str, str, str, str | None]:
+    """单成员组的 text-merge 兜底键：(kind, league, sport, identity, start_bucket)。
+
+    team_match：identity = 排序的 home/away 队名集合；
+    race / tournament_field：identity = 规范化 event_name；
+    start_bucket：UTC 小时级（None 表示未知，None 不强匹配）。
+    """
+
+    kind = event.kind.value
+    league = (event.league or "").strip().upper()
+    sport = (event.sport or "").strip().lower()
+    if event.kind == LiveEventKind.TEAM_MATCH and event.home and event.away:
+        identity = "|".join(sorted([_team_key(event.home), _team_key(event.away)]))
+    else:
+        identity = _normalize(event.event_name)
+    bucket = _start_bucket(event)
+    return (kind, league, sport, identity, bucket)
 
 
-def _with_source_conflict(selected: SportsLiveGame, conflict: SportsLiveGame) -> SportsLiveGame:
-    raw_conflicts = selected.source_payload.get("source_conflicts")
-    existing = raw_conflicts if isinstance(raw_conflicts, tuple) else ()
-    return replace(
-        selected,
-        source_payload={
-            **selected.source_payload,
-            "source_conflicts": (
-                *existing,
-                {
-                    "source": conflict.source,
-                    "status": conflict.status.value,
-                    "raw_status": conflict.raw_status,
-                },
-            ),
-        },
+def _team_key(participant: Any) -> str:
+    name = (
+        participant.display_name
+        or participant.name
+        or participant.abbreviation
+        or ""
     )
+    return _normalize(name)
 
 
-def _duplicate_index(selected: Sequence[SportsLiveGame], game: SportsLiveGame) -> int | None:
-    for index, current in enumerate(selected):
-        if _same_game(current, game):
-            return index
+def _normalize(value: str | None) -> str:
+    text = re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+    return text or "unknown"
+
+
+def _start_bucket(event: LiveEvent) -> str | None:
+    if event.event_start_time is not None:
+        ts = event.event_start_time
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts.astimezone(timezone.utc).strftime("%Y-%m-%dT%H")
     return None
-
-
-def _same_game(left: SportsLiveGame, right: SportsLiveGame) -> bool:
-    if left.league.strip().upper() != right.league.strip().upper():
-        return False
-    left_bucket = _event_start_bucket(left)
-    right_bucket = _event_start_bucket(right)
-    if left_bucket is not None and right_bucket is not None and left_bucket != right_bucket:
-        return False
-    return _teams_match(left.home, right.home) and _teams_match(left.away, right.away)
-
-
-def _selection_score(game: SportsLiveGame) -> tuple[int, int, float]:
-    observed_at = game.observed_at or datetime.fromtimestamp(0, tz=timezone.utc)
-    if observed_at.tzinfo is None:
-        observed_at = observed_at.replace(tzinfo=timezone.utc)
-    return (_STATUS_PRIORITY.get(game.status, 0), _source_priority(game.source), observed_at.timestamp())
-
-
-def _game_key(game: SportsLiveGame) -> tuple[str, str, str]:
-    return (
-        game.league.strip().upper(),
-        _team_key(game.home.display_name or game.home.name or game.home.abbreviation),
-        _team_key(game.away.display_name or game.away.name or game.away.abbreviation),
-    )
-
-
-def _team_key(value: str | None) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
-    return normalized or "unknown"
-
-
-def _source_priority(source: str) -> int:
-    source_code = str(source or "").split(":", maxsplit=1)[0].strip().lower()
-    return _SOURCE_PRIORITY.get(source_code, 0)
-
-
-def _is_official(source: str) -> bool:
-    return str(source or "").split(":", maxsplit=1)[0].strip().lower() in _OFFICIAL_SOURCES
-
-
-def _teams_match(left: Any, right: Any) -> bool:
-    left_aliases = _team_alias_keys(left)
-    right_aliases = _team_alias_keys(right)
-    if left_aliases.intersection(right_aliases):
-        return True
-    for left_alias in left_aliases:
-        for right_alias in right_aliases:
-            shorter, longer = sorted((left_alias, right_alias), key=len)
-            if len(shorter) >= 4 and longer.endswith(shorter):
-                return True
-    return False
-
-
-def _team_alias_keys(team: Any) -> set[str]:
-    aliases = team.match_aliases() if hasattr(team, "match_aliases") else ()
-    result = {_team_key(alias) for alias in aliases}
-    return {alias for alias in result if alias != "unknown"}
-
-
-def _event_start_bucket(game: SportsLiveGame) -> str | None:
-    payload = game.source_payload
-    timestamp = _timestamp_value(payload.get("start_timestamp"))
-    if timestamp is not None:
-        return _bucket_from_datetime(datetime.fromtimestamp(timestamp, tz=timezone.utc))
-    for key in ("game_time_utc", "start_time_utc", "game_date", "date", "official_date"):
-        value = payload.get(key)
-        bucket = _bucket_from_text(value)
-        if bucket is not None:
-            return bucket
-    return None
-
-
-def _timestamp_value(value: object) -> float | None:
-    if value is None:
-        return None
-    try:
-        timestamp = float(str(value))
-    except (TypeError, ValueError):
-        return None
-    if timestamp > 10_000_000_000:
-        timestamp = timestamp / 1000
-    return timestamp
-
-
-def _bucket_from_text(value: object) -> str | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        return text
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return _bucket_from_datetime(parsed)
-
-
-def _bucket_from_datetime(value: datetime) -> str:
-    utc_value = value.astimezone(timezone.utc)
-    return utc_value.strftime("%Y-%m-%dT%H")
