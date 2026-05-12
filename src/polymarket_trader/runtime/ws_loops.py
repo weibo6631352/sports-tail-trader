@@ -15,11 +15,12 @@ logger = logging.getLogger(__name__)
 _SUBSCRIPTION_REFRESH_SECONDS = 5.0
 _MARKET_WS_LIVE_STATUSES = {"live", "ended"}
 _MARKET_WS_TAIL_WINDOW_SECONDS = 3600.0
-# Polymarket 自身 active+open 的 sports market 也直接放行，不再 100% 依赖外部
+# Polymarket 自身 ELIGIBLE 的 sports market 直接放行，不再 100% 依赖外部
 # sports_live_state（SofaScore/ESPN 不覆盖 ATP Challenger/ITF/WTA125 等冷门赛事，
 # 也常被 Cloudflare 屏蔽）。窗口比 _MARKET_WS_TAIL_WINDOW_SECONDS 宽——这里只是
-# 决定"是否值得订阅 WS"，进入入场判定后还会被策略层过滤。
-_MARKET_WS_POLY_ACTIVE_WINDOW_SECONDS = 21600.0  # 6h
+# 决定"是否值得订阅 WS"，进入入场判定后还会被策略层进一步过滤（tail_window 等）。
+# 48h 覆盖周末和今晚比赛，足够 200 订阅上限的优先级排序生效。
+_MARKET_WS_POLY_ACTIVE_WINDOW_SECONDS = 172800.0  # 48h
 # 订阅数上限：避免 polymarket WS 限流 / 队列爆炸。Sports tail 模式实际同时
 # 关注的 live market 通常 <50；200 留充裕余量但有硬护栏。超出时按 end_date 升序
 # 截断（最快结束的优先订阅）。
@@ -192,9 +193,12 @@ def _market_requires_market_ws(
 
 
 def _market_active_in_polymarket(market: Any, *, now: datetime) -> bool:
-    if not getattr(market, "active", True):
-        return False
-    if getattr(market, "closed", False):
+    """domain ``Market`` 没有 active/closed 字段，权威判 ``trading_status``：
+    只有 ELIGIBLE 才考虑订阅；CANDIDATE / PAUSED / CLOSED / RESOLVED / REJECTED 跳过。"""
+
+    from polymarket_trader.domain.market import TradingStatus  # 避免循环导入
+
+    if market.trading_status != TradingStatus.ELIGIBLE:
         return False
     end = getattr(market, "end_date", None)
     if end is None:
@@ -203,7 +207,7 @@ def _market_active_in_polymarket(market: Any, *, now: datetime) -> bool:
     if end.tzinfo is None:
         end = end.replace(tzinfo=timezone.utc)
     seconds_until_end = (end.astimezone(timezone.utc) - now.astimezone(timezone.utc)).total_seconds()
-    # 已过 end_date 但还没 closed 的市场仍允许订阅（结算可能滞后），不限下边界。
+    # 已过 end_date 但还没 RESOLVED 的市场仍允许订阅（结算可能滞后），不限下边界。
     return seconds_until_end <= _MARKET_WS_POLY_ACTIVE_WINDOW_SECONDS
 
 
