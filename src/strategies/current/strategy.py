@@ -12,7 +12,7 @@ from decimal import Decimal
 import re
 from typing import Any, Mapping
 
-from polymarket_trader.extension_api.lifecycle import LifecycleEvent as _LifecycleEvent
+from polymarket_trader.extension_api.lifecycle import LifecycleEnvelope as _LifecycleEnvelope, LifecycleEvent as _LifecycleEvent
 from polymarket_trader.extension_api import (
     AccountSnapshotView,
     BusinessExtension,
@@ -32,9 +32,9 @@ from polymarket_trader.extension_api import (
 
 from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.sports_live import LiveEvent, TennisGameState
+from polymarket_trader.domain.sports_live import BaseballGameState, LiveEvent, TennisGameState
 
-from strategies.current.config import CurrentStrategyConfig, load_current_strategy_config
+from strategies.current.config import CurrentStrategyConfig, OUTRIGHT_FALLBACK_ENTRY_PRICE, load_current_strategy_config
 from strategies.current.identity import STRATEGY_ID
 from strategies.current.discovery import (
     build_configured_discovery_queries,
@@ -152,6 +152,10 @@ class CurrentStrategy:
         """本策略消费体育直播；自身同时实现 ``LiveStateHooks``。"""
 
         return self
+
+    @property
+    def league_source_affinity(self) -> Mapping[str, tuple[str, ...]] | None:
+        return self._config.league_source_affinity or None
 
     def validate_config(self, settings: Any) -> tuple[Any, ...]:
         """在框架启动期校验策略侧配置是否足以正常运行。
@@ -585,7 +589,7 @@ class CurrentStrategy:
         return ExtensionDecision.buy(
             reason=evaluation.reason,
             token_id=evaluation.candidate.token_id if evaluation.candidate else None,
-            price=evaluation.entry_price_cap or Decimal("0.50"),
+            price=evaluation.entry_price_cap or OUTRIGHT_FALLBACK_ENTRY_PRICE,
             amount_usdc=proposed_amount,
             market_slug=market.market_slug,
             decision_kind=DecisionKind.ENTRY,
@@ -607,12 +611,11 @@ class CurrentStrategy:
         with active_ports_scope(self._ports):
             return _enrich_decision(decide_exit(self._config, context), default_kind=DecisionKind.EXIT)
 
-    async def _on_live_state_no_feasible_source(self, envelope: Any) -> None:
+    async def _on_live_state_no_feasible_source(self, envelope: _LifecycleEnvelope) -> None:
         """Lifecycle 回调：worker 报出"全源不可用"后，缓存为 True；后续可在重新可用
         时由 LIVE_STATE_UPDATED 任意成功事件清回 False。"""
 
-        payload = getattr(envelope, "payload", None) or {}
-        statuses = payload.get("source_statuses") or ()
+        statuses = envelope.payload.get("source_statuses") or ()
         no_feasible = True
         for status in statuses:
             health = status.get("health") if isinstance(status, dict) else None
@@ -977,12 +980,12 @@ def _market_has_live_tail_state(
     return False
 
 
-def _baseball_tail_state_reached(state: Any) -> bool:
+def _baseball_tail_state_reached(state: BaseballGameState) -> bool:
     """用结构化棒球局面判断是否值得触发快速入场重放。"""
 
-    current_inning = _int_value(getattr(state, "current_inning", None))
-    outs = _int_value(getattr(state, "outs", None))
-    occupied_bases = tuple(getattr(state, "occupied_bases", ()) or ())
+    current_inning = _int_value(state.current_inning)
+    outs = _int_value(state.outs)
+    occupied_bases = tuple(state.occupied_bases or ())
     return current_inning is not None and current_inning >= 9 and outs is not None and outs >= 2 and not occupied_bases
 
 

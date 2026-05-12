@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Iterable, Sequence, cast
+from typing import Any, Iterable, Sequence
 
 from sqlalchemy import select
 
@@ -47,7 +47,14 @@ def _market_matches_snapshot_filters(
     return True
 
 
-def _market_snapshot_sort_value(market: Market, sort_by: str) -> object | None:
+_MARKET_FEE_SORT_KEYS: frozenset[str] = frozenset(
+    {"market_slug", "fee_rate_bps", "fee_rate_updated_at", "maker_base_fee_bps", "taker_base_fee_bps"}
+)
+
+
+def _market_fee_sort_value(market: Market, sort_by: str) -> Any:
+    # sort_by 必须在 _MARKET_FEE_SORT_KEYS 内，由 sort_markets 调用前校验保证。
+    assert sort_by in _MARKET_FEE_SORT_KEYS, f"sort_by {sort_by!r} not in _MARKET_FEE_SORT_KEYS"
     return {
         "market_slug": market.market_slug,
         "fee_rate_bps": market.fee_rate_bps,
@@ -57,7 +64,7 @@ def _market_snapshot_sort_value(market: Market, sort_by: str) -> object | None:
     }[sort_by]
 
 
-def _sort_market_snapshots(
+def sort_markets(
     markets: Sequence[Market],
     *,
     sort_by: str | None = None,
@@ -65,22 +72,15 @@ def _sort_market_snapshots(
 ) -> tuple[Market, ...]:
     if sort_by is None:
         return tuple(markets)
-    supported = {
-        "market_slug",
-        "fee_rate_bps",
-        "fee_rate_updated_at",
-        "maker_base_fee_bps",
-        "taker_base_fee_bps",
-    }
-    if sort_by not in supported:
+    if sort_by not in _MARKET_FEE_SORT_KEYS:
         return tuple(markets)
     if sort_by == "market_slug":
         return tuple(sorted(markets, key=lambda market: market.market_slug, reverse=sort_direction == "desc"))
-    present = [market for market in markets if _market_snapshot_sort_value(market, sort_by) is not None]
-    missing = [market for market in markets if _market_snapshot_sort_value(market, sort_by) is None]
+    present = [market for market in markets if _market_fee_sort_value(market, sort_by) is not None]
+    missing = [market for market in markets if _market_fee_sort_value(market, sort_by) is None]
     present.sort(key=lambda market: market.market_slug)
     present.sort(
-        key=lambda market: cast(Any, _market_snapshot_sort_value(market, sort_by)),
+        key=lambda market: _market_fee_sort_value(market, sort_by),
         reverse=sort_direction == "desc",
     )
     return tuple(present + missing)
@@ -234,7 +234,7 @@ class MarketRepository(BaseRepository):
                     taker_base_fee_bps_max=taker_base_fee_bps_max,
                 )
             )
-            sorted_items = _sort_market_snapshots(
+            sorted_items = sort_markets(
                 filtered,
                 sort_by=sort_by,
                 sort_direction=sort_direction,
@@ -277,4 +277,4 @@ class MarketRepository(BaseRepository):
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
 
-__all__ = ["MarketRepository"]
+__all__ = ["MarketRepository", "sort_markets"]

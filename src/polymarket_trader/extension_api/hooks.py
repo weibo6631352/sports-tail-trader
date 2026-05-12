@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
 from polymarket_trader.domain.market import Market
@@ -59,6 +60,11 @@ class LiveStateHooks(Protocol):
     表示策略不参与直播驱动的市场发现 / 跟踪，framework 会跳过 ``SportsLiveStateWorker``
     的装配，不强制非体育策略实现这两个 hook。
     """
+
+    @property
+    def league_source_affinity(self) -> Mapping[str, tuple[str, ...]] | None:
+        """每个 league 的首选直播源顺序；None 表示走 aggregate 内置全局默认表。"""
+        ...
 
     def discovery_queries_for_live_events(
         self, events: tuple[LiveEvent, ...]

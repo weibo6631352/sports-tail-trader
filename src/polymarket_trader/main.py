@@ -106,6 +106,14 @@ from polymarket_trader.workers.user_ws import UserWsWorker
 
 logger = logging.getLogger(__name__)
 
+# 聚合器超时 = 单次 provider 超时 × 倍率，floor 防止 timeout_s 配置极小时完全没预算。
+_PROVIDER_TIMEOUT_MULTIPLIER = 3
+_PROVIDER_TIMEOUT_FLOOR_S = 12.0
+# 启动快照加载上限，限制重启时的内存占用；超出部分等 WS 增量补齐。
+_STARTUP_SNAPSHOT_ITEM_LIMIT = 500
+# reconcile 批次上限，防止 maintenance 队列积压时单批过大阻塞主循环。
+_RECONCILE_BATCH_SIZE_LIMIT = 256
+
 
 @dataclass(slots=True)
 class RuntimeComponents:
@@ -304,7 +312,7 @@ def _build_sports_live_state_client(
     # 聚合器超时是"单个 provider 完整快照"的预算；像 ESPN/SofaScore 这类 provider
     # 内部会按多个 sport/league 拉取，预算需要高于单次 HTTP timeout，避免刚拿到部分
     # 实盘数据时被外层取消。各 provider 已并行隔离，放宽这里不会阻塞交易主链路。
-    provider_timeout_s = max(settings.sports_live_state_timeout_s * 3, 12.0)
+    provider_timeout_s = max(settings.sports_live_state_timeout_s * _PROVIDER_TIMEOUT_MULTIPLIER, _PROVIDER_TIMEOUT_FLOOR_S)
     return SportsLiveAggregateClient(
         providers=tuple(providers),
         closers=tuple(closers),
@@ -381,14 +389,9 @@ def _build_season_odds_worker(
             if r.strip()
         ),
     )
-    hooks = getattr(extension, "hooks", extension)
-    select_market = getattr(hooks, "select_market", None)
-
     def _is_outright(market: Any) -> bool:
-        if select_market is None:
-            return False
         try:
-            decision = select_market(market)
+            decision = extension.hooks.select_market(market)
         except Exception:
             return False
         return bool(decision.selected) and decision.metadata.get("market_family") == "outright"
@@ -651,10 +654,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 extra={"extension": getattr(extension.spec, "name", "unknown")},
             )
         else:
-            # 策略包提供 league-aware 源亲和；framework Settings 不持有策略字段
-            # （CLAUDE.md §10）。当前扩展无该字段时退回 None（走 aggregate 内置全局表）。
-            strategy_config = getattr(extension, "config", None) or getattr(extension, "_config", None)
-            league_source_priority = getattr(strategy_config, "league_source_affinity", None)
+            league_source_priority = live_state_hooks.league_source_affinity
             sports_live_state_client = _build_sports_live_state_client(
                 settings,
                 league_source_priority=league_source_priority,
@@ -973,10 +973,10 @@ async def _load_reference_state(runtime: RuntimeComponents) -> dict[str, int]:
     try:
         async with runtime.db_session_factory() as session:
             account_snapshot = await AccountSnapshotRepository(session).get_current_snapshot()
-            markets = await MarketRepository(session).list_markets_snapshot(limit=500, offset=0)
-            positions = await PositionRepository(session).list_positions_snapshot(limit=500, offset=0)
-            open_orders = await OrderRepository(session).list_open_orders_snapshot(limit=500, offset=0)
-            fills = await FillRepository(session).list_fills_snapshot(limit=500, offset=0)
+            markets = await MarketRepository(session).list_markets_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
+            positions = await PositionRepository(session).list_positions_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
+            open_orders = await OrderRepository(session).list_open_orders_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
+            fills = await FillRepository(session).list_fills_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
         if account_snapshot is not None:
             # peak 必须先恢复——否则 update_balances 触发的 publish 会用 in-memory 0
             # 当 baseline，把"重启前历史 peak 1500，当前 600"误算成 peak=600，drawdown
@@ -1234,7 +1234,7 @@ def _events_request_market_authority_refresh(events: tuple[DomainEvent, ...]) ->
 
 
 async def _run_reconcile(runtime: RuntimeComponents) -> None:
-    max_batch_size = max(1, min(runtime.settings.maintenance_event_queue_max_size, 256))
+    max_batch_size = max(1, min(runtime.settings.maintenance_event_queue_max_size, _RECONCILE_BATCH_SIZE_LIMIT))
     while True:
         first_trigger = await runtime.event_bus.next_maintenance_event()
         pending_events: list[DomainEvent] = [first_trigger]

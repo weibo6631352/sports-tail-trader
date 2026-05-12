@@ -2,7 +2,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import is_dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any
 
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.status import (
@@ -31,7 +31,7 @@ def _as_mapping(value: Any) -> Mapping[str, Any]:
     if is_dataclass(value):
         from dataclasses import asdict
 
-        return asdict(cast(Any, value))
+        return asdict(value)
     if isinstance(value, Mapping):
         return value
     return {"value": value}

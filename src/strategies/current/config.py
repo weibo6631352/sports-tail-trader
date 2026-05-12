@@ -56,6 +56,11 @@ def _default_league_source_affinity() -> Mapping[str, tuple[str, ...]]:
     }
 
 
+# outright 评估路径：当 evaluator 未能计算出 entry_price_cap 时使用的兜底价。
+# fair × (1-edge) 反向定价失效（无成交量/无隐含概率）时才会触发，等价于"以市价中点入场"。
+OUTRIGHT_FALLBACK_ENTRY_PRICE = Decimal("0.50")
+
+
 @dataclass(frozen=True, slots=True)
 class CurrentStrategyConfig:
     """当前策略的静态配置。

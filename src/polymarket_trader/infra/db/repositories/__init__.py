@@ -1,7 +1,6 @@
 """Repository aggregate.
 
-One module per aggregate root; ``_legacy.py`` keeps remaining repositories
-during the split. Re-exports keep ``from polymarket_trader.infra.db
+One module per aggregate root. Re-exports keep ``from polymarket_trader.infra.db
 import ...`` and other call sites stable.
 """
 

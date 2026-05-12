@@ -5,6 +5,11 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from polymarket_trader.domain.market import Market
+from polymarket_trader.domain.time_filters import TimeRange
+from polymarket_trader.infra.db import RepositoryPage
+from polymarket_trader.infra.db.repositories.market import sort_markets
+from polymarket_trader.infra.polymarket import PolymarketClientError
 from polymarket_trader.app.admin_serialization import page_payload
 from polymarket_trader.app.admin_service_helpers import (
     MarketFeeSortField,
@@ -12,12 +17,7 @@ from polymarket_trader.app.admin_service_helpers import (
     _RepositoryGroup,
     _market_matches_fee_filters,
     _orderbook_has_no_quotes,
-    _sort_markets,
 )
-from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.time_filters import TimeRange
-from polymarket_trader.infra.db import RepositoryPage
-from polymarket_trader.infra.polymarket import PolymarketClientError
 
 
 class AdminMarketQueryMixin:
@@ -42,7 +42,7 @@ class AdminMarketQueryMixin:
         registry = self._registry_snapshot()
         if registry.markets or not self._has_db_session_factory():
             account = self._account_snapshot()
-            markets = _sort_markets(
+            markets = sort_markets(
                 tuple(
                     market
                     for market in registry.markets

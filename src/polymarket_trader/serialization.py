@@ -4,7 +4,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
 
 
 def utc_now() -> datetime:
@@ -31,7 +31,7 @@ def jsonable(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
     if is_dataclass(value):
-        return jsonable(asdict(cast(Any, value)))
+        return jsonable(asdict(value))
     if isinstance(value, Mapping):
         return {str(key): jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):

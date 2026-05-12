@@ -1,9 +1,7 @@
 """SQLAlchemy ORM model aggregate.
 
 Each per-table module owns one model class; this package re-exports them
-so callers (and ``Base.metadata.create_all``) see the full registry. The
-``_legacy`` shim keeps current model definitions until each submodule is
-extracted.
+so callers (and ``Base.metadata.create_all``) see the full registry.
 """
 
 from polymarket_trader.infra.db.base import (

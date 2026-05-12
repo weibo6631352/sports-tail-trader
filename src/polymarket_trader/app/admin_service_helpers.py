@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
@@ -103,32 +103,6 @@ def _market_matches_fee_filters(
     return True
 
 
-def _market_sort_value(market: Market, sort_by: MarketFeeSortField) -> object | None:
-    return {
-        "market_slug": market.market_slug,
-        "fee_rate_bps": market.fee_rate_bps,
-        "fee_rate_updated_at": market.fee_rate_updated_at,
-        "maker_base_fee_bps": market.maker_base_fee_bps,
-        "taker_base_fee_bps": market.taker_base_fee_bps,
-    }[sort_by]
-
-
-def _sort_markets(
-    markets: Sequence[Market],
-    *,
-    sort_by: MarketFeeSortField | None = None,
-    sort_direction: SortDirection = "desc",
-) -> tuple[Market, ...]:
-    if sort_by is None:
-        return tuple(markets)
-    present = [market for market in markets if _market_sort_value(market, sort_by) is not None]
-    missing = [market for market in markets if _market_sort_value(market, sort_by) is None]
-    present.sort(
-        key=lambda market: cast(Any, _market_sort_value(market, sort_by)),
-        reverse=sort_direction == "desc",
-    )
-    return tuple(present + missing)
-
 
 def _candidate_matches_filters(
     candidate: Mapping[str, Any],
@@ -215,10 +189,7 @@ def _runtime_extension_hooks(runtime: Any) -> Any | None:
     if hooks is not None:
         return hooks
     market_service = getattr(runtime, "market_service", None)
-    hooks = getattr(market_service, "extension_hooks", None)
-    if hooks is not None:
-        return hooks
-    return getattr(market_service, "_extension_hooks", None)
+    return getattr(market_service, "extension_hooks", None)
 
 
 def _live_source_gap_urgency(
