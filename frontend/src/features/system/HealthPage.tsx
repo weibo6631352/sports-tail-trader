@@ -121,7 +121,7 @@ export function HealthPage() {
                     {job.name}
                   </Text>
                   <Text size="xs" c="dimmed">
-                    每 {job.interval_ms ? `${job.interval_ms} ms` : '—'} · 上次 {job.last_run_at ?? '—'}
+                    每 {job.interval_seconds != null ? `${job.interval_seconds}s` : '—'} · 上次 {job.last_started_at ? job.last_started_at.replace('T', ' ').slice(0, 19) : '—'}
                   </Text>
                 </Group>
               ))}

@@ -87,11 +87,28 @@ export type WorkerHealth = {
   [key: string]: unknown
 }
 
+export type SchedulerJob = {
+  name: string
+  priority?: string
+  interval_seconds?: number | null
+  enabled?: boolean
+  paused?: boolean
+  running?: boolean
+  run_count?: number
+  last_started_at?: Iso | null
+  last_finished_at?: Iso | null
+  last_duration_ms?: number | null
+  next_run_at?: Iso | null
+  last_error?: string | null
+  tags?: string[]
+}
+
 export type WorkersSnapshot = {
   automatic_trading_enabled?: boolean
   workers?: WorkerHealth[]
   scheduler?: {
-    jobs?: Array<{ name: string; interval_ms?: number; last_run_at?: Iso; healthy?: boolean }>
+    jobs?: SchedulerJob[]
+    created_at?: Iso
   }
   queue_depths?: Record<string, number>
   [key: string]: unknown
