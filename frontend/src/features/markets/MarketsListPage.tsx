@@ -63,11 +63,13 @@ export function MarketsListPage() {
       cell: ({ row }) => (
         <StatusPill
           tone={
-            row.original.trading_status === 'active'
+            row.original.trading_status === 'eligible'
               ? 'success'
               : row.original.trading_status === 'paused'
                 ? 'warning'
-                : 'neutral'
+                : row.original.trading_status === 'rejected'
+                  ? 'danger'
+                  : 'neutral'
           }
           size="xs"
         >
@@ -140,7 +142,7 @@ export function MarketsListPage() {
           size="xs"
           placeholder="trading_status"
           value={tradingStatus}
-          data={['active', 'paused', 'resolved', 'closed', 'archived']}
+          data={['candidate', 'eligible', 'paused', 'closed', 'resolved', 'rejected']}
           onChange={(v) => { setTradingStatus(v); setPage(1) }}
           clearable
           w={150}

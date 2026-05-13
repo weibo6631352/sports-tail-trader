@@ -21,6 +21,25 @@ from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.serialization import decimal_text, jsonable
 
 
+# token_id 是 256-bit 整数；JSONB payload 里历史上存成 int，对外契约必须是 string。
+_TOKEN_ID_LIKE_KEYS = frozenset({"token_id", "winning_token_id"})
+
+
+def _normalize_token_id_strings(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            k: (
+                str(v)
+                if k in _TOKEN_ID_LIKE_KEYS and isinstance(v, int) and not isinstance(v, bool)
+                else _normalize_token_id_strings(v)
+            )
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_normalize_token_id_strings(item) for item in value]
+    return value
+
+
 def page_payload(page: RepositoryPage[Any], *, serializer: Callable[[Any], Any]) -> dict[str, Any]:
     return {
         "items": [serializer(item) for item in page.items],
@@ -86,10 +105,30 @@ class AdminSerializer:
             )
             for outcome in market.outcomes
         ]
+        market_dict = self.market(market)
+        fees = market_dict.get("fees") or {}
         return {
-            "market": self.market(market),
+            **market_dict,
             "tracked": registry_snapshot.get_by_condition_id(market.condition_id) is not None,
             "token_views": token_views,
+            # 列表/详情页直接读 fee_preview：把 market 级 fees 折叠成与 token_view.fee_preview 同构的 shape
+            "fee_preview": {
+                "fee_rate_bps": fees.get("fee_rate_bps"),
+                "fees_enabled": fees.get("enabled"),
+                "maker_base_fee_bps": fees.get("maker_base_fee_bps"),
+                "taker_base_fee_bps": fees.get("taker_base_fee_bps"),
+                "fee_rate_updated_at": fees.get("fee_rate_updated_at"),
+            },
+            # 前端 marketBadges 读 pause_reason；当前来源是 market.reject_reason
+            "pause_reason": market_dict.get("reject_reason"),
+            "tokens": [
+                {
+                    "token_id": tv.get("token_id"),
+                    "outcome": tv.get("outcome"),
+                    "position_size_shares": (tv.get("position") or {}).get("size_shares"),
+                }
+                for tv in token_views
+            ],
         }
 
     def token_view(
@@ -391,7 +430,7 @@ class AdminSerializer:
             "status": event.status,
             "reason": event.reason,
             "raw_response": event.raw_response,
-            "payload": jsonable(event.payload),
+            "payload": _normalize_token_id_strings(jsonable(event.payload)),
             "created_at": jsonable(event.created_at),
             "updated_at": jsonable(event.updated_at),
         }

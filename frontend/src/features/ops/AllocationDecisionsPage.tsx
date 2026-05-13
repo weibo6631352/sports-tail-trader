@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Group, TextInput } from '@mantine/core'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -24,6 +24,13 @@ export function AllocationDecisionsPage() {
   const [page, setPage] = useState(1)
   const [conditionId, setConditionId] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
+  const detailRef = useRef<HTMLDivElement | null>(null)
+  // 详情卡片渲染在长表格下方；展开时滚动到位，避免「点了没反应」错觉。
+  useEffect(() => {
+    if (openId && detailRef.current) {
+      detailRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [openId])
 
   const params = useMemo(
     () => ({
@@ -131,13 +138,15 @@ export function AllocationDecisionsPage() {
       />
 
       {openEvent ? (
-        <SectionCard
-          title={`决策过程 ${openEvent.event_id.slice(0, 12)}…`}
-          description={`${formatIso(openEvent.created_at)} · ${openEvent.condition_id ?? '—'}`}
-          mt="md"
-        >
-          <JsonPanel value={openEvent.payload ?? {}} maxHeight={420} />
-        </SectionCard>
+        <div ref={detailRef}>
+          <SectionCard
+            title={`决策过程 ${openEvent.event_id.slice(0, 12)}…`}
+            description={`${formatIso(openEvent.created_at)} · ${openEvent.condition_id ?? '—'}`}
+            mt="md"
+          >
+            <JsonPanel value={openEvent.payload ?? {}} maxHeight={420} />
+          </SectionCard>
+        </div>
       ) : null}
     </>
   )

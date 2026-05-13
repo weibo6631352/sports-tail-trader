@@ -77,7 +77,10 @@ class AdminReconcileDecisionsQueryMixin:
             return None
         settlement = settle_items[0]
         payload = settlement.payload if isinstance(settlement.payload, dict) else {}
-        winning_token_id = payload.get("winning_token_id")
+        winning_token_id_raw = payload.get("winning_token_id")
+        winning_token_id = (
+            str(winning_token_id_raw) if winning_token_id_raw is not None else None
+        )
         last_decision = (
             tuple(decision_page.items or ())[0] if (decision_page.items or ()) else None
         )
