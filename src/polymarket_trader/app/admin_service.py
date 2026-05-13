@@ -225,8 +225,16 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
 
         markets: dict[str, Market] = {}
         for record in store.records():
-            # 候选只读取曾被策略 live_state hook 标记过的 market（即 record 上有 live_state_payload）
-            if not record.live_state_payload:
+            # 候选读取两类 record：
+            # 1) live_state_payload 非空——single_game 主路径（sports_live_state_worker 写入）
+            # 2) metadata 含 series_state / game_odds / season_odds_snapshot——series winner /
+            #    outright 类市场由专用 worker 写入 metadata，不经 live_state hook。
+            _has_series_data = bool(
+                record.metadata.get("series_state")
+                or record.metadata.get("game_odds")
+                or record.metadata.get("season_odds_snapshot")
+            )
+            if not record.live_state_payload and not _has_series_data:
                 continue
             market = None
             if record.condition_id:

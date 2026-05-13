@@ -2,6 +2,7 @@
 
 规则：
 1. outcome label 直接是球队名：normalize 后与 state.team_a / team_b 比对。
+   先精确匹配；不中则走昵称扩展（如 "Cavs" → "cavaliers"）再重试。
 2. YES / NO 二元 outcome：从 market_question / event_title 反向匹配 team_a 或
    team_b 的全名或 last token。YES → 该队赢；NO → 对手赢。
 3. 命中 0 或多于 1 视为歧义，返回 None；evaluator 据此报 SERIES_TEAM_NOT_RESOLVED。
@@ -24,6 +25,24 @@ TeamSide = Literal["team_a", "team_b"]
 
 _BINARY_OUTCOMES = frozenset({"yes", "no"})
 
+# Polymarket outcome 常见昵称 → 官方队名中会出现的规范词。
+# key: normalize_team_name(nickname), value: normalize_team_name(canonical_token)
+# 精确匹配失败时用这张表做二次扩展，避免逐队硬编码同时保持可审计。
+_NICKNAME_EXPANSIONS: dict[str, str] = {
+    # NBA
+    "cavs": "cavaliers",
+    "wolves": "timberwolves",
+    "blazers": "trail blazers",
+    "okc": "thunder",
+    # NHL
+    "habs": "canadiens",
+    "avs": "avalanche",
+    "preds": "predators",
+    "bolts": "lightning",
+    "sens": "senators",
+    "leafs": "maple leafs",
+}
+
 
 def resolve_series_team(
     market: Market,
@@ -42,8 +61,12 @@ def resolve_series_team(
         return None
 
     if label_norm and label_norm not in _BINARY_OUTCOMES:
-        # 类别型 outcome：直接看 outcome 字串自身匹配哪一边。
+        # 类别型 outcome：先精确匹配，再走昵称扩展。
         match = _match_side(label_norm, team_a_norm, team_b_norm)
+        if match is None:
+            expanded = _NICKNAME_EXPANSIONS.get(label_norm)
+            if expanded:
+                match = _match_side(expanded, team_a_norm, team_b_norm)
         return match
 
     # YES / NO outcome：从 market_question 反向找球队。系列赛市场 YES/NO 通常表达
@@ -83,7 +106,12 @@ def _team_in_text(team_norm: str, text_norm: str) -> bool:
         return True
     last = team_norm.split()[-1]
     if last and last != team_norm:
-        return _word_boundary(last, text_norm)
+        if _word_boundary(last, text_norm):
+            return True
+        # Compound-word fallback: "timberwolves" ends with "wolves"
+        for word in text_norm.split():
+            if word.endswith(last):
+                return True
     return False
 
 

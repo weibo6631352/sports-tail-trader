@@ -170,6 +170,8 @@ def size_series_entry(
     token_views = tuple(context.market_token_views or ())
 
     per_market_cap = min(budget, settings.max_per_market_usdc)
+    _season_port = ports.season_state if ports is not None else None
+    _season_snapshot = _season_port.season_snapshot() if _season_port is not None else None
     fair_value_by_token: dict[str, Decimal] = {}
     market_snapshots: list[AllocationMarketSnapshot] = []
     for tv in token_views:
@@ -191,7 +193,7 @@ def size_series_entry(
             min_orderbook_depth_usdc=settings.min_orderbook_depth_usdc,
             max_series_state_age_seconds=settings.max_state_age_seconds,
             max_game_odds_age_seconds=settings.max_game_odds_age_seconds,
-            season_snapshot=None,
+            season_snapshot=_season_snapshot,
         )
         candidate = SeriesCandidate(
             market=market,

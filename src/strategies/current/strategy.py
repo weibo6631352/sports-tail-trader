@@ -93,6 +93,10 @@ class CurrentStrategy:
         self._live_event_filter_cache_events_id: int | None = None
         self._live_event_filter_cache: dict[tuple[tuple[str, ...], str | None], tuple[LiveEvent, ...]] = {}
         self._live_state_no_feasible_source: bool = False
+        # 把策略配置注册给 parameter store，让 GET /parameters 能返回 strategy.* 字段
+        # 的当前 default_value。框架因此无需读策略私有属性。
+        if self._ports.parameter is not None:
+            self._ports.parameter.register_strategy_defaults(config)
         if self._ports.lifecycle is not None:
             try:
                 self._ports.lifecycle.subscribe(

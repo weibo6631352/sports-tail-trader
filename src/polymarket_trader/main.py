@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from polymarket_trader.api.routes.stream import SseSubscriptionRegistry
 from polymarket_trader.app.market_service import MarketService
-from polymarket_trader.app.ports import bind_extension_orderbook_reader, build_extension_ports
+from polymarket_trader.app.ports import bind_extension_orderbook_reader, bind_extension_season_state, build_extension_ports
 from polymarket_trader.app.reconcile_service import ReconcileService
 from polymarket_trader.app.extension_host import load_extension
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
@@ -666,6 +666,10 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     extension_issues = _validate_extension_config(extension, settings)
     if extension_issues:
         raise ConfigLoadError(list(extension_issues))
+    # settings 是框架侧不变量，由 composition root 直接绑定。strategy.* 默认值由
+    # 策略自己在 __init__ 时通过 ports.parameter.register_strategy_defaults 注册——
+    # 框架不读策略私有属性，避免跨层 duck-typing。
+    parameter_store.bind_settings(settings)
     # strategy_id 来自策略 spec，单进程内只装配一次；所有 framework worker / service
     # （persistence、decision recorder、trading_decision_service、user_ws_worker ...）
     # 都绑定同一个值，作为 SCOPE 表的归属键。
@@ -815,6 +819,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 publish_entry_signals=settings.sports_live_state_publish_entry_signals,
             )
     season_state_store = SeasonStateStore()
+    bind_extension_season_state(extension_ports, season_state_store)
     season_state_worker, season_state_client = _build_season_state_worker(
         settings,
         store=season_state_store,

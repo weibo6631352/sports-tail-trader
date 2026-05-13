@@ -120,7 +120,11 @@ def test_series_winner_skips_with_missing_game_odds() -> None:
 def test_series_winner_record_only_when_permission_locked() -> None:
     """Record-only：accepted 但 permission!=AUTO_EXECUTE → SKIP 带审计 metadata。"""
 
-    config = CurrentStrategyConfig()
+    config = replace(
+        CurrentStrategyConfig(),
+        tail_series_winner_execution_permission=ExecutionPermission.RECORD_ONLY,
+        tail_series_winner_budget_usdc=Decimal("0"),
+    )
     strategy = CurrentStrategy(config=config)
     market = _market()
     metadata = {

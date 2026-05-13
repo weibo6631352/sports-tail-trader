@@ -44,6 +44,8 @@ def decide_series_entry(
     now = context.now or datetime.now(timezone.utc)
     ctx_meta = context.metadata or {}
 
+    _season_port = ports.season_state if ports is not None else None
+    _season_snapshot = _season_port.season_snapshot() if _season_port is not None else None
     best_accept: tuple[tuple[Decimal, SeriesEvaluation], MarketTokenView] | None = None
     first_reject: tuple[SeriesEvaluation, MarketTokenView] | None = None
     for token_view in token_views:
@@ -64,7 +66,7 @@ def decide_series_entry(
             min_orderbook_depth_usdc=settings.min_orderbook_depth_usdc,
             max_series_state_age_seconds=settings.max_state_age_seconds,
             max_game_odds_age_seconds=settings.max_game_odds_age_seconds,
-            season_snapshot=None,
+            season_snapshot=_season_snapshot,
         )
         candidate = SeriesCandidate(
             market=market,

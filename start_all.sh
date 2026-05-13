@@ -207,7 +207,9 @@ start_background_process() {
   local command_text="$1"
   local pid_file="$2"
 
-  setsid bash -lc "cd '$APP_DIR' && $command_text" </dev/null >/dev/null 2>&1 &
+  # 用 exec 替换 bash，使 PID 文件直接指向目标进程而非 shell 包装层；
+  # 去掉 -l 避免加载 login-shell 初始化文件（所有路径都用绝对路径传入）。
+  setsid bash -c "cd '$APP_DIR' && exec $command_text" </dev/null >/dev/null 2>&1 &
   echo "$!" > "$pid_file"
 }
 
@@ -511,7 +513,7 @@ ensure_backend() {
 
   log "启动后端服务"
   start_background_process \
-    "'$PYTHON_BIN' -m uvicorn polymarket_trader.api.app:create_app --factory --host '$BACKEND_HOST' --port '$BACKEND_PORT'" \
+    "'$PYTHON_BIN' -m uvicorn polymarket_trader.api.app:create_app --factory --host '$BACKEND_HOST' --port '$BACKEND_PORT' --timeout-graceful-shutdown 5" \
     "$BACKEND_PID_FILE"
 
   wait_for_http "后端服务" "$BACKEND_HEALTH_URL" 30

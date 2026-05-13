@@ -14,9 +14,11 @@ import {
 import { notifications } from '@mantine/notifications'
 import { IconAlertTriangle, IconPlayerPlay, IconTrophy } from '@tabler/icons-react'
 import type { ColumnDef } from '@tanstack/react-table'
+import { qk } from '@core/api/keys'
 import { operationsApi, parametersApi } from '@core/api/resources'
 import { describeError } from '@core/api/errors'
 import type {
+  ParameterRegistryEntry,
   ParameterSweepRequest,
   ParameterSweepResponse,
   SweepCandidateResult,
@@ -100,26 +102,38 @@ export function ParameterSweepPage() {
     queryFn: ({ signal }) => operationsApi.parameterSweepParams(signal),
     staleTime: 60_000,
   })
+  const registryQuery = useQuery({
+    queryKey: qk.parameters.list(),
+    queryFn: ({ signal }) => parametersApi.list(signal),
+    staleTime: 30_000,
+  })
+  const registry = useMemo(() => registryQuery.data?.parameters ?? [], [registryQuery.data])
   // 稳定引用：paramSpecsQuery.data ?? [] 每次渲染都产生新数组，useMemo 避免下游依赖抖动
   const paramSpecs = useMemo(() => paramSpecsQuery.data ?? [], [paramSpecsQuery.data])
 
-  const emptyInputs = useMemo(
-    () => Object.fromEntries(paramSpecs.map((s) => [s.key, ''])) as SweepInputs,
-    [paramSpecs],
-  )
+  // 初始候选 = 当前生效值（override 优先，否则默认值），让 sweep 默认包含
+  // "当前参数" 作为基线对照；用户可在此基础上加变体或清空。
+  const seedInputs = useMemo(() => {
+    return Object.fromEntries(
+      paramSpecs.map((s) => {
+        const regEntry = registry.find((e) => e.scope === s.scope && e.key === s.key)
+        const current = regEntry?.override?.value ?? regEntry?.default_value ?? null
+        return [s.key, current !== null ? String(current) : '']
+      }),
+    ) as SweepInputs
+  }, [paramSpecs, registry])
   const [inputs, setInputs] = useState<SweepInputs>({
     tail_outright_min_edge_bps: '',
     tail_outright_max_entry_price: '',
     tail_outright_min_orderbook_depth_usdc: '',
     entry_no_price_max: '',
   })
-  // 服务端 paramSpecs 首次加载时同步 inputs 键集合。
-  // 用 useState 跟踪上次 paramSpecs 引用，在 render 期间同步派生 inputs——
-  // 这是 React 推荐替代 useEffect+setState 的模式（避免级联渲染）。
-  const [prevParamSpecs, setPrevParamSpecs] = useState(paramSpecs)
-  if (prevParamSpecs !== paramSpecs && paramSpecs.length > 0) {
-    setPrevParamSpecs(paramSpecs)
-    setInputs(emptyInputs)
+  // seedInputs 是 useMemo——paramSpecs 或 registry 变化时引用更新。
+  // render 期间同步派生，避免 useEffect 级联渲染。
+  const [prevSeed, setPrevSeed] = useState<SweepInputs | null>(null)
+  if (paramSpecs.length > 0 && prevSeed !== seedInputs) {
+    setPrevSeed(seedInputs)
+    setInputs(seedInputs)
   }
   const [perDecisionUsdc, setPerDecisionUsdc] = useState(10)
   const [decisionLimit, setDecisionLimit] = useState(2000)
@@ -176,6 +190,9 @@ export function ParameterSweepPage() {
           <Stack gap="sm">
             {paramSpecs.map((meta) => {
               const fieldErrors = parsed.errors.filter((e) => e.key === meta.key)
+              const regEntry = registry.find((e) => e.scope === meta.scope && e.key === meta.key)
+              const currentEffective = regEntry?.override?.value ?? regEntry?.default_value ?? null
+              const hasOverride = regEntry?.override != null
               return (
                 <Group key={meta.key} gap="sm" wrap="wrap" align="flex-start">
                   <Stack gap={2} style={{ minWidth: 280 }}>
@@ -187,6 +204,14 @@ export function ParameterSweepPage() {
                     </Text>
                     <Text size="xs" c="dimmed">
                       {meta.input_hint}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      当前：<code>{currentEffective !== null ? String(currentEffective) : '—'}</code>
+                      {currentEffective !== null ? (
+                        <span style={{ marginLeft: 4, fontSize: 10 }}>
+                          {hasOverride ? '(override)' : '(默认)'}
+                        </span>
+                      ) : null}
                     </Text>
                   </Stack>
                   <Textarea
@@ -266,14 +291,14 @@ export function ParameterSweepPage() {
             description="结果按 hypothetical PnL 降序；可一键把某组合应用到 /parameters。"
           />
         ) : (
-          <ResultsView data={result} />
+          <ResultsView data={result} registry={registry} />
         )}
       </Stack>
     </>
   )
 }
 
-function ResultsView({ data }: { data: ParameterSweepResponse }) {
+function ResultsView({ data, registry }: { data: ParameterSweepResponse; registry: ParameterRegistryEntry[] }) {
   const fallbackWarn = data.entry_price_cap_fallback_count > 0
   const bestPnlKey = data.best_by_pnl ? paramsKey(data.best_by_pnl.parameters) : null
   const bestWinKey = data.best_by_win_rate ? paramsKey(data.best_by_win_rate.parameters) : null
@@ -310,10 +335,10 @@ function ResultsView({ data }: { data: ParameterSweepResponse }) {
       {data.best_by_pnl || data.best_by_win_rate ? (
         <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
           {data.best_by_pnl ? (
-            <BestCard title="Top by PnL" data={data.best_by_pnl} icon={<IconTrophy size={16} />} />
+            <BestCard title="Top by PnL" data={data.best_by_pnl} icon={<IconTrophy size={16} />} registry={registry} />
           ) : null}
           {data.best_by_win_rate ? (
-            <BestCard title="Top by Win Rate" data={data.best_by_win_rate} icon={<IconTrophy size={16} />} />
+            <BestCard title="Top by Win Rate" data={data.best_by_win_rate} icon={<IconTrophy size={16} />} registry={registry} />
           ) : null}
         </SimpleGrid>
       ) : null}
@@ -322,7 +347,7 @@ function ResultsView({ data }: { data: ParameterSweepResponse }) {
         title={`全部结果 ${data.results.length} 组合`}
         description="按 hypothetical PnL 降序；点行可一键应用到 /parameters"
       >
-        <ResultsTable rows={data.results} bestPnlKey={bestPnlKey} bestWinKey={bestWinKey} />
+        <ResultsTable rows={data.results} bestPnlKey={bestPnlKey} bestWinKey={bestWinKey} registry={registry} />
       </SectionCard>
     </Stack>
   )
@@ -332,10 +357,12 @@ function BestCard({
   title,
   data,
   icon,
+  registry,
 }: {
   title: string
   data: SweepCandidateResult
   icon: React.ReactNode
+  registry: ParameterRegistryEntry[]
 }) {
   return (
     <SectionCard
@@ -374,7 +401,7 @@ function BestCard({
           size="compact-xs"
           color="accent"
           variant="light"
-          onClick={() => promptApplyToParameters(data)}
+          onClick={() => promptApplyToParameters(data, registry)}
         >
           应用到 /parameters
         </Button>
@@ -387,10 +414,12 @@ function ResultsTable({
   rows,
   bestPnlKey,
   bestWinKey,
+  registry,
 }: {
   rows: SweepCandidateResult[]
   bestPnlKey: string | null
   bestWinKey: string | null
+  registry: ParameterRegistryEntry[]
 }) {
   const columns: ColumnDef<SweepCandidateResult, unknown>[] = [
     {
@@ -455,7 +484,7 @@ function ResultsTable({
           variant="link"
           onClick={(e) => {
             e.stopPropagation()
-            promptApplyToParameters(row.original)
+            promptApplyToParameters(row.original, registry)
           }}
         >
           应用
@@ -533,16 +562,22 @@ function pnlColor(v: string | null | undefined): string | undefined {
 // 把一组 sweep 参数批量 PUT 到 /parameters/{scope}/{key}。
 // 所有 sweep 参数都在 strategy scope；走 confirmAction 显示 diff。
 // 失败的项继续后续 PUT，最后汇总通知——避免半应用。
-function promptApplyToParameters(result: SweepCandidateResult) {
+function promptApplyToParameters(result: SweepCandidateResult, registry: ParameterRegistryEntry[]) {
   const entries = Object.entries(result.parameters)
   if (entries.length === 0) return
-  const diff: DiffRow[] = entries.map(([key, value]) => ({
-    field: `strategy.${key}`,
-    before: '(当前值)',
-    after: value,
-    risk: 'high',
-    hint: '点应用后立即生效；重启即丢',
-  }))
+  const diff: DiffRow[] = entries.map(([key, value]) => {
+    const regEntry = registry.find((e) => e.scope === 'strategy' && e.key === key)
+    const before = regEntry
+      ? String(regEntry.override?.value ?? regEntry.default_value ?? '(default)')
+      : '(unknown)'
+    return {
+      field: `strategy.${key}`,
+      before,
+      after: value,
+      risk: 'high' as const,
+      hint: '点应用后立即生效；重启即丢',
+    }
+  })
   confirmAction({
     title: '把这组参数应用到 /parameters',
     description: `共 ${entries.length} 个 strategy 参数；逐个 PUT，全部走 audit_events 记录。`,

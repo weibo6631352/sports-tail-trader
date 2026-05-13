@@ -494,6 +494,12 @@ async def run_market_ws(runtime: Any) -> None:
                             detail="no_markets",
                         )
                         sync_runtime_metrics(runtime)
+                else:
+                    # delta <= threshold：不重建连接，但仍为新增 token 预取 REST 快照，
+                    # 避免它们在首条 WS 消息到达前以空盘口触发 missing_price_or_prob。
+                    new_token_ids = tuple(desired_set - subscribed_set)
+                    if new_token_ids:
+                        await runtime.market_ws_worker.refresh_rest_snapshots(new_token_ids)
 
             try:
                 message = await asyncio.wait_for(queue.get(), timeout=1.0)

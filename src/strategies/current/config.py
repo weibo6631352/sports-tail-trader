@@ -273,10 +273,10 @@ class CurrentStrategyConfig:
 
     # Series WINNER family 配置。默认 budget=0 + RECORD_ONLY；与 outright 同样
     # 双 flip（permission=AUTO_EXECUTE + budget>0）才会真实下单。
-    tail_series_winner_execution_permission: ExecutionPermission = ExecutionPermission.RECORD_ONLY
-    tail_series_winner_min_edge_bps: int = 800  # 8% —— 系列赛波动比单场 outright 更大
+    tail_series_winner_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
+    tail_series_winner_min_edge_bps: int = 200
     tail_series_winner_max_entry_price: Decimal = Decimal("0.95")
-    tail_series_winner_budget_usdc: Decimal = Decimal("0")
+    tail_series_winner_budget_usdc: Decimal = Decimal("25")
     tail_series_winner_max_per_market_usdc: Decimal = Decimal("25")
     tail_series_winner_max_event_correlation_usdc: Decimal = Decimal("40")
     tail_series_winner_min_orderbook_depth_usdc: Decimal = Decimal("50")

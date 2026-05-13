@@ -7,6 +7,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.account import AccountSnapshot
+from polymarket_trader.domain.sports_season import SeasonSnapshot
 from polymarket_trader.observability.metrics import MetricsRegistry
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
@@ -174,6 +175,14 @@ class ParameterStorePort:
     def has_override(self, scope: str, key: str) -> bool:
         return self._store.has_override(scope, key)
 
+    def register_strategy_defaults(self, config: Any) -> None:
+        """让策略把自己的配置对象注册到 store，用于 GET /parameters 返回 default_value。
+
+        框架不直接读策略私有属性——由策略主动暴露 config 对象，存到 store 里。
+        store._get_default_value 通过 ``getattr(config, key)`` 按 spec 注册的 key 读基准值。
+        """
+        self._store.bind_strategy_config(config)
+
 
 def build_extension_ports(
     *,
@@ -201,7 +210,43 @@ def build_extension_ports(
         lifecycle=lifecycle_bus,
         parameter=ParameterStorePort(store=parameter_store) if parameter_store is not None else None,
         metrics=metrics_port,
+        season_state=SeasonStatePort(),
     )
+
+
+class SeasonStatePort:
+    """把 ``SeasonStateStore`` 暴露给策略层。
+
+    与 ``MarketDataPort.bind_orderbook_reader`` 同模式：先在 ``build_extension_ports``
+    时注入空端口，等 ``season_state_store`` 在 ``build_runtime`` 后期创建完毕后
+    调用 ``bind_store`` 填入。策略调用 ``season_snapshot()`` 返回积分榜快照，
+    无 store 时返回空 snapshot，保证 pythagorean fallback 仍优雅降级。
+    """
+
+    def __init__(self) -> None:
+        self._store: Any | None = None
+
+    def bind_store(self, store: Any | None) -> None:
+        self._store = store
+
+    def season_snapshot(self) -> SeasonSnapshot:
+        if self._store is None:
+            return SeasonSnapshot(observed_at=datetime.now(timezone.utc))
+        standings = tuple(self._store.all_standings())
+        return SeasonSnapshot(
+            observed_at=datetime.now(timezone.utc),
+            standings=standings,
+        )
+
+
+def bind_extension_season_state(
+    ports: ExtensionPorts,
+    season_state_store: Any | None,
+) -> None:
+    """把 season_state_store 注入 ports.season_state（原地修改内部对象，不替换 ports）。"""
+    season_port = ports.season_state
+    if isinstance(season_port, SeasonStatePort):
+        season_port.bind_store(season_state_store)
 
 
 def bind_extension_orderbook_reader(

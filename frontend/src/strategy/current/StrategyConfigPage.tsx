@@ -197,11 +197,11 @@ function ParamEditor({
   onClear: () => void
 }) {
   const meta = getParamMetadata(entry.scope, entry.key)
-  const currentValue = entry.override?.value ?? null
-  const currentText = stringValue(currentValue)
-  const [draft, setDraft] = useState<string>(currentText)
+  // effectiveText = override 生效值 ?? 启动期默认值 ?? ''
+  const effectiveText = stringValue(entry.override?.value ?? entry.default_value ?? null)
+  const [draft, setDraft] = useState<string>(effectiveText)
   const hasOverride = entry.override !== null
-  const dirty = draft.trim() !== '' && draft !== currentText
+  const dirty = draft.trim() !== '' && draft !== effectiveText
 
   return (
     <SectionCard
@@ -248,7 +248,10 @@ function ParamEditor({
         </Group>
         <Group justify="space-between" gap="xs">
           <Text size="xs" c="dimmed">
-            当前生效：<code>{currentText || '∅ (Settings/策略默认)'}</code>
+            当前生效：<code>{effectiveText || '—'}</code>
+            {!hasOverride && entry.default_value !== null ? (
+              <span style={{ marginLeft: 4, color: 'var(--color-text-dim)', fontSize: 10 }}>(默认)</span>
+            ) : null}
           </Text>
           {entry.override ? (
             <Text size="xs" c="dimmed">
@@ -316,7 +319,7 @@ function promptSet(
   }) => Promise<unknown>,
 ) {
   const meta = getParamMetadata(entry.scope, entry.key)
-  const before = entry.override?.value ?? '(default)'
+  const before = entry.override?.value ?? entry.default_value ?? '(default)'
   const diff: DiffRow[] = [
     {
       field: `${entry.scope}.${entry.key}`,

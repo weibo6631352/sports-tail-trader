@@ -354,9 +354,19 @@ class ParameterStore:
     def __init__(self, *, event_bus: Any | None = None) -> None:
         self._overrides: dict[tuple[str, str], _OverrideEntry] = {}
         self._event_bus = event_bus
+        self._settings_obj: Any = None
+        self._strategy_config_obj: Any = None
 
     def bind_event_bus(self, event_bus: Any | None) -> None:
         self._event_bus = event_bus
+
+    def bind_settings(self, settings: Any) -> None:
+        """绑定 Settings 实例，用于 registry_payload 中返回 settings.* 参数的默认值。"""
+        self._settings_obj = settings
+
+    def bind_strategy_config(self, config: Any) -> None:
+        """绑定策略配置实例，用于 registry_payload 中返回 strategy.* 参数的默认值。"""
+        self._strategy_config_obj = config
 
     def get(self, scope: str, key: str, default: Any = None) -> Any:
         entry = self._overrides.get((scope, key))
@@ -452,20 +462,30 @@ class ParameterStore:
         return result
 
     def registry_payload(self) -> list[dict[str, Any]]:
-        """所有可调参数定义 + 当前 override（如有）。"""
+        """所有可调参数定义 + 当前 override（如有）+ 基准默认值。"""
 
         result: list[dict[str, Any]] = []
         for spec in list_specs():
             entry = self._overrides.get((spec.scope, spec.key))
+            default_value = self._get_default_value(spec.scope, spec.key)
             result.append(
                 {
                     "scope": spec.scope,
                     "key": spec.key,
                     "description": spec.description,
+                    "default_value": _stringify(default_value),
                     "override": None if entry is None else self._as_payload(spec.scope, spec.key, entry, spec),
                 }
             )
         return result
+
+    def _get_default_value(self, scope: str, key: str) -> Any:
+        """按 scope 从绑定的 settings / strategy_config 读取当前基准值。"""
+        if scope == "settings" and self._settings_obj is not None:
+            return getattr(self._settings_obj, key, None)
+        if scope == "strategy" and self._strategy_config_obj is not None:
+            return getattr(self._strategy_config_obj, key, None)
+        return None
 
     def _as_payload(
         self,

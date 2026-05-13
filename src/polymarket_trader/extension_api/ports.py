@@ -7,6 +7,7 @@ from typing import Any, Mapping, Protocol
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
+from polymarket_trader.domain.sports_season import SeasonSnapshot
 from polymarket_trader.extension_api.context import AccountSnapshotView
 from polymarket_trader.extension_api.lifecycle import LifecycleBus
 
@@ -88,6 +89,22 @@ class ParameterPort(Protocol):
 
     def has_override(self, scope: str, key: str) -> bool: ...
 
+    def register_strategy_defaults(self, config: Any) -> None:
+        """策略主动注册自己的配置对象，让 store 在 GET /parameters 返回 strategy.*
+        参数的当前 default_value（按 spec 注册的 key 用 getattr 读对应字段）。
+        """
+        ...
+
+
+class SeasonStateReadPort(Protocol):
+    """策略层访问赛季积分榜 / 系列赛分快照的端口。
+
+    用途：series winner 定价时做 Pythagorean win-pct fallback；无 game_odds API 时
+    保证有兜底概率来源，不直接返回 MISSING_SERIES_ODDS。
+    """
+
+    def season_snapshot(self) -> SeasonSnapshot: ...
+
 
 @dataclass(frozen=True, slots=True)
 class ExtensionPorts:
@@ -102,3 +119,4 @@ class ExtensionPorts:
     lifecycle: LifecycleBus | None = None
     parameter: ParameterPort | None = None
     metrics: MetricsPort | None = None
+    season_state: SeasonStateReadPort | None = None

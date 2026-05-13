@@ -932,6 +932,8 @@ export type ParameterRegistryEntry = {
   scope: string
   key: string
   description: string
+  /** 启动时从 Settings / 策略配置读取的基准默认值；无则 null。 */
+  default_value: string | null
   override: ParameterOverride | null
 }
 

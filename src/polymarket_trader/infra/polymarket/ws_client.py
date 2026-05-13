@@ -42,7 +42,7 @@ class PolymarketWebSocketClient:
         connect_timeout_s: float = 10.0,
         ping_interval_s: float = 20.0,
         ping_timeout_s: float = 20.0,
-        close_timeout_s: float = 10.0,
+        close_timeout_s: float = 3.0,
         max_queue: int = 16,
         reconnect_delay_s: float = 5.0,
     ) -> None:

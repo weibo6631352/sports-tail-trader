@@ -22,6 +22,7 @@ from typing import Any, Mapping
 # 价格 floor/ceiling 与 outright/pricing 保持一致——同一份语义只能写一处。
 _PRICE_FLOOR = Decimal("0.01")
 _PRICE_CEILING = Decimal("0.99")
+_TICK_SIZE = Decimal("0.01")
 
 
 # 字符串拒绝原因常量。值与对应枚举字面值对齐，让调用方可直接 .value 比较。
@@ -58,7 +59,10 @@ def entry_price_cap(
 
     edge = Decimal(min_edge_bps) / Decimal(10000)
     proportional = fair_value * (Decimal(1) - edge)
-    return _clamp(min(proportional, max_entry_price))
+    raw = _clamp(min(proportional, max_entry_price))
+    # Floor to valid Polymarket tick size to avoid risk manager tick_size_invalid rejection.
+    floored = (raw // _TICK_SIZE) * _TICK_SIZE
+    return floored if floored >= _PRICE_FLOOR else _PRICE_FLOOR
 
 
 def check_entry_gates(
