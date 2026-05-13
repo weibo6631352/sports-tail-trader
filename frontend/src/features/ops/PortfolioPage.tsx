@@ -87,7 +87,7 @@ export function PortfolioPage() {
 
       <Stack gap="md">
         <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
-          <Stat label="净值 net_value" value={formatUsdc(snapshot.data?.net_value_usdc ?? snapshot.data?.equity_usdc)} />
+          <Stat label="净值 net_value" value={formatUsdc(snapshot.data?.net_value_usdc)} />
           <Stat
             label="实现 PnL"
             value={formatUsdc(snapshot.data?.realized_pnl_usdc)}
@@ -197,9 +197,9 @@ function EquityChart({ points }: { points: EquityPoint[] }) {
     )
   }
   const data = points.map((p) => ({
-    t: p.t,
-    label: formatIso(p.t, 'MM-DD HH:mm'),
-    net_value: toDecimal(p.net_value_usdc)?.toNumber() ?? 0,
+    t: p.ts,
+    label: formatIso(p.ts, 'MM-DD HH:mm'),
+    net_value: toDecimal(p.net_usdc)?.toNumber() ?? 0,
   }))
   return (
     <div style={{ width: '100%', height: 280 }}>

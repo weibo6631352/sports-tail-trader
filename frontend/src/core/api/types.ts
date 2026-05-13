@@ -570,7 +570,7 @@ export type PortfolioSnapshot = {
   [key: string]: unknown
 }
 
-export type EquityPoint = { t: Iso; net_value_usdc: DecimalStr }
+export type EquityPoint = { ts: Iso; net_usdc: DecimalStr }
 
 export type EquityCurve = {
   window_ms: number
