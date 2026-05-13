@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from polymarket_trader.domain.order import (
     BuyOrderIntent,
+    CancelOrderIntent,
     Order,
     OrderResult,
     OrderResultStatus,
@@ -89,6 +92,66 @@ def test_long_local_order_keys_are_shortened_for_database_columns() -> None:
     assert len(model.idempotency_key or "") <= 255
     assert model.order_key == model.idempotency_key
     assert model.raw_payload["idempotency_key"] == long_key
+
+
+def test_order_result_with_cancel_intent_persists_without_attribute_error() -> None:
+    """CancelOrderIntent 没有 ``post_only``，from_domain 走 isinstance 守卫
+    退到 payload 兜底，不应 AttributeError。"""
+
+    cancel = CancelOrderIntent(
+        strategy_id="sports_tail",
+        trace_id="trace-cancel",
+        condition_id="condition-1",
+        token_id="token-1",
+        order_id="exchange-order-id",
+        idempotency_key="local-cancel-key",
+        reason="user_cancel",
+    )
+    result = OrderResult(
+        strategy_id="sports_tail",
+        trace_id="trace-cancel",
+        condition_id="condition-1",
+        token_id="token-1",
+        status=OrderResultStatus.CANCELLED,
+        intent=cancel,
+        order_id="exchange-order-id",
+        side=OrderSide.BUY,
+        order_type=OrderType.GTC,
+        price=None,
+    )
+
+    model = OrderModel.from_domain(result, raw_payload={"post_only": True})
+
+    assert model.post_only is True
+    assert model.order_key == "exchange-order-id"
+
+
+def test_order_result_missing_side_raises_for_persistence() -> None:
+    """OrderResult 必须携带 side / order_type 才能落 orders 表；缺失则显式
+    报错，避免在 audit 列里写空字符串。"""
+
+    cancel = CancelOrderIntent(
+        strategy_id="sports_tail",
+        trace_id="trace-cancel-missing-side",
+        condition_id="condition-1",
+        token_id="token-1",
+        order_id="exchange-order-id",
+        idempotency_key="local-cancel-key",
+    )
+    result = OrderResult(
+        strategy_id="sports_tail",
+        trace_id="trace-cancel-missing-side",
+        condition_id="condition-1",
+        token_id="token-1",
+        status=OrderResultStatus.FAILED,
+        intent=cancel,
+        side=None,
+        order_type=None,
+        price=None,
+    )
+
+    with pytest.raises(ValueError, match="side/order_type"):
+        OrderModel.from_domain(result)
 
 
 def test_long_outbox_idempotency_keys_are_shortened_for_database_columns() -> None:

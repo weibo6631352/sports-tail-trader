@@ -37,7 +37,6 @@ from strategies.current.series.handicap_outcome import (
     parse_handicap_outcome,
 )
 from strategies.current.series.match import (
-    GameSpreads,
     game_spreads_from_metadata,
     series_state_from_metadata,
 )
@@ -274,10 +273,9 @@ def _evaluate_handicap_single_game(
                 "handicap_scope": "single_game",
             },
         )
-    snapshot = _to_snapshot(spreads)
     target_team = state.team_a if bet.team_side == "team_a" else state.team_b
     p_cover = single_game_cover_probability(
-        snapshot,
+        spreads,
         team_a=target_team,
         handicap=bet.handicap,
     )
@@ -457,25 +455,6 @@ def _gate_and_pack(
         fair_value=fair_value,
         reject_reason=None,
         metadata=accepted_metadata,
-    )
-
-
-def _to_snapshot(spreads: GameSpreads) -> Any:
-    """轻量适配 ``handicap_model.single_game_cover_probability`` 的接口。
-
-    避免 series.match 直接 import infra 的 GameSpreadSnapshot；构造一个最小
-    属性结构传给定价函数即可。
-    """
-
-    from polymarket_trader.infra.sports.game_odds_client import GameSpreadSnapshot
-
-    return GameSpreadSnapshot(
-        team_a=spreads.team_a,
-        team_b=spreads.team_b,
-        spread_line=spreads.spread_line,
-        p_a_covers=spreads.p_a_covers,
-        observed_at=spreads.observed_at,
-        source=spreads.source,
     )
 
 

@@ -26,8 +26,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from polymarket_trader.infra.sports.game_odds_client import GameSpreadSnapshot
 from strategies.current._shared.team_normalize import normalize_team_name
+from strategies.current.series.match import GameSpreads
 from strategies.current.series.types import SeriesState
 
 
@@ -82,7 +82,7 @@ def series_handicap_cover_probability(
 
 
 def single_game_cover_probability(
-    spread_snapshot: GameSpreadSnapshot,
+    spread_snapshot: GameSpreads,
     *,
     team_a: str,
     handicap: Decimal,

@@ -7,7 +7,15 @@ from sqlalchemy import Boolean, Index, Integer, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from polymarket_trader.domain.order import Order, OrderResult, OrderSide, OrderStatus, OrderType
+from polymarket_trader.domain.order import (
+    BuyOrderIntent,
+    Order,
+    OrderResult,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    SellOrderIntent,
+)
 from polymarket_trader.infra.db.base import (
     Base,
     JsonMapping,
@@ -175,7 +183,7 @@ class OrderModel(Base, TimestampMixin):
             reason=order.reason,
             post_only=(
                 order.intent.post_only
-                if order.intent is not None
+                if isinstance(order.intent, (BuyOrderIntent, SellOrderIntent))
                 else _json_bool(payload.get("post_only"))
             ),
             raw_payload=payload,

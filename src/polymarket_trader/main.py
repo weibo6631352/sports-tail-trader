@@ -101,6 +101,7 @@ from polymarket_trader.runtime.ws_loops import (
     run_user_ws as _run_user_ws,
 )
 from polymarket_trader.extension_api import BusinessExtension
+from polymarket_trader.extension_api.manifest import ConfigValidator
 from polymarket_trader.workers.market_discovery_worker import MarketDiscoveryWorker
 from polymarket_trader.workers.market_ws import MarketWsWorker
 from polymarket_trader.workers.persistence import PersistenceWorker
@@ -592,8 +593,12 @@ def _validate_extension_config(extension: BusinessExtension, settings: Settings)
 
     与 ``Settings.validate_startup_readiness`` 互补：把策略侧的最小可执行集
     校验（比如 discovery 列表是否为空）也前移到启动期，避免上线后才暴露。
+
+    ConfigValidator 是可选 Protocol；未实现的 extension 直接返回空 issues。
     """
 
+    if not isinstance(extension, ConfigValidator):
+        return ()
     issues = extension.validate_config(settings)
     if not issues:
         return ()
