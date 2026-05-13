@@ -14,21 +14,12 @@ import ordersOpen from './fixtures/orders.open.json' with { type: 'json' }
 // 不在此覆盖 SSE / /stream——SSE 失败已有 fallback，且不影响首屏业务展示。
 
 /**
- * 顺序很关键：先按路径精确匹配（precedence 由注册顺序决定，越早注册优先级越高），
- * 兜底所有未匹配 /api/** 返回 404，避免某条 fetch 漏 mock 导致测试静默挂起。
+ * Playwright 路由是 LIFO：后注册的路由优先级更高。
+ * 因此先注册兜底（优先级最低），再注册精确 mock（优先级最高）。
+ * 用 regex 匹配 pathname，忽略 query string，避免带参请求漏拦截。
  */
 async function mockApi(page: Page): Promise<void> {
-  // candidates.list 必须能识别 limit / accepted / 等任意 query；按 pathname 匹配。
-  await routeJson(page, '**/api/candidates', candidatesList)
-  await routeJson(page, '**/api/orders', ordersOpen)
-  await routeJson(page, '**/api/runtime', runtimeSnapshot)
-  await routeJson(page, '**/api/ready', readySnapshot)
-  await routeJson(page, '**/api/workers', workersSnapshot)
-  await routeJson(page, '**/api/portfolio', portfolioSnapshot)
-  await routeJson(page, '**/api/metrics/latency-percentiles', latencySnapshot)
-  await routeJson(page, '**/api/metrics', metricsSnapshot)
-
-  // 兜底：其它任何 /api/** 返回空 page，避免依赖未 mock 的端点时测试挂死。
+  // 兜底先注册——LIFO 下优先级最低，其它未匹配端点返回空列表。
   await page.route('**/api/**', (route: Route) => {
     void route.fulfill({
       status: 200,
@@ -36,9 +27,25 @@ async function mockApi(page: Page): Promise<void> {
       body: JSON.stringify({ items: [], total: 0, limit: 100, offset: 0, has_more: false }),
     })
   })
+
+  // 精确 mock 后注册——LIFO 下优先级更高；regex 忽略 query string。
+  // /api/metrics 先注册（优先级更低），/api/metrics/latency-percentiles 后注册（更高），
+  // 保证 latency-percentiles 不被 /api/metrics 截断。
+  await routeJson(page, /\/api\/metrics(\?.*)?$/, metricsSnapshot)
+  await routeJson(page, /\/api\/metrics\/latency-percentiles(\?.*)?$/, latencySnapshot)
+  await routeJson(page, /\/api\/portfolio(\?.*)?$/, portfolioSnapshot)
+  await routeJson(page, /\/api\/workers(\?.*)?$/, workersSnapshot)
+  await routeJson(page, /\/api\/ready(\?.*)?$/, readySnapshot)
+  await routeJson(page, /\/api\/runtime(\?.*)?$/, runtimeSnapshot)
+  await routeJson(page, /\/api\/orders(\?.*)?$/, ordersOpen)
+  await routeJson(page, /\/api\/candidates(\?.*)?$/, candidatesList)
 }
 
-async function routeJson(page: Page, pattern: string, payload: unknown): Promise<void> {
+async function routeJson(
+  page: Page,
+  pattern: string | RegExp | ((url: URL) => boolean),
+  payload: unknown,
+): Promise<void> {
   await page.route(pattern, (route: Route) => {
     void route.fulfill({
       status: 200,
@@ -56,14 +63,13 @@ test.describe('盯盘首页 LiveOverview', () => {
     // 标题
     await expect(page.getByText('盯盘总览')).toBeVisible()
 
-    // Portfolio 卡：fixture 里 net_value_usdc = 12345.67，formatUsdc 输出可能含千分位
-    // 不绑死格式细节，断 "12,345" 子串（覆盖 toLocaleString 与裸字符串两种格式）。
-    const portfolioCard = page.locator('text=Portfolio').locator('..')
-    await expect(portfolioCard).toBeVisible()
+    // Portfolio 卡：用 "净值 net_value" 唯一锚点定位，排除侧边栏导航链接歧义。
+    // net_value_usdc = 12345.67，formatUsdc 输出可能含千分位，匹配子串 "12,345" / "12345"。
+    await expect(page.getByText('净值 net_value')).toBeVisible()
     await expect(page.getByText(/12[,.]?345/).first()).toBeVisible()
 
-    // phase 由 Workers SectionCard 的 description 渲染：phase: running
-    await expect(page.getByText(/phase:\s*running/)).toBeVisible()
+    // phase 出现在顶栏徽章和 Workers SectionCard description 两处，取第一个断言即可
+    await expect(page.getByText(/phase:\s*running/).first()).toBeVisible()
 
     // worker 列表至少包含 fixture 中的两个 worker name
     await expect(page.getByText('trading_decision_worker')).toBeVisible()
