@@ -662,7 +662,7 @@ export type LiveSourceGapsPage = Page<LiveSourceGapRow>
 
 // ---------- Analytics ----------
 
-export type FunnelStage = { stage: string; count: number; pct?: number }
+export type FunnelStage = { name: string; count: number }
 
 export type FunnelSnapshot = {
   window_ms: number
@@ -672,28 +672,27 @@ export type FunnelSnapshot = {
 }
 
 export type RejectionBucket = {
-  reason: string
+  key: string
   count: number
-  pct?: number
-  market_type?: string | null
-  league?: string | null
+  pct: number
 }
 
 export type RejectionsSnapshot = {
   window_ms: number
-  end_ms?: number | null
-  rejections: RejectionBucket[]
-  [key: string]: unknown
+  generated_at: Iso
+  total: number
+  top: RejectionBucket[]
+  filters: { league: string | null; market_type: string | null; strategy_id: string | null }
 }
 
 export type ExecutionQualitySnapshot = {
   window_ms: number
-  end_ms?: number | null
-  fill_count?: number
-  avg_slippage_bps?: DecimalStr
-  median_slippage_bps?: DecimalStr
-  per_market_type?: Array<{ market_type: string; fill_count: number; avg_slippage_bps?: DecimalStr }>
-  [key: string]: unknown
+  generated_at: Iso
+  submit_latency_ms: { p50: number | null; p95: number | null }
+  fill_latency_ms: { p50: number | null; p95: number | null }
+  slippage_bps: { mean: number | null; p95: number | null }
+  sample_size: number
+  filters: { league: string | null; market_type: string | null; strategy_id: string | null }
 }
 
 export type EdgeRealizationItem = {

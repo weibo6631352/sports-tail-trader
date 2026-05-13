@@ -22,19 +22,20 @@ export function RejectionsPage() {
   })
 
   const columns: ColumnDef<RejectionBucket, unknown>[] = [
-    { header: 'reason', accessorKey: 'reason' },
+    { header: 'reason', accessorKey: 'key' },
     { header: 'count', accessorKey: 'count' },
     {
       header: 'pct',
-      cell: ({ row }) => (typeof row.original.pct === 'number' ? `${(row.original.pct * 100).toFixed(2)}%` : '—'),
+      cell: ({ row }) => (typeof row.original.pct === 'number' ? `${row.original.pct.toFixed(2)}%` : '—'),
     },
-    { header: 'market_type', accessorKey: 'market_type' },
-    { header: 'league', accessorKey: 'league' },
   ]
 
   return (
     <>
-      <PageHeader title="拒绝原因 Top" subtitle="按 reason 桶聚合；可继续在 league / market_type 切片" />
+      <PageHeader
+        title="拒绝原因 Top"
+        subtitle={query.data ? `共 ${query.data.total} 次拒绝` : '按 reason 桶聚合'}
+      />
       <AnalyticsToolbar loading={query.isFetching} onQuery={() => setSubmitted(params)} />
       {!submitted ? (
         <EmptyState title="点击查询" />
@@ -43,9 +44,9 @@ export function RejectionsPage() {
       ) : (
         <DataTable<RejectionBucket>
           columns={columns}
-          data={query.data?.rejections}
+          data={query.data?.top}
           isLoading={query.isLoading}
-          rowKey={(r, i) => `${r.reason}_${i}`}
+          rowKey={(r, i) => `${r.key}_${i}`}
         />
       )}
     </>

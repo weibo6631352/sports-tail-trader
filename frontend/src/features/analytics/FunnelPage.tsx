@@ -26,12 +26,8 @@ export function FunnelPage() {
   })
 
   const columns: ColumnDef<FunnelStage, unknown>[] = [
-    { header: 'stage', accessorKey: 'stage' },
+    { header: 'stage', accessorKey: 'name' },
     { header: 'count', accessorKey: 'count' },
-    {
-      header: 'pct',
-      cell: ({ row }) => (typeof row.original.pct === 'number' ? `${(row.original.pct * 100).toFixed(2)}%` : '—'),
-    },
   ]
 
   return (
@@ -50,7 +46,7 @@ export function FunnelPage() {
               <ResponsiveContainer>
                 <BarChart data={query.data?.stages ?? []}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#243352" />
-                  <XAxis dataKey="stage" stroke="#97a6c2" tick={{ fontSize: 11 }} />
+                  <XAxis dataKey="name" stroke="#97a6c2" tick={{ fontSize: 11 }} />
                   <YAxis stroke="#97a6c2" tick={{ fontSize: 11 }} />
                   <Tooltip contentStyle={chartTooltipStyle} />
                   <Bar dataKey="count" fill="#5cd9c5" />
@@ -64,7 +60,7 @@ export function FunnelPage() {
               data={query.data?.stages}
               isLoading={query.isLoading}
               error={query.error}
-              rowKey={(r) => r.stage}
+              rowKey={(r) => r.name}
             />
           </SectionCard>
           {query.data?.window_ms ? (

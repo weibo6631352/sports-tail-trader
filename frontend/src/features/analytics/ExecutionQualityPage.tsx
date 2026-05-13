@@ -7,9 +7,18 @@ import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { EmptyState } from '@shared/ui/EmptyState'
 import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
-import { formatBps, formatDecimal } from '@shared/format'
 import { AnalyticsToolbar } from './AnalyticsToolbar'
 import { useAnalyticsParams } from './_useAnalyticsParams'
+
+function fmtMs(v: number | null | undefined): string {
+  if (v == null) return '—'
+  return `${v.toFixed(1)} ms`
+}
+
+function fmtBps(v: number | null | undefined): string {
+  if (v == null) return '—'
+  return `${v.toFixed(2)} bps`
+}
 
 export function ExecutionQualityPage() {
   const params = useAnalyticsParams()
@@ -34,45 +43,43 @@ export function ExecutionQualityPage() {
           <SectionCard title="样本">
             <Stack gap={4}>
               <Text size="xl" fw={700}>
-                {query.data?.fill_count ?? '—'}
+                {query.data?.sample_size ?? '—'}
               </Text>
               <Text size="xs" c="dimmed">
                 成交数
               </Text>
             </Stack>
           </SectionCard>
-          <SectionCard title="平均 slippage">
+          <SectionCard title="Slippage mean">
             <Stack gap={4}>
               <Text size="xl" fw={700}>
-                {formatBps(query.data?.avg_slippage_bps)}
+                {fmtBps(query.data?.slippage_bps?.mean)}
               </Text>
               <Text size="xs" c="dimmed">
-                {formatDecimal(query.data?.avg_slippage_bps, { dp: 2, suffix: ' bps' })}
+                p95: {fmtBps(query.data?.slippage_bps?.p95)}
               </Text>
             </Stack>
           </SectionCard>
-          <SectionCard title="中位数 slippage">
+          <SectionCard title="提交延迟 submit latency">
             <Stack gap={4}>
               <Text size="xl" fw={700}>
-                {formatBps(query.data?.median_slippage_bps)}
+                p50: {fmtMs(query.data?.submit_latency_ms?.p50)}
+              </Text>
+              <Text size="xs" c="dimmed">
+                p95: {fmtMs(query.data?.submit_latency_ms?.p95)}
               </Text>
             </Stack>
           </SectionCard>
-
-          {(query.data?.per_market_type ?? []).length > 0 && (
-            <SectionCard title="按 market_type" style={{ gridColumn: '1 / -1' }}>
-              <Stack gap={4}>
-                {(query.data?.per_market_type ?? []).map((row) => (
-                  <Stack key={row.market_type} gap={2}>
-                    <Text size="sm">{row.market_type}</Text>
-                    <Text size="xs" c="dimmed">
-                      fills={row.fill_count} · avg_slippage={formatBps(row.avg_slippage_bps)}
-                    </Text>
-                  </Stack>
-                ))}
-              </Stack>
-            </SectionCard>
-          )}
+          <SectionCard title="成交延迟 fill latency">
+            <Stack gap={4}>
+              <Text size="xl" fw={700}>
+                p50: {fmtMs(query.data?.fill_latency_ms?.p50)}
+              </Text>
+              <Text size="xs" c="dimmed">
+                p95: {fmtMs(query.data?.fill_latency_ms?.p95)}
+              </Text>
+            </Stack>
+          </SectionCard>
         </SimpleGrid>
       )}
     </>
