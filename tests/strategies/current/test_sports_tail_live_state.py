@@ -614,14 +614,14 @@ def test_current_strategy_reuses_live_game_prefilter_for_same_event(monkeypatch)
         ),
     )
     start_parse_calls = 0
-    original_event_start_time = strategy_module._event_start_time
+    original_event_start_time = live_state_module._event_start_time
 
     def counted_event_start_time(event):
         nonlocal start_parse_calls
         start_parse_calls += 1
         return original_event_start_time(event)
 
-    monkeypatch.setattr(strategy_module, "_event_start_time", counted_event_start_time)
+    monkeypatch.setattr(live_state_module, "_event_start_time", counted_event_start_time)
     monkeypatch.setattr(strategy_module, "build_live_state_match", lambda _market, _games, **_kwargs: None)
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 

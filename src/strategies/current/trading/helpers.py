@@ -1,12 +1,21 @@
-"""通用辅助：从 ExtensionContext.metadata 中读 Decimal / 文本；Fill 金额计算。"""
+"""通用辅助：从 ExtensionContext.metadata 中读 Decimal / 文本；Fill 金额计算；
+决策元数据投影（enrich_decision / build_strategy_summary）。
+"""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
+from typing import Any, Mapping
 
 from polymarket_trader.domain.events import Fill
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.extension_api import ExtensionContext
+from polymarket_trader.extension_api import (
+    DecisionKind,
+    ExtensionContext,
+    ExtensionDecision,
+    StrategySummary,
+)
 
 
 def bid_plus_tick_fallback_ask(
@@ -68,6 +77,71 @@ def fill_notional_usdc(fill: Fill) -> Decimal:
         return fill.price * fill.size
     except Exception:
         return Decimal("0")
+
+
+def decimal_from_metadata(value: object) -> Decimal | None:
+    """metadata 中的价格/金额文本转 Decimal；None 表示缺失或解析失败。"""
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def enrich_decision(decision: ExtensionDecision, *, default_kind: DecisionKind) -> ExtensionDecision:
+    """把策略私有 metadata 投影成 framework 中性的 StrategySummary / decision_kind / intent_tags。
+
+    策略 metadata 仍然透传 audit，但 framework 只读强类型字段。
+    """
+    metadata = dict(decision.metadata or {})
+    is_scale_in = metadata.get("opportunity_type") == "scale_in_advantage"
+    decision_kind = decision.decision_kind if decision.decision_kind is not None else (
+        DecisionKind.SCALE_IN if is_scale_in else default_kind
+    )
+    intent_tags = decision.intent_tags if decision.intent_tags else (
+        frozenset({"scale_in"}) if is_scale_in else frozenset()
+    )
+    summary = decision.summary if decision.summary is not None else _build_strategy_summary(metadata)
+    return replace(decision, decision_kind=decision_kind, intent_tags=intent_tags, summary=summary)
+
+
+def _build_strategy_summary(metadata: Mapping[str, Any]) -> StrategySummary:
+    live_game = (
+        metadata.get("live_game") if isinstance(metadata.get("live_game"), Mapping) else {}
+    )
+    home = live_game.get("home_name") or ""
+    away = live_game.get("away_name") or ""
+    period = live_game.get("period") or ""
+    label_parts = [str(p).strip() for p in (home, "vs" if home and away else "", away, period) if str(p).strip()]
+    label = " ".join(label_parts)
+    return StrategySummary(
+        action=str(metadata.get("tail_action") or ""),
+        reason=str(metadata.get("tail_reason") or ""),
+        label=label,
+        market_type=str(metadata.get("market_type") or ""),
+        side=str(metadata.get("side") or ""),
+        line=decimal_from_metadata(metadata.get("line")),
+        best_ask=decimal_from_metadata(metadata.get("best_ask")),
+        observed_at=None,
+        manual_confirmed=bool(metadata.get("manual_confirmed")),
+        confirmed_by=str(metadata.get("confirmed_by") or ""),
+        confirm_reason=str(metadata.get("confirm_reason") or ""),
+        extras={
+            "league": live_game.get("league"),
+            "home_name": live_game.get("home_name"),
+            "away_name": live_game.get("away_name"),
+            "period": live_game.get("period"),
+            "observed_at": live_game.get("observed_at"),
+            "game_status": metadata.get("game_status") or live_game.get("status"),
+            "total_score": metadata.get("total_score"),
+            "seconds_remaining": metadata.get("seconds_remaining"),
+            "execution_permission": metadata.get("execution_permission"),
+            "market_family": metadata.get("market_family"),
+            "risk_reason": metadata.get("risk_reason"),
+            "exit_plan": metadata.get("exit_plan"),
+        },
+    )
 
 
 def _metadata_decimal(context: ExtensionContext, *keys: str) -> Decimal | None:

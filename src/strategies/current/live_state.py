@@ -1,9 +1,9 @@
 """当前体育扫尾策略的外部直播状态映射。
 
-本模块只处理策略消费的 metadata 形态和 market 文本匹配语义。框架 worker
-只调用这些纯函数，不在运行时层硬编码当前策略阈值或盘口判断。
+本模块只处理体育事件与市场的文本匹配、运动类型识别和候选事件预过滤。
+不包含策略决策逻辑（尾盘条件、入场阈值等由 trading/tail_bypass.py 承担）。
 
-匹配按 ``LiveEvent.kind`` 分支：team_match 走原有 home/away 别名匹配，
+匹配按 ``LiveEvent.kind`` 分支：team_match 走 home/away 别名匹配，
 race 走 leader_driver / top-3 driver / event_name 关键字命中。
 """
 
@@ -726,3 +726,103 @@ def _compact_alias_matches_market(tokens: tuple[str, ...], market_compact: str) 
 
 def _compact_text(value: str) -> str:
     return value.replace(" ", "")
+
+
+# ---------------------------------------------------------------------------
+# 运动类型识别 + 候选直播事件过滤
+# ---------------------------------------------------------------------------
+
+def _normalized_market_text_for_sport(market: Market) -> str:
+    """归一化 market 所有文本字段，用于运动类型关键字匹配。"""
+    return " ".join(
+        re.sub(
+            r"[^a-z0-9]+",
+            " ",
+            " ".join(
+                part
+                for part in (
+                    market.market_question,
+                    market.market_name,
+                    market.market_slug,
+                    market.event_title,
+                    market.event_slug,
+                    market.category,
+                    " ".join(market.tags),
+                    " ".join(outcome.outcome for outcome in market.outcomes),
+                )
+                if part
+            ).lower(),
+        ).split()
+    )
+
+
+def _market_sport_codes(market: Market) -> set[str]:
+    text = _normalized_market_text_for_sport(market)
+    mapping = (
+        ("table-tennis", ("table tennis", "table-tennis", "wtt", "world team championships")),
+        ("baseball", ("mlb", "kbo", "baseball")),
+        ("tennis", ("atp", "wta")),
+        ("basketball", ("nba", "wnba", "ncaamb", "ncaawb", "basketball")),
+        ("ice-hockey", ("nhl", "ahl", "hockey", "ice hockey")),
+        ("american-football", ("nfl", "ncaaf", "american football")),
+        ("football", ("soccer", "football", "mls", "nwsl", "epl")),
+    )
+    return {sport for sport, tokens in mapping if any(f" {token} " in f" {text} " for token in tokens)}
+
+
+def _event_sport_code(event: LiveEvent) -> str | None:
+    sport = str(event.sport or event.source_payload.get("sport") or "").strip().lower()
+    if sport:
+        return _normalize_sport_code(sport)
+    source = str(event.source or "").strip().lower()
+    league = str(event.league or "").strip().lower()
+    text = f"{source} {league}"
+    if "mlb" in text:
+        return "baseball"
+    if "nba" in text or "basketball" in text:
+        return "basketball"
+    if "nhl" in text or "hockey" in text:
+        return "ice-hockey"
+    if "table-tennis" in text or "table tennis" in text or "wtt" in text:
+        return "table-tennis"
+    if "tennis" in text or "atp" in text or "wta" in text:
+        return "tennis"
+    if "football" in text or "soccer" in text:
+        return "football"
+    return None
+
+
+def _normalize_sport_code(value: str) -> str:
+    normalized = value.replace("_", "-").replace(" ", "-")
+    if normalized in {"soccer"}:
+        return "football"
+    if normalized in {"icehockey"}:
+        return "ice-hockey"
+    if normalized in {"tabletennis"}:
+        return "table-tennis"
+    return normalized
+
+
+def _event_start_is_near_market_start(event: LiveEvent, market_start: datetime) -> bool:
+    event_start = _event_start_time(event)
+    if event_start is None:
+        return True
+    tolerance = timedelta(hours=24) if _event_sport_code(event) == "tennis" else timedelta(hours=6)
+    return abs(event_start - market_start) <= tolerance
+
+
+def candidate_live_events_for_market(
+    market: Market,
+    events: tuple[LiveEvent, ...],
+) -> tuple[LiveEvent, ...]:
+    """按运动类型和开赛时间预过滤候选直播事件，减少后续全量文本匹配开销。"""
+    sport_codes = _market_sport_codes(market)
+    market_start = _ensure_utc(market.game_start_time)
+    filtered: list[LiveEvent] = []
+    for event in events:
+        if sport_codes and (event_sport := _event_sport_code(event)) is not None and event_sport not in sport_codes:
+            continue
+        if market_start is not None and not _event_start_is_near_market_start(event, market_start):
+            continue
+        filtered.append(event)
+    return tuple(filtered)

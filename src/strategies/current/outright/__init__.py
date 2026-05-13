@@ -18,6 +18,8 @@ from strategies.current.outright.pricing import (
 )
 from strategies.current.outright.risk import check_outright_entry_risk
 from strategies.current.outright.team_resolver import resolve_market_team
+from strategies.current.outright.sizing import size_outright_entry
+from strategies.current.outright.decide import decide_outright_entry, resolve_outright_reject_label
 
 __all__ = [
     "OutrightAction",
@@ -25,10 +27,13 @@ __all__ = [
     "OutrightFairValue",
     "OutrightRejectReason",
     "check_outright_entry_risk",
+    "decide_outright_entry",
     "evaluate_outright_opportunity",
     "match_season_state",
     "outright_exit_price_target",
     "outright_fair_value",
     "resolve_market_team",
+    "resolve_outright_reject_label",
     "season_odds_from_metadata",
+    "size_outright_entry",
 ]

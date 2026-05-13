@@ -112,6 +112,9 @@ from polymarket_trader.workers.sports_season_state_worker import SportsSeasonSta
 from polymarket_trader.workers.series_state_worker import SeriesStateWorker
 from polymarket_trader.workers.game_odds_worker import GameOddsWorker
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
+from strategies.current.outcomes import describe_sports_market
+from strategies.current.series.classifier import classify_series_sub_type
+from strategies.current.series.types import SeriesSubType
 from polymarket_trader.workers.user_ws import UserWsWorker
 from polymarket_trader.infra.sports.series_state_client import (
     EspnSeriesStateClient,
@@ -413,12 +416,8 @@ def _build_season_odds_worker(
         ),
     )
     def _is_outright(market: Market) -> bool:
-        try:
-            decision = extension.hooks.select_market(market)
-        except Exception:
-            logger.debug("season_odds_worker._is_outright_failed", extra={"condition_id": market.condition_id}, exc_info=True)
-            return False
-        return bool(decision.selected) and decision.metadata.get("market_family") == "outright"
+        descriptor = describe_sports_market(market)
+        return descriptor.accepted and descriptor.market_family.value == "outright"
 
     def _sport_key(market: Market) -> str | None:
         # 简单映射：从 tags / category 推断。NBA/NHL/NFL/MLB 等明确 league 直接转 TheOddsAPI sport_key。
@@ -454,29 +453,12 @@ def _build_season_odds_worker(
     return worker, client
 
 
-def _is_series_winner_market(
-    extension: BusinessExtension,
-    market: Market,
-) -> bool:
-    """通过策略 universe.select_market 判定 market 是否归到 series WINNER 家族。
-
-    series 子类型最终由 classifier 决定；本 helper 只判 family + sub_type==winner。
-    """
-
-    try:
-        decision = extension.hooks.select_market(market)
-    except Exception:
-        logger.debug(
-            "series_state_worker._is_series_failed",
-            extra={"condition_id": market.condition_id},
-            exc_info=True,
-        )
+def _is_series_winner_market(market: Market) -> bool:
+    """market 是否归到 series WINNER 子类型。"""
+    descriptor = describe_sports_market(market)
+    if not descriptor.accepted or descriptor.market_family.value != "series":
         return False
-    if not decision.selected:
-        return False
-    if decision.metadata.get("market_family") != "series":
-        return False
-    return decision.metadata.get("series_sub_type") == "winner"
+    return classify_series_sub_type(market) == SeriesSubType.WINNER
 
 
 def _build_series_state_worker(
@@ -527,7 +509,7 @@ def _build_series_state_worker(
         registry=registry,
         entry_metadata_store=entry_metadata_store,
         sport_key_for=_sport_key,
-        is_series_winner_market=lambda m: _is_series_winner_market(extension, m),
+        is_series_winner_market=_is_series_winner_market,
         series_key_for=_series_key,
         ttl_seconds=settings.sports_series_state_ttl_seconds,
         enabled=True,
@@ -580,7 +562,7 @@ def _build_game_odds_worker(
         registry=registry,
         entry_metadata_store=entry_metadata_store,
         sport_key_for=_sport_key,
-        is_series_winner_market=lambda m: _is_series_winner_market(extension, m),
+        is_series_winner_market=_is_series_winner_market,
         game_key_for=_game_key,
         ttl_seconds=settings.sports_game_odds_ttl_seconds,
         enabled=True,

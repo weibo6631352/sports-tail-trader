@@ -14,6 +14,11 @@
 """
 
 from strategies.current.series.classifier import classify_series_sub_type
+from strategies.current.series.decide import (
+    decide_series_entry,
+    resolve_series_reject_label,
+    resolve_series_sub_type_label,
+)
 from strategies.current.series.evaluator import (
     SeriesEvaluatorInputs,
     evaluate_series_opportunity,
@@ -60,6 +65,11 @@ from strategies.current.series.types import (
     SeriesState,
     SeriesSubType,
 )
+from strategies.current.series.sizing import (
+    SeriesSubTypeSettings,
+    series_subtype_settings,
+    size_series_entry,
+)
 from strategies.current.series.winner_model import (
     series_win_probability,
     team_b_win_probability,
@@ -78,10 +88,12 @@ __all__ = [
     "SeriesState",
     "SeriesSubType",
     "SeriesSubTypeRiskConfig",
+    "SeriesSubTypeSettings",
     "SingleGameProb",
     "TeamSide",
     "check_series_entry_risk",
     "classify_series_sub_type",
+    "decide_series_entry",
     "derive_single_game_prob",
     "evaluate_series_opportunity",
     "game_odds_from_metadata",
@@ -91,11 +103,15 @@ __all__ = [
     "prob_over",
     "prob_under",
     "push_probability",
+    "resolve_series_reject_label",
+    "resolve_series_sub_type_label",
     "resolve_series_team",
     "series_handicap_cover_probability",
     "series_state_from_metadata",
+    "series_subtype_settings",
     "series_win_probability",
     "single_game_cover_probability",
+    "size_series_entry",
     "team_b_win_probability",
     "total_games_distribution",
 ]
