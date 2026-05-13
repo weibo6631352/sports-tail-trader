@@ -7,6 +7,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.account import AccountSnapshot
+from polymarket_trader.observability.metrics import MetricsRegistry
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
 from polymarket_trader.extension_api import ExtensionPorts
@@ -114,6 +115,44 @@ class NullTelemetryPort:
         return None
 
 
+class NullMetricsPort:
+    """``MetricsPort`` 的空实现——测试 / 不接 metrics 注册表时使用。
+
+    与 ``MetricsRegistryMetricsPort`` 接口完全一致；策略代码透明地调用
+    ``ports.metrics.inc_counter(...)``，不必感知 registry 是否绑定。
+    """
+
+    def inc_counter(
+        self,
+        name: str,
+        amount: float = 1.0,
+        *,
+        labels: Mapping[str, object] | None = None,
+    ) -> None:
+        return None
+
+
+class MetricsRegistryMetricsPort:
+    """把 framework ``MetricsRegistry`` 暴露给策略层的 ``MetricsPort``。
+
+    只暴露 ``inc_counter``（同步 O(1) 内存写入），让 P0 决策路径可以在不阻塞
+    主链路的情况下记录命中/拒绝原因。Gauges / Histograms 不开放给策略——保留
+    在 framework 侧避免策略意外引入无界 label。
+    """
+
+    def __init__(self, *, registry: MetricsRegistry) -> None:
+        self._registry = registry
+
+    def inc_counter(
+        self,
+        name: str,
+        amount: float = 1.0,
+        *,
+        labels: Mapping[str, object] | None = None,
+    ) -> None:
+        self._registry.inc_counter(name, amount, labels=labels)
+
+
 class UtcClockPort:
     def now(self) -> datetime:
         return datetime.now(timezone.utc)
@@ -143,8 +182,14 @@ def build_extension_ports(
     orderbook_reader: OrderbookReader | None = None,
     lifecycle_bus: InProcessLifecycleBus | None = None,
     parameter_store: Any | None = None,
+    metrics_registry: MetricsRegistry | None = None,
 ) -> ExtensionPorts:
     market_port = MarketDataPort(registry=registry, orderbook_reader=orderbook_reader)
+    metrics_port = (
+        MetricsRegistryMetricsPort(registry=metrics_registry)
+        if metrics_registry is not None
+        else NullMetricsPort()
+    )
     return ExtensionPorts(
         market=market_port,
         orderbook=market_port,
@@ -155,6 +200,7 @@ def build_extension_ports(
         clock=UtcClockPort(),
         lifecycle=lifecycle_bus,
         parameter=ParameterStorePort(store=parameter_store) if parameter_store is not None else None,
+        metrics=metrics_port,
     )
 
 

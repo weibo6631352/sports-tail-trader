@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from polymarket_trader.app.admin_serialization import page_payload
 from polymarket_trader.app.admin_service_helpers import (
@@ -16,10 +16,31 @@ from polymarket_trader.app.admin_service_helpers import (
 )
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.time_filters import TimeRange
+from polymarket_trader.serialization import jsonable
+
+# 这两段 import 跨 app → strategies 边界（与 ``infra/sports/series_state_client.py``
+# 同模式）：``series_state`` 元数据键的约定属于 series 策略包，admin 诊断必须读到
+# 同一份强类型解析与 team_resolver trace 才能给运维一致的诊断结果，没有 framework
+# 侧的等价物可复用——所以让 admin 直接调策略包的纯函数（无副作用、无状态）。
+from strategies.current.outright.match import season_odds_from_metadata
+from strategies.current.outright.team_resolver import resolve_market_team_debug
+from strategies.current.series.match import series_state_from_metadata
 
 
-class AdminSportsQueryMixin:
-    """体育直播状态相关只读查询。"""
+if TYPE_CHECKING:
+    from polymarket_trader.app.admin_query._protocol import AdminQueryHost as _Base
+else:
+    _Base = object
+
+
+class AdminSportsQueryMixin(_Base):
+    """体育直播状态相关只读查询。
+
+    继承 ``AdminQueryHost`` 仅在 TYPE_CHECKING 模式下生效，让 mypy 看到本 mixin
+    依赖宿主 (AdminService) 提供的 ``runtime`` / ``_entry_metadata_store`` /
+    ``_slice_sequence`` 等 helper；运行时仍由 AdminService 的多重继承装配实际
+    方法，不引入额外间接调用。
+    """
 
     async def list_sports_live_events_history(
         self,
@@ -193,6 +214,109 @@ class AdminSportsQueryMixin:
             }
         )
         return payload
+
+    async def list_series_state_snapshots(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """返回 ``EntryMetadataStore`` 中所有 ``series_state`` 快照。
+
+        线上验证 ``series_state_worker`` 是否在持续刷新比分；如果某场系列赛
+        ``age_seconds`` 长期超出 ``tail_series_winner_max_state_age_seconds``，
+        说明 ESPN 抓取链路出问题，evaluator 会以 ``STALE_SERIES_STATE``/
+        ``MISSING_SERIES_STATE`` 拒绝该市场。
+        """
+
+        store = self._entry_metadata_store()
+        if store is None:
+            page = self._slice_sequence((), limit=limit, offset=offset)
+            payload = page_payload(page, serializer=lambda item: item)
+            payload["total_records"] = 0
+            return payload
+        if now is None:
+            now = datetime.now(timezone.utc)
+        items: list[dict[str, Any]] = []
+        for record in store.records():
+            state = series_state_from_metadata(record.metadata)
+            if state is None:
+                continue
+            age_seconds = max(0.0, (now - state.observed_at).total_seconds())
+            items.append(
+                {
+                    "condition_id": record.condition_id,
+                    "market_slug": record.market_slug,
+                    "event_slug": record.event_slug,
+                    "team_a": state.team_a,
+                    "team_b": state.team_b,
+                    "wins_a": state.wins_a,
+                    "wins_b": state.wins_b,
+                    "best_of": state.best_of,
+                    "next_game_at": jsonable(state.next_game_at),
+                    "observed_at": jsonable(state.observed_at),
+                    "age_seconds": age_seconds,
+                    "source": record.source,
+                    "updated_at": jsonable(record.updated_at),
+                }
+            )
+        # observed_at 最新的排前面：诊断时优先看最新写入的。
+        items.sort(key=lambda item: item["observed_at"] or "", reverse=True)
+        page = self._slice_sequence(tuple(items), limit=limit, offset=offset)
+        payload = page_payload(page, serializer=lambda item: item)
+        payload["total_records"] = len(items)
+        return payload
+
+    async def outright_team_resolution(
+        self,
+        *,
+        condition_id: str | None = None,
+        market_slug: str | None = None,
+    ) -> dict[str, Any] | None:
+        """对指定 outright market 跑 ``resolve_market_team_debug``，返回 trace。
+
+        线上 ``OUTRIGHT_TEAM_NOT_RESOLVED`` 拒绝原因排查入口：admin 调本接口
+        看 normalized_text / candidate_teams / matches，判断是 snapshot 缺该球队
+        还是文本归一化遗漏标点 / 别名。返回 ``None`` 时由路由层翻译成 404。
+        """
+
+        market = self._resolve_market(
+            condition_id=condition_id,
+            market_slug=market_slug,
+        )
+        if market is None:
+            return None
+        metadata = self._entry_metadata_for_market(market)
+        snapshot = season_odds_from_metadata(metadata)
+        if snapshot is None:
+            return {
+                "market": {
+                    "condition_id": market.condition_id,
+                    "market_slug": market.market_slug,
+                    "event_slug": market.event_slug,
+                    "market_question": market.market_question,
+                    "event_title": market.event_title,
+                },
+                "snapshot_available": False,
+                "reason": "missing_season_odds",
+                "trace": None,
+            }
+        trace = resolve_market_team_debug(market, snapshot)
+        return {
+            "market": {
+                "condition_id": market.condition_id,
+                "market_slug": market.market_slug,
+                "event_slug": market.event_slug,
+                "market_question": market.market_question,
+                "event_title": market.event_title,
+            },
+            "snapshot_available": True,
+            "snapshot_market_key": snapshot.market_key,
+            "snapshot_source": snapshot.source,
+            "snapshot_observed_at": jsonable(snapshot.observed_at),
+            "trace": trace.as_payload(),
+        }
 
 
 __all__ = ["AdminSportsQueryMixin"]

@@ -1,6 +1,8 @@
 from polymarket_trader.app.ports.extension_ports import (
     AccountStatePort,
     MarketDataPort,
+    MetricsRegistryMetricsPort,
+    NullMetricsPort,
     NullTelemetryPort,
     OrderHistoryPort,
     RegistryStatePort,
@@ -13,6 +15,8 @@ from polymarket_trader.app.ports.extension_ports import (
 __all__ = [
     "AccountStatePort",
     "MarketDataPort",
+    "MetricsRegistryMetricsPort",
+    "NullMetricsPort",
     "NullTelemetryPort",
     "OrderHistoryPort",
     "RegistryStatePort",

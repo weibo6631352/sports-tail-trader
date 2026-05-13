@@ -51,6 +51,27 @@ class TelemetryPort(Protocol):
     def record_event(self, name: str, *, attributes: Mapping[str, Any] | None = None) -> None: ...
 
 
+class MetricsPort(Protocol):
+    """策略层向 framework MetricsRegistry 同步上报有界 counter 的端口。
+
+    与 ``TelemetryPort`` 的差别：``record_event`` 是审计事件（高维度、长 payload），
+    ``MetricsPort.inc_counter`` 是 O(1) 内存计数（低维度、bounded label 集合）。
+    P0 决策路径用这个上报命中/拒绝原因，主链路只产生 dict 写入开销，不做 IO。
+
+    Label 值必须有界（如 ``sub_type`` ∈ {winner, total_games, ...}、``reason`` 是
+    StrEnum 值）；不可传 condition_id / token_id 这类无界值，会让 metrics registry
+    无限膨胀。
+    """
+
+    def inc_counter(
+        self,
+        name: str,
+        amount: float = 1.0,
+        *,
+        labels: Mapping[str, Any] | None = None,
+    ) -> None: ...
+
+
 class ClockPort(Protocol):
     def now(self) -> datetime: ...
 
@@ -80,3 +101,4 @@ class ExtensionPorts:
     clock: ClockPort | None = None
     lifecycle: LifecycleBus | None = None
     parameter: ParameterPort | None = None
+    metrics: MetricsPort | None = None

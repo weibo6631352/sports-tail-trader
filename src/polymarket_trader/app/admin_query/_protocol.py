@@ -47,6 +47,8 @@ class AdminQueryHost(Protocol):
 
     def _entry_metadata_store(self) -> Any | None: ...
 
+    def _entry_metadata_for_market(self, market: "Market") -> dict[str, Any]: ...
+
     def _slice_sequence(
         self,
         items: "tuple[Any, ...] | list[Any]",

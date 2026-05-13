@@ -14,10 +14,42 @@ TheOddsAPI ``outrights`` 端点返回 ``{球队名: 概率}``；Polymarket 同�
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
 from strategies.current._shared.team_normalize import normalize_team_name
+
+
+@dataclass(frozen=True, slots=True)
+class TeamResolutionTrace:
+    """``resolve_market_team_debug`` 的诊断 trace。
+
+    用于 admin endpoint 让运维快速看到「为什么这个市场被判为 OUTRIGHT_TEAM_NOT_RESOLVED」。
+    不进入 P0 主路径：``resolve_market_team`` 仍走最小开销实现，trace 函数额外
+    构造 metadata 仅在诊断查询时调用。
+    """
+
+    market_question: str
+    event_title: str
+    event_slug: str
+    normalized_text: str
+    candidate_teams: tuple[str, ...]
+    matches: tuple[str, ...]
+    resolved: str | None
+    ambiguous: bool
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "market_question": self.market_question,
+            "event_title": self.event_title,
+            "event_slug": self.event_slug,
+            "normalized_text": self.normalized_text,
+            "candidate_teams": list(self.candidate_teams),
+            "matches": list(self.matches),
+            "resolved": self.resolved,
+            "ambiguous": self.ambiguous,
+        }
 
 
 def resolve_market_team(market: Market, snapshot: SeasonOddsSnapshot) -> str | None:
@@ -81,4 +113,37 @@ def _word_boundary_search(needle: str, haystack: str) -> bool:
     return re.search(pattern, haystack) is not None
 
 
-__all__ = ["resolve_market_team"]
+def resolve_market_team_debug(
+    market: Market, snapshot: SeasonOddsSnapshot
+) -> TeamResolutionTrace:
+    """同 ``resolve_market_team``，但返回完整的解析 trace，仅用于 admin 诊断。
+
+    与生产路径区分：``resolve_market_team`` 只关心命中结果，热路径不构造 trace；
+    本函数在 admin endpoint 单点调用，能力换性能（O(N) 球队遍历无影响）。
+    """
+
+    normalized_text = _candidate_text(market)
+    candidate_teams = tuple(snapshot.fair_probabilities.keys())
+    matches: list[str] = []
+    if normalized_text:
+        for key in candidate_teams:
+            if _team_matches_text(key, normalized_text):
+                matches.append(key)
+    resolved = matches[0] if len(matches) == 1 else None
+    return TeamResolutionTrace(
+        market_question=market.market_question or "",
+        event_title=market.event_title or "",
+        event_slug=market.event_slug or "",
+        normalized_text=normalized_text,
+        candidate_teams=candidate_teams,
+        matches=tuple(matches),
+        resolved=resolved,
+        ambiguous=len(matches) > 1,
+    )
+
+
+__all__ = [
+    "TeamResolutionTrace",
+    "resolve_market_team",
+    "resolve_market_team_debug",
+]

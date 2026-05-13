@@ -79,6 +79,16 @@ from strategies.current.universe import select_market
 logger = logging.getLogger(__name__)
 
 
+# 命中率 / 拒绝原因指标。Worktree 5：把新增拒绝原因纳入有界 metric 维度，让
+# 线上能从 /metrics 端点直接读出 outright / series 的 accepted / rejected 命中率
+# 与 top reason 分布。所有 label 维度都是 StrEnum 值（reason）或 SubType 值
+# （sub_type），不含 condition_id / token_id 之类无界 label，避免 registry 膨胀。
+_METRIC_OUTRIGHT_DECISION = "strategy_outright_decision_total"
+_METRIC_OUTRIGHT_REJECT = "strategy_outright_reject_total"
+_METRIC_SERIES_DECISION = "strategy_series_decision_total"
+_METRIC_SERIES_REJECT = "strategy_series_reject_total"
+
+
 @dataclass(frozen=True, slots=True)
 class _MockTokenView:
     """测试兜底 token view（生产路径 framework 注入真正的 MarketTokenView）。"""
@@ -644,20 +654,61 @@ class CurrentStrategy:
 
         descriptor = describe_sports_market(context.market) if context.market else None
         if descriptor is not None and descriptor.market_family.value == "outright":
-            return _enrich_decision(
+            decision = _enrich_decision(
                 self._decide_outright_entry(context),
                 default_kind=DecisionKind.ENTRY,
             )
+            self._record_outright_decision_metric(decision)
+            return decision
         if descriptor is not None and descriptor.market_family.value == "series":
             # 子类型（WINNER / TOTAL_GAMES / GAME_HANDICAP）全部接通真实定价模型；
             # accepted 路径在 budget 解锁 + AUTO_EXECUTE 下产 BUY，其余路径 SKIP 携带
             # 可审计 reject_reason。
-            return _enrich_decision(
+            decision = _enrich_decision(
                 self._decide_series_entry(context),
                 default_kind=DecisionKind.ENTRY,
             )
+            self._record_series_decision_metric(decision)
+            return decision
         with active_ports_scope(self._ports):
             return _enrich_decision(decide_entry(self._config, context), default_kind=DecisionKind.ENTRY)
+
+    def _record_outright_decision_metric(self, decision: ExtensionDecision) -> None:
+        """同步上报 outright 决策结果到 MetricsRegistry。
+
+        P0 路径：``inc_counter`` 是 RLock 保护的内存 dict 写入（O(1)），无 IO；
+        ``NullMetricsPort`` 场景下整体退化为函数 ret。所有 label 都是 bounded
+        集合（outcome ∈ accepted/rejected，reason 来自 ``OutrightRejectReason``
+        StrEnum 或固定字符串），不会引入 registry 膨胀。
+        """
+
+        metrics = self._ports.metrics
+        if metrics is None:
+            return
+        outcome = "accepted" if decision.action.value == "buy" else "rejected"
+        metrics.inc_counter(_METRIC_OUTRIGHT_DECISION, labels={"outcome": outcome})
+        if outcome == "rejected":
+            reason = _resolve_outright_reject_label(decision)
+            metrics.inc_counter(_METRIC_OUTRIGHT_REJECT, labels={"reason": reason})
+
+    def _record_series_decision_metric(self, decision: ExtensionDecision) -> None:
+        """同步上报 series 决策结果到 MetricsRegistry，按 sub_type 维度分桶。"""
+
+        metrics = self._ports.metrics
+        if metrics is None:
+            return
+        sub_type = _resolve_series_sub_type_label(decision)
+        outcome = "accepted" if decision.action.value == "buy" else "rejected"
+        metrics.inc_counter(
+            _METRIC_SERIES_DECISION,
+            labels={"sub_type": sub_type, "outcome": outcome},
+        )
+        if outcome == "rejected":
+            reason = _resolve_series_reject_label(decision)
+            metrics.inc_counter(
+                _METRIC_SERIES_REJECT,
+                labels={"sub_type": sub_type, "reason": reason},
+            )
 
     def _decide_outright_entry(self, context: ExtensionContext) -> ExtensionDecision:
         """outright 子包驱动的入场决策。
@@ -1310,6 +1361,45 @@ def _decimal_from_metadata(value: object) -> Decimal | None:
         return Decimal(str(value))
     except Exception:
         return None
+
+
+def _resolve_outright_reject_label(decision: ExtensionDecision) -> str:
+    """从 SKIP 决策的 metadata / reason 还原 metric 用的拒绝原因 label。
+
+    优先读 ``outright_reject_reason`` 强类型字段（来自 ``OutrightRejectReason``
+    StrEnum）；缺失时落到 ``decision.reason``。fallback ``unspecified`` 仅在
+    完全没有结构化原因时出现，便于线上 grep "为什么没被分类"。
+    """
+
+    metadata = decision.metadata or {}
+    reason = metadata.get("outright_reject_reason")
+    if isinstance(reason, str) and reason:
+        return reason
+    if decision.reason:
+        return decision.reason
+    return "unspecified"
+
+
+def _resolve_series_sub_type_label(decision: ExtensionDecision) -> str:
+    """从决策 metadata 取 series sub_type；缺失时记 ``unknown``。"""
+
+    metadata = decision.metadata or {}
+    sub_type = metadata.get("series_sub_type")
+    if isinstance(sub_type, str) and sub_type:
+        return sub_type
+    return "unknown"
+
+
+def _resolve_series_reject_label(decision: ExtensionDecision) -> str:
+    """同 _resolve_outright_reject_label，但适配 series 决策的 metadata key。"""
+
+    metadata = decision.metadata or {}
+    reason = metadata.get("series_reject_reason")
+    if isinstance(reason, str) and reason:
+        return reason
+    if decision.reason:
+        return decision.reason
+    return "unspecified"
 
 
 def _series_entry_price(evaluation: SeriesEvaluation, *, fallback: Decimal) -> Decimal:

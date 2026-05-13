@@ -168,3 +168,60 @@
    后 calibration 端点立即可用。
 3. 若 Gamma 撞 rate limit（日志含 `settlement_scanner.gamma_filter_failed`），
    降低 scheduler 频率或减少 `max_markets_per_run`。
+
+## YES/NO 冠军市场 + 系列赛市场异常诊断
+
+症状：
+- 某条 outright 二元市场（如 `Will the Boston Celtics win 2026 NBA?`）一直未生成
+  BUY 决策，`/admin/decisions/dump` 显示 `outright_reject_reason=outright_team_not_resolved`。
+- 系列赛市场（NBA/NHL 季后赛）大量 `series_reject_reason=missing_series_state` 或
+  `stale_series_state`。
+- `/metrics` 中 `strategy_outright_reject_total{reason=...}` /
+  `strategy_series_reject_total{sub_type=...,reason=...}` 某条原因激增。
+
+新增可审计拒绝原因（出现在 ExtensionDecision.metadata + metrics 维度）：
+
+- Outright：
+  - `outright_team_not_resolved`：market 文本里没有 snapshot 球队，或命中歧义
+    （≥ 2 个球队同时被命中）。
+  - `season_odds_incomplete`：snapshot Σp 偏离 [0.95, 1.05]，de-vig 不完整。
+- Series 通用：
+  - `missing_series_state` / `stale_series_state`：``series_state_worker`` 未刷新或
+    距上次刷新过久。
+  - `missing_series_odds` / `stale_series_odds`：单场胜率源（TheOddsAPI）缺失或过期。
+  - `insufficient_edge` / `price_above_fair`：模型 fair 高于 ask 但 edge 未达 min_edge_bps。
+  - `liquidity_below_min`：ask 侧可买深度低于 ``tail_series_*_min_orderbook_depth_usdc``。
+  - `source_conflict`：fusion 多源结论分歧。
+- Series sub-type 专用：
+  - `series_team_not_resolved`：outcome 文本无法映射到 ``SeriesState.team_a/b``。
+  - `series_outcome_not_parsed`：TOTAL_GAMES `Over X.5` / `Under X.5` 或 GAME_HANDICAP
+    `Team -3.5` 文本解析失败。
+  - `missing_game_spreads` / `stale_game_spreads`：GAME_HANDICAP single-game scope 缺
+    单场让分。
+  - `subtype_unclassified`：classifier 命中 SERIES family 但子类型为 OTHER。
+
+诊断步骤：
+
+1. **查命中率分布**：`GET /metrics`，看 `strategy_outright_decision_total{outcome=...}` 与
+   `strategy_series_decision_total{sub_type=...,outcome=...}`；accepted/rejected 比与
+   top reason 决定优先排查哪条链路。
+2. **outright team 解析失败**：`GET /admin/outright/team-resolution?condition_id=<id>`
+   （也可 `?market_slug=<slug>`），返回字段：
+   - ``trace.normalized_text``：拼 market_question + event_title + event_slug 归一后的文本。
+   - ``trace.candidate_teams``：snapshot 中所有候选球队。
+   - ``trace.matches``：命中集合；空 = 0 命中（snapshot 没该球队 / 文本里没球队名），
+     ≥ 2 = 歧义（同一文本里出现多支 snapshot 球队）。
+   - ``trace.resolved``：唯一命中时返回 key，否则 None。
+   - ``snapshot_available=False`` + ``reason=missing_season_odds``：
+     ``sports_season_odds_worker`` 未为该 market 写入 snapshot，先排 worker 健康度。
+3. **series_state 缺失/过期**：`GET /admin/series/state`，返回所有 series_state 快照
+   含 ``age_seconds``。``age_seconds`` 显著大于 ``tail_series_winner_max_state_age_seconds``
+   说明 ``series_state_worker`` 抓取失败（ESPN 端点变动 / 网络层异常）；目标 market 缺失
+   说明 worker 还没匹配上该 market 的 event_slug → 看 worker 日志。
+4. **单场胜率源**：``missing_series_odds`` 表示 ``game_odds_worker`` 未写入或写入了不
+   匹配的球队 → 直接看 ``decision_records`` 的 ``decision_input.metadata.game_odds``。
+5. **调阈值**：edge / liquidity 类原因经验证后用 ``PUT /parameters/strategy/{key}``
+   写 override（同上节）。
+
+注意：admin endpoints 全部只读，不触发 discovery / 订阅 / 交易；调用频率不受
+P0 路径限制。

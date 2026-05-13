@@ -659,6 +659,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         snapshot_provider=account_state_store.snapshot,
         lifecycle_bus=lifecycle_bus,
         parameter_store=parameter_store,
+        metrics_registry=metrics,
     )
     if settings.extension_module is None:
         raise ConfigLoadError(
