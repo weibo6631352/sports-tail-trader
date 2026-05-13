@@ -331,7 +331,7 @@ class TradingService:
                     "retryable": order_result.retryable,
                 }
             )
-        intent_tags = getattr(intent, "intent_tags", None)
+        intent_tags = intent.intent_tags
         if intent_tags:
             payload["intent_tags"] = tuple(sorted(intent_tags))
         self._lifecycle_bus.publish(

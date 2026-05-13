@@ -144,16 +144,16 @@ class TennisGameState:
     def total_games(self) -> int:
         return self.home_total_games + self.away_total_games
 
-    def sets_won_for(self, side: Any) -> int:
-        key = getattr(side, "value", side)
+    def sets_won_for(self, side: str) -> int:
+        key = str(side)
         if key == "home":
             return self.home_sets_won
         if key == "away":
             return self.away_sets_won
         return 0
 
-    def current_set_games_for(self, side: Any) -> int | None:
-        key = getattr(side, "value", side)
+    def current_set_games_for(self, side: str) -> int | None:
+        key = str(side)
         if key == "home":
             return self.home_current_set_games
         if key == "away":

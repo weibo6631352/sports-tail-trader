@@ -915,7 +915,7 @@ class RiskManager:
         if intent.side != OrderSide.BUY:
             return None
         open_exit_orders = _open_sell_orders_for_subject(open_orders, intent)
-        if open_exit_orders and getattr(intent, "allow_open_exit_overlap", False):
+        if open_exit_orders and intent.allow_open_exit_overlap:
             covered_shares = _covered_sell_shares(position, open_exit_orders)
             position_shares = Decimal("0") if position is None else position.shares
             if position is None or position_shares <= Decimal("0") or covered_shares < position_shares:

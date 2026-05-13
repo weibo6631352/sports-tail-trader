@@ -954,9 +954,9 @@ def _plan_allows_position_increase(plan: EntryPlan) -> bool:
     """
 
     intent = plan.intent
-    if intent is None or not getattr(intent, "allow_open_exit_overlap", False):
+    if intent is None or not intent.allow_open_exit_overlap:
         return False
-    tags = getattr(intent, "intent_tags", frozenset()) or frozenset()
+    tags = intent.intent_tags or frozenset()
     return "scale_in" in tags
 
 

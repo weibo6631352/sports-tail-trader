@@ -123,7 +123,7 @@ def serialize_plan_metadata(plan: EntryPlan) -> dict[str, object]:
 
     payload: dict[str, object] = {
         "decision_kind": None if plan.decision_kind is None else plan.decision_kind.value,
-        "intent_tags": tuple(sorted(plan.intent.intent_tags)) if plan.intent is not None and getattr(plan.intent, "intent_tags", None) else (),
+        "intent_tags": tuple(sorted(plan.intent.intent_tags)) if plan.intent is not None else (),
         "strategy_payload": jsonable(plan.metadata or {}),
     }
     if plan.summary is not None:

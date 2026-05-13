@@ -32,7 +32,7 @@ class RawMarketEvent:
             trace_id = uuid4().hex
         object.__setattr__(self, "trace_id", trace_id)
 
-        discovered_at = getattr(self, "discovered_at", None)
+        discovered_at = self.discovered_at
         if not isinstance(discovered_at, datetime):
             discovered_at = _utc_now()
         if discovered_at.tzinfo is None:

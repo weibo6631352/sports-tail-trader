@@ -121,6 +121,7 @@ class CancelOrderIntent:
     market_slug: str | None = None
     idempotency_key: str | None = None
     reason: str = ""
+    intent_tags: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +136,7 @@ class ReplaceOrderIntent:
     market_slug: str | None = None
     idempotency_key: str | None = None
     reason: str = ""
+    intent_tags: frozenset[str] = field(default_factory=frozenset)
 
 
 TradableOrderIntent: TypeAlias = BuyOrderIntent | SellOrderIntent
