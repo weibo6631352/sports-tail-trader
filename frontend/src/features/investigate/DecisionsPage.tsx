@@ -129,14 +129,14 @@ export function DecisionsPage() {
           size="xs"
           placeholder="trace_id"
           value={traceId}
-          onChange={(e) => setTraceId(e.currentTarget.value)}
+          onChange={(e) => { setTraceId(e.currentTarget.value); setPage(1) }}
           w={300}
         />
         <TextInput
           size="xs"
           placeholder="condition_id (0x...)"
           value={conditionId}
-          onChange={(e) => setConditionId(e.currentTarget.value)}
+          onChange={(e) => { setConditionId(e.currentTarget.value); setPage(1) }}
           w={320}
         />
         <Select
@@ -147,7 +147,7 @@ export function DecisionsPage() {
             { value: 'true', label: 'accepted' },
             { value: 'false', label: 'rejected' },
           ]}
-          onChange={(v) => setAccepted((v as 'true' | 'false' | null) ?? '')}
+          onChange={(v) => { setAccepted((v as 'true' | 'false' | null) ?? ''); setPage(1) }}
           clearable
           w={150}
         />

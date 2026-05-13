@@ -15,15 +15,30 @@ const PAGE_SIZE = 100
 export function FillsPage() {
   const [page, setPage] = useState(1)
   const [traceId, setTraceId] = useState('')
+  const [conditionId, setConditionId] = useState('')
 
   const params = useMemo(
-    () => ({ limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE, trace_id: traceId.trim() || undefined }),
-    [page, traceId],
+    () => ({
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+      trace_id: traceId.trim() || undefined,
+      condition_id: conditionId.trim() || undefined,
+    }),
+    [page, traceId, conditionId],
   )
   const query = useQuery({ queryKey: qk.fills.list(params), queryFn: ({ signal }) => fillsApi.list(params, signal) })
 
   const columns: ColumnDef<FillRow, unknown>[] = [
     { header: 'when', cell: ({ row }) => formatIso(row.original.created_at, 'MM-DD HH:mm:ss') },
+    {
+      header: 'condition / token',
+      cell: ({ row }) => (
+        <div>
+          {row.original.condition_id ? <CopyableId value={row.original.condition_id} dense /> : '—'}
+          {row.original.token_id ? <CopyableId value={row.original.token_id} dense /> : null}
+        </div>
+      ),
+    },
     { header: 'order_id', cell: ({ row }) => <CopyableId value={row.original.order_id ?? ''} dense /> },
     { header: 'side', accessorKey: 'side' },
     { header: 'price', cell: ({ row }) => formatDecimal(row.original.price, { dp: 4 }) },
@@ -38,9 +53,22 @@ export function FillsPage() {
 
   return (
     <>
-      <PageHeader title="成交流水 Fills" />
+      <PageHeader title="成交流水 Fills" subtitle="按 trace_id / condition_id 过滤" />
       <Group gap="xs" mb="sm">
-        <TextInput size="xs" placeholder="trace_id" value={traceId} onChange={(e) => setTraceId(e.currentTarget.value)} w={300} />
+        <TextInput
+          size="xs"
+          placeholder="trace_id"
+          value={traceId}
+          onChange={(e) => { setTraceId(e.currentTarget.value); setPage(1) }}
+          w={280}
+        />
+        <TextInput
+          size="xs"
+          placeholder="condition_id (0x...)"
+          value={conditionId}
+          onChange={(e) => { setConditionId(e.currentTarget.value); setPage(1) }}
+          w={280}
+        />
       </Group>
       <DataTable<FillRow>
         columns={columns}

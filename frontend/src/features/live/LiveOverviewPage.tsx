@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { SimpleGrid, Stack, Group, Text } from '@mantine/core'
+import { SimpleGrid, Stack, Group, Text, Anchor } from '@mantine/core'
+import { useNavigate } from 'react-router-dom'
 import { qk } from '@core/api/keys'
 import { healthApi, portfolioApi } from '@core/api/resources'
 import { useRuntimeIdentity } from '@core/identity/useRuntimeIdentity'
@@ -11,6 +12,7 @@ import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
 import { formatUsdc, pnlTone, formatDecimal } from '@shared/format'
 
 export function LiveOverviewPage() {
+  const navigate = useNavigate()
   const ready = useQuery({
     queryKey: qk.ready(),
     queryFn: ({ signal }) => healthApi.ready(signal),
@@ -98,7 +100,12 @@ export function LiveOverviewPage() {
                 v={formatUsdc(portfolio.data?.cash_pnl_usdc)}
                 tone={pnlTone(portfolio.data?.cash_pnl_usdc)}
               />
-              <KV k="持仓数 / 开口数" v={`${portfolio.data?.position_count ?? '—'} / ${portfolio.data?.open_position_count ?? '—'}`} />
+              <Group justify="space-between" gap="xs">
+                <Text size="xs" c="dimmed">持仓数 / 开口数</Text>
+                <Anchor size="sm" fw={500} onClick={() => navigate('/live/positions')} style={{ cursor: 'pointer' }}>
+                  {portfolio.data?.position_count ?? '—'} / {portfolio.data?.open_position_count ?? '—'}
+                </Anchor>
+              </Group>
             </Stack>
           )}
         </SectionCard>
@@ -117,7 +124,7 @@ export function LiveOverviewPage() {
           )}
         </SectionCard>
 
-        <SectionCard title="Workers / 队列" description={runtime.data?.phase ? `phase: ${runtime.data.phase}` : undefined}>
+        <SectionCard title="Workers / 队列" description={runtime.data?.readiness?.phase ?? runtime.data?.phase ? `phase: ${runtime.data?.readiness?.phase ?? runtime.data?.phase}` : undefined}>
           {workers.error ? (
             <QueryErrorNotice error={workers.error} compact />
           ) : (

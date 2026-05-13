@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Group, Select } from '@mantine/core'
+import { Group, Select, TextInput } from '@mantine/core'
 import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { qk } from '@core/api/keys'
@@ -22,6 +22,7 @@ export function MarketsListPage() {
   const [page, setPage] = useState(1)
   const [tradingStatus, setTradingStatus] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<string>('fee_rate_updated_at')
+  const [slugSearch, setSlugSearch] = useState('')
 
   const params = useMemo(
     () => ({
@@ -109,6 +110,18 @@ export function MarketsListPage() {
       : []),
   ]
 
+  const filteredItems = useMemo(() => {
+    const items = query.data?.items ?? []
+    if (!slugSearch.trim()) return items
+    const q = slugSearch.trim().toLowerCase()
+    return items.filter(
+      (m) =>
+        m.market_slug?.toLowerCase().includes(q) ||
+        m.condition_id.toLowerCase().includes(q) ||
+        m.league?.toLowerCase().includes(q),
+    )
+  }, [query.data?.items, slugSearch])
+
   const total = query.data?.total ?? query.data?.items?.length ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -116,12 +129,19 @@ export function MarketsListPage() {
     <>
       <PageHeader title="市场列表" subtitle="按 fee tier / trading status 过滤；点行进入 timeline" />
       <Group gap="xs" mb="sm" wrap="wrap">
+        <TextInput
+          size="xs"
+          placeholder="搜索 market_slug / condition_id / league"
+          value={slugSearch}
+          onChange={(e) => { setSlugSearch(e.currentTarget.value); setPage(1) }}
+          w={280}
+        />
         <Select
           size="xs"
           placeholder="trading_status"
           value={tradingStatus}
           data={['active', 'paused', 'resolved', 'closed', 'archived']}
-          onChange={(v) => setTradingStatus(v)}
+          onChange={(v) => { setTradingStatus(v); setPage(1) }}
           clearable
           w={150}
         />
@@ -142,7 +162,7 @@ export function MarketsListPage() {
       </Group>
       <DataTable<MarketView>
         columns={columns}
-        data={query.data?.items}
+        data={filteredItems}
         isLoading={query.isLoading}
         isFetching={query.isFetching}
         error={query.error}

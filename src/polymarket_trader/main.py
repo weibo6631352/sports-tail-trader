@@ -1069,7 +1069,7 @@ def _register_runtime_workers(runtime: RuntimeComponents) -> None:
     if runtime.game_odds_worker is not None:
         runtime.supervisor.register_worker("sports_game_odds_sync", priority="P2")
     runtime.supervisor.register_worker("persistence", priority="P3")
-    runtime.supervisor.register_worker("audit_retention_purge", priority="P3")
+    runtime.supervisor.register_worker("audit_retention_purge", priority="P3", state=WorkerLifecycleState.RUNNING, detail="scheduler-driven; first run after interval")
 
 
 def _seed_default_metrics(runtime: RuntimeComponents) -> None:

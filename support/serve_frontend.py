@@ -20,6 +20,9 @@ _HOP_BY_HOP_HEADERS = {
     "upgrade",
 }
 
+# 这些路径前缀直接转发到后端（不加 /api 重写）
+_BACKEND_PASSTHROUGH_PREFIXES = ("/stream/",)
+
 
 class FrontendProxyHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -53,9 +56,21 @@ class FrontendProxyHandler(http.server.BaseHTTPRequestHandler):
         )
         sys.stdout.flush()
 
+    def _is_backend_path(self) -> bool:
+        path = parse.urlsplit(self.path).path
+        if path == "/api" or path.startswith("/api/"):
+            return True
+        for prefix in _BACKEND_PASSTHROUGH_PREFIXES:
+            if path == prefix.rstrip("/") or path.startswith(prefix):
+                return True
+        return False
+
     def _dispatch(self) -> None:
-        if self.path == "/api" or self.path.startswith("/api/"):
-            self._proxy_request()
+        if self._is_backend_path():
+            if self._is_sse_request():
+                self._proxy_sse()
+            else:
+                self._proxy_request()
             return
 
         if self.command not in {"GET", "HEAD"}:
@@ -63,6 +78,60 @@ class FrontendProxyHandler(http.server.BaseHTTPRequestHandler):
             return
 
         self._serve_static()
+
+    def _is_sse_request(self) -> bool:
+        accept = self.headers.get("Accept", "")
+        return "text/event-stream" in accept
+
+    def _proxy_sse(self) -> None:
+        """流式代理 SSE 连接——逐块转发，不缓冲响应体。"""
+        target_url = self._backend_target_url()
+        headers = {
+            key: value
+            for key, value in self.headers.items()
+            if key.lower() not in _HOP_BY_HOP_HEADERS and key.lower() != "host"
+        }
+        req = request.Request(target_url, headers=headers, method="GET")
+        try:
+            # timeout=None 允许 SSE 无限长连接
+            response = request.urlopen(req, timeout=None)
+        except error.HTTPError as exc:
+            self._write_proxy_response(
+                status=exc.code,
+                headers=list(exc.headers.items()),
+                body=exc.read(),
+            )
+            return
+        except Exception as exc:
+            payload = f"sse proxy failed: {exc}\n".encode()
+            self.send_response(502)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
+        # 转发响应头，不发 Content-Length（流式）
+        self.send_response(response.status)
+        for key, value in response.headers.items():
+            if key.lower() in _HOP_BY_HOP_HEADERS or key.lower() == "content-length":
+                continue
+            self.send_header(key, value)
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+
+        # 逐行转发 SSE 数据
+        try:
+            while True:
+                line = response.readline()
+                if not line:
+                    break
+                self.wfile.write(line)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            response.close()
 
     def _proxy_request(self) -> None:
         target_url = self._backend_target_url()
@@ -78,13 +147,13 @@ class FrontendProxyHandler(http.server.BaseHTTPRequestHandler):
             with request.urlopen(req, timeout=30) as response:
                 self._write_proxy_response(
                     status=response.status,
-                    headers=response.headers.items(),
+                    headers=list(response.headers.items()),
                     body=response.read() if self.command != "HEAD" else b"",
                 )
         except error.HTTPError as exc:
             self._write_proxy_response(
                 status=exc.code,
-                headers=exc.headers.items(),
+                headers=list(exc.headers.items()),
                 body=exc.read() if self.command != "HEAD" else b"",
             )
         except Exception as exc:  # pragma: no cover - network failure path
@@ -99,6 +168,7 @@ class FrontendProxyHandler(http.server.BaseHTTPRequestHandler):
     def _backend_target_url(self) -> str:
         split_result = parse.urlsplit(self.path)
         api_path = split_result.path
+        # /api/xxx → /xxx；/stream/xxx → /stream/xxx（直通）
         rewritten_path = api_path[4:] if api_path.startswith("/api") else api_path
         if not rewritten_path:
             rewritten_path = "/"
@@ -128,7 +198,7 @@ class FrontendProxyHandler(http.server.BaseHTTPRequestHandler):
         self,
         *,
         status: int,
-        headers: list[tuple[str, str]] | object,
+        headers: list[tuple[str, str]],
         body: bytes,
     ) -> None:
         self.send_response(status)

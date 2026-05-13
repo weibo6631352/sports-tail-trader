@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
+import { Alert, Anchor, Checkbox, Group, Text } from '@mantine/core'
+import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { qk, qkRoots } from '@core/api/keys'
 import { positionsApi } from '@core/api/resources'
@@ -18,7 +20,9 @@ const PAGE_SIZE = 100
 
 export function LivePositionsPage() {
   const client = useQueryClient()
+  const navigate = useNavigate()
   const [page, setPage] = useState(1)
+  const [activeOnly, setActiveOnly] = useState(false)
   const params = { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }
   const query = useQuery({
     queryKey: qk.positions.list(params),
@@ -27,7 +31,15 @@ export function LivePositionsPage() {
 
   const forceExit = useMutation({
     mutationFn: positionsApi.forceExit,
-    onSuccess: () => {
+    onSuccess: (data) => {
+      if (data.status === 'failed') {
+        notifications.show({
+          title: 'force exit 失败',
+          message: data.reason ?? 'market_not_operable',
+          color: 'red',
+        })
+        return
+      }
       notifications.show({ title: 'force exit 已提交', message: '后续以 audit_events 为准', color: 'teal' })
       client.invalidateQueries({ queryKey: qkRoots.positions })
       client.invalidateQueries({ queryKey: qkRoots.orders })
@@ -44,7 +56,16 @@ export function LivePositionsPage() {
         header: 'market / token',
         cell: ({ row }) => (
           <div>
-            <div style={{ fontSize: 12 }}>{row.original.market_slug ?? '—'}</div>
+            <Anchor
+              size="xs"
+              onClick={(e) => {
+                e.stopPropagation()
+                navigate(`/investigate/timeline?condition_id=${encodeURIComponent(row.original.condition_id)}`)
+              }}
+              style={{ cursor: 'pointer', fontSize: 12 }}
+            >
+              {row.original.market_slug ?? row.original.condition_id}
+            </Anchor>
             <CopyableId value={row.original.token_id} dense />
           </div>
         ),
@@ -92,7 +113,7 @@ export function LivePositionsPage() {
       {
         header: '状态',
         cell: ({ row }) => (
-          <StatusPill tone={row.original.redeemable ? 'success' : 'neutral'} size="xs">
+          <StatusPill tone={row.original.redeemable ? 'warning' : 'success'} size="xs">
             {row.original.redeemable ? 'redeemable' : 'open'}
           </StatusPill>
         ),
@@ -101,6 +122,7 @@ export function LivePositionsPage() {
         header: '操作',
         cell: ({ row }) => {
           const p = row.original
+          if (p.redeemable) return <span style={{ color: 'var(--mantine-color-dimmed)', fontSize: 12 }}>待赎回</span>
           return (
             <InlineActionButton
               variant="danger"
@@ -136,17 +158,39 @@ export function LivePositionsPage() {
         },
       },
     ],
-    [forceExit],
+    [forceExit, navigate],
   )
 
-  const totalPages = Math.max(1, Math.ceil((query.data?.total ?? query.data?.items?.length ?? 0) / PAGE_SIZE))
+  const allItems = query.data?.items ?? []
+  const redeemableCount = allItems.filter((p) => p.redeemable).length
+  const displayItems = activeOnly ? allItems.filter((p) => !p.redeemable) : allItems
+  const totalPages = Math.max(1, Math.ceil((query.data?.total ?? allItems.length) / PAGE_SIZE))
 
   return (
     <>
-      <PageHeader title="实时持仓" subtitle="行内 force exit · 二次确认 + operator/reason" />
+      <PageHeader
+        title="实时持仓"
+        subtitle="OPEN = 市场进行中；REDEEMABLE = 市场已结算，代币待赎回（价值可能为 $0）· force exit 需二次确认"
+      />
+      {redeemableCount > 0 && (
+        <Alert color="orange" mb="sm" variant="light">
+          <Text size="sm">
+            <strong>{redeemableCount} 个持仓已结算（REDEEMABLE）</strong>——市场已结束，你持有的代币需要发起赎回交易才能从账户清除。
+            若押注方向错误，赎回金额为 $0；若押注正确，赎回可拿回对应金额。这些不是"亏损中的活跃持仓"，而是等待链上清算的已结算头寸。
+          </Text>
+        </Alert>
+      )}
+      <Group mb="sm">
+        <Checkbox
+          size="xs"
+          label="只看活跃（OPEN）"
+          checked={activeOnly}
+          onChange={(e) => { setActiveOnly(e.currentTarget.checked); setPage(1) }}
+        />
+      </Group>
       <DataTable<PositionRow>
         columns={columns}
-        data={query.data?.items}
+        data={displayItems}
         isLoading={query.isLoading}
         isFetching={query.isFetching}
         error={query.error}

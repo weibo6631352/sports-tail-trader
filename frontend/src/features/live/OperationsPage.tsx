@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, SimpleGrid, Stack, Text, TextInput, Textarea } from '@mantine/core'
+import { Alert, Badge, Button, Group, SimpleGrid, Stack, Text, TextInput, Textarea } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
 import { qk, qkRoots } from '@core/api/keys'
@@ -17,12 +17,19 @@ export function OperationsPage() {
     queryKey: qk.runtime(),
     queryFn: ({ signal }) => healthApi.runtime(signal),
   })
-  const auto = Boolean(runtime.data?.automatic_trading_enabled)
+  const readiness = runtime.data?.readiness
+  const auto = Boolean(readiness?.automatic_trading_enabled)
+  const phase = readiness?.phase ?? runtime.data?.phase
+  const blockingReasons: string[] = readiness?.blocking_reasons ?? []
   const operator = useOperatorStore((s) => s.operator)
 
   const pauseMutation = useMutation({
     mutationFn: operationsApi.pauseTrading,
-    onSuccess: () => {
+    onSuccess: (data) => {
+      if (data.status === 'failed') {
+        notifications.show({ title: '暂停失败', message: data.reason ?? 'unknown', color: 'red' })
+        return
+      }
       notifications.show({ title: '全局已暂停', message: '已写入审计', color: 'yellow' })
       client.invalidateQueries({ queryKey: qkRoots.runtime })
       client.invalidateQueries({ queryKey: qkRoots.ready })
@@ -31,7 +38,11 @@ export function OperationsPage() {
   })
   const resumeMutation = useMutation({
     mutationFn: operationsApi.resumeTrading,
-    onSuccess: () => {
+    onSuccess: (data) => {
+      if (data.status === 'failed') {
+        notifications.show({ title: '恢复失败', message: data.reason ?? 'unknown', color: 'red' })
+        return
+      }
       notifications.show({ title: '全局已恢复', message: '已写入审计', color: 'teal' })
       client.invalidateQueries({ queryKey: qkRoots.runtime })
       client.invalidateQueries({ queryKey: qkRoots.ready })
@@ -63,9 +74,22 @@ export function OperationsPage() {
       <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
         <SectionCard title="全局自动交易开关" description="影响所有市场；按钮按当前状态联动">
           <Stack gap="sm">
-            <Text size="xs" c="dimmed">
-              当前状态：{auto ? '运行中' : '已暂停'}
-            </Text>
+            <Group gap="xs" wrap="wrap">
+              <Text size="xs" c="dimmed">phase:</Text>
+              <Text size="xs" ff="var(--font-mono)">{phase ?? '—'}</Text>
+            </Group>
+            {blockingReasons.length > 0 && (
+              <Alert color="orange" variant="light" p="xs">
+                <Text size="xs" fw={600} mb={4}>阻塞原因（自动交易无法启动）</Text>
+                <Stack gap={2}>
+                  {blockingReasons.map((r) => (
+                    <Badge key={r} color="orange" variant="light" size="xs" ff="var(--font-mono)" style={{ textTransform: 'none' }}>
+                      {r}
+                    </Badge>
+                  ))}
+                </Stack>
+              </Alert>
+            )}
             {auto ? (
               <Button
                 color="yellow"

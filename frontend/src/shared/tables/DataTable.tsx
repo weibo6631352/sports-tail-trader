@@ -48,6 +48,7 @@ export function DataTable<T>({
   rightToolbar,
   density = 'compact',
 }: DataTableProps<T>) {
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table returns new function refs each render; incompatible with React Compiler by design
   const table: Table<T> = useReactTable({
     data: data ?? [],
     columns,

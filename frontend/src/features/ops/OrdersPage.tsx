@@ -76,8 +76,8 @@ export function OrdersPage() {
           checked={openOnly}
           onChange={(e) => setOpenOnly(e.currentTarget.checked)}
         />
-        <TextInput size="xs" placeholder="trace_id" value={traceId} onChange={(e) => setTraceId(e.currentTarget.value)} w={300} />
-        <TextInput size="xs" placeholder="condition_id" value={conditionId} onChange={(e) => setConditionId(e.currentTarget.value)} w={320} />
+        <TextInput size="xs" placeholder="trace_id" value={traceId} onChange={(e) => { setTraceId(e.currentTarget.value); setPage(1) }} w={300} />
+        <TextInput size="xs" placeholder="condition_id" value={conditionId} onChange={(e) => { setConditionId(e.currentTarget.value); setPage(1) }} w={320} />
       </Group>
       <DataTable<OrderRow>
         columns={columns}
