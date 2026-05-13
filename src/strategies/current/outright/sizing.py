@@ -8,10 +8,13 @@ from decimal import Decimal
 from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.extension_api import EntrySizing, ExtensionContext
 
+from polymarket_trader.extension_api import ExtensionPorts
+
 from strategies.current.allocation import AllocationMarketSnapshot, ProbView, kelly_plan
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.outright.match import season_odds_from_metadata
 from strategies.current.outright.pricing import outright_fair_value
+from strategies.current.parameter_overrides import effective_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +22,10 @@ logger = logging.getLogger(__name__)
 def size_outright_entry(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
+    ports: ExtensionPorts | None = None,
 ) -> EntrySizing:
     """用赛季赔率作为真概率（conf=1.0）喂 Kelly 公式；独立预算包络，不占 single_game 资金。"""
-    budget = config.tail_outright_budget_usdc
+    budget = effective_decimal(ports, "tail_outright_budget_usdc", config.tail_outright_budget_usdc)
     if budget <= Decimal("0"):
         return EntrySizing(
             allocation_plan=AllocationPlan(

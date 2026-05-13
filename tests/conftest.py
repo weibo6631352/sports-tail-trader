@@ -2,8 +2,8 @@
 
 包含可选的 PostgreSQL 集成测试 fixture：
 
-    pytest -q          # 默认跳过所有 @pytest.mark.pg 测试
-    pytest -q --pg     # 启用，使用 testcontainers 拉起一次性 Postgres 实例
+    pytest -q           # 默认运行所有测试（含 @pytest.mark.pg）；容器不可用时自动 skip
+    pytest -q --no-pg   # 显式跳过所有 pg 测试（无 Docker/testcontainers 时使用）
 
 会话级 ``pg_session`` fixture 在整轮 pytest 会话内复用同一个容器和 engine；
 每个用例显式 truncate 自己写入的表即可，避免容器反复启动的开销。
@@ -17,22 +17,21 @@ import pytest
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
-        "--pg",
+        "--no-pg",
         action="store_true",
         default=False,
-        help="Enable PostgreSQL integration tests via testcontainers.",
+        help="Skip PostgreSQL integration tests (testcontainers/Docker not available).",
     )
 
 
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    if config.getoption("--pg"):
-        return
-    skip_marker = pytest.mark.skip(reason="pg integration tests disabled (pass --pg to enable)")
-    for item in items:
-        if "pg" in item.keywords:
-            item.add_marker(skip_marker)
+    if config.getoption("--no-pg"):
+        skip_marker = pytest.mark.skip(reason="pg integration tests skipped (--no-pg)")
+        for item in items:
+            if "pg" in item.keywords:
+                item.add_marker(skip_marker)
 
 
 @pytest.fixture(scope="session")

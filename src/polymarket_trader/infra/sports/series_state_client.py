@@ -164,6 +164,8 @@ def _event_matches(event: Mapping[str, Any], norm_target: str) -> bool:
         value = event.get(key)
         if value:
             candidates.append(str(value))
+    # per_team_tokens[i] = set of normalized name tokens for competitor i
+    per_team_tokens: list[set[str]] = []
     competitions = event.get("competitions")
     if isinstance(competitions, Sequence):
         for comp in competitions:
@@ -178,7 +180,31 @@ def _event_matches(event: Mapping[str, Any], norm_target: str) -> bool:
                     value = series.get(series_key_field)
                     if value:
                         candidates.append(str(value))
-    return any(_normalize_match_key(c) == norm_target for c in candidates)
+            for comp_entry in comp.get("competitors") or ():
+                if not isinstance(comp_entry, Mapping):
+                    continue
+                team = comp_entry.get("team")
+                if not isinstance(team, Mapping):
+                    continue
+                tokens: set[str] = set()
+                for field in ("abbreviation", "shortDisplayName", "displayName", "name"):
+                    v = team.get(field)
+                    if v:
+                        tok = _normalize_match_key(str(v))
+                        if tok:
+                            tokens.add(tok)
+                if tokens:
+                    per_team_tokens.append(tokens)
+    if any(_normalize_match_key(c) == norm_target for c in candidates):
+        return True
+    # Polymarket slugs embed team names (e.g. "avalanchevswild") but not ESPN
+    # numeric event IDs.  Fall back: at least one name token from EACH competitor
+    # must appear as a substring in the series_key.
+    if len(per_team_tokens) >= 2 and all(
+        any(t in norm_target for t in tokens) for tokens in per_team_tokens
+    ):
+        return True
+    return False
 
 
 def _series_from_event(

@@ -11,8 +11,11 @@ from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.market import Market
 from polymarket_trader.extension_api import EntrySizing, ExtensionContext
 
+from polymarket_trader.extension_api import ExtensionPorts
+
 from strategies.current.allocation import AllocationMarketSnapshot, ProbView, kelly_plan
 from strategies.current.config import CurrentStrategyConfig
+from strategies.current.parameter_overrides import effective_decimal, effective_int, effective_str_enum
 from strategies.current.series.classifier import classify_series_sub_type
 from strategies.current.series.evaluator import SeriesEvaluatorInputs, evaluate_series_opportunity
 from strategies.current.series.types import SeriesCandidate, SeriesSubType
@@ -41,22 +44,28 @@ class SeriesSubTypeSettings:
 def series_subtype_settings(
     market: Market,
     config: CurrentStrategyConfig,
+    ports: ExtensionPorts | None = None,
 ) -> tuple[SeriesSubType, SeriesSubTypeSettings]:
     """根据 market 的子类型分类返回对应配置包络。
 
     OTHER 子类型也走 winner 配置（evaluator 会直接 SUBTYPE_UNCLASSIFIED 拒绝）。
+    ports 存在时，winner 子类型允许运行时 override（budget/edge/entry_price/depth）。
     """
 
     sub_type = classify_series_sub_type(market)
     if sub_type == SeriesSubType.TOTAL_GAMES:
         return sub_type, SeriesSubTypeSettings(
-            execution_permission=config.tail_series_total_games_execution_permission,
-            min_edge_bps=config.tail_series_total_games_min_edge_bps,
-            max_entry_price=config.tail_series_total_games_max_entry_price,
-            budget_usdc=config.tail_series_total_games_budget_usdc,
+            execution_permission=effective_str_enum(
+                ports, "tail_series_total_games_execution_permission",
+                config.tail_series_total_games_execution_permission,
+                ExecutionPermission,
+            ),
+            min_edge_bps=effective_int(ports, "tail_series_total_games_min_edge_bps", config.tail_series_total_games_min_edge_bps),
+            max_entry_price=effective_decimal(ports, "tail_series_total_games_max_entry_price", config.tail_series_total_games_max_entry_price),
+            budget_usdc=effective_decimal(ports, "tail_series_total_games_budget_usdc", config.tail_series_total_games_budget_usdc),
             max_per_market_usdc=config.tail_series_total_games_max_per_market_usdc,
             max_event_correlation_usdc=config.tail_series_total_games_max_event_correlation_usdc,
-            min_orderbook_depth_usdc=config.tail_series_total_games_min_orderbook_depth_usdc,
+            min_orderbook_depth_usdc=effective_decimal(ports, "tail_series_total_games_min_orderbook_depth_usdc", config.tail_series_total_games_min_orderbook_depth_usdc),
             max_state_age_seconds=config.tail_series_winner_max_state_age_seconds,
             max_game_odds_age_seconds=config.tail_series_winner_max_game_odds_age_seconds,
             max_hold_horizon_days=config.tail_series_total_games_max_hold_horizon_days,
@@ -64,13 +73,17 @@ def series_subtype_settings(
         )
     if sub_type == SeriesSubType.GAME_HANDICAP:
         return sub_type, SeriesSubTypeSettings(
-            execution_permission=config.tail_series_handicap_execution_permission,
-            min_edge_bps=config.tail_series_handicap_min_edge_bps,
-            max_entry_price=config.tail_series_handicap_max_entry_price,
-            budget_usdc=config.tail_series_handicap_budget_usdc,
+            execution_permission=effective_str_enum(
+                ports, "tail_series_handicap_execution_permission",
+                config.tail_series_handicap_execution_permission,
+                ExecutionPermission,
+            ),
+            min_edge_bps=effective_int(ports, "tail_series_handicap_min_edge_bps", config.tail_series_handicap_min_edge_bps),
+            max_entry_price=effective_decimal(ports, "tail_series_handicap_max_entry_price", config.tail_series_handicap_max_entry_price),
+            budget_usdc=effective_decimal(ports, "tail_series_handicap_budget_usdc", config.tail_series_handicap_budget_usdc),
             max_per_market_usdc=config.tail_series_handicap_max_per_market_usdc,
             max_event_correlation_usdc=config.tail_series_handicap_max_event_correlation_usdc,
-            min_orderbook_depth_usdc=config.tail_series_handicap_min_orderbook_depth_usdc,
+            min_orderbook_depth_usdc=effective_decimal(ports, "tail_series_handicap_min_orderbook_depth_usdc", config.tail_series_handicap_min_orderbook_depth_usdc),
             max_state_age_seconds=config.tail_series_winner_max_state_age_seconds,
             max_game_odds_age_seconds=config.tail_series_winner_max_game_odds_age_seconds,
             max_hold_horizon_days=config.tail_series_handicap_max_hold_horizon_days,
@@ -79,13 +92,17 @@ def series_subtype_settings(
     # WINNER 与 OTHER 共用 winner 配置；OTHER 在 evaluator 立即 SUBTYPE_UNCLASSIFIED 拒绝。
     effective_sub_type = SeriesSubType.WINNER if sub_type == SeriesSubType.OTHER else sub_type
     return effective_sub_type, SeriesSubTypeSettings(
-        execution_permission=config.tail_series_winner_execution_permission,
-        min_edge_bps=config.tail_series_winner_min_edge_bps,
-        max_entry_price=config.tail_series_winner_max_entry_price,
-        budget_usdc=config.tail_series_winner_budget_usdc,
+        execution_permission=effective_str_enum(
+            ports, "tail_series_winner_execution_permission",
+            config.tail_series_winner_execution_permission,
+            ExecutionPermission,
+        ),
+        min_edge_bps=effective_int(ports, "tail_series_winner_min_edge_bps", config.tail_series_winner_min_edge_bps),
+        max_entry_price=effective_decimal(ports, "tail_series_winner_max_entry_price", config.tail_series_winner_max_entry_price),
+        budget_usdc=effective_decimal(ports, "tail_series_winner_budget_usdc", config.tail_series_winner_budget_usdc),
         max_per_market_usdc=config.tail_series_winner_max_per_market_usdc,
         max_event_correlation_usdc=config.tail_series_winner_max_event_correlation_usdc,
-        min_orderbook_depth_usdc=config.tail_series_winner_min_orderbook_depth_usdc,
+        min_orderbook_depth_usdc=effective_decimal(ports, "tail_series_winner_min_orderbook_depth_usdc", config.tail_series_winner_min_orderbook_depth_usdc),
         max_state_age_seconds=config.tail_series_winner_max_state_age_seconds,
         max_game_odds_age_seconds=config.tail_series_winner_max_game_odds_age_seconds,
         max_hold_horizon_days=config.tail_series_winner_max_hold_horizon_days,
@@ -96,6 +113,7 @@ def series_subtype_settings(
 def size_series_entry(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
+    ports: ExtensionPorts | None = None,
 ) -> EntrySizing:
     """Series Kelly sizing：evaluator 已算好的 fair_value 直接喂 Kelly（conf=1.0）。"""
     market = context.market
@@ -109,8 +127,9 @@ def size_series_entry(
             reason="series_missing_market",
         )
 
-    sub_type, settings = series_subtype_settings(market, config)
+    sub_type, settings = series_subtype_settings(market, config, ports=ports)
     budget = settings.budget_usdc
+    _series_meta: dict[str, str] = {"market_family": "series", "series_sub_type": sub_type.value}
     if budget <= Decimal("0"):
         return EntrySizing(
             allocation_plan=AllocationPlan(
@@ -119,6 +138,7 @@ def size_series_entry(
                 reason=f"series_{sub_type.value}_budget_zero",
             ),
             reason=f"series_{sub_type.value}_budget_zero",
+            metadata=_series_meta,
         )
 
     kelly_fraction = context.kelly_fraction
@@ -138,6 +158,7 @@ def size_series_entry(
             ),
             reason="series_sizing_no_kelly_params",
             metadata={
+                "market_family": "series",
                 "series_budget_usdc": str(budget),
                 "series_sub_type": sub_type.value,
                 "kelly_path": "not_applied",

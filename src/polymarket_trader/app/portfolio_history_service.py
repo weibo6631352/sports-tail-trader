@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Awaitable, Callable
 
-from polymarket_trader.infra.db import AccountHistoryPoint
+from polymarket_trader.domain.account import AccountHistoryPoint
 
 
 # 默认窗口 7d、采样 60s——和 60s 后台 snapshot job 对齐。

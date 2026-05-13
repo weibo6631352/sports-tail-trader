@@ -143,6 +143,9 @@ class _RecordingEventBus:
     def __init__(self) -> None:
         self.published: list[tuple[Any, Any]] = []
 
+    def publish_nowait(self, priority: Any, event: Any) -> None:
+        self.published.append((priority, event))
+
     async def publish(self, priority: Any, event: Any) -> None:
         self.published.append((priority, event))
 

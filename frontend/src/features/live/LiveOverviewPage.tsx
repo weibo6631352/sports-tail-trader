@@ -53,25 +53,25 @@ export function LiveOverviewPage() {
             <QueryErrorNotice error={ready.error} compact />
           ) : (
             <Stack gap={6}>
-              <Row label="ready" tone={ready.data?.ready ? 'success' : 'danger'} value={String(ready.data?.ready ?? '—')} />
+              <Row label="ready" tone={ready.data?.ready_to_trade ? 'success' : 'danger'} value={String(ready.data?.ready_to_trade ?? '—')} />
               <Row
                 label="market_ws"
-                tone={ready.data?.market_ws_connected ? 'success' : 'warning'}
-                value={String(ready.data?.market_ws_connected ?? '—')}
+                tone={runtime.data?.readiness?.market_ws_connected ? 'success' : 'warning'}
+                value={String(runtime.data?.readiness?.market_ws_connected ?? '—')}
               />
               <Row
                 label="user_ws"
-                tone={ready.data?.user_ws_connected ? 'success' : 'warning'}
-                value={String(ready.data?.user_ws_connected ?? '—')}
+                tone={(runtime.data?.readiness?.user_ws_connected ?? ready.data?.runtime?.user_ws_connected) ? 'success' : 'warning'}
+                value={String(runtime.data?.readiness?.user_ws_connected ?? ready.data?.runtime?.user_ws_connected ?? '—')}
               />
               <Row
                 label="trading_client"
-                tone={ready.data?.trading_client_ready ? 'success' : 'warning'}
-                value={String(ready.data?.trading_client_ready ?? '—')}
+                tone={runtime.data?.readiness?.trading_client_ready ? 'success' : 'warning'}
+                value={String(runtime.data?.readiness?.trading_client_ready ?? '—')}
               />
-              {ready.data?.blocked_on ? (
+              {(ready.data?.blocking_reasons ?? []).length > 0 ? (
                 <Text size="xs" c="dimmed">
-                  blocked_on: <code>{ready.data.blocked_on}</code>
+                  blocked: <code>{(ready.data!.blocking_reasons as string[]).join(', ')}</code>
                 </Text>
               ) : null}
             </Stack>
@@ -85,7 +85,7 @@ export function LiveOverviewPage() {
             <Stack gap={6}>
               <KV
                 k="净值 net_value"
-                v={formatUsdc(portfolio.data?.net_value_usdc ?? portfolio.data?.equity_usdc)}
+                v={formatUsdc(portfolio.data?.net_value_usdc)}
               />
               <KV k="名义敞口 notional" v={formatUsdc(portfolio.data?.notional_usdc)} />
               <KV
@@ -103,16 +103,16 @@ export function LiveOverviewPage() {
           )}
         </SectionCard>
 
-        <SectionCard title="决策计数">
-          {metrics.error ? (
-            <QueryErrorNotice error={metrics.error} compact />
+        <SectionCard title="账户计数">
+          {portfolio.error ? (
+            <QueryErrorNotice error={portfolio.error} compact />
           ) : (
             <Stack gap={6}>
-              <KV k="decisions_total" v={String(metrics.data?.decisions_total ?? '—')} />
-              <KV k="accepted" v={String(metrics.data?.decisions_accepted ?? '—')} tone="pos" />
-              <KV k="rejected" v={String(metrics.data?.decisions_rejected ?? '—')} tone="neutral" />
-              <KV k="orders_acked" v={String(metrics.data?.orders_acked ?? '—')} />
-              <KV k="fills_total" v={String(metrics.data?.fills_total ?? '—')} />
+              <KV k="成交 fill_count" v={String(portfolio.data?.fill_count ?? '—')} />
+              <KV k="持仓 position_count" v={String(portfolio.data?.position_count ?? '—')} />
+              <KV k="挂单 open_orders" v={String(portfolio.data?.open_order_count ?? '—')} />
+              <KV k="追踪市场 markets" v={String(portfolio.data?.markets_tracked ?? '—')} />
+              <KV k="暂停市场 pauses" v={String(portfolio.data?.pause_count ?? '—')} />
             </Stack>
           )}
         </SectionCard>
@@ -174,11 +174,14 @@ export function LiveOverviewPage() {
         </SectionCard>
 
         <SectionCard title="SSE / 订阅">
-          <Stack gap={4}>
-            <KV k="active subscribers" v={String(metrics.data?.sse_active_subscribers ?? '—')} />
-            <KV k="dropped events" v={String(metrics.data?.sse_dropped_events_total ?? '—')} />
-            <KV k="subscriber cap" v={String(metrics.data?.sse_subscriber_cap ?? '—')} />
-          </Stack>
+          {metrics.error ? (
+            <QueryErrorNotice error={metrics.error} compact />
+          ) : (
+            <Stack gap={4}>
+              <KV k="active subscribers" v={String(metrics.data?.sse_active_subscribers ?? '—')} />
+              <KV k="dropped events" v={String(metrics.data?.sse_dropped_events_total ?? '—')} />
+            </Stack>
+          )}
         </SectionCard>
 
         {/* 策略私有 widgets——通用壳让 strategies.current 自己说话。 */}

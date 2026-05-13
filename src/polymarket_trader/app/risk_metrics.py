@@ -17,7 +17,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Sequence
 
-from polymarket_trader.infra.db import AccountHistoryPoint
+from polymarket_trader.domain.account import AccountHistoryPoint
 from polymarket_trader.app.portfolio_history_service import compute_max_drawdown
 
 

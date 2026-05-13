@@ -268,7 +268,7 @@ class AdminControlsMixin:
         if event_bus is None:
             return {"status": "failed", "reason": "event_bus_unavailable"}
         trace_id = uuid4().hex
-        await event_bus.publish(
+        event_bus.publish_nowait(
             OutboxPriority.P3,
             DomainEvent(
                 trace_id=trace_id,
@@ -323,7 +323,7 @@ class AdminControlsMixin:
         trace_id = trace_id or uuid4().hex
         event_bus = getattr(self.runtime, "event_bus", None)
         if event_bus is not None:
-            await event_bus.publish(
+            event_bus.publish_nowait(
                 OutboxPriority.P1,
                 DomainEvent(
                     trace_id=trace_id,
@@ -372,7 +372,7 @@ class AdminControlsMixin:
         trace_id = trace_id or uuid4().hex
         event_bus = getattr(self.runtime, "event_bus", None)
         if event_bus is not None:
-            await event_bus.publish(
+            event_bus.publish_nowait(
                 OutboxPriority.P1,
                 DomainEvent(
                     trace_id=trace_id,
@@ -458,7 +458,7 @@ class AdminControlsMixin:
             OrderResultStatus.FAILED,
             OrderResultStatus.REJECTED,
         }
-        await self._publish_order_action_audit(
+        self._publish_order_action_audit(
             event_type_pre="ORDER_CANCEL_REQUESTED",
             event_type_post="ORDER_CANCELLED",
             trace_id=trace_id,
@@ -476,7 +476,7 @@ class AdminControlsMixin:
             "review": self._serializer().review(review),
         }
 
-    async def _publish_order_action_audit(
+    def _publish_order_action_audit(
         self,
         *,
         event_type_pre: str,
@@ -518,7 +518,7 @@ class AdminControlsMixin:
             pre_payload["old_size_shares"] = str(old_size_shares)
         if new_size_shares is not None:
             pre_payload["new_size_shares"] = str(new_size_shares)
-        await event_bus.publish(
+        event_bus.publish_nowait(
             OutboxPriority.P1,
             DomainEvent(
                 trace_id=trace_id,
@@ -535,7 +535,7 @@ class AdminControlsMixin:
             return
         post_payload = dict(pre_payload)
         post_payload["result_status"] = order_result.status.value if order_result.status else ""
-        await event_bus.publish(
+        event_bus.publish_nowait(
             OutboxPriority.P1,
             DomainEvent(
                 trace_id=trace_id,
@@ -730,6 +730,54 @@ class AdminControlsMixin:
             "status": "ok",
             "operator": operator,
             "condition_id": condition_id,
+        }
+
+    async def bulk_cancel_orders(
+        self,
+        *,
+        order_ids: Sequence[str],
+        operator: str = "manual",
+        reason: str = "admin_bulk_cancel",
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """批量撤单：对列表里每个 order_id 依次调用 cancel_order。
+
+        每笔撤单独立走 TradingService → OrderExecutor，有独立 trace_id。
+        失败不影响后续条目——全量跑完后返回汇总结果。
+        上限 20 单，防止一次 admin 操作占用交易服务过久。
+        """
+
+        results = []
+        succeeded = 0
+        failed = 0
+
+        for oid in order_ids[:20]:
+            item_trace = uuid4().hex
+            result = await self.cancel_order(
+                order_id=oid,
+                operator=operator,
+                reason=reason,
+                trace_id=item_trace,
+            )
+            status = result.get("status", "failed")
+            if status == "ok":
+                succeeded += 1
+            else:
+                failed += 1
+            results.append({
+                "order_id": oid,
+                "trace_id": item_trace,
+                "status": status,
+                "reason": result.get("reason", ""),
+            })
+
+        return {
+            "submitted": len(results),
+            "succeeded": succeeded,
+            "failed": failed,
+            "operator": operator,
+            "parent_trace_id": trace_id,
+            "results": results,
         }
 
 

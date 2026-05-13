@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 import re
 
 from polymarket_trader.domain.market import Market
@@ -66,6 +67,7 @@ def tail_token_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
     return describe_sports_market(market).targets
 
 
+@lru_cache(maxsize=2048)
 def describe_sports_market(market: Market) -> SportsMarketDescriptor:
     """从 market 文本和 outcomes 中解析体育盘口类型、盘口线和方向。"""
 

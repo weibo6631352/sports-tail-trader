@@ -157,9 +157,7 @@ def _allocation_skip_reason(
     if not snapshot.risk_allowed:
         return "risk_limit_reached"
 
-    best_ask = snapshot.best_ask if snapshot.best_ask is not None else (
-        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
-    )
+    best_ask = snapshot.effective_best_ask
     locked_outcome_signal = _tail_locked_outcome_signal(context)
     price_cap = _tail_price_cap(
         config,
@@ -169,12 +167,10 @@ def _allocation_skip_reason(
     )
     if best_ask is None:
         return "missing_best_ask"
-    if best_ask is not None and best_ask > price_cap:
+    if best_ask > price_cap:
         return "price_above_entry_max"
 
-    spread = snapshot.spread if snapshot.spread is not None else (
-        snapshot.orderbook.spread if snapshot.orderbook is not None else None
-    )
+    spread = snapshot.effective_spread
     if (
         config.max_spread is not None
         and spread is not None

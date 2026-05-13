@@ -8,6 +8,19 @@ from polymarket_trader.app.admin_service import AdminService
 router = APIRouter(prefix="/outbox", tags=["outbox"])
 
 
+@router.get("/queue-depth")
+async def get_queue_depth(
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """事件队列积压深度（纯内存，零 DB，零 P0 影响）。
+
+    返回 trading / maintenance / persistence 三条 lane 的实时队列深度与容量。
+    持久化 lane 积压过高说明 DB 写入出现瓶颈。
+    """
+
+    return service.outbox_queue_depth()
+
+
 @router.get("/pending")
 async def list_outbox_pending(
     limit: int = Query(default=100, ge=1, le=500),

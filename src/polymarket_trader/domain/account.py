@@ -90,6 +90,14 @@ class MarketPause:
 
 
 @dataclass(frozen=True, slots=True)
+class AccountHistoryPoint:
+    """账户净值时间序列的一个采样点（查询结果 DTO）。"""
+
+    recorded_at: datetime
+    net_value_usdc: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class AccountSnapshot:
     balance_usdc: Decimal = Decimal("0")
     allowance_usdc: Decimal = Decimal("0")

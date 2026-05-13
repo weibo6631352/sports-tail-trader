@@ -82,3 +82,20 @@ def effective_decimal(ports: ExtensionPorts | None, key: str, default: Decimal) 
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return default
+
+
+def effective_str_enum(
+    ports: ExtensionPorts | None,
+    key: str,
+    default: Any,
+    enum_type: type,
+) -> Any:
+    """StrEnum override；value 必须是枚举成员字符串，否则退回 default。"""
+
+    value = _resolve(ports, key, default)
+    if value is None:
+        return default
+    try:
+        return enum_type(str(value))
+    except ValueError:
+        return default

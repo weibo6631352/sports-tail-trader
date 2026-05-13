@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from polymarket_trader.extension_api import DecisionKind, ExtensionContext, ExtensionDecision, MarketTokenView
+from polymarket_trader.extension_api import DecisionKind, ExtensionContext, ExtensionDecision, ExtensionPorts, MarketTokenView
 
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.series.evaluator import SeriesEvaluatorInputs, evaluate_series_opportunity
@@ -18,6 +18,7 @@ from strategies.current.trading.helpers import decimal_from_metadata
 def decide_series_entry(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
+    ports: ExtensionPorts | None = None,
 ) -> ExtensionDecision:
     """按 sub_type 选取风控 + 定价配置；accepted 路径走 Kelly 分配 + risk 前置 → BUY。"""
     market = context.market
@@ -36,7 +37,7 @@ def decide_series_entry(
             for o in outcomes
         )
 
-    sub_type, settings = series_subtype_settings(market, config)
+    sub_type, settings = series_subtype_settings(market, config, ports=ports)
     permission = settings.execution_permission
     budget_unlocked = settings.budget_usdc > Decimal("0")
     auto_enabled = budget_unlocked and permission.value == "auto_execute"

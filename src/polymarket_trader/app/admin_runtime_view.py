@@ -138,6 +138,8 @@ class AdminRuntimeView:
             "queue_depths": supervisor.get("queue_depths"),
             "metrics": supervisor.get("metrics"),
             "sports_live_sync": self._sports_live_sync_snapshot(),
+            "sse_active_subscribers": supervisor.get("sse_active_subscribers", 0),
+            "sse_dropped_events_total": supervisor.get("sse_dropped_events_total", 0),
         }
 
     def _supervisor_snapshot(self) -> dict[str, Any]:

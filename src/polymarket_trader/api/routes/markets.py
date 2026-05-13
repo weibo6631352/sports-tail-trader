@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -262,6 +263,56 @@ async def list_market_settlements(
         condition_id=condition_id,
         time_range=build_time_range(since=since, until=until),
     )
+
+
+@router.get("/liquidity")
+async def get_market_liquidity(
+    token_id: str = Query(min_length=1),
+    condition_id: str | None = Query(default=None),
+    market_slug: str | None = Query(default=None),
+    depth_ticks: int = Query(default=5, ge=1, le=20),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """盘口流动性快照（纯 WS 热缓存，零 DB，零 P0 影响）。
+
+    返回：VWAP 中间价、有效买卖价差（bps）、bid/ask 各档累计深度、
+    盘口快照新鲜度（snapshot_age_ms）。
+    """
+
+    payload = service.get_market_liquidity(
+        token_id=token_id,
+        condition_id=condition_id,
+        market_slug=market_slug,
+        depth_ticks=depth_ticks,
+    )
+    if payload is None:
+        raise HTTPException(status_code=503, detail="orderbook_snapshot_unavailable")
+    return payload
+
+
+@router.get("/impact")
+async def get_market_impact(
+    token_id: str = Query(min_length=1),
+    size_usdc: float = Query(gt=0, le=100_000, description="目标买入 USDC 金额"),
+    condition_id: str | None = Query(default=None),
+    market_slug: str | None = Query(default=None),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """下单前冲击成本估算（纯 WS 热缓存，零 DB，零 P0 影响）。
+
+    给定目标买入 USDC，逐档遍历 ask 侧，估算预计成交均价、预计份额、
+    价格冲击（bps）、可填满比例。下单前快速判断流动性是否充足。
+    """
+
+    payload = service.get_market_impact(
+        token_id=token_id,
+        size_usdc=Decimal(str(size_usdc)),
+        condition_id=condition_id,
+        market_slug=market_slug,
+    )
+    if payload is None:
+        raise HTTPException(status_code=503, detail="orderbook_snapshot_unavailable")
+    return payload
 
 
 @router.post("/settle")

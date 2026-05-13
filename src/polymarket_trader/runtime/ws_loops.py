@@ -19,12 +19,16 @@ _MARKET_WS_TAIL_WINDOW_SECONDS = 3600.0
 # sports_live_state（SofaScore/ESPN 不覆盖 ATP Challenger/ITF/WTA125 等冷门赛事，
 # 也常被 Cloudflare 屏蔽）。窗口比 _MARKET_WS_TAIL_WINDOW_SECONDS 宽——这里只是
 # 决定"是否值得订阅 WS"，进入入场判定后还会被策略层进一步过滤（tail_window 等）。
-# 48h 覆盖周末和今晚比赛，足够 200 订阅上限的优先级排序生效。
-_MARKET_WS_POLY_ACTIVE_WINDOW_SECONDS = 172800.0  # 48h
+# 21 天覆盖 NHL/NBA 季后赛系列赛（通常 1-3 周）和冠军赛单场；200 订阅上限按
+# end_date 升序截断，确保最近到期市场优先拿到盘口流。
+_MARKET_WS_POLY_ACTIVE_WINDOW_SECONDS = 1_814_400.0  # 21 天：覆盖系列赛 / 季后赛（通常 1-3 周）
 # 订阅数上限：避免 polymarket WS 限流 / 队列爆炸。Sports tail 模式实际同时
 # 关注的 live market 通常 <50；200 留充裕余量但有硬护栏。超出时按 end_date 升序
 # 截断（最快结束的优先订阅）。
 _MARKET_WS_MAX_SUBSCRIPTIONS = 200
+# stream task 已启动后容忍订阅集的小幅变化，避免持续 cancel/reconnect。
+# 只有 added+removed > 此阈值才重建连接；新增 token 会在下次 reconnect 时补充。
+_MARKET_WS_RESUBSCRIBE_THRESHOLD = 10
 
 
 def _offer_to_ws_queue(
@@ -450,7 +454,16 @@ async def run_market_ws(runtime: Any) -> None:
             if loop.time() >= next_subscription_refresh_at:
                 next_subscription_refresh_at = loop.time() + _SUBSCRIPTION_REFRESH_SECONDS
                 desired_token_ids = market_ws_subscription_token_ids(runtime)
-                if desired_token_ids != subscribed_token_ids:
+                # 已有运行中 stream task 时，只有变化量超过阈值才重建连接，避免
+                # market_discovery 持续发现新市场导致握手永远无法完成。
+                subscribed_set = set(subscribed_token_ids)
+                desired_set = set(desired_token_ids)
+                delta = len(desired_set.symmetric_difference(subscribed_set))
+                needs_reconnect = (
+                    desired_token_ids != subscribed_token_ids
+                    and (stream_task is None or delta > _MARKET_WS_RESUBSCRIBE_THRESHOLD)
+                )
+                if needs_reconnect:
                     await _cancel_task(stream_task)
                     stream_task = None
                     subscribed_token_ids = ()
@@ -458,6 +471,10 @@ async def run_market_ws(runtime: Any) -> None:
                     if desired_token_ids:
                         runtime.market_ws_worker.build_subscription_request(desired_token_ids)
                         await runtime.market_ws_worker.refresh_rest_snapshots(desired_token_ids)
+                        # REST 预取可能耗时（并发 20 路仍需若干秒）。完成后重置定时器，
+                        # 避免耗时结束时 next_subscription_refresh_at 已过期、下一轮循环
+                        # 立即重建连接（stream_task 刚建好即被 cancel）。
+                        next_subscription_refresh_at = loop.time() + _SUBSCRIPTION_REFRESH_SECONDS
                         stream_task = asyncio.create_task(
                             stream_market_ws_messages(runtime, desired_token_ids, queue),
                             name="trader:market-ws-stream",

@@ -1,12 +1,12 @@
 """通用辅助：从 ExtensionContext.metadata 中读 Decimal / 文本；Fill 金额计算；
-决策元数据投影（enrich_decision / build_strategy_summary）。
+决策元数据投影（enrich_decision / build_strategy_summary）；tick_size 解析。
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from polymarket_trader.domain.events import Fill
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
@@ -16,6 +16,25 @@ from polymarket_trader.extension_api import (
     ExtensionDecision,
     StrategySummary,
 )
+
+if TYPE_CHECKING:
+    from polymarket_trader.domain.market import Market
+
+# Polymarket 标准最小 tick；仅在 orderbook 和 market 均未报告 tick_size 时兜底。
+_TICK_SIZE_FALLBACK = Decimal("0.01")
+
+
+def resolve_tick_size(
+    orderbook: OrderbookSnapshot | None,
+    market: "Market | None" = None,
+) -> Decimal:
+    """优先取 orderbook.tick_size，次取 market.tick_size，最後兜底 0.01。"""
+
+    if orderbook is not None and orderbook.tick_size is not None and orderbook.tick_size > Decimal("0"):
+        return orderbook.tick_size
+    if market is not None and market.tick_size is not None and market.tick_size > Decimal("0"):
+        return market.tick_size
+    return _TICK_SIZE_FALLBACK
 
 
 def bid_plus_tick_fallback_ask(

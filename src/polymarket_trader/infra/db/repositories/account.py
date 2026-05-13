@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Iterable, Sequence
@@ -8,24 +7,12 @@ from typing import Any, Iterable, Sequence
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from polymarket_trader.domain.account import AccountSnapshot
+from polymarket_trader.domain.account import AccountHistoryPoint, AccountSnapshot
 from polymarket_trader.infra.db.models import AccountSnapshotModel, _decimal, _ensure_aware
 from polymarket_trader.infra.db.repositories._base import (
     BaseRepository,
     _row_dict,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class AccountHistoryPoint:
-    """聚合后的账户净值时间序列点。
-
-    ``recorded_at`` 是当前 bucket 内最新一条 snapshot 的写入时间，便于
-    drawdown 计算回到原始时间轴上。
-    """
-
-    recorded_at: datetime
-    net_value_usdc: Decimal
 
 
 class AccountSnapshotRepository(BaseRepository):

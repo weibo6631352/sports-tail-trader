@@ -3,9 +3,11 @@ import type {
   AllocationDecisionsPage,
   AllocationsPage,
   AuditEventsPage,
+  BulkCancelResult,
   CalibrationSnapshot,
   Candidate,
   CandidatesPage,
+  DataFreshnessSnapshot,
   DecisionRecord,
   DecisionsPage,
   EdgeRealizationSnapshot,
@@ -17,6 +19,8 @@ import type {
   LatencyPercentilesSnapshot,
   LiveSourceGapsPage,
   LiveStatesPage,
+  MarketImpact,
+  MarketLiquidity,
   MarketSettlement,
   MarketSettlementsPage,
   MarketView,
@@ -29,6 +33,7 @@ import type {
   OrdersPage,
   OutboxFailuresPage,
   OutboxPendingPage,
+  OutboxQueueDepth,
   ParameterClearRequest,
   ParameterClearResult,
   ParameterOverride,
@@ -37,8 +42,10 @@ import type {
   ParametersRegistry,
   ParameterSweepRequest,
   ParameterSweepResponse,
+  SweepParamSpec,
   PnlBreakdown,
   PnlBreakdownGroupBy,
+  PortfolioExposure,
   PortfolioRiskMetrics,
   PortfolioSnapshot,
   PositionsPage,
@@ -107,6 +114,14 @@ export const decisionsApi = {
 // ---------- 市场 ----------
 
 export const marketsApi = {
+  liquidity: (
+    params: { token_id: string; condition_id?: string; market_slug?: string; depth_ticks?: number },
+    signal?: AbortSignal,
+  ) => apiClient.get<MarketLiquidity>('/markets/liquidity', { params, signal }),
+  impact: (
+    params: { token_id: string; size_usdc: number; condition_id?: string; market_slug?: string },
+    signal?: AbortSignal,
+  ) => apiClient.get<MarketImpact>('/markets/impact', { params, signal }),
   list: (
     params: {
       limit?: number
@@ -201,6 +216,7 @@ export const ordersApi = {
       trace_id?: string
       order_id?: string
       trade_id?: string
+      status?: string
       since?: number
       until?: number
       strategy_id?: string
@@ -227,6 +243,12 @@ export const ordersApi = {
     condition_id?: string
     token_id?: string
   }) => apiClient.post<WriteOperationResult>('/orders/cancel', { body }),
+  bulkCancel: (body: {
+    order_ids: string[]
+    operator?: string
+    reason?: string
+    trace_id?: string
+  }) => apiClient.post<BulkCancelResult>('/orders/bulk-cancel', { body }),
 }
 
 export const positionsApi = {
@@ -359,11 +381,15 @@ export const portfolioApi = {
       params,
       signal,
     }),
+  exposure: (signal?: AbortSignal) =>
+    apiClient.get<PortfolioExposure>('/portfolio/exposure', { signal }),
 }
 
 // ---------- 候选 ----------
 
 export const candidatesApi = {
+  dataFreshness: (signal?: AbortSignal) =>
+    apiClient.get<DataFreshnessSnapshot>('/candidates/data-freshness', { signal }),
   list: (
     params: {
       limit?: number
@@ -556,6 +582,8 @@ export const sportsApi = {
 // ---------- Outbox ----------
 
 export const outboxApi = {
+  queueDepth: (signal?: AbortSignal) =>
+    apiClient.get<OutboxQueueDepth>('/outbox/queue-depth', { signal }),
   pending: (
     params: { limit?: number; offset?: number; trace_id?: string },
     signal?: AbortSignal,
@@ -607,6 +635,8 @@ export const operationsApi = {
     apiClient.post<WriteOperationResult>('/operations/pause-trading', { body }),
   resumeTrading: (body: { operator: string; trace_id?: string }) =>
     apiClient.post<WriteOperationResult>('/operations/resume-trading', { body }),
+  parameterSweepParams: (signal?: AbortSignal) =>
+    apiClient.get<SweepParamSpec[]>('/operations/parameter-sweep/params', { signal }),
   parameterSweep: (body: ParameterSweepRequest) =>
     apiClient.post<ParameterSweepResponse>('/operations/parameter-sweep', { body }),
 }
@@ -686,3 +716,4 @@ export const api = {
   sports: sportsApi,
   parameters: parametersApi,
 }
+

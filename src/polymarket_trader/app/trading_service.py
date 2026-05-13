@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
-from inspect import isawaitable
-from typing import Any, Iterable
+from decimal import Decimal
+from typing import Any, Iterable, Protocol, runtime_checkable
 from uuid import uuid4
 
 from polymarket_trader.domain.allocation import AllocationPlan
@@ -17,14 +16,11 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import (
     BuyOrderIntent,
     CancelOrderIntent,
-    ExecutionTimestamps,
     ManagedOrderIntent,
     Order,
     OrderIntent,
     OrderResult,
     OrderResultStatus,
-    OrderSide,
-    OrderType,
     ReplaceOrderIntent,
     SellOrderIntent,
 )
@@ -37,6 +33,13 @@ from polymarket_trader.runtime.lifecycle_bus import LifecyclePublisher
 logger = logging.getLogger(__name__)
 
 
+@runtime_checkable
+class OrderExecutorProtocol(Protocol):
+    async def submit(self, intent: OrderIntent) -> OrderResult: ...
+    async def cancel(self, intent: CancelOrderIntent) -> OrderResult: ...
+    async def replace(self, intent: ReplaceOrderIntent) -> OrderResult: ...
+
+
 class TradingService:
     """Coordinates risk-checked order intents and execution."""
 
@@ -44,7 +47,7 @@ class TradingService:
         self,
         *,
         risk_manager: RiskManager | None = None,
-        executor: object | None = None,
+        executor: OrderExecutorProtocol | None = None,
         lifecycle_bus: LifecyclePublisher | None = None,
         event_bus: Any | None = None,
     ) -> None:
@@ -252,9 +255,9 @@ class TradingService:
             trace_id=intent.trace_id,
             event_type=DomainEventType.RISK_REJECTION_RECORDED,
             event_id=uuid4().hex,
-            market_slug=getattr(intent, "market_slug", None),
+            market_slug=intent.market_slug,
             condition_id=intent.condition_id,
-            token_id=getattr(intent, "token_id", None),
+            token_id=intent.token_id,
             reason=risk_decision.reason or "risk_rejected",
             payload={
                 "passed": False,
@@ -271,10 +274,11 @@ class TradingService:
                 publish_nowait(OutboxPriority.P3, event)
             else:
                 # 测试桩可能只实现 publish；兜底为 fire-and-forget task。
-                result = bus.publish(OutboxPriority.P3, event)
-                if isawaitable(result):
-                    import asyncio
+                import asyncio
+                import inspect
 
+                result = bus.publish(OutboxPriority.P3, event)
+                if inspect.isawaitable(result):
                     asyncio.ensure_future(result)
         except Exception:
             logger.debug("trading_service.publish_risk_event_failed", exc_info=True)
@@ -351,24 +355,20 @@ class TradingService:
     ) -> tuple[OrderResult, bool, str | None]:
         if self._executor is None:
             return (
-                _synthetic_order_result(
-                    intent,
-                    status=OrderResultStatus.FAILED,
-                    reason="executor_unavailable",
-                    retryable=True,
-                ),
+                _synthetic_order_result(intent, status=OrderResultStatus.FAILED, reason="executor_unavailable", retryable=True),
                 False,
                 None,
             )
-
-        result, submitted, submission_error = await self._invoke_executor(
-            intent,
-            operation=operation,
-            method_candidates=("submit", f"submit_{intent.side.value.lower()}"),
-            fallback_status=OrderResultStatus.FAILED,
-            fallback_reason="executor_returned_empty_result",
-        )
-        return result, submitted, submission_error
+        try:
+            order_result = await self._executor.submit(intent)
+            return order_result, True, None
+        except Exception as exc:
+            error = str(exc)
+            return (
+                _synthetic_order_result(intent, status=OrderResultStatus.FAILED, reason=error, retryable=True),
+                True,
+                error,
+            )
 
     async def _execute_control_intent(
         self,
@@ -378,76 +378,23 @@ class TradingService:
     ) -> tuple[OrderResult, bool, str | None]:
         if self._executor is None:
             return (
-                _synthetic_order_result(
-                    intent,
-                    status=OrderResultStatus.FAILED,
-                    reason="executor_unavailable",
-                    retryable=True,
-                ),
+                _synthetic_order_result(intent, status=OrderResultStatus.FAILED, reason="executor_unavailable", retryable=True),
                 False,
                 None,
             )
-
-        method_candidates = ("cancel", "cancel_order") if operation == "cancel" else ("replace", "replace_order")
-        result, submitted, submission_error = await self._invoke_executor(
-            intent,
-            operation=operation,
-            method_candidates=method_candidates,
-            fallback_status=OrderResultStatus.FAILED,
-            fallback_reason="executor_returned_empty_result",
-        )
-        return result, submitted, submission_error
-
-    async def _invoke_executor(
-        self,
-        intent: ManagedOrderIntent,
-        *,
-        operation: str,
-        method_candidates: tuple[str, ...],
-        fallback_status: OrderResultStatus,
-        fallback_reason: str,
-    ) -> tuple[OrderResult, bool, str | None]:
-        last_error: str | None = None
-        for method_name in method_candidates:
-            method = getattr(self._executor, method_name, None)
-            if method is None:
-                continue
-            try:
-                raw_result = method(intent)
-                if isawaitable(raw_result):
-                    raw_result = await raw_result
-                order_result = _coerce_order_result(
-                    raw_result,
-                    intent,
-                    operation=operation,
-                    fallback_status=fallback_status,
-                    fallback_reason=fallback_reason,
-                )
-                return order_result, True, None
-            except Exception as exc:
-                last_error = str(exc)
-                break
-        if last_error is not None:
+        try:
+            if isinstance(intent, CancelOrderIntent):
+                order_result = await self._executor.cancel(intent)
+            else:
+                order_result = await self._executor.replace(intent)
+            return order_result, True, None
+        except Exception as exc:
+            error = str(exc)
             return (
-                _synthetic_order_result(
-                    intent,
-                    status=OrderResultStatus.FAILED,
-                    reason=last_error,
-                    retryable=True,
-                ),
+                _synthetic_order_result(intent, status=OrderResultStatus.FAILED, reason=error, retryable=True),
                 True,
-                last_error,
+                error,
             )
-        return (
-            _synthetic_order_result(
-                intent,
-                status=fallback_status,
-                reason=fallback_reason,
-                retryable=False,
-            ),
-            False,
-            None,
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -464,82 +411,6 @@ class TradingReviewResult:
         return self.risk_decision.passed if self.risk_decision is not None else self.submitted
 
 
-def _coerce_order_result(
-    raw_result: object | None,
-    intent: ManagedOrderIntent,
-    *,
-    operation: str,
-    fallback_status: OrderResultStatus,
-    fallback_reason: str,
-) -> OrderResult:
-    if isinstance(raw_result, OrderResult):
-        return raw_result
-    if raw_result is not None and hasattr(raw_result, "__dict__"):
-        data = dict(vars(raw_result))
-    elif isinstance(raw_result, dict):
-        data = dict(raw_result)
-    else:
-        data = {}
-
-    status_value = data.get("status")
-    if isinstance(status_value, OrderResultStatus):
-        status = status_value
-    elif isinstance(status_value, str):
-        try:
-            status = OrderResultStatus(status_value)
-        except ValueError:
-            status = fallback_status
-    else:
-        status = fallback_status
-
-    timestamps = data.get("timestamps")
-    if not isinstance(timestamps, dict) and timestamps is not None:
-        timestamps = {
-            "queued_at": getattr(timestamps, "queued_at", None),
-            "sign_started_at": getattr(timestamps, "sign_started_at", None),
-            "signed_at": getattr(timestamps, "signed_at", None),
-            "submitted_at": getattr(timestamps, "submitted_at", None),
-            "ack_at": getattr(timestamps, "ack_at", None),
-        }
-
-    return OrderResult(
-        strategy_id=str(data.get("strategy_id", intent.strategy_id)),
-        trace_id=str(data.get("trace_id", intent.trace_id)),
-        condition_id=str(data.get("condition_id", intent.condition_id)),
-        token_id=str(data.get("token_id", intent.token_id)),
-        status=status,
-        intent=intent,
-        market_slug=data.get("market_slug", intent.market_slug),
-        order_id=data.get("order_id"),
-        trade_id=data.get("trade_id"),
-        side=_coerce_side(data.get("side", getattr(intent, "side", None))),
-        order_type=_coerce_order_type(data.get("order_type", getattr(intent, "order_type", None))),
-        price=_coerce_decimal(data.get("price", getattr(intent, "price", None))),
-        requested_amount_usdc=_coerce_decimal(
-            data.get("requested_amount_usdc", getattr(intent, "amount_usdc", None))
-        ),
-        requested_size_shares=_coerce_decimal(
-            data.get("requested_size_shares", getattr(intent, "size_shares", None))
-        ),
-        matched_shares=_coerce_decimal_or_zero(data.get("matched_shares", Decimal("0"))),
-        remaining_shares=_coerce_decimal_or_zero(data.get("remaining_shares", Decimal("0"))),
-        spent_usdc=_coerce_decimal_or_zero(data.get("spent_usdc", Decimal("0"))),
-        notional_usdc=_coerce_decimal_or_zero(
-            data.get("notional_usdc", getattr(intent, "notional_usdc", Decimal("0")))
-        ),
-        reason=data.get("reason", fallback_reason),
-        retryable=bool(data.get("retryable", False)),
-        raw_response_summary=data.get("raw_response_summary"),
-        timestamps=(
-            timestamps
-            if isinstance(timestamps, ExecutionTimestamps)
-            else ExecutionTimestamps(**timestamps)
-            if isinstance(timestamps, dict)
-            else ExecutionTimestamps()
-        ),
-    )
-
-
 def _synthetic_order_result(
     intent: ManagedOrderIntent,
     *,
@@ -547,6 +418,20 @@ def _synthetic_order_result(
     reason: str,
     retryable: bool,
 ) -> OrderResult:
+    if isinstance(intent, (BuyOrderIntent, SellOrderIntent)):
+        side = intent.side
+        order_type = intent.order_type
+        price = intent.price
+        amount_usdc = intent.amount_usdc
+        size_shares = intent.size_shares
+        notional_usdc = intent.notional_usdc
+    else:
+        side = None
+        order_type = None
+        price = None
+        amount_usdc = None
+        size_shares = None
+        notional_usdc = Decimal("0")
     return OrderResult(
         strategy_id=intent.strategy_id,
         trace_id=intent.trace_id,
@@ -555,49 +440,12 @@ def _synthetic_order_result(
         status=status,
         intent=intent,
         market_slug=intent.market_slug,
-        side=_coerce_side(getattr(intent, "side", None)),
-        order_type=_coerce_order_type(getattr(intent, "order_type", None)),
-        price=_coerce_decimal(getattr(intent, "price", None)),
-        requested_amount_usdc=_coerce_decimal(getattr(intent, "amount_usdc", None)),
-        requested_size_shares=_coerce_decimal(getattr(intent, "size_shares", None)),
-        notional_usdc=_coerce_decimal_or_zero(getattr(intent, "notional_usdc", Decimal("0"))),
+        side=side,
+        order_type=order_type,
+        price=price,
+        requested_amount_usdc=amount_usdc,
+        requested_size_shares=size_shares,
+        notional_usdc=notional_usdc,
         reason=reason,
         retryable=retryable,
     )
-
-
-def _coerce_decimal(value: object | None) -> Decimal | None:
-    if value is None:
-        return None
-    if isinstance(value, Decimal):
-        return value
-    try:
-        return Decimal(str(value))
-    except (ValueError, TypeError, InvalidOperation):
-        return None
-
-
-def _coerce_decimal_or_zero(value: object | None) -> Decimal:
-    return _coerce_decimal(value) or Decimal("0")
-
-
-def _coerce_side(value: object | None) -> OrderSide | None:
-    if value is None:
-        return None
-    if isinstance(value, OrderSide):
-        return value
-    try:
-        return OrderSide(str(value))
-    except ValueError:
-        return None
-
-
-def _coerce_order_type(value: object | None) -> OrderType | None:
-    if value is None:
-        return None
-    if isinstance(value, OrderType):
-        return value
-    try:
-        return OrderType(str(value))
-    except ValueError:
-        return None

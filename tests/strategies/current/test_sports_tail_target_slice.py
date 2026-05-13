@@ -492,7 +492,7 @@ def test_market_descriptor_separates_single_game_from_series_outright_and_esport
     assert descriptors["esports"].market_family == SportsMarketFamily.ESPORTS
 
 
-def test_universe_excludes_non_single_game_markets_from_auto_strategy_scope() -> None:
+def test_universe_includes_series_and_excludes_esports() -> None:
     config = CurrentStrategyConfig()
 
     decisions = {
@@ -502,15 +502,15 @@ def test_universe_excludes_non_single_game_markets_from_auto_strategy_scope() ->
         "esports": select_market(config, _esports_series_market()),
     }
 
-    # series family 不在 single_game/outright universe 白名单内；universe 排除原因来自
-    # outcomes._market_family_reason，真正的子类型拒绝原因走 series.evaluator。
-    assert decisions["series_winner"].selected is False
-    assert decisions["series_winner"].reason == "series_market_pending_model"
-    assert decisions["series_totals"].selected is False
-    assert decisions["series_totals"].reason == "series_market_pending_model"
-    # Outright 不再静默排除：纳入候选 + 标记 market_family=outright，进入 outright 子包评估。
+    # series family 现在纳入 universe：decide_series_entry 已实现 WINNER / TOTAL_GAMES / GAME_HANDICAP 路径。
+    assert decisions["series_winner"].selected is True
+    assert decisions["series_winner"].metadata.get("market_family") == "series"
+    assert decisions["series_totals"].selected is True
+    assert decisions["series_totals"].metadata.get("market_family") == "series"
+    # Outright 保持纳入。
     assert decisions["outright"].selected is True
     assert decisions["outright"].metadata.get("market_family") == "outright"
+    # Esports 仍排除：没有专用定价和风控路径。
     assert decisions["esports"].selected is False
     assert decisions["esports"].reason == "esports_market_not_auto_tradable"
 

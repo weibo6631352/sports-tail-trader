@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from strategies.current.outcomes import describe_sports_market
+from strategies.current.outcomes import describe_sports_market, SportsMarketFamily
 from polymarket_trader.infra.db import (
     AllocationRepository,
     AuditEventRepository,
@@ -171,7 +171,7 @@ def _live_source_gap_scope_markets(runtime: Any, markets: Sequence[Market]) -> t
             continue
         if not decision.selected:
             continue
-        if describe_sports_market(market).market_family.value != "single_game":
+        if describe_sports_market(market).market_family != SportsMarketFamily.SINGLE_GAME:
             # outright / series / esports 不依赖单场直播源，本诊断不覆盖。
             continue
         scoped.append(market)

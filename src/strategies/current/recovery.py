@@ -7,6 +7,7 @@ from decimal import Decimal, ROUND_CEILING
 
 from polymarket_trader.domain.market import TradingStatus
 from polymarket_trader.domain.order import Order, OrderSide, OrderType
+from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.extension_api import RecoveryDecision, ExtensionContext, ExtensionDecision
 
@@ -14,6 +15,7 @@ from strategies.current.config import CurrentStrategyConfig
 from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata, exit_price_for_context
 from strategies.current.outcomes import tail_token_targets
 from strategies.current.tail import LiveGameStatus, live_game_state_from_metadata
+from strategies.current.trading.helpers import resolve_tick_size
 
 
 def decide_recovery(
@@ -161,18 +163,18 @@ def decide_recovery(
     )
 
 
-def _order_identifier(order) -> str | None:
+def _order_identifier(order: Order) -> str | None:
     return order.order_id or order.idempotency_key
 
 
-def _is_open_entry_order(order) -> bool:
+def _is_open_entry_order(order: Order) -> bool:
     return order.side == OrderSide.BUY and order.open
 
 
 def _should_cancel_open_entry_order(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
-    order,
+    order: Order,
 ) -> bool:
     """撤掉超过策略 TTL 的历史开放 BUY，避免旧 GTC 买单长期占用资金。"""
 
@@ -180,6 +182,7 @@ def _should_cancel_open_entry_order(
         return False
     max_resting_seconds = config.tail_entry_maker_max_resting_seconds
     if max_resting_seconds <= 0:
+        # max_resting_seconds <= 0 表示"配置：立即撤单"，不是超时。
         return True
     opened_at = order.created_at or order.updated_at
     if opened_at is None:
@@ -192,7 +195,7 @@ def _should_cancel_open_entry_order(
     return (now - opened_at).total_seconds() > max_resting_seconds
 
 
-def _is_open_exit_order(order) -> bool:
+def _is_open_exit_order(order: Order) -> bool:
     return order.side == OrderSide.SELL and order.open
 
 
@@ -202,7 +205,7 @@ def _is_profit_take_exit_order(order: Order) -> bool:
     return order.reason in {"strategy_profit_take", "recovery_profit_take"}
 
 
-def _open_order_shares(order) -> Decimal:
+def _open_order_shares(order: Order) -> Decimal:
     if order.remaining_shares is not None:
         return max(order.remaining_shares, Decimal("0"))
     if order.size_shares is not None:
@@ -213,7 +216,7 @@ def _open_order_shares(order) -> Decimal:
 def _recovery_profit_take_action(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
-    position,
+    position: Position,
     *,
     uncovered_shares: Decimal,
     recovery_metadata: dict[str, object],
@@ -225,18 +228,18 @@ def _recovery_profit_take_action(
     """
 
     if not config.tail_recovery_profit_take_enabled:
-        return None
+        return None  # 功能未开启，跳过止盈补单。
     if position.shares <= Decimal("0") or position.cost_usdc <= Decimal("0"):
-        return None
+        return None  # 仓位数据异常（空仓或零成本），无法计算均价，跳过。
     average_price = position.cost_usdc / position.shares
     if average_price < config.tail_recovery_profit_take_min_avg_price or average_price >= Decimal("1"):
-        return None
+        return None  # 均价过低（结算效率合理，不需要提前止盈）或异常越界。
     target_price, price_source = _recovery_profit_take_price(context, position.token_id, average_price)
     if target_price is None or target_price > Decimal("1"):
-        return None
+        return None  # 无法确定有效止盈价（盘口缺失或价格越界）。
     expected_profit = uncovered_shares * (target_price - average_price)
     if expected_profit < config.tail_profit_take_min_profit_usdc:
-        return None
+        return None  # 预期毛利润低于最小阈值，不值得挂单。
     exit_metadata = dict(recovery_metadata)
     exit_metadata.update(
         build_exit_plan_metadata(
@@ -287,7 +290,7 @@ def _recovery_profit_take_price(
     if best_bid is not None and best_bid > average_price and (
         tick_price is None or best_bid > tick_price
     ):
-        tick_size = orderbook.tick_size or (context.market.tick_size if context.market is not None else None)
+        tick_size = resolve_tick_size(orderbook, context.market)
         return cap_price_to_clob_limit(best_bid, tick_size=tick_size), "best_bid"
     return tick_price, "next_tick"
 
@@ -306,13 +309,7 @@ def _orderbook_for_token(context: ExtensionContext, token_id: str):
 def _next_tick_price(context: ExtensionContext, price: Decimal) -> Decimal | None:
     """返回当前价格上方一档 tick。"""
 
-    tick_size = None
-    if context.orderbook is not None and context.orderbook.tick_size is not None:
-        tick_size = context.orderbook.tick_size
-    elif context.market is not None:
-        tick_size = context.market.tick_size
-    if tick_size is None or tick_size <= Decimal("0"):
-        tick_size = Decimal("0.01")
+    tick_size = resolve_tick_size(context.orderbook, context.market)
     units = (price / tick_size).to_integral_value(rounding=ROUND_CEILING)
     return cap_price_to_clob_limit((units + 1) * tick_size, tick_size=tick_size)
 

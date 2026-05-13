@@ -70,6 +70,12 @@ def _optional_int(value: object) -> int | None:
         return None
 
 
+def _opt_str(mapping: Mapping[str, Any], key: str) -> str | None:
+    """从 Mapping 中取字符串值；None 或缺失键返回 None。"""
+    v = mapping.get(key)
+    return str(v) if v is not None else None
+
+
 def _source_conflicts(value: object) -> tuple[Mapping[str, Any], ...]:
     if not isinstance(value, (tuple, list)):
         return ()
@@ -86,12 +92,13 @@ def _baseball_state(value: object) -> BaseballGameState | None:
         base for base in (_optional_int(item) for item in occupied)
         if base is not None
     ) if isinstance(occupied, (tuple, list)) else ()
+    _inh = value.get("inning_half")
     return BaseballGameState(
         current_inning=_optional_int(value.get("current_inning")),
-        inning_half=None if value.get("inning_half") is None else str(value.get("inning_half")).strip().lower(),
+        inning_half=None if _inh is None else str(_inh).strip().lower(),
         outs=_optional_int(value.get("outs")),
-        offense_team=None if value.get("offense_team") is None else str(value.get("offense_team")),
-        defense_team=None if value.get("defense_team") is None else str(value.get("defense_team")),
+        offense_team=_opt_str(value, "offense_team"),
+        defense_team=_opt_str(value, "defense_team"),
         occupied_bases=occupied_bases,
     )
 
@@ -110,10 +117,10 @@ def _tennis_state(value: object) -> TennisGameState | None:
         home_total_games=_optional_int(value.get("home_total_games")) or 0,
         away_total_games=_optional_int(value.get("away_total_games")) or 0,
         set_scores=_tennis_set_scores(value.get("set_scores")),
-        home_point=None if value.get("home_point") is None else str(value.get("home_point")),
-        away_point=None if value.get("away_point") is None else str(value.get("away_point")),
-        first_to_serve=None if value.get("first_to_serve") is None else str(value.get("first_to_serve")),
-        serving_side=None if value.get("serving_side") is None else str(value.get("serving_side")),
+        home_point=_opt_str(value, "home_point"),
+        away_point=_opt_str(value, "away_point"),
+        first_to_serve=_opt_str(value, "first_to_serve"),
+        serving_side=_opt_str(value, "serving_side"),
     )
 
 

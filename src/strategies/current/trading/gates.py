@@ -21,6 +21,7 @@ from strategies.current.risk import check_tail_entry_risk
 from strategies.current.tail import (
     LiveGameState,
     LiveGameStatus,
+    SportsMarketFamily,
     SportsMarketSide,
     SportsMarketSnapshot,
     TailEvaluation,
@@ -59,7 +60,7 @@ def _tail_entry_gate(
     if not descriptor.accepted or descriptor.market_type is None:
         return None
     family_metadata = {"market_family": descriptor.market_family.value}
-    if descriptor.market_family.value != "single_game":
+    if descriptor.market_family != SportsMarketFamily.SINGLE_GAME:
         return (
             ExtensionDecision.skip(
                 reason=descriptor.reason,
@@ -245,7 +246,7 @@ def _tail_allocation_gate(
     if not descriptor.accepted or descriptor.market_type is None:
         return "", {}
     family_metadata = {"market_family": descriptor.market_family.value}
-    if descriptor.market_family.value != "single_game":
+    if descriptor.market_family != SportsMarketFamily.SINGLE_GAME:
         return descriptor.reason, family_metadata
     game = live_game_state_from_metadata(context.metadata)
     target, target_reason = _target_for_live_game(
@@ -258,9 +259,6 @@ def _tail_allocation_gate(
         return target_reason, {**family_metadata, "parse_reason": descriptor.reason}
 
     policy = tail_policy_from_config(config)
-    best_ask = snapshot.best_ask if snapshot.best_ask is not None else (
-        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
-    )
     evaluation = evaluate_tail_opportunity(
         game,
         SportsMarketSnapshot(
@@ -268,7 +266,7 @@ def _tail_allocation_gate(
             side=target.side,
             token_id=target.token_id,
             line=descriptor.line,
-            best_ask=best_ask,
+            best_ask=snapshot.effective_best_ask,
             buyable_liquidity_usdc=buyable_liquidity_usdc,
             market_family=descriptor.market_family,
             market_slug=snapshot.market_slug,
@@ -310,7 +308,7 @@ def _scale_in_allocation_gate(
     descriptor = describe_sports_market(snapshot.market)
     if not descriptor.accepted or descriptor.market_type is None:
         return False, {}, None
-    if descriptor.market_family.value != "single_game":
+    if descriptor.market_family != SportsMarketFamily.SINGLE_GAME:
         return False, {}, None
     game = live_game_state_from_metadata(context.metadata)
     target, _target_reason = _target_for_live_game(
@@ -322,9 +320,6 @@ def _scale_in_allocation_gate(
     if target is None:
         return False, {}, None
 
-    best_ask = snapshot.best_ask if snapshot.best_ask is not None else (
-        snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
-    )
     evaluation = evaluate_scale_in_opportunity(
         game,
         SportsMarketSnapshot(
@@ -332,7 +327,7 @@ def _scale_in_allocation_gate(
             side=target.side,
             token_id=target.token_id,
             line=descriptor.line,
-            best_ask=best_ask,
+            best_ask=snapshot.effective_best_ask,
             buyable_liquidity_usdc=buyable_liquidity_usdc,
             market_family=descriptor.market_family,
             market_slug=snapshot.market_slug,
@@ -381,7 +376,7 @@ def _tail_pre_orderbook_skip_reason(
     descriptor = describe_sports_market(snapshot.market)
     if not descriptor.accepted or descriptor.market_type is None:
         return ""
-    if descriptor.market_family.value != "single_game":
+    if descriptor.market_family != SportsMarketFamily.SINGLE_GAME:
         return ""
     game = live_game_state_from_metadata(context.metadata)
     if game is None or game.status == LiveGameStatus.ENDED:

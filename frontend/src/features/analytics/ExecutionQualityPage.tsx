@@ -62,7 +62,7 @@ export function ExecutionQualityPage() {
           {(query.data?.per_market_type ?? []).length > 0 && (
             <SectionCard title="按 market_type" style={{ gridColumn: '1 / -1' }}>
               <Stack gap={4}>
-                {query.data!.per_market_type!.map((row) => (
+                {(query.data?.per_market_type ?? []).map((row) => (
                   <Stack key={row.market_type} gap={2}>
                     <Text size="sm">{row.market_type}</Text>
                     <Text size="xs" c="dimmed">

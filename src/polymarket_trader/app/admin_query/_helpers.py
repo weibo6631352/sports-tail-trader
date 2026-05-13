@@ -68,10 +68,11 @@ def _empty_latency_payload(
         "sample_limit": sample_limit,
         "event_types": list(event_types),
         "sample_count": 0,
-        "stages": {
-            stage_name: {"count": 0, "percentiles_ms": {}, "max_ms": None, "min_ms": None}
+        "stages": [
+            {"stage": stage_name, "sample_count": 0, "p50_ms": None, "p90_ms": None,
+             "p95_ms": None, "p99_ms": None, "min_ms": None, "max_ms": None}
             for stage_name, _, _ in _LATENCY_STAGES
-        },
+        ],
     }
 
 
@@ -101,24 +102,26 @@ def _compute_latency_payload(
                 continue
             stages[stage_name].append(delta_ms)
 
-    stage_payload: dict[str, Any] = {}
+    stage_list: list[dict[str, Any]] = []
     for stage_name in stages:
         values = sorted(stages[stage_name])
-        percentile_map = {
-            f"p{int(q * 100)}": _percentile(values, q) for q in _LATENCY_PERCENTILES
-        }
-        stage_payload[stage_name] = {
-            "count": len(values),
-            "percentiles_ms": percentile_map,
-            "max_ms": values[-1] if values else None,
+        pct = {q: _percentile(values, q) for q in _LATENCY_PERCENTILES}
+        stage_list.append({
+            "stage": stage_name,
+            "sample_count": len(values),
+            "p50_ms": pct.get(0.50),
+            "p90_ms": pct.get(0.90),
+            "p95_ms": pct.get(0.95),
+            "p99_ms": pct.get(0.99),
             "min_ms": values[0] if values else None,
-        }
+            "max_ms": values[-1] if values else None,
+        })
     return {
         "window_ms": window_ms,
         "sample_limit": sample_limit,
         "event_types": list(event_types),
         "sample_count": len(events),
-        "stages": stage_payload,
+        "stages": stage_list,
     }
 
 

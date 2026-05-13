@@ -94,7 +94,9 @@ class Scheduler:
         state = self._jobs[name]
         state.enabled = True
         if state.next_run_at is None and state.interval_seconds is not None:
-            state.next_run_at = _utc_now()
+            # run_immediately=False: 首次运行延迟一个 interval，不在启动时立即跑。
+            delay = 0.0 if state.run_immediately else state.interval_seconds
+            state.next_run_at = _utc_now() + timedelta(seconds=delay)
         if state.task is None or state.task.done():
             state.task = asyncio.create_task(self._run_job_loop(state), name=f"scheduler:{name}")
         state.wake.set()

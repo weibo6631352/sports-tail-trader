@@ -112,7 +112,7 @@ from polymarket_trader.workers.sports_season_state_worker import SportsSeasonSta
 from polymarket_trader.workers.series_state_worker import SeriesStateWorker
 from polymarket_trader.workers.game_odds_worker import GameOddsWorker
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
-from strategies.current.outcomes import describe_sports_market
+from strategies.current.outcomes import describe_sports_market, SportsMarketFamily
 from strategies.current.series.classifier import classify_series_sub_type
 from strategies.current.series.types import SeriesSubType
 from polymarket_trader.workers.user_ws import UserWsWorker
@@ -417,7 +417,7 @@ def _build_season_odds_worker(
     )
     def _is_outright(market: Market) -> bool:
         descriptor = describe_sports_market(market)
-        return descriptor.accepted and descriptor.market_family.value == "outright"
+        return descriptor.accepted and descriptor.market_family == SportsMarketFamily.OUTRIGHT
 
     def _sport_key(market: Market) -> str | None:
         # 简单映射：从 tags / category 推断。NBA/NHL/NFL/MLB 等明确 league 直接转 TheOddsAPI sport_key。
@@ -456,7 +456,7 @@ def _build_season_odds_worker(
 def _is_series_winner_market(market: Market) -> bool:
     """market 是否归到 series WINNER 子类型。"""
     descriptor = describe_sports_market(market)
-    if not descriptor.accepted or descriptor.market_family.value != "series":
+    if not descriptor.accepted or descriptor.market_family != SportsMarketFamily.SERIES:
         return False
     return classify_series_sub_type(market) == SeriesSubType.WINNER
 
@@ -1269,7 +1269,9 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
             interval_seconds=float(runtime.settings.sports_series_state_interval_seconds),
             tags=("sports_series_state",),
             start=True,
-            run_immediately=True,
+            # 启动时不立即跑：市场发现 + 注册表填充通常需要 10-30 秒；
+            # 立即跑会在 registry 为空时找不到 targets，浪费一整个 interval。
+            run_immediately=False,
         )
     if runtime.game_odds_worker is not None:
         runtime.scheduler.register_job(

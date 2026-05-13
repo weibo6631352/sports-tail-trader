@@ -43,6 +43,19 @@ async def get_portfolio(service: AdminService = Depends(get_admin_service)) -> d
     return await service.portfolio_snapshot()
 
 
+@router.get("/exposure")
+async def get_portfolio_exposure(
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """每市场未平仓名义暴露（纯内存快照，零 DB，零 P0 影响）。
+
+    返回所有持仓按市场分解的：名义市值、浮动盈亏、平均入场价、
+    当前价、挂单预留资金、暂停状态。是操盘者"我的风险在哪里"的全局视图。
+    """
+
+    return await service.portfolio_exposure()
+
+
 @router.get("/equity-curve")
 async def get_equity_curve(
     window_ms: int = Query(default=DEFAULT_WINDOW_MS, ge=1),

@@ -43,7 +43,7 @@ from strategies.current.live_state import (
     _ensure_utc,
 )
 from strategies.current.trading.tail_bypass import market_tail_window_bypass_reason
-from strategies.current.outcomes import describe_sports_market
+from strategies.current.outcomes import describe_sports_market, SportsMarketFamily
 from strategies.current.outright import (
     decide_outright_entry,
     resolve_outright_reject_label,
@@ -296,26 +296,26 @@ class CurrentStrategy:
     def size_entry(self, context: ExtensionContext) -> EntrySizing:
         """outright / series family 各自走独立预算包络，与 single_game 互不挤占。"""
         descriptor = describe_sports_market(context.market) if context.market else None
-        if descriptor is not None and descriptor.market_family.value == "outright":
-            return size_outright_entry(self._config, context)
-        if descriptor is not None and descriptor.market_family.value == "series":
-            return size_series_entry(self._config, context)
+        if descriptor is not None and descriptor.market_family == SportsMarketFamily.OUTRIGHT:
+            return size_outright_entry(self._config, context, self._ports)
+        if descriptor is not None and descriptor.market_family == SportsMarketFamily.SERIES:
+            return size_series_entry(self._config, context, self._ports)
         with active_ports_scope(self._ports):
             return size_entry(self._config, context)
 
     def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
         """按 ``descriptor.market_family`` 分派到对应决策模块。"""
         descriptor = describe_sports_market(context.market) if context.market else None
-        if descriptor is not None and descriptor.market_family.value == "outright":
+        if descriptor is not None and descriptor.market_family == SportsMarketFamily.OUTRIGHT:
             decision = enrich_decision(
                 decide_outright_entry(self._config, context, self._ports),
                 default_kind=DecisionKind.ENTRY,
             )
             self._record_outright_decision_metric(decision)
             return decision
-        if descriptor is not None and descriptor.market_family.value == "series":
+        if descriptor is not None and descriptor.market_family == SportsMarketFamily.SERIES:
             decision = enrich_decision(
-                decide_series_entry(self._config, context),
+                decide_series_entry(self._config, context, self._ports),
                 default_kind=DecisionKind.ENTRY,
             )
             self._record_series_decision_metric(decision)
@@ -334,8 +334,8 @@ class CurrentStrategy:
         """额外路径：全源不可用时，single_game 市场主动暂停交易。"""
         if self._live_state_no_feasible_source:
             descriptor = describe_sports_market(context.market) if context.market else None
-            family = descriptor.market_family.value if descriptor is not None else None
-            if family == "single_game":
+            family = descriptor.market_family if descriptor is not None else None
+            if family == SportsMarketFamily.SINGLE_GAME:
                 return RecoveryDecision(
                     reason="sports_live_state_no_source",
                     actions=(),
@@ -379,7 +379,7 @@ class CurrentStrategy:
         events: tuple[LiveEvent, ...],
     ) -> "LiveStateMatch | None":
         descriptor = describe_sports_market(market)
-        if not descriptor.accepted or descriptor.market_family.value != "single_game":
+        if not descriptor.accepted or descriptor.market_family != SportsMarketFamily.SINGLE_GAME:
             return None
         candidate_events = self._candidate_live_events_for_market(market, events)
 

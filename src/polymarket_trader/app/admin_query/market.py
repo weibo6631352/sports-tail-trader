@@ -1,7 +1,8 @@
-"""市场维度的只读查询：列表、单条、盘口、midpoint、价格历史、盘口快照历史。"""
+"""市场维度的只读查询：列表、单条、盘口、midpoint、价格历史、盘口快照历史、流动性、冲击成本。"""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -10,7 +11,7 @@ from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
 from polymarket_trader.infra.db.repositories.market import sort_markets
 from polymarket_trader.infra.polymarket import PolymarketClientError
-from polymarket_trader.app.admin_serialization import page_payload
+from polymarket_trader.app.admin_serialization import decimal_text, page_payload
 from polymarket_trader.app.admin_service_helpers import (
     MarketFeeSortField,
     SortDirection,
@@ -266,6 +267,183 @@ class AdminMarketQueryMixin:
 
         page = await self._with_repositories(_query)
         return page_payload(page, serializer=self._serializer().orderbook)
+
+
+    def get_market_liquidity(
+        self,
+        *,
+        token_id: str,
+        condition_id: str | None = None,
+        market_slug: str | None = None,
+        depth_ticks: int = 5,
+    ) -> dict[str, Any] | None:
+        """盘口流动性快照（纯内存，热 WS 数据，零 DB，零 P0 影响）。
+
+        返回：
+        - vwap_mid: 成交量加权中间价（bid/ask 各侧前 depth_ticks 档）
+        - effective_spread: 有效买卖价差
+        - snapshot_age_ms: 盘口快照距现在的延迟（毫秒）
+        - bid/ask 深度分档（按累计 USDC 分 1/5/10 档）
+        """
+
+        snapshot = self._market_ws_snapshot(token_id)
+        if snapshot is None or _orderbook_has_no_quotes(snapshot):
+            return None
+
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        received_ms = int(snapshot.received_at.timestamp() * 1000)
+        age_ms = now_ms - received_ms
+
+        # WS 快照档位无序且含 0-size 占位，必须先过滤再排序才能计算有效深度。
+        active_bids = sorted(
+            (lv for lv in snapshot.bids if lv.size > Decimal("0")),
+            key=lambda lv: lv.price,
+            reverse=True,  # 最优 bid（价格最高）在前
+        )
+        active_asks = sorted(
+            (lv for lv in snapshot.asks if lv.size > Decimal("0")),
+            key=lambda lv: lv.price,
+            reverse=False,  # 最优 ask（价格最低）在前
+        )
+
+        def _depth_tiers(levels: list, max_ticks: int) -> list[dict[str, str]]:
+            tiers = []
+            cumulative_size = Decimal("0")
+            cumulative_usdc = Decimal("0")
+            for i, level in enumerate(levels[:max_ticks]):
+                cumulative_size += level.size
+                cumulative_usdc += level.price * level.size
+                tiers.append({
+                    "tick": str(i + 1),
+                    "price": decimal_text(level.price),
+                    "size": decimal_text(level.size),
+                    "cumulative_size": decimal_text(cumulative_size),
+                    "cumulative_usdc": decimal_text(cumulative_usdc),
+                })
+            return tiers
+
+        # 成交量加权中间价：取排序后前 N 档（最优档开始）
+        def _vwap_side(levels: list, max_ticks: int) -> Decimal | None:
+            total_size = Decimal("0")
+            total_pv = Decimal("0")
+            for level in levels[:max_ticks]:
+                total_size += level.size
+                total_pv += level.price * level.size
+            if total_size == Decimal("0"):
+                return None
+            return total_pv / total_size
+
+        vwap_bid = _vwap_side(active_bids, depth_ticks)
+        vwap_ask = _vwap_side(active_asks, depth_ticks)
+        vwap_mid = (
+            (vwap_bid + vwap_ask) / Decimal("2")
+            if vwap_bid is not None and vwap_ask is not None
+            else None
+        )
+        simple_mid = (
+            (snapshot.best_bid + snapshot.best_ask) / Decimal("2")
+            if snapshot.best_bid is not None and snapshot.best_ask is not None
+            else None
+        )
+
+        return {
+            "token_id": token_id,
+            "condition_id": condition_id,
+            "market_slug": market_slug,
+            "snapshot_age_ms": age_ms,
+            "best_bid": decimal_text(snapshot.best_bid) if snapshot.best_bid is not None else None,
+            "best_ask": decimal_text(snapshot.best_ask) if snapshot.best_ask is not None else None,
+            "best_bid_size": decimal_text(snapshot.best_bid_size) if snapshot.best_bid_size is not None else None,
+            "best_ask_size": decimal_text(snapshot.best_ask_size) if snapshot.best_ask_size is not None else None,
+            "spread": decimal_text(snapshot.spread) if snapshot.spread is not None else None,
+            "effective_spread_bps": (
+                decimal_text(snapshot.spread / simple_mid * Decimal("10000"))
+                if snapshot.spread is not None and simple_mid is not None and simple_mid > Decimal("0")
+                else None
+            ),
+            "vwap_mid": decimal_text(vwap_mid) if vwap_mid is not None else None,
+            "vwap_bid": decimal_text(vwap_bid) if vwap_bid is not None else None,
+            "vwap_ask": decimal_text(vwap_ask) if vwap_ask is not None else None,
+            "bid_depth": _depth_tiers(active_bids, depth_ticks),
+            "ask_depth": _depth_tiers(active_asks, depth_ticks),
+            "total_bid_size": decimal_text(
+                sum((level.size for level in active_bids[:depth_ticks]), Decimal("0"))
+            ),
+            "total_ask_size": decimal_text(
+                sum((level.size for level in active_asks[:depth_ticks]), Decimal("0"))
+            ),
+        }
+
+    def get_market_impact(
+        self,
+        *,
+        token_id: str,
+        size_usdc: Decimal,
+        condition_id: str | None = None,
+        market_slug: str | None = None,
+    ) -> dict[str, Any] | None:
+        """下单前冲击成本估算（纯内存，热 WS 盘口，零 DB，零 P0 影响）。
+
+        给定目标买入 USDC，逐档遍历 ask 侧，估算：
+        - estimated_avg_price: 预计成交均价
+        - estimated_shares: 预计成交份额
+        - price_impact_bps: 相对 best_ask 的价格冲击（bps）
+        - fillable_usdc: 当前深度能填满的 USDC
+        - unfillable_usdc: 深度不足无法填满的 USDC
+        """
+
+        snapshot = self._market_ws_snapshot(token_id)
+        if snapshot is None or _orderbook_has_no_quotes(snapshot):
+            return None
+
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        received_ms = int(snapshot.received_at.timestamp() * 1000)
+        age_ms = now_ms - received_ms
+
+        # 从最优 ask（价格最低）开始逐档吃单，必须排序并过滤 0-size 占位档。
+        active_asks = sorted(
+            (lv for lv in snapshot.asks if lv.size > Decimal("0")),
+            key=lambda lv: lv.price,
+        )
+
+        remaining_usdc = size_usdc
+        total_shares = Decimal("0")
+        total_cost = Decimal("0")
+
+        for level in active_asks:
+            if remaining_usdc <= Decimal("0"):
+                break
+            level_usdc = level.price * level.size
+            fill_usdc = min(remaining_usdc, level_usdc)
+            fill_shares = fill_usdc / level.price
+            total_shares += fill_shares
+            total_cost += fill_usdc
+            remaining_usdc -= fill_usdc
+
+        fillable_usdc = size_usdc - remaining_usdc
+        avg_price = total_cost / total_shares if total_shares > Decimal("0") else None
+        best_ask = snapshot.best_ask
+
+        impact_bps = None
+        if avg_price is not None and best_ask is not None and best_ask > Decimal("0"):
+            impact_bps = decimal_text(
+                (avg_price - best_ask) / best_ask * Decimal("10000")
+            )
+
+        return {
+            "token_id": token_id,
+            "condition_id": condition_id,
+            "market_slug": market_slug,
+            "snapshot_age_ms": age_ms,
+            "requested_usdc": decimal_text(size_usdc),
+            "fillable_usdc": decimal_text(fillable_usdc),
+            "unfillable_usdc": decimal_text(remaining_usdc),
+            "estimated_shares": decimal_text(total_shares) if total_shares > Decimal("0") else None,
+            "estimated_avg_price": decimal_text(avg_price) if avg_price is not None else None,
+            "best_ask": decimal_text(best_ask) if best_ask is not None else None,
+            "price_impact_bps": impact_bps,
+            "fully_fillable": remaining_usdc == Decimal("0"),
+        }
 
 
 __all__ = ["AdminMarketQueryMixin"]

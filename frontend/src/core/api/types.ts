@@ -22,12 +22,28 @@ export type Page<T> = {
 export type HealthSnapshot = Record<string, string>
 
 export type ReadinessSnapshot = {
-  ready: boolean
-  blocked_on?: string
+  // /ready 顶层字段
+  ready_to_trade?: boolean
+  phase?: string
+  blocking_reasons?: string[]
+  blocking_issues?: Array<{ field: string; code: string; message: string }>
+  warnings?: unknown[]
+  runtime?: {
+    user_ws_connected?: boolean
+    [key: string]: unknown
+  }
+  // /runtime.readiness 子对象字段（market_ws_connected / trading_client_ready 等在此层）
+  ready?: boolean
+  live?: boolean
+  automatic_trading_enabled?: boolean
+  config_ready?: boolean
+  db_ready?: boolean
+  trading_client_ready?: boolean
   market_ws_connected?: boolean
   user_ws_connected?: boolean
-  trading_client_ready?: boolean
+  reconcile_fresh?: boolean
   trading_status?: string
+  blocked_on?: string
   [key: string]: unknown
 }
 
@@ -44,8 +60,6 @@ export type RuntimeIdentity = {
 export type RuntimeSettings = {
   extension_module?: string | null
   strategy_id?: string | null
-  phase?: string | null
-  automatic_trading_enabled?: boolean
   paper_trading?: boolean
   [key: string]: unknown
 }
@@ -84,16 +98,29 @@ export type WorkersSnapshot = {
 }
 
 export type MetricsSnapshot = {
-  orders_queued?: number
-  orders_signed?: number
-  orders_submitted?: number
+  phase?: string
+  automatic_trading_enabled?: boolean
+  queue_depths?: unknown
+  metrics?: {
+    collected_at?: string
+    queue_depths?: unknown[]
+    ws_states?: unknown[]
+    reconcile?: unknown
+    trading_gate?: unknown
+    counters?: Array<{ name: string; value: number; labels: unknown[]; updated_at: string }>
+    gauges?: Array<{ name: string; value: number; labels: unknown[]; updated_at: string }>
+    histograms?: unknown[]
+    timestamps?: unknown[]
+  }
+  sports_live_sync?: unknown
+  sse_active_subscribers?: number
+  sse_dropped_events_total?: number
+  // legacy fields (不再由后端返回，保留避免调用侧报错)
   orders_acked?: number
   fills_total?: number
   decisions_total?: number
   decisions_accepted?: number
   decisions_rejected?: number
-  sse_active_subscribers?: number
-  sse_dropped_events_total?: number
   sse_subscriber_cap?: number
   [key: string]: unknown
 }
@@ -516,16 +543,27 @@ export function narrowOutboxEvent(event: OutboxPendingRow): KnownOutboxEvent | n
 // ---------- Portfolio ----------
 
 export type PortfolioSnapshot = {
-  equity_usdc?: DecimalStr | null
-  notional_usdc?: DecimalStr | null
-  cash_usdc?: DecimalStr | null
-  available_usdc?: DecimalStr | null
+  balance_usdc?: DecimalStr | null
   allowance_usdc?: DecimalStr | null
+  available_usdc?: DecimalStr | null
   net_value_usdc?: DecimalStr | null
-  realized_pnl_usdc?: DecimalStr | null
+  notional_usdc?: DecimalStr | null
+  cost_usdc?: DecimalStr | null
   cash_pnl_usdc?: DecimalStr | null
+  realized_pnl_usdc?: DecimalStr | null
   position_count?: number
   open_position_count?: number
+  open_order_count?: number
+  fill_count?: number
+  pause_count?: number
+  markets_tracked?: number
+  user_ws_connected?: boolean
+  allow_new_entries?: boolean
+  last_reconcile_at?: Iso | null
+  recent_allocations?: unknown[]
+  // legacy aliases
+  equity_usdc?: DecimalStr | null
+  cash_usdc?: DecimalStr | null
   redeemable_position_count?: number
   positions?: PositionRow[]
   updated_at?: Iso
@@ -1137,6 +1175,19 @@ export type SweepCandidateResult = {
   mean_pnl_per_entered_usdc: DecimalStr | null
 }
 
+export type SweepParamSpec = {
+  key: SweepParameterKey
+  type: 'int' | 'decimal'
+  label: string
+  input_hint: string
+  example: string
+  scope: 'strategy'
+  minimum?: string | null
+  minimum_exclusive?: string | null
+  maximum?: string | null
+  maximum_exclusive?: string | null
+}
+
 export type ParameterSweepRequest = {
   /** 候选键值；笛卡尔积上限 1000。 */
   candidates: Partial<Record<SweepParameterKey, Array<number | string>>>
@@ -1164,4 +1215,128 @@ export type ParameterSweepResponse = {
   results: SweepCandidateResult[]
   best_by_pnl: SweepCandidateResult | null
   best_by_win_rate: SweepCandidateResult | null
+}
+
+// ---------- 新增：操盘缺口补全类型 ----------
+
+export type PortfolioExposureItem = {
+  condition_id: string
+  token_id: string
+  market_slug: string | null
+  strategy_id: string
+  shares: DecimalStr
+  cost_usdc: DecimalStr
+  notional_usdc: DecimalStr
+  avg_price: DecimalStr | null
+  cur_price: DecimalStr | null
+  cash_pnl: DecimalStr | null
+  percent_pnl: DecimalStr | null
+  realized_pnl: DecimalStr | null
+  open_buy_reserved_usdc: DecimalStr
+  paused: boolean
+  redeemable: boolean | null
+  settled_zero_value: boolean
+}
+
+export type PortfolioExposure = {
+  items: PortfolioExposureItem[]
+  position_count: number
+  total_notional_usdc: DecimalStr
+  total_cost_usdc: DecimalStr
+  total_cash_pnl: DecimalStr
+  total_open_buy_reserved_usdc: DecimalStr
+  available_usdc: DecimalStr
+  balance_usdc: DecimalStr
+  equity_usdc: DecimalStr
+}
+
+export type DepthTier = {
+  tick: string
+  price: DecimalStr
+  size: DecimalStr
+  cumulative_size: DecimalStr
+  cumulative_usdc: DecimalStr
+}
+
+export type MarketLiquidity = {
+  token_id: string
+  condition_id: string | null
+  market_slug: string | null
+  snapshot_age_ms: number
+  best_bid: DecimalStr | null
+  best_ask: DecimalStr | null
+  best_bid_size: DecimalStr | null
+  best_ask_size: DecimalStr | null
+  spread: DecimalStr | null
+  effective_spread_bps: DecimalStr | null
+  vwap_mid: DecimalStr | null
+  vwap_bid: DecimalStr | null
+  vwap_ask: DecimalStr | null
+  bid_depth: DepthTier[]
+  ask_depth: DepthTier[]
+  total_bid_size: DecimalStr
+  total_ask_size: DecimalStr
+}
+
+export type MarketImpact = {
+  token_id: string
+  condition_id: string | null
+  market_slug: string | null
+  snapshot_age_ms: number
+  requested_usdc: DecimalStr
+  fillable_usdc: DecimalStr
+  unfillable_usdc: DecimalStr
+  estimated_shares: DecimalStr | null
+  estimated_avg_price: DecimalStr | null
+  best_ask: DecimalStr | null
+  price_impact_bps: DecimalStr | null
+  fully_fillable: boolean
+}
+
+export type QueueLaneDepth = {
+  depth: number
+  capacity: number
+  retained: number
+  utilization_pct: DecimalStr | null
+}
+
+export type OutboxQueueDepth = {
+  available: boolean
+  trading?: QueueLaneDepth
+  maintenance?: QueueLaneDepth
+  persistence?: QueueLaneDepth
+  low_priority_paused?: boolean
+}
+
+export type BulkCancelResultItem = {
+  order_id: string
+  trace_id: string
+  status: 'ok' | 'failed'
+  reason: string
+}
+
+export type BulkCancelResult = {
+  submitted: number
+  succeeded: number
+  failed: number
+  operator: string
+  parent_trace_id: string | null
+  results: BulkCancelResultItem[]
+}
+
+export type DataFreshnessItem = {
+  condition_id: string | null
+  market_slug: string | null
+  event_slug: string | null
+  source: string | null
+  has_live_state: boolean
+  signal_allowed: boolean | null
+  staleness_ms: number | null
+  updated_at: string | null
+}
+
+export type DataFreshnessSnapshot = {
+  available: boolean
+  item_count: number
+  items: DataFreshnessItem[]
 }

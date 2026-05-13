@@ -124,6 +124,7 @@ class OrderRepository(BaseRepository):
         trade_id: str | None = None,
         condition_id: str | None = None,
         token_id: str | None = None,
+        status: str | None = None,
         time_range: TimeRange | None = None,
         strategy_id: str | None = None,
     ) -> RepositoryPage[Order]:
@@ -141,6 +142,8 @@ class OrderRepository(BaseRepository):
             stmt = stmt.where(OrderModel.token_id == token_id)
         if strategy_id is not None:
             stmt = stmt.where(OrderModel.strategy_id == strategy_id)
+        if status is not None:
+            stmt = stmt.where(OrderModel.status == status)
         if time_range is not None and not time_range.is_empty:
             since_dt, until_dt = time_range.to_datetime_range()
             if since_dt is not None:

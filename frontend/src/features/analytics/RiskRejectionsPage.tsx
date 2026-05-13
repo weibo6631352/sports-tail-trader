@@ -44,7 +44,7 @@ export function RiskRejectionsPage() {
 
   const aggregate = useQuery({
     queryKey: submitted ? qk.analytics.riskRejectionsAggregate(submitted) : ['analytics', 'risk-aggregate', 'idle'],
-    queryFn: ({ signal }) => analyticsApi.riskRejectionsAggregate(submitted!, signal),
+    queryFn: ({ signal }) => analyticsApi.riskRejectionsAggregate(submitted ?? { sample_limit: 0 }, signal),
     enabled: Boolean(submitted),
   })
 
@@ -61,9 +61,9 @@ export function RiskRejectionsPage() {
       analyticsApi.riskRejections(
         {
           limit: 200,
-          condition_id: submitted!.condition_id,
-          since: submitted!.since,
-          until: submitted!.until,
+          condition_id: submitted?.condition_id,
+          since: submitted?.since,
+          until: submitted?.until,
         },
         signal,
       ),

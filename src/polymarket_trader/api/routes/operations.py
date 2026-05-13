@@ -117,6 +117,16 @@ async def list_reconcile_diffs(
     )
 
 
+@router.get("/parameter-sweep/params")
+async def parameter_sweep_params() -> list[dict[str, object]]:
+    """返回所有可调参数的元数据（类型、范围、标签、示例），供前端渲染 UI。
+
+    单一来源：前端不再维护本地副本，新增/删除参数只改 parameter_sweep.py。
+    """
+    from polymarket_trader.app.parameter_sweep import supported_parameter_specs
+    return supported_parameter_specs()
+
+
 @router.post("/parameter-sweep")
 async def parameter_sweep(
     request: ParameterSweepRequest,

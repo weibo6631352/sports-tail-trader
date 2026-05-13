@@ -60,15 +60,20 @@ _TEAM_EVENT_START_TOLERANCE = timedelta(hours=3)
 # 网球资格赛/小赛会的页面时间和直播源时间可能跨日重排；跨源 24h 兜底（保留原逻辑）。
 _TENNIS_EVENT_START_TOLERANCE = timedelta(hours=24)
 
+# 可调校准常数；随匹配质量数据积累后再调整。
 # confidence 归一化基准：score 来自 alias 长度累加（典型对阵 5–25）。
 # 30 作为分母把"双方都中长名 + 完整别名"映射到约 1.0；溢出 clamp 到 1.0。
 _CONFIDENCE_SCORE_SCALE = 30.0
 # RACE kind 匹配天然弱于 team-pair（leader 文本短、易撞名）→ 0.7 折扣压低优先级。
 _RACE_CONFIDENCE_DISCOUNT = 0.7
 # RACE 文本命中权重；每命中一个 leader / driver / event 关键字加分，最终归一到 confidence。
-_RACE_LEADER_DRIVER_SCORE = 12
-_RACE_TOP3_DRIVER_SCORE = 6
-_RACE_EVENT_NAME_SCORE = 4
+_RACE_LEADER_DRIVER_SCORE = 12  # leader driver 关键字命中
+_RACE_TOP3_DRIVER_SCORE = 6     # top-3 driver（非 leader）命中
+_RACE_EVENT_NAME_SCORE = 4      # event_name 关键字命中
+# RACE top-N driver 阈值（position <= 此值参与扫描）
+_RACE_TOP_POSITION_THRESHOLD = 3
+# token 级单词最小长度，防止短词撞名（单 token 匹配时强制 >= 此值）
+_PHRASE_TOKEN_MIN_LENGTH = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,7 +314,7 @@ def _match_race_event(
         matched_driver = leader
     if drivers:
         # 给 leader 之后的 top 候选也做一次扫描，命中其中之一即可。
-        top_drivers = [d.name for d in drivers if d.position is not None and d.position <= 3]
+        top_drivers = [d.name for d in drivers if d.position is not None and d.position <= _RACE_TOP_POSITION_THRESHOLD]
         for driver_name in top_drivers:
             if driver_name == leader:
                 continue
@@ -341,7 +346,7 @@ def _phrase_matches(phrase: str, market_text: str, market_tokens: set[str]) -> b
     if not tokens:
         return False
     if len(tokens) == 1:
-        return tokens[0] in market_tokens and len(tokens[0]) >= 3
+        return tokens[0] in market_tokens and len(tokens[0]) >= _PHRASE_TOKEN_MIN_LENGTH
     phrase_text = " ".join(tokens)
     return f" {phrase_text} " in f" {market_text} " or all(t in market_tokens for t in tokens)
 
@@ -644,7 +649,7 @@ def _best_alias(
                 continue
             if len(tokens) == 1:
                 token = tokens[0]
-                if len(token) < 3 and token not in market_tokens:
+                if len(token) < _PHRASE_TOKEN_MIN_LENGTH and token not in market_tokens:
                     continue
                 if token in market_tokens:
                     candidates.append((_alias_score(token), alias))

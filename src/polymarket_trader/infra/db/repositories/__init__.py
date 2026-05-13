@@ -8,10 +8,8 @@ from polymarket_trader.infra.db.repositories._base import (
     BaseRepository,
     RepositoryPage,
 )
-from polymarket_trader.infra.db.repositories.account import (
-    AccountHistoryPoint,
-    AccountSnapshotRepository,
-)
+from polymarket_trader.domain.account import AccountHistoryPoint
+from polymarket_trader.infra.db.repositories.account import AccountSnapshotRepository
 from polymarket_trader.infra.db.repositories.allocation import AllocationRepository
 from polymarket_trader.infra.db.repositories.audit import AuditEventRepository
 from polymarket_trader.infra.db.repositories.decision import DecisionRecordRepository

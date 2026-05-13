@@ -16,10 +16,8 @@ export function useRuntimeIdentity() {
     query,
     identity,
     settings: query.data?.settings,
-    automaticTradingEnabled: Boolean(
-      query.data?.automatic_trading_enabled ?? query.data?.settings?.automatic_trading_enabled,
-    ),
+    automaticTradingEnabled: Boolean(query.data?.automatic_trading_enabled),
     extensionModule: query.data?.settings?.extension_module ?? null,
-    phase: query.data?.phase ?? query.data?.settings?.phase ?? null,
+    phase: query.data?.phase ?? null,
   }
 }

@@ -52,6 +52,24 @@ class AllocationMarketSnapshot:
     def market_slug(self) -> str:
         return self.market.market_slug
 
+    @property
+    def effective_best_ask(self) -> Decimal | None:
+        """best_ask 字段优先；缺时从 orderbook 取，避免调用方重复写三行兜底。"""
+        if self.best_ask is not None:
+            return self.best_ask
+        if self.orderbook is not None:
+            return self.orderbook.best_ask
+        return None
+
+    @property
+    def effective_spread(self) -> Decimal | None:
+        """spread 字段优先；缺时从 orderbook 取，避免调用方重复写三行兜底。"""
+        if self.spread is not None:
+            return self.spread
+        if self.orderbook is not None:
+            return self.orderbook.spread
+        return None
+
 
 # 策略侧给 Kelly 提供 (prob_p, prob_confidence, source_label) 的 callback。
 # source_label 仅作审计标记（"outright_real" / "tail_implied" 等），不影响公式。
@@ -134,9 +152,7 @@ def kelly_plan(
             )
             continue
         prob_view = prob_provider(snapshot)
-        price_c = snapshot.best_ask if snapshot.best_ask is not None else (
-            snapshot.orderbook.best_ask if snapshot.orderbook is not None else None
-        )
+        price_c = snapshot.effective_best_ask
         if prob_view.prob_p is None or price_c is None or price_c <= Decimal("0"):
             allocations.append(
                 _reject_allocation(
@@ -383,6 +399,7 @@ def _market_liquidity_usdc(
 def _ask_depth_notional(
     orderbook: OrderbookSnapshot | None,
 ) -> Decimal:
+    # 无价格上限版本，仅供 kelly_plan 内部使用；有 price_cap 的版本在 trading/gates.py。
     if orderbook is None:
         return Decimal("0")
     depth_usdc = Decimal("0")

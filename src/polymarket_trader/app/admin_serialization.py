@@ -244,6 +244,9 @@ class AdminSerializer:
     def orderbook(self, orderbook: OrderbookSnapshot | None) -> dict[str, Any] | None:
         if orderbook is None:
             return None
+        import datetime as _dt
+        now_ms = int(_dt.datetime.now(_dt.timezone.utc).timestamp() * 1000)
+        received_ms = int(orderbook.received_at.timestamp() * 1000)
         return {
             "token_id": orderbook.token_id,
             "condition_id": orderbook.condition_id,
@@ -256,6 +259,7 @@ class AdminSerializer:
             "tick_size": decimal_text(orderbook.tick_size),
             "spread": decimal_text(orderbook.spread),
             "received_at": jsonable(orderbook.received_at),
+            "snapshot_age_ms": now_ms - received_ms,
             "bids": [{"price": decimal_text(level.price), "size": decimal_text(level.size)} for level in orderbook.bids],
             "asks": [{"price": decimal_text(level.price), "size": decimal_text(level.size)} for level in orderbook.asks],
         }

@@ -17,7 +17,7 @@ export function OperationsPage() {
     queryKey: qk.runtime(),
     queryFn: ({ signal }) => healthApi.runtime(signal),
   })
-  const auto = Boolean(runtime.data?.automatic_trading_enabled ?? runtime.data?.settings?.automatic_trading_enabled)
+  const auto = Boolean(runtime.data?.automatic_trading_enabled)
   const operator = useOperatorStore((s) => s.operator)
 
   const pauseMutation = useMutation({

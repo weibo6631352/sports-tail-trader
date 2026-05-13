@@ -151,9 +151,9 @@ function OperatorTab() {
     queryFn: ({ signal }) =>
       auditEventsApi.operators(
         {
-          sample_limit: submitted!.sample_limit,
-          since: submitted!.since,
-          until: submitted!.until,
+          sample_limit: submitted?.sample_limit ?? 0,
+          since: submitted?.since,
+          until: submitted?.until,
         },
         signal,
       ),
@@ -168,10 +168,10 @@ function OperatorTab() {
     queryFn: ({ signal }) =>
       auditEventsApi.operators(
         {
-          operator: selectedOperator!,
-          sample_limit: submitted!.sample_limit,
-          since: submitted!.since,
-          until: submitted!.until,
+          operator: selectedOperator ?? '',
+          sample_limit: submitted?.sample_limit ?? 0,
+          since: submitted?.since,
+          until: submitted?.until,
         },
         signal,
       ),

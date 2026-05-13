@@ -51,7 +51,8 @@ def decide_outright_entry(
             for o in outcomes
         )
     permission = config.tail_outright_execution_permission
-    budget_unlocked = config.tail_outright_budget_usdc > Decimal("0")
+    budget_usdc = effective_decimal(ports, "tail_outright_budget_usdc", config.tail_outright_budget_usdc)
+    budget_unlocked = budget_usdc > Decimal("0")
     effective_permission = permission if budget_unlocked else ExecutionPermission.RECORD_ONLY
     now = context.now or datetime.now(timezone.utc)
     _TokenView = _MockTokenView | MarketTokenView
@@ -137,7 +138,7 @@ def decide_outright_entry(
     if allocation is not None and allocation.buy_budget_usdc > Decimal("0"):
         proposed_amount = allocation.buy_budget_usdc
     else:
-        proposed_amount = min(config.tail_outright_budget_usdc, config.tail_outright_max_per_market_usdc)
+        proposed_amount = min(budget_usdc, config.tail_outright_max_per_market_usdc)
     if proposed_amount <= Decimal("0"):
         return ExtensionDecision.skip(
             reason="outright_budget_exhausted",
@@ -155,7 +156,7 @@ def decide_outright_entry(
         existing_event_exposure_usdc=existing_event_exposure,
         max_per_market_usdc=config.tail_outright_max_per_market_usdc,
         max_event_correlation_usdc=config.tail_outright_max_event_correlation_usdc,
-        max_total_outright_usdc=config.tail_outright_budget_usdc,
+        max_total_outright_usdc=budget_usdc,
         max_hold_horizon_days=config.tail_outright_max_hold_horizon_days,
         min_remaining_days=config.tail_outright_min_remaining_days,
     )

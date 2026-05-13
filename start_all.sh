@@ -250,20 +250,24 @@ cleanup_pid_file_process() {
 listening_pid_for_port() {
   local port="$1"
 
-  if ! command -v ss >/dev/null 2>&1; then
-    return 0
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp "( sport = :$port )" 2>/dev/null \
+      | sed -nE 's/.*pid=([0-9]+).*/\1/p' \
+      | head -n 1
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -ti ":$port" -sTCP:LISTEN 2>/dev/null | head -n 1
   fi
-
-  ss -ltnp "( sport = :$port )" 2>/dev/null \
-    | sed -nE 's/.*pid=([0-9]+).*/\1/p' \
-    | head -n 1
 }
 
 process_belongs_to_app() {
   local pid="$1"
   local cwd
 
-  cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  if [[ -r "/proc/$pid/cwd" ]]; then
+    cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  elif command -v lsof >/dev/null 2>&1; then
+    cwd="$(lsof -p "$pid" -a -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
+  fi
   [[ -n "$cwd" && "$cwd" == "$APP_DIR"* ]]
 }
 
@@ -272,7 +276,11 @@ process_matches_service() {
   local command_fragment="$2"
   local cmdline
 
-  cmdline="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+  if [[ -r "/proc/$pid/cmdline" ]]; then
+    cmdline="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+  else
+    cmdline="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  fi
   [[ -n "$cmdline" && "$cmdline" == *"$command_fragment"* ]]
 }
 

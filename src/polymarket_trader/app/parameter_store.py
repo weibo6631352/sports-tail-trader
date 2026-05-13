@@ -88,6 +88,14 @@ def _coerce_decimal_positive(value: Any) -> Decimal:
     return result
 
 
+def _coerce_execution_permission(value: Any) -> str:
+    allowed = {"record_only", "alert_only", "manual_confirm", "auto_execute"}
+    text = str(value).strip().lower()
+    if text not in allowed:
+        raise ValueError(f"execution_permission must be one of {sorted(allowed)}, got {value!r}")
+    return text
+
+
 def _coerce_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -278,6 +286,44 @@ _register(ParameterSpec(
         "默认 86400（24h）。改 0 = 关闭 stale 检测。"
     ),
     coerce=_coerce_positive_int,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_series_winner_budget_usdc",
+    description=(
+        "Series winner（季后赛系列赛胜者）family 总预算上限（USDC）。"
+        "默认 0 = 全部拒绝（仅审计）。要启用自动交易，同时需设置 "
+        "tail_series_winner_execution_permission=auto_execute 且值 ≥ "
+        "tail_series_winner_max_per_market_usdc（默认 25）。"
+    ),
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_series_winner_min_edge_bps",
+    description="Series winner 入场最小 edge（bps）；默认 800=8%。",
+    coerce=_coerce_positive_int,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_series_winner_max_entry_price",
+    description="Series winner 最大入场价（0–1，price space）；默认 0.95。",
+    coerce=_coerce_probability,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_series_winner_min_orderbook_depth_usdc",
+    description="Series winner 入场要求的最小盘口可吃深度（USDC）；默认 50。",
+    coerce=_coerce_decimal_non_negative,
+))
+_register(ParameterSpec(
+    scope="strategy",
+    key="tail_series_winner_execution_permission",
+    description=(
+        "Series winner 执行权限：record_only / alert_only / manual_confirm / auto_execute。"
+        "要启用自动交易需同时设置 tail_series_winner_budget_usdc > 0。"
+    ),
+    coerce=_coerce_execution_permission,
 ))
 
 

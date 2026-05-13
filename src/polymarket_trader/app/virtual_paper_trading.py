@@ -21,6 +21,7 @@ from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import OrderResultStatus
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
+from polymarket_trader.infra.db.repositories.market import MarketRepository
 from polymarket_trader.infra.outbox.local_queue import LocalOutbox
 from polymarket_trader.infra.polymarket.auth import PolymarketOrderExecutionClient
 from polymarket_trader.infra.polymarket.order_executor import (
@@ -198,7 +199,7 @@ async def _select_candidate(
 ) -> _CandidateSelection:
     account = _account_snapshot(runtime)
     has_explicit_request = bool(condition_id or token_id or market_slug)
-    explicit_market = _resolve_market(
+    explicit_market = await _resolve_market(
         runtime,
         condition_id=condition_id,
         token_id=token_id,
@@ -577,7 +578,7 @@ def _rejection(
         "risk_reason": extras.get("risk_reason"),
         "execution_permission": execution_permission,
         "market_family": extras.get("market_family") or "unknown",
-        "market_type": (None if summary is None else (summary.market_type or None)) or "unknown",
+        "market_type": (summary.market_type if summary is not None else None) or "unknown",
         "game_status": extras.get("game_status") or "unknown",
         "best_ask": None if summary is None or summary.best_ask is None else str(summary.best_ask),
         "line": None if summary is None or summary.line is None else str(summary.line),
@@ -869,7 +870,7 @@ def _registry_markets(runtime: Any) -> tuple[Market, ...]:
     return tuple(registry.snapshot().markets)
 
 
-def _resolve_market(
+async def _resolve_market(
     runtime: Any,
     *,
     condition_id: str | None = None,
@@ -877,18 +878,34 @@ def _resolve_market(
     market_slug: str | None = None,
 ) -> Market | None:
     registry = getattr(runtime, "registry", None)
-    if registry is None:
+    if registry is not None:
+        if condition_id:
+            market = registry.get_by_condition_id(condition_id)
+            if market is not None:
+                return market
+        if token_id:
+            market = registry.get_by_token_id(token_id)
+            if market is not None:
+                return market
+        if market_slug:
+            market = registry.get_by_slug(market_slug)
+            if market is not None:
+                return market
+    session_factory = getattr(runtime, "db_session_factory", None)
+    if session_factory is None:
         return None
-    if condition_id:
-        market = registry.get_by_condition_id(condition_id)
-        if market is not None:
-            return market
-    if token_id:
-        market = registry.get_by_token_id(token_id)
-        if market is not None:
-            return market
-    if market_slug:
-        return registry.get_by_slug(market_slug)
+    async with session_factory() as session:
+        repo = MarketRepository(session)
+        if condition_id:
+            market = await repo.get_by_condition_id(condition_id)
+            if market is not None:
+                return market
+        if token_id:
+            market = await repo.get_by_token_id(token_id)
+            if market is not None:
+                return market
+        if market_slug:
+            return await repo.get_by_market_slug(market_slug)
     return None
 
 

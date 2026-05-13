@@ -10,7 +10,7 @@ from polymarket_trader.extension_api import DecisionKind, ExtensionContext, Exte
 
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata, exit_price_for_context
-from strategies.current.trading.helpers import enrich_decision
+from strategies.current.trading.helpers import enrich_decision, resolve_tick_size
 
 
 def decide_follow_up(
@@ -29,7 +29,7 @@ def decide_follow_up(
         target_price = _decimal_from_intent_metadata(intent_metadata.get("profit_take_target_price"))
         if target_price is None:
             return ()
-        target_price = cap_price_to_clob_limit(target_price, tick_size=_effective_tick_size(context))
+        target_price = cap_price_to_clob_limit(target_price, tick_size=resolve_tick_size(context.orderbook, context.market))
         exit_metadata = build_exit_plan_metadata(
             config,
             context,
@@ -96,14 +96,6 @@ def _has_profit_take_follow_up(metadata: Mapping[str, object]) -> bool:
     return metadata.get("exit_mode") == "profit_take" or bool(
         metadata.get("profit_take_overlay_enabled")
     )
-
-
-def _effective_tick_size(context: ExtensionContext) -> Decimal | None:
-    if context.orderbook is not None and context.orderbook.tick_size is not None:
-        return context.orderbook.tick_size
-    if context.market is not None:
-        return context.market.tick_size
-    return None
 
 
 def _decimal_from_intent_metadata(value: object) -> Decimal | None:

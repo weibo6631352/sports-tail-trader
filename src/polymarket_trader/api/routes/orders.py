@@ -40,6 +40,14 @@ class CancelOrderRequest(BaseModel):
     trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+class BulkCancelRequest(BaseModel):
+    # 上限 20 单，防止单次 admin 操作长时间占用交易服务（§7 不阻塞 P0）。
+    order_ids: list[str] = Field(min_length=1, max_length=20)
+    operator: str = Field(default="manual", min_length=1, max_length=64)
+    reason: str = Field(default="admin_bulk_cancel", min_length=1, max_length=200)
+    trace_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
 @router.get("")
 async def list_orders(
     limit: int = Query(default=100, ge=1, le=500),
@@ -50,6 +58,16 @@ async def list_orders(
     trace_id: str | None = Query(default=None, min_length=1, max_length=128),
     order_id: str | None = Query(default=None, min_length=1, max_length=128),
     trade_id: str | None = Query(default=None, min_length=1, max_length=128),
+    status: str | None = Query(
+        default=None,
+        description=(
+            "按订单状态过滤（仅 open_only=false 时生效）。"
+            "可选值：created / signed / submitted / cancel_requested / "
+            "matched / partially_filled / no_fill / live / cancelled / rejected / failed"
+        ),
+        min_length=1,
+        max_length=32,
+    ),
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
     strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
@@ -65,6 +83,7 @@ async def list_orders(
         trace_id=trace_id,
         order_id=order_id,
         trade_id=trade_id,
+        status=status,
         time_range=build_time_range(since=since, until=until),
         strategy_id=strategy_id,
     )
@@ -100,6 +119,23 @@ async def cancel_order(
         market_slug=request.market_slug,
         condition_id=request.condition_id,
         token_id=request.token_id,
+        operator=request.operator,
+        reason=request.reason,
+        trace_id=request.trace_id,
+    )
+
+
+@router.post("/bulk-cancel")
+async def bulk_cancel_orders(
+    request: BulkCancelRequest,
+    service: AdminService = Depends(get_admin_service),
+    _rate: None = Depends(rate_limit(endpoint="bulk_cancel_orders", qps=0.2, burst=1)),
+) -> dict[str, object]:
+    """批量撤单（最多 20 单）。每笔独立走 TradingService → OrderExecutor，
+    单笔失败不阻塞后续；返回每笔结果汇总。"""
+
+    return await service.bulk_cancel_orders(
+        order_ids=request.order_ids,
         operator=request.operator,
         reason=request.reason,
         trace_id=request.trace_id,

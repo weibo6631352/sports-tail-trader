@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   Alert,
   Badge,
@@ -21,6 +21,7 @@ import type {
   ParameterSweepResponse,
   SweepCandidateResult,
   SweepParameterKey,
+  SweepParamSpec,
 } from '@core/api/types'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
@@ -35,56 +36,9 @@ import { type DiffRow } from '@shared/forms/DiffPreview'
 import { formatUsdc, pnlTone } from '@shared/format'
 import { useTimeWindowStore } from '@core/time/store'
 
-// 后端 _SUPPORTED_PARAMETERS 白名单——前端复述一份给 UI 用。
-// 注：要新增可调字段，先在后端 parameter_sweep.py 添加，再同步这里。
-type SweepParamMeta = {
-  key: SweepParameterKey
-  label: string
-  inputHint: string
-  example: string
-  type: 'int' | 'decimal'
-  /** 把后端 sweep 参数名映射到 parameter_store 的 (scope, key)，用于一键应用。 */
-  scope: 'strategy'
-}
-
-const PARAM_META: SweepParamMeta[] = [
-  {
-    key: 'tail_outright_min_edge_bps',
-    label: '最小 edge (bps)',
-    inputHint: 'int 整数；缩小 = 入场门槛降低',
-    example: '300, 400, 500, 600',
-    type: 'int',
-    scope: 'strategy',
-  },
-  {
-    key: 'tail_outright_max_entry_price',
-    label: '最大入场价 (0–1)',
-    inputHint: 'decimal；扩大会接到更贵的标的',
-    example: '0.50, 0.60, 0.70',
-    type: 'decimal',
-    scope: 'strategy',
-  },
-  {
-    key: 'tail_outright_min_orderbook_depth_usdc',
-    label: '最小盘口深度 (USDC)',
-    inputHint: 'decimal；为空字段的样本算作不通过',
-    example: '5, 10, 20',
-    type: 'decimal',
-    scope: 'strategy',
-  },
-  {
-    key: 'entry_no_price_max',
-    label: 'No-side 价格上限 (0–1)',
-    inputHint: 'decimal；安全阈值',
-    example: '0.45, 0.55',
-    type: 'decimal',
-    scope: 'strategy',
-  },
-]
-
 type SweepInputs = Record<SweepParameterKey, string>
 
-function parseCandidates(inputs: SweepInputs): {
+function parseCandidates(inputs: SweepInputs, paramSpecs: SweepParamSpec[]): {
   candidates: Partial<Record<SweepParameterKey, Array<number | string>>>
   gridSize: number
   errors: Array<{ key: SweepParameterKey; message: string }>
@@ -93,7 +47,7 @@ function parseCandidates(inputs: SweepInputs): {
   const errors: Array<{ key: SweepParameterKey; message: string }> = []
   let gridSize = 1
   let anyKey = false
-  for (const meta of PARAM_META) {
+  for (const meta of paramSpecs) {
     const raw = inputs[meta.key].trim()
     if (!raw) continue
     anyKey = true
@@ -140,18 +94,39 @@ function parseCandidates(inputs: SweepInputs): {
 export function ParameterSweepPage() {
   const since = useTimeWindowStore((s) => s.since)
   const until = useTimeWindowStore((s) => s.until)
+
+  const paramSpecsQuery = useQuery({
+    queryKey: ['parameter-sweep-params'],
+    queryFn: ({ signal }) => operationsApi.parameterSweepParams(signal),
+    staleTime: 60_000,
+  })
+  // 稳定引用：paramSpecsQuery.data ?? [] 每次渲染都产生新数组，useMemo 避免下游依赖抖动
+  const paramSpecs = useMemo(() => paramSpecsQuery.data ?? [], [paramSpecsQuery.data])
+
+  const emptyInputs = useMemo(
+    () => Object.fromEntries(paramSpecs.map((s) => [s.key, ''])) as SweepInputs,
+    [paramSpecs],
+  )
   const [inputs, setInputs] = useState<SweepInputs>({
     tail_outright_min_edge_bps: '',
     tail_outright_max_entry_price: '',
     tail_outright_min_orderbook_depth_usdc: '',
     entry_no_price_max: '',
   })
+  // 服务端 paramSpecs 首次加载时同步 inputs 键集合。
+  // 用 useState 跟踪上次 paramSpecs 引用，在 render 期间同步派生 inputs——
+  // 这是 React 推荐替代 useEffect+setState 的模式（避免级联渲染）。
+  const [prevParamSpecs, setPrevParamSpecs] = useState(paramSpecs)
+  if (prevParamSpecs !== paramSpecs && paramSpecs.length > 0) {
+    setPrevParamSpecs(paramSpecs)
+    setInputs(emptyInputs)
+  }
   const [perDecisionUsdc, setPerDecisionUsdc] = useState(10)
   const [decisionLimit, setDecisionLimit] = useState(2000)
   const [settlementLimit, setSettlementLimit] = useState(2000)
   const [result, setResult] = useState<ParameterSweepResponse | null>(null)
 
-  const parsed = useMemo(() => parseCandidates(inputs), [inputs])
+  const parsed = useMemo(() => parseCandidates(inputs, paramSpecs), [inputs, paramSpecs])
   const gridOverLimit = parsed.gridSize > 1000
   const hasParseError = parsed.errors.length > 0
   const canRun = parsed.gridSize > 0 && !gridOverLimit && !hasParseError
@@ -199,7 +174,7 @@ export function ParameterSweepPage() {
       <Stack gap="md">
         <SectionCard title="候选参数" description="每行多个候选值，逗号 / 空格 / 换行分隔；留空 = 不扫该字段">
           <Stack gap="sm">
-            {PARAM_META.map((meta) => {
+            {paramSpecs.map((meta) => {
               const fieldErrors = parsed.errors.filter((e) => e.key === meta.key)
               return (
                 <Group key={meta.key} gap="sm" wrap="wrap" align="flex-start">
@@ -211,14 +186,14 @@ export function ParameterSweepPage() {
                       {meta.label}
                     </Text>
                     <Text size="xs" c="dimmed">
-                      {meta.inputHint}
+                      {meta.input_hint}
                     </Text>
                   </Stack>
                   <Textarea
                     size="xs"
                     style={{ flex: 1, minWidth: 280 }}
                     placeholder={`例如：${meta.example}`}
-                    value={inputs[meta.key]}
+                    value={inputs[meta.key] ?? ''}
                     onChange={(e) => setInputs({ ...inputs, [meta.key]: e.currentTarget.value })}
                     autosize
                     minRows={1}

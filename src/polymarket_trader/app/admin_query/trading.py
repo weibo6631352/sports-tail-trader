@@ -1,12 +1,15 @@
-"""交易维度的 admin 只读查询：订单、成交、持仓、分配、风控拒绝。"""
+"""交易维度的 admin 只读查询：订单、成交、持仓、分配、风控拒绝、组合暴露。"""
 
 from __future__ import annotations
 
 from collections import Counter
+from decimal import Decimal
 from typing import Any
 
-from polymarket_trader.app.admin_serialization import page_payload
+from polymarket_trader.app.admin_serialization import decimal_text, page_payload
 from polymarket_trader.app.admin_service_helpers import _RepositoryGroup
+from polymarket_trader.domain.account import _open_buy_order_reserved_usdc
+from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
 
@@ -25,6 +28,7 @@ class AdminTradingQueryMixin:
         trace_id: str | None = None,
         order_id: str | None = None,
         trade_id: str | None = None,
+        status: str | None = None,
         time_range: TimeRange | None = None,
         strategy_id: str | None = None,
     ) -> dict[str, Any]:
@@ -39,6 +43,7 @@ class AdminTradingQueryMixin:
                 and (order_id is None or order.order_id == order_id)
                 and (trade_id is None or order.trade_id == trade_id)
                 and (strategy_id is None or order.strategy_id == strategy_id)
+                and (status is None or (order.status is not None and order.status.value == status))
                 and (time_range is None or time_range.contains(order.created_at))
             ]
             page = self._slice_sequence(orders, limit=limit, offset=offset)
@@ -55,6 +60,7 @@ class AdminTradingQueryMixin:
                 and (order_id is None or order.order_id == order_id)
                 and (trade_id is None or order.trade_id == trade_id)
                 and (strategy_id is None or order.strategy_id == strategy_id)
+                and (status is None or (order.status is not None and order.status.value == status))
                 and (time_range is None or time_range.contains(order.created_at))
             ]
             page = self._slice_sequence(orders, limit=limit, offset=offset)
@@ -69,6 +75,7 @@ class AdminTradingQueryMixin:
                 trade_id=trade_id,
                 condition_id=condition_id,
                 token_id=token_id,
+                status=status,
                 time_range=time_range,
                 strategy_id=strategy_id,
             )
@@ -286,6 +293,80 @@ class AdminTradingQueryMixin:
                 {"field": fld, "count": cnt}
                 for fld, cnt in field_counter.most_common(50)
             ],
+        }
+
+
+    async def portfolio_exposure(self) -> dict[str, Any]:
+        """每市场未平仓名义暴露快照（纯内存，零 DB，零 P0 影响）。
+
+        按 condition_id 分组，返回每个仓位的：名义市值、浮动盈亏、
+        平均入场价、当前价、挂单预留资金、暂停状态。
+        操盘者最直接的"我的风险在哪里"全局视图。
+        """
+
+        snapshot = self._account_snapshot()
+
+        # 预聚合每个 (condition_id, token_id) 的挂单预留 USDC
+        reserved_by_token: dict[tuple[str, str], Decimal] = {}
+        for order in snapshot.open_orders:
+            if order.side != OrderSide.BUY or not order.open:
+                continue
+            key = (order.condition_id or "", order.token_id or "")
+            reserved_by_token[key] = (
+                reserved_by_token.get(key, Decimal("0"))
+                + _open_buy_order_reserved_usdc(order)
+            )
+
+        total_notional = Decimal("0")
+        total_cost = Decimal("0")
+        total_cash_pnl = Decimal("0")
+        total_reserved = Decimal("0")
+        items = []
+
+        for pos in snapshot.positions:
+            notional = (
+                pos.current_value
+                if pos.current_value is not None
+                else pos.cost_usdc
+            )
+            reserved = reserved_by_token.get(
+                (pos.condition_id, pos.token_id), Decimal("0")
+            )
+            total_notional += notional
+            total_cost += pos.cost_usdc
+            total_reserved += reserved
+            if pos.cash_pnl is not None:
+                total_cash_pnl += pos.cash_pnl
+
+            items.append({
+                "condition_id": pos.condition_id,
+                "token_id": pos.token_id,
+                "market_slug": pos.market_slug,
+                "strategy_id": pos.strategy_id,
+                "shares": decimal_text(pos.shares),
+                "cost_usdc": decimal_text(pos.cost_usdc),
+                "notional_usdc": decimal_text(notional),
+                "avg_price": decimal_text(pos.avg_price) if pos.avg_price is not None else None,
+                "cur_price": decimal_text(pos.cur_price) if pos.cur_price is not None else None,
+                "cash_pnl": decimal_text(pos.cash_pnl) if pos.cash_pnl is not None else None,
+                "percent_pnl": decimal_text(pos.percent_pnl) if pos.percent_pnl is not None else None,
+                "realized_pnl": decimal_text(pos.realized_pnl) if pos.realized_pnl is not None else None,
+                "open_buy_reserved_usdc": decimal_text(reserved),
+                "paused": snapshot.is_market_paused(pos.condition_id),
+                "redeemable": pos.redeemable,
+                "settled_zero_value": pos.settled_zero_value,
+            })
+
+        return {
+            "items": items,
+            "position_count": len(items),
+            "total_notional_usdc": decimal_text(total_notional),
+            "total_cost_usdc": decimal_text(total_cost),
+            "total_cash_pnl": decimal_text(total_cash_pnl),
+            "total_open_buy_reserved_usdc": decimal_text(total_reserved),
+            "available_usdc": decimal_text(snapshot.available_usdc),
+            "balance_usdc": decimal_text(snapshot.balance_usdc),
+            "equity_usdc": decimal_text(snapshot.equity_usdc),
         }
 
 

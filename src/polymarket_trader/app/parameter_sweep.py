@@ -49,45 +49,82 @@ class SweepSampleQuality(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class _ParameterSpec:
-    """sweep 候选值类型 + 金融取值范围。
+    """sweep 候选值类型 + 金融取值范围 + UI 展示元数据。
 
     sweep 输出会被人工搬到真实 ParameterStore，所以接受 ``-0.5`` / ``2.5``
     这种物理上不可达的值会污染调优结论。范围检查在 ``_coerce_value`` 内立即做。
+
+    ``label`` / ``input_hint`` / ``example`` 由 API 暴露给前端，避免前端复述
+    一份参数列表（单一来源——前端从 ``GET /parameter-sweep/params`` 拉取）。
     """
 
     type_name: str  # "int" 或 "decimal"
-    minimum: Decimal | None = None       # 含端点（>=）
+    minimum: Decimal | None = None            # 含端点（>=）
     minimum_exclusive: Decimal | None = None  # 严格大于（>）
-    maximum: Decimal | None = None       # 含端点（<=）
+    maximum: Decimal | None = None            # 含端点（<=）
     maximum_exclusive: Decimal | None = None  # 严格小于（<）
+    label: str = ""
+    input_hint: str = ""
+    example: str = ""
+
+    def as_api_dict(self, key: str) -> dict[str, object]:
+        return {
+            "key": key,
+            "type": self.type_name,
+            "label": self.label,
+            "input_hint": self.input_hint,
+            "example": self.example,
+            "minimum": str(self.minimum) if self.minimum is not None else None,
+            "minimum_exclusive": str(self.minimum_exclusive) if self.minimum_exclusive is not None else None,
+            "maximum": str(self.maximum) if self.maximum is not None else None,
+            "maximum_exclusive": str(self.maximum_exclusive) if self.maximum_exclusive is not None else None,
+            "scope": "strategy",
+        }
 
 
 # sweep 允许调的参数白名单——按 strategy parameter_store 注册值的子集挑出来。
 # 不开放结算 / 退出参数因为它们影响的是离场端，本模块只算入场后到结算的总 PnL。
 _SUPPORTED_PARAMETERS: dict[str, _ParameterSpec] = {
-    # bps 不能为负——负 edge 等于"接受亏损交易"，物理上不可达
-    "tail_outright_min_edge_bps": _ParameterSpec("int", minimum=Decimal("0")),
-    # 概率在 (0, 1)，PolymarketYes/No share 价格区间
+    "tail_outright_min_edge_bps": _ParameterSpec(
+        "int",
+        minimum=Decimal("0"),
+        label="最小 edge (bps)",
+        input_hint="int 整数；缩小 = 入场门槛降低",
+        example="300, 400, 500, 600",
+    ),
     "tail_outright_max_entry_price": _ParameterSpec(
         "decimal",
         minimum_exclusive=Decimal("0"),
         maximum_exclusive=Decimal("1"),
+        label="最大入场价 (0–1)",
+        input_hint="decimal；扩大会接到更贵的标的",
+        example="0.50, 0.60, 0.70",
     ),
-    # 盘口深度不能为负
     "tail_outright_min_orderbook_depth_usdc": _ParameterSpec(
-        "decimal", minimum=Decimal("0")
+        "decimal",
+        minimum=Decimal("0"),
+        label="最小盘口深度 (USDC)",
+        input_hint="decimal；为空字段的样本算作不通过",
+        example="5, 10, 20",
     ),
-    # No-price 上限同样属于概率域，允许等于 1（"不限"）
     "entry_no_price_max": _ParameterSpec(
         "decimal",
         minimum_exclusive=Decimal("0"),
         maximum=Decimal("1"),
+        label="No-side 价格上限 (0–1)",
+        input_hint="decimal；安全阈值",
+        example="0.45, 0.55",
     ),
 }
 
 
 def supported_parameter_keys() -> tuple[str, ...]:
     return tuple(sorted(_SUPPORTED_PARAMETERS.keys()))
+
+
+def supported_parameter_specs() -> list[dict[str, object]]:
+    """按字典序返回所有可 sweep 参数的 API 表示，供前端渲染 UI。"""
+    return [spec.as_api_dict(key) for key, spec in sorted(_SUPPORTED_PARAMETERS.items())]
 
 
 @dataclass(frozen=True, slots=True)

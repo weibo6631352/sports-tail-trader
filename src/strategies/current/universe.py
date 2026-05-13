@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.extension_api import UniverseDecision
+from strategies.current.tail import SportsMarketFamily
 
 from strategies.current.config import CurrentStrategyConfig
 
@@ -40,25 +41,33 @@ def select_market(config: CurrentStrategyConfig, market: Market) -> UniverseDeci
     descriptor = describe_sports_market(market)
     if not descriptor.accepted or descriptor.market_type is None:
         return UniverseDecision.exclude(reason=descriptor.reason or "market_parse_failed")
-    family = descriptor.market_family.value
-    # 接受 single_game ∪ outright；series/esports 仍可审计拒绝（§9：所有盘口至少建模）。
-    if family not in {"single_game", "outright"}:
+    family = descriptor.market_family
+    # 接受 single_game ∪ outright ∪ series；esports 仍可审计拒绝（§9：所有盘口至少建模）。
+    if family not in {SportsMarketFamily.SINGLE_GAME, SportsMarketFamily.OUTRIGHT, SportsMarketFamily.SERIES}:
         return UniverseDecision.exclude(
-            reason=descriptor.reason or f"{family}_family_excluded",
+            reason=descriptor.reason or f"{family.value}_family_excluded",
         )
 
     category_tokens = _normalized_tokens(_universe_text(market))
-    if family == "single_game":
+    if family == SportsMarketFamily.SINGLE_GAME:
         # single_game 必须命中体育 token 才进入策略 universe，避免泛体育候选噪音。
         if not set(config.tail_category_tokens) & category_tokens:
             return UniverseDecision.exclude(reason="category_not_matched")
         if descriptor.market_type not in config.tail_enabled_market_types:
             return UniverseDecision.exclude(reason="market_type_disabled")
-    else:
+    elif family == SportsMarketFamily.OUTRIGHT:
         # outright：枚举的 market_type 是 binary_prop/moneyline；按 outright 自己的
         # 白名单过滤，避免和 single_game 共用 tail_enabled_market_types。
         if descriptor.market_type not in config.tail_outright_enabled_market_types:
             return UniverseDecision.exclude(reason="outright_market_type_disabled")
+    else:
+        # series：classify_series_sub_type 返回 OTHER 表示文本无系列赛关键词，直接拒绝。
+        from strategies.current.series.classifier import classify_series_sub_type
+        from strategies.current.series.types import SeriesSubType
+
+        sub_type = classify_series_sub_type(market)
+        if sub_type == SeriesSubType.OTHER:
+            return UniverseDecision.exclude(reason="series_sub_type_unclassifiable")
     return UniverseDecision.include(
         reason="market_selected",
         metadata={
