@@ -18,6 +18,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.infra.sports.game_odds_client import (
     GameOddsClient,
     GameOddsSnapshot,
+    GameSpreadSnapshot,
 )
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.registry import MarketRegistry
@@ -90,11 +91,21 @@ class GameOddsWorker:
                 self._consecutive_failures += 1
                 self._last_error = f"{market.market_slug}: {exc}"
                 continue
+            # spreads 缺失不影响 h2h 主路径：series WINNER 仍可用 h2h；只在
+            # HANDICAP single_game scope 缺数据时由 evaluator 报 MISSING_GAME_SPREADS。
+            spread_snapshot: GameSpreadSnapshot | None = None
+            try:
+                spread_snapshot = await self._client.fetch_spreads(
+                    sport_key=sport_key,
+                    game_key=game_key,
+                )
+            except Exception as exc:
+                self._last_error = f"spreads:{market.market_slug}: {exc}"
             self._consecutive_failures = 0
             self._last_fetched_at[market.condition_id] = _utc_now()
-            if snapshot is None:
+            if snapshot is None and spread_snapshot is None:
                 continue
-            self._upsert(market, snapshot)
+            self._upsert(market, snapshot, spread_snapshot)
             refreshed += 1
         self._last_markets_refreshed = refreshed
         return refreshed
@@ -105,18 +116,14 @@ class GameOddsWorker:
             return True
         return (_utc_now() - last).total_seconds() >= self._ttl_seconds
 
-    def _upsert(self, market: Market, snapshot: GameOddsSnapshot) -> None:
+    def _upsert(
+        self,
+        market: Market,
+        snapshot: GameOddsSnapshot | None,
+        spread_snapshot: GameSpreadSnapshot | None,
+    ) -> None:
         # 与 series_state_worker 同模式：整记录替换需保留既有 metadata 字段，
         # 否则会清掉 live_state / season_odds / series_state 字段。
-        payload: dict = {
-            "team_a": snapshot.team_a,
-            "team_b": snapshot.team_b,
-            "p_a": str(snapshot.p_a),
-            "observed_at": snapshot.observed_at.isoformat(),
-            "source": snapshot.source,
-        }
-        if snapshot.source_event_id:
-            payload["source_event_id"] = snapshot.source_event_id
         existing_record = self._entry_metadata_store.find(
             condition_id=market.condition_id,
             market_slug=market.market_slug,
@@ -133,13 +140,39 @@ class GameOddsWorker:
             existing_live_state_reason = existing_record.live_state_signal_reason or ""
             existing_live_state_phase = existing_record.live_state_phase or ""
             existing_live_state_payload = dict(existing_record.live_state_payload or {})
-        existing_metadata["game_odds"] = payload
+        if snapshot is not None:
+            payload: dict = {
+                "team_a": snapshot.team_a,
+                "team_b": snapshot.team_b,
+                "p_a": str(snapshot.p_a),
+                "observed_at": snapshot.observed_at.isoformat(),
+                "source": snapshot.source,
+            }
+            if snapshot.source_event_id:
+                payload["source_event_id"] = snapshot.source_event_id
+            existing_metadata["game_odds"] = payload
+        if spread_snapshot is not None:
+            spread_payload: dict = {
+                "team_a": spread_snapshot.team_a,
+                "team_b": spread_snapshot.team_b,
+                "spread_line": str(spread_snapshot.spread_line),
+                "p_a_covers": str(spread_snapshot.p_a_covers),
+                "observed_at": spread_snapshot.observed_at.isoformat(),
+                "source": spread_snapshot.source,
+            }
+            if spread_snapshot.source_event_id:
+                spread_payload["source_event_id"] = spread_snapshot.source_event_id
+            existing_metadata["game_spreads"] = spread_payload
+        # source 标签取 h2h 优先，spreads 兜底；observed_at 同理。
+        primary = snapshot or spread_snapshot
+        if primary is None:
+            return
         self._entry_metadata_store.upsert(
             condition_id=market.condition_id,
             market_slug=market.market_slug,
             event_slug=market.event_slug,
-            source=f"game_odds:{snapshot.source}",
-            updated_at=snapshot.observed_at,
+            source=f"game_odds:{primary.source}",
+            updated_at=primary.observed_at,
             metadata=existing_metadata,
             live_state_signal_allowed=existing_live_state_allowed,
             live_state_signal_reason=existing_live_state_reason,

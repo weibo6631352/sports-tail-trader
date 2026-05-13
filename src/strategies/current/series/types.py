@@ -59,9 +59,14 @@ class SeriesRejectReason(StrEnum):
     TOTAL_BUDGET_EXHAUSTED = "total_budget_exhausted"
     EVENT_CORRELATION_CAP = "event_correlation_cap"
     PER_MARKET_CAP_EXCEEDED = "per_market_cap_exceeded"
-    # 子类型尚未接线（Worktree 4 落 TOTAL_GAMES / HANDICAP；本 worktree 只接 WINNER）。
-    TOTAL_GAMES_MODEL_PENDING = "total_games_model_pending"
-    HANDICAP_MODEL_PENDING = "handicap_model_pending"
+    # outcome 文本无法解析为 (line, direction) (TOTAL_GAMES) 或 (team, line, scope)
+    # (GAME_HANDICAP) —— evaluator 已分到正确子类型但 outcome 形态超出已知模式。
+    SERIES_OUTCOME_NOT_PARSED = "series_outcome_not_parsed"
+    # GAME_HANDICAP 子类型且 scope=single_game，但 metadata 缺少 game_spreads
+    # （TheOddsAPI spread fetch 失败或未匹配上）。series scope 的 handicap 仍可
+    # 走 series_handicap_cover_probability。
+    MISSING_GAME_SPREADS = "missing_game_spreads"
+    STALE_GAME_SPREADS = "stale_game_spreads"
 
 
 @dataclass(frozen=True, slots=True)

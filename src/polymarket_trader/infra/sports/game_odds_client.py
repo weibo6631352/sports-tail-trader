@@ -35,6 +35,25 @@ class GameOddsSnapshot:
     raw_payload: Mapping[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class GameSpreadSnapshot:
+    """单场让分快照。
+
+    ``spread_line`` 是 ``team_a`` 视角的让分（负数=team_a 让分）。
+    ``p_a_covers`` 是 de-vig 后 team_a 在该 line 上覆盖的概率；team_b 的覆盖
+    概率是 ``1 - p_a_covers``。
+    """
+
+    team_a: str
+    team_b: str
+    spread_line: Decimal
+    p_a_covers: Decimal
+    observed_at: datetime
+    source: str
+    source_event_id: str | None = None
+    raw_payload: Mapping[str, Any] = field(default_factory=dict)
+
+
 class GameOddsClient(Protocol):
     """单场胜率源标准接口。"""
 
@@ -44,6 +63,13 @@ class GameOddsClient(Protocol):
         sport_key: str,
         game_key: str,
     ) -> GameOddsSnapshot | None: ...
+
+    async def fetch_spreads(
+        self,
+        *,
+        sport_key: str,
+        game_key: str,
+    ) -> GameSpreadSnapshot | None: ...
 
     async def aclose(self) -> None: ...
 
@@ -113,6 +139,39 @@ class TheOddsApiGameOddsClient:
             raise normalize_sports_data_error(exc, operation=operation) from exc
         observed_at = utc_now(self._now_provider)
         return parse_theoddsapi_h2h_payload(
+            payload,
+            game_key=game_key,
+            observed_at=observed_at,
+        )
+
+    async def fetch_spreads(
+        self,
+        *,
+        sport_key: str,
+        game_key: str,
+    ) -> GameSpreadSnapshot | None:
+        if not self._api_key:
+            return None
+        operation = f"theoddsapi_spreads:{sport_key}"
+        try:
+            response = await self._client.get(
+                f"/v4/sports/{sport_key}/odds",
+                params={
+                    "apiKey": self._api_key,
+                    "regions": ",".join(self._regions),
+                    "markets": "spreads",
+                    "oddsFormat": "decimal",
+                },
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            raise normalize_sports_data_error(exc, operation=operation) from exc
+        try:
+            payload = response.json()
+        except Exception as exc:
+            raise normalize_sports_data_error(exc, operation=operation) from exc
+        observed_at = utc_now(self._now_provider)
+        return parse_theoddsapi_spreads_payload(
             payload,
             game_key=game_key,
             observed_at=observed_at,
@@ -243,9 +302,129 @@ def _decimal(value: Any) -> Decimal | None:
         return None
 
 
+def parse_theoddsapi_spreads_payload(
+    payload: Any,
+    *,
+    game_key: str,
+    observed_at: datetime | None = None,
+) -> GameSpreadSnapshot | None:
+    """TheOddsAPI v4 spreads 响应 → GameSpreadSnapshot。
+
+    spreads market 每个 outcome 含 ``name`` (球队名)、``price`` (decimal odds) 和
+    ``point`` (该球队对应的让分 line)。``team_a = home_team``；``spread_line``
+    使用 home 的 point（与 ``p_a_covers`` 同步）。多家 bookmaker 平均 price 后
+    用比例归一 de-vig。
+    """
+
+    observed_at = observed_at or datetime.now(timezone.utc)
+    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
+        return None
+    target = _normalize_key(game_key)
+    matched: Mapping[str, Any] | None = None
+    for event in payload:
+        if not isinstance(event, Mapping):
+            continue
+        candidates = (
+            _normalize_key(str(event.get("id") or "")),
+            _normalize_key(_event_label(event)),
+        )
+        if target in candidates:
+            matched = event
+            break
+    if matched is None:
+        return None
+    home = str(matched.get("home_team") or "").strip()
+    away = str(matched.get("away_team") or "").strip()
+    if not home or not away:
+        return None
+    aggregated = _aggregate_spread(matched, home=home, away=away)
+    if aggregated is None:
+        return None
+    home_price, away_price, home_point = aggregated
+    raw_probs = {
+        home: Decimal(1) / home_price,
+        away: Decimal(1) / away_price,
+    }
+    fair = _power_method_devig(raw_probs)
+    p_home = fair.get(home)
+    if p_home is None or p_home <= 0:
+        return None
+    return GameSpreadSnapshot(
+        team_a=home,
+        team_b=away,
+        spread_line=home_point,
+        p_a_covers=p_home,
+        observed_at=observed_at,
+        source="theoddsapi",
+        source_event_id=str(matched.get("id") or "") or None,
+        raw_payload={
+            "sport_key": matched.get("sport_key"),
+            "commence_time": matched.get("commence_time"),
+        },
+    )
+
+
+def _aggregate_spread(
+    event: Mapping[str, Any],
+    *,
+    home: str,
+    away: str,
+) -> tuple[Decimal, Decimal, Decimal] | None:
+    """从所有 bookmaker 的 spreads market 平均出 (home_price, away_price, home_point)。
+
+    选取规则：每个 bookmaker 内部对 home 与 away 的 ``point`` 必须互为相反数
+    （spread 定义本就如此）。多家 bookmaker 的 home_point 可能不同——取
+    出现频次最高的 home_point 作为基准；价格在同一 home_point 下平均。
+    """
+
+    grouped: dict[Decimal, dict[str, list[Decimal]]] = {}
+    for bookmaker in event.get("bookmakers", ()) or ():
+        if not isinstance(bookmaker, Mapping):
+            continue
+        for market in bookmaker.get("markets", ()) or ():
+            if not isinstance(market, Mapping):
+                continue
+            if str(market.get("key") or "").lower() != "spreads":
+                continue
+            home_price: Decimal | None = None
+            away_price: Decimal | None = None
+            home_point: Decimal | None = None
+            for outcome in market.get("outcomes", ()) or ():
+                if not isinstance(outcome, Mapping):
+                    continue
+                name = str(outcome.get("name") or "").strip()
+                price = _decimal(outcome.get("price"))
+                point = _decimal(outcome.get("point"))
+                if not name or price is None or point is None or price <= 0:
+                    continue
+                if name == home:
+                    home_price, home_point = price, point
+                elif name == away:
+                    away_price = price
+            if home_price is None or away_price is None or home_point is None:
+                continue
+            bucket = grouped.setdefault(home_point, {"home": [], "away": []})
+            bucket["home"].append(home_price)
+            bucket["away"].append(away_price)
+    if not grouped:
+        return None
+    # 选取出现次数最多的 home_point 作为基准；并列时取数值最小的（更窄 line 优先）。
+    chosen_point = max(grouped.keys(), key=lambda pt: (len(grouped[pt]["home"]), -pt))
+    bucket = grouped[chosen_point]
+    home_prices = bucket["home"]
+    away_prices = bucket["away"]
+    if not home_prices or not away_prices:
+        return None
+    home_mean = sum(home_prices) / Decimal(len(home_prices))
+    away_mean = sum(away_prices) / Decimal(len(away_prices))
+    return home_mean, away_mean, chosen_point
+
+
 __all__ = [
     "GameOddsClient",
     "GameOddsSnapshot",
+    "GameSpreadSnapshot",
     "TheOddsApiGameOddsClient",
     "parse_theoddsapi_h2h_payload",
+    "parse_theoddsapi_spreads_payload",
 ]

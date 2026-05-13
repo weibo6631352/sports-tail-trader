@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from polymarket_trader.infra.sports.game_odds_client import (
     parse_theoddsapi_h2h_payload,
+    parse_theoddsapi_spreads_payload,
 )
 
 
@@ -106,6 +107,75 @@ def test_returns_none_when_outcome_pricing_invalid() -> None:
     snapshot = parse_theoddsapi_h2h_payload(payload, game_key="ev-1", observed_at=_OBS)
     # 两个 bookmaker 的 home 都被丢弃 → home outcome 没有概率 → 返回 None
     assert snapshot is None
+
+
+def _spreads_payload(
+    *,
+    home: str = "Boston Celtics",
+    away: str = "New York Knicks",
+    home_point: float = -3.5,
+    home_price: float = 1.91,
+    away_price: float = 1.91,
+    event_id: str = "ev-1",
+) -> list[dict]:
+    away_point = -home_point
+    return [
+        {
+            "id": event_id,
+            "sport_key": "basketball_nba",
+            "home_team": home,
+            "away_team": away,
+            "commence_time": "2026-05-15T23:30:00Z",
+            "bookmakers": [
+                {
+                    "key": "draftkings",
+                    "markets": [
+                        {
+                            "key": "spreads",
+                            "outcomes": [
+                                {"name": home, "price": home_price, "point": home_point},
+                                {"name": away, "price": away_price, "point": away_point},
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "key": "fanduel",
+                    "markets": [
+                        {
+                            "key": "spreads",
+                            "outcomes": [
+                                {"name": home, "price": home_price * 1.02, "point": home_point},
+                                {"name": away, "price": away_price * 0.98, "point": away_point},
+                            ],
+                        }
+                    ],
+                },
+            ],
+        }
+    ]
+
+
+def test_parses_spreads_payload_with_devig() -> None:
+    payload = _spreads_payload()
+    snapshot = parse_theoddsapi_spreads_payload(payload, game_key="ev-1", observed_at=_OBS)
+    assert snapshot is not None
+    assert snapshot.team_a == "Boston Celtics"
+    assert snapshot.team_b == "New York Knicks"
+    assert snapshot.spread_line == Decimal("-3.5")
+    # 1/1.91 ≈ 0.524；两边对称 → de-vig 后 p_a 接近 0.5。
+    assert Decimal("0.45") < snapshot.p_a_covers < Decimal("0.55")
+
+
+def test_returns_none_when_spreads_event_missing() -> None:
+    assert parse_theoddsapi_spreads_payload(_spreads_payload(), game_key="missing", observed_at=_OBS) is None
+
+
+def test_returns_none_when_no_spreads_market() -> None:
+    payload = _spreads_payload()
+    payload[0]["bookmakers"][0]["markets"][0]["key"] = "h2h"
+    payload[0]["bookmakers"][1]["markets"][0]["key"] = "h2h"
+    assert parse_theoddsapi_spreads_payload(payload, game_key="ev-1", observed_at=_OBS) is None
 
 
 def test_p_a_corresponds_to_home_team() -> None:

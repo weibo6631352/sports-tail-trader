@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
-from polymarket_trader.infra.sports.game_odds_client import GameOddsSnapshot
+from polymarket_trader.infra.sports.game_odds_client import (
+    GameOddsSnapshot,
+    GameSpreadSnapshot,
+)
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.workers.game_odds_worker import GameOddsWorker
@@ -33,11 +36,20 @@ def _market() -> Market:
 
 
 class _FakeClient:
-    def __init__(self, snapshot: GameOddsSnapshot | None) -> None:
+    def __init__(
+        self,
+        snapshot: GameOddsSnapshot | None,
+        *,
+        spread_snapshot: GameSpreadSnapshot | None = None,
+    ) -> None:
         self._snapshot = snapshot
+        self._spread_snapshot = spread_snapshot
 
     async def fetch(self, *, sport_key: str, game_key: str):
         return self._snapshot
+
+    async def fetch_spreads(self, *, sport_key: str, game_key: str):
+        return self._spread_snapshot
 
     async def aclose(self) -> None:
         return None
@@ -109,6 +121,37 @@ def test_disabled_worker_does_nothing() -> None:
     )
     refreshed = asyncio.run(worker.sync_once())
     assert refreshed == 0
+
+
+def test_writes_game_spreads_when_client_returns_spread_snapshot() -> None:
+    registry = MarketRegistry()
+    store = EntryMetadataStore()
+    market = _market()
+    registry.upsert(market)
+    spreads = GameSpreadSnapshot(
+        team_a="Boston Celtics",
+        team_b="New York Knicks",
+        spread_line=Decimal("-3.5"),
+        p_a_covers=Decimal("0.55"),
+        observed_at=_OBS,
+        source="theoddsapi",
+    )
+    worker = GameOddsWorker(
+        client=_FakeClient(_snapshot(), spread_snapshot=spreads),
+        registry=registry,
+        entry_metadata_store=store,
+        sport_key_for=lambda _m: "basketball_nba",
+        is_series_winner_market=lambda _m: True,
+        game_key_for=lambda m: m.event_slug,
+        ttl_seconds=60,
+        enabled=True,
+    )
+    refreshed = asyncio.run(worker.sync_once())
+    assert refreshed == 1
+    record = store.find(condition_id=market.condition_id)
+    assert record is not None
+    assert record.metadata["game_spreads"]["spread_line"] == "-3.5"
+    assert record.metadata["game_spreads"]["p_a_covers"] == "0.55"
 
 
 def test_ttl_throttles_repeat_fetch() -> None:

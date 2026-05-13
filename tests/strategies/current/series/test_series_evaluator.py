@@ -31,7 +31,7 @@ def _candidate(question: str, outcomes: tuple[tuple[str, str], ...] = (("tok-a",
 
 def test_winner_sub_type_without_state_returns_missing_series_state() -> None:
     # 不注入 inputs / state → record-only：classifier 判到 WINNER 但缺 state
-    # 后立即 MISSING_SERIES_STATE，不再走 *_MODEL_PENDING 占位。
+    # 后立即 MISSING_SERIES_STATE。
     evaluation = evaluate_series_opportunity(_candidate("Who will win the series?"))
 
     assert evaluation.accepted is False
@@ -41,20 +41,32 @@ def test_winner_sub_type_without_state_returns_missing_series_state() -> None:
     assert evaluation.metadata["reject_reason"] == "missing_series_state"
 
 
-def test_total_games_sub_type_returns_total_games_model_pending() -> None:
-    evaluation = evaluate_series_opportunity(_candidate("Total Games O/U 5.5"))
+def test_total_games_sub_type_without_state_returns_missing_state() -> None:
+    # TOTAL_GAMES 子类型：先解析 outcome 再读 state；缺 state 报 MISSING_SERIES_STATE。
+    evaluation = evaluate_series_opportunity(_candidate("Total Games O/U 5.5", outcomes=(("tok-over", "Over 5.5"),)))
 
     assert evaluation.accepted is False
     assert evaluation.sub_type == SeriesSubType.TOTAL_GAMES
-    assert evaluation.reject_reason == SeriesRejectReason.TOTAL_GAMES_MODEL_PENDING
+    assert evaluation.reject_reason == SeriesRejectReason.MISSING_SERIES_STATE
 
 
-def test_game_handicap_sub_type_returns_handicap_model_pending() -> None:
-    evaluation = evaluate_series_opportunity(_candidate("Game 5 handicap -3.5"))
+def test_total_games_sub_type_with_unparseable_outcome_returns_outcome_not_parsed() -> None:
+    # 解析失败优先于 state 缺失检查——outcome 写错时直接报 SERIES_OUTCOME_NOT_PARSED。
+    evaluation = evaluate_series_opportunity(_candidate("Total Games scenario", outcomes=(("tok-unknown", "Maybe"),)))
+
+    assert evaluation.accepted is False
+    assert evaluation.sub_type == SeriesSubType.TOTAL_GAMES
+    assert evaluation.reject_reason == SeriesRejectReason.SERIES_OUTCOME_NOT_PARSED
+
+
+def test_game_handicap_sub_type_without_state_returns_missing_state() -> None:
+    evaluation = evaluate_series_opportunity(
+        _candidate("Game 5 handicap -3.5", outcomes=(("tok-yes", "Yes"),))
+    )
 
     assert evaluation.accepted is False
     assert evaluation.sub_type == SeriesSubType.GAME_HANDICAP
-    assert evaluation.reject_reason == SeriesRejectReason.HANDICAP_MODEL_PENDING
+    assert evaluation.reject_reason == SeriesRejectReason.MISSING_SERIES_STATE
 
 
 def test_other_sub_type_returns_subtype_unclassified() -> None:

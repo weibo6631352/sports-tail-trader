@@ -1,7 +1,8 @@
 """``CurrentStrategy.decide_entry`` 对 series family 的分派契约。
 
-worktree 2 阶段：所有子类型都应进 ``series.evaluator`` 并返回 SKIP 决策携带
-``*_MODEL_PENDING`` reject_reason；不得构造 BUY、不得旁路风控、不得回落 tail 路径。
+所有子类型都进 ``series.evaluator``；缺数据时返回 SKIP 决策携带可审计 reject_reason
+（如 missing_series_state / series_outcome_not_parsed），accepted 路径产 BUY。
+不得构造旁路 / 不得绕过风控。
 """
 
 from __future__ import annotations
@@ -87,24 +88,25 @@ def test_series_winner_dispatch_skips_when_state_missing() -> None:
     assert decision.metadata.get("series_accepted") is False
 
 
-def test_series_total_games_dispatch_returns_skip_with_total_games_pending() -> None:
+def test_series_total_games_dispatch_skips_when_state_missing() -> None:
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
     decision = strategy.decide_entry(_context(_series_total_games_market()))
 
     assert decision.action == ExtensionAction.SKIP
     assert decision.metadata.get("market_family") == "series"
     assert decision.metadata.get("series_sub_type") == "total_games"
-    assert decision.metadata.get("series_reject_reason") == "total_games_model_pending"
+    # 缺 series_state → missing_series_state。
+    assert decision.metadata.get("series_reject_reason") == "missing_series_state"
 
 
-def test_series_game_handicap_dispatch_returns_skip_with_handicap_pending() -> None:
+def test_series_game_handicap_dispatch_skips_when_state_missing() -> None:
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
     decision = strategy.decide_entry(_context(_series_game_handicap_market()))
 
     assert decision.action == ExtensionAction.SKIP
     assert decision.metadata.get("market_family") == "series"
     assert decision.metadata.get("series_sub_type") == "game_handicap"
-    assert decision.metadata.get("series_reject_reason") == "handicap_model_pending"
+    assert decision.metadata.get("series_reject_reason") == "missing_series_state"
 
 
 def test_series_dispatch_does_not_construct_buy() -> None:

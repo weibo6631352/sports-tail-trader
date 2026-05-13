@@ -83,6 +83,43 @@ def game_odds_from_metadata(metadata: Mapping[str, Any]) -> GameOdds | None:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class GameSpreads:
+    """下一场让分快照——p_a_covers 是 home 在 spread_line 上覆盖的 de-vig 概率。"""
+
+    team_a: str
+    team_b: str
+    spread_line: Decimal
+    p_a_covers: Decimal
+    observed_at: datetime
+    source: str
+
+
+def game_spreads_from_metadata(metadata: Mapping[str, Any]) -> GameSpreads | None:
+    """metadata 顶层 ``game_spreads`` 键 → GameSpreads；缺失/格式错误返回 None。"""
+
+    raw = metadata.get("game_spreads") if isinstance(metadata, Mapping) else None
+    if not isinstance(raw, Mapping):
+        return None
+    team_a = str(raw.get("team_a") or "").strip()
+    team_b = str(raw.get("team_b") or "").strip()
+    spread_line = _decimal(raw.get("spread_line"))
+    p_a = _decimal(raw.get("p_a_covers"))
+    observed_at = _datetime(raw.get("observed_at"))
+    if not team_a or not team_b or spread_line is None or p_a is None or observed_at is None:
+        return None
+    if p_a <= 0 or p_a >= 1:
+        return None
+    return GameSpreads(
+        team_a=team_a,
+        team_b=team_b,
+        spread_line=spread_line,
+        p_a_covers=p_a,
+        observed_at=observed_at,
+        source=str(raw.get("source") or "unknown"),
+    )
+
+
 def _int(value: Any) -> int | None:
     if value is None:
         return None
@@ -126,6 +163,8 @@ def _ensure_utc(value: datetime) -> datetime:
 
 __all__ = [
     "GameOdds",
+    "GameSpreads",
     "game_odds_from_metadata",
+    "game_spreads_from_metadata",
     "series_state_from_metadata",
 ]

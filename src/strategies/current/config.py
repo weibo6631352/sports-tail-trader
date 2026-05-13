@@ -272,8 +272,7 @@ class CurrentStrategyConfig:
     tail_outright_min_orderbook_depth_usdc: Decimal = Decimal("100")
 
     # Series WINNER family 配置。默认 budget=0 + RECORD_ONLY；与 outright 同样
-    # 双 flip（permission=AUTO_EXECUTE + budget>0）才会真实下单。Worktree 3 阶段
-    # 只接通 WINNER；TOTAL_GAMES / GAME_HANDICAP 仍 record-only。
+    # 双 flip（permission=AUTO_EXECUTE + budget>0）才会真实下单。
     tail_series_winner_execution_permission: ExecutionPermission = ExecutionPermission.RECORD_ONLY
     tail_series_winner_min_edge_bps: int = 800  # 8% —— 系列赛波动比单场 outright 更大
     tail_series_winner_max_entry_price: Decimal = Decimal("0.95")
@@ -287,6 +286,29 @@ class CurrentStrategyConfig:
     tail_series_winner_min_remaining_days: int = 0  # 系列赛剩余比赛随时可成交
     tail_series_winner_exit_edge_target: Decimal = Decimal("0.05")
     tail_series_winner_min_profit_per_share: Decimal = Decimal("0.02")
+
+    # Series TOTAL_GAMES family 配置。分布尾端方差大，default min_edge 比 WINNER 略高。
+    tail_series_total_games_execution_permission: ExecutionPermission = ExecutionPermission.RECORD_ONLY
+    tail_series_total_games_min_edge_bps: int = 1000  # 10%
+    tail_series_total_games_max_entry_price: Decimal = Decimal("0.92")
+    tail_series_total_games_budget_usdc: Decimal = Decimal("0")
+    tail_series_total_games_max_per_market_usdc: Decimal = Decimal("25")
+    tail_series_total_games_max_event_correlation_usdc: Decimal = Decimal("40")
+    tail_series_total_games_min_orderbook_depth_usdc: Decimal = Decimal("50")
+    tail_series_total_games_max_hold_horizon_days: int = 30
+    tail_series_total_games_min_remaining_days: int = 0
+
+    # Series GAME_HANDICAP family 配置。single_game scope 与 series scope 共用
+    # 同一组配置——风险定价路径不同但资金 / 时间窗约束等同。
+    tail_series_handicap_execution_permission: ExecutionPermission = ExecutionPermission.RECORD_ONLY
+    tail_series_handicap_min_edge_bps: int = 1000  # 10%
+    tail_series_handicap_max_entry_price: Decimal = Decimal("0.92")
+    tail_series_handicap_budget_usdc: Decimal = Decimal("0")
+    tail_series_handicap_max_per_market_usdc: Decimal = Decimal("25")
+    tail_series_handicap_max_event_correlation_usdc: Decimal = Decimal("40")
+    tail_series_handicap_min_orderbook_depth_usdc: Decimal = Decimal("50")
+    tail_series_handicap_max_hold_horizon_days: int = 30
+    tail_series_handicap_min_remaining_days: int = 0
 
     # league-aware 源亲和：aggregate_client 用此覆盖默认全局源优先级表。
     # 仅当前体育扫尾策略关心；framework Settings 不持有，CLAUDE.md §10。
