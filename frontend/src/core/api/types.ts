@@ -1106,7 +1106,7 @@ export type AllocationDecisionsPage = Page<AllocationDecisionEvent>
 
 // ---------- Portfolio Risk Metrics (P2 #15) ----------
 
-export type PortfolioRiskMetrics = {
+export type RiskMetricsPayload = {
   sample_count: number
   first_recorded_at: Iso | null
   last_recorded_at: Iso | null
@@ -1125,6 +1125,12 @@ export type PortfolioRiskMetrics = {
   /** sharpe_like = mean / stddev × sqrt(annualization_factor)（若提供）。 */
   sharpe_like: string | null
   annualization_factor: number | null
+}
+
+export type PortfolioRiskMetrics = {
+  window_ms: number
+  interval_ms: number
+  metrics: RiskMetricsPayload
 }
 
 // ---------- Operator Interventions Aggregate (plan §13.17) ----------

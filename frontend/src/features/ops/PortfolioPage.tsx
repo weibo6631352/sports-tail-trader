@@ -126,57 +126,57 @@ export function PortfolioPage() {
             <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
               <Stat
                 label="total_return"
-                value={fmtPct(risk.data?.total_return)}
-                tone={returnTone(risk.data?.total_return)}
-                hint={`样本 ${risk.data?.sample_count ?? 0} 个`}
+                value={fmtPct(risk.data?.metrics?.total_return)}
+                tone={returnTone(risk.data?.metrics?.total_return)}
+                hint={`样本 ${risk.data?.metrics?.sample_count ?? 0} 个`}
               />
               <Stat
                 label="max drawdown"
-                value={formatUsdc(risk.data?.max_drawdown_pct)}
+                value={formatUsdc(risk.data?.metrics?.max_drawdown_pct)}
                 tone="neg"
                 hint={
-                  risk.data?.peak_at && risk.data?.trough_at
-                    ? `${formatIso(risk.data.peak_at, 'MM-DD HH:mm')} → ${formatIso(risk.data.trough_at, 'MM-DD HH:mm')}`
+                  risk.data?.metrics?.peak_at && risk.data?.metrics?.trough_at
+                    ? `${formatIso(risk.data.metrics.peak_at, 'MM-DD HH:mm')} → ${formatIso(risk.data.metrics.trough_at, 'MM-DD HH:mm')}`
                     : '—'
                 }
               />
               <Stat
                 label="time underwater"
                 value={
-                  risk.data?.time_underwater_seconds !== undefined
-                    ? formatSeconds(risk.data.time_underwater_seconds)
+                  risk.data?.metrics?.time_underwater_seconds !== undefined
+                    ? formatSeconds(risk.data.metrics.time_underwater_seconds)
                     : '—'
                 }
                 hint={
-                  risk.data?.time_underwater_ratio
-                    ? `占比 ${(Number(risk.data.time_underwater_ratio) * 100).toFixed(1)}%`
+                  risk.data?.metrics?.time_underwater_ratio
+                    ? `占比 ${(Number(risk.data.metrics.time_underwater_ratio) * 100).toFixed(1)}%`
                     : undefined
                 }
               />
               <Stat
                 label="Sharpe-like"
-                value={fmtNum(risk.data?.sharpe_like, 3)}
-                tone={returnTone(risk.data?.sharpe_like)}
+                value={fmtNum(risk.data?.metrics?.sharpe_like, 3)}
+                tone={returnTone(risk.data?.metrics?.sharpe_like)}
                 hint="mean / stddev × √(annualization)"
               />
               <Stat
                 label="mean return / period"
-                value={fmtNum(risk.data?.mean_return_per_period, 6)}
+                value={fmtNum(risk.data?.metrics?.mean_return_per_period, 6)}
               />
               <Stat
                 label="stddev return / period"
-                value={fmtNum(risk.data?.stddev_return_per_period, 6)}
+                value={fmtNum(risk.data?.metrics?.stddev_return_per_period, 6)}
                 hint="波动率"
               />
               <Stat
                 label="start / end net value"
-                value={`${formatUsdc(risk.data?.start_net_value_usdc)} → ${formatUsdc(risk.data?.end_net_value_usdc)}`}
+                value={`${formatUsdc(risk.data?.metrics?.start_net_value_usdc)} → ${formatUsdc(risk.data?.metrics?.end_net_value_usdc)}`}
               />
               <Stat
                 label="first → last recorded"
                 value={
-                  risk.data?.first_recorded_at && risk.data?.last_recorded_at
-                    ? `${formatIso(risk.data.first_recorded_at, 'MM-DD HH:mm')} → ${formatIso(risk.data.last_recorded_at, 'MM-DD HH:mm')}`
+                  risk.data?.metrics?.first_recorded_at && risk.data?.metrics?.last_recorded_at
+                    ? `${formatIso(risk.data.metrics.first_recorded_at, 'MM-DD HH:mm')} → ${formatIso(risk.data.metrics.last_recorded_at, 'MM-DD HH:mm')}`
                     : '—'
                 }
               />
