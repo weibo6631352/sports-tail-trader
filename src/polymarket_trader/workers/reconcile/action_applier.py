@@ -270,28 +270,14 @@ class ReconcileActionApplier:
             )
 
 
-def _submission_succeeded(result: object | None) -> bool:
+def _submission_succeeded(result: OrderResult | None) -> bool:
     if result is None:
         return True
-    if isinstance(result, OrderResult):
-        return result.status not in {
-            OrderResultStatus.REJECTED,
-            OrderResultStatus.FAILED,
-            OrderResultStatus.UNKNOWN_TIMEOUT,
-        }
-    status = getattr(result, "status", None)
-    if isinstance(status, OrderResultStatus):
-        return status not in {
-            OrderResultStatus.REJECTED,
-            OrderResultStatus.FAILED,
-            OrderResultStatus.UNKNOWN_TIMEOUT,
-        }
-    if isinstance(status, str):
-        return status.lower() not in {"rejected", "failed", "unknown_timeout"}
-    submitted = getattr(result, "submitted", None)
-    if submitted is not None:
-        return bool(submitted)
-    return True
+    return result.status not in {
+        OrderResultStatus.REJECTED,
+        OrderResultStatus.FAILED,
+        OrderResultStatus.UNKNOWN_TIMEOUT,
+    }
 
 
 def _require_token_id(action: ReconcileAction) -> str:

@@ -318,7 +318,7 @@ def _capture_frame(
     plan = None if result is None else result.plan
     review = None if result is None else result.review
     entry_order = None if review is None else review.order_result
-    follow_ups = () if result is None else getattr(result, "follow_up_intents", ()) or ()
+    follow_ups = () if result is None else result.follow_up_intents or ()
     summary = None if plan is None else plan.summary
     return ShadowDecisionFrame(
         event=event,

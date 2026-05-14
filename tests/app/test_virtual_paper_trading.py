@@ -226,6 +226,8 @@ def _runtime_with_real_like_candidate() -> SimpleNamespace:
             orderbook_reader=market_ws.snapshot,
         ),
         trading_client=_FakeTradingClient(),
+        db_session_factory=None,
+        clob_client=None,
     )
 
 
@@ -413,7 +415,7 @@ def test_orderbook_rest_fallback_returns_gracefully_when_clob_raises() -> None:
             raise ConnectionError("simulated_clob_timeout")
 
     runtime = SimpleNamespace(
-        market_ws=SimpleNamespace(snapshot=lambda token_id: None),
+        market_ws_worker=None,
         clob_client=_ErrorClobClient(),
     )
 

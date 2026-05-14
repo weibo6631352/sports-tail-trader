@@ -328,9 +328,9 @@ class AccountStateProjector:
                 order_type=intent.order_type,
                 price=intent.price,
                 market_slug=intent.market_slug,
-                size_shares=getattr(intent, "size_shares", None),
-                remaining_shares=getattr(intent, "size_shares", None),
-                amount_usdc=getattr(intent, "amount_usdc", None),
+                size_shares=intent.size_shares,
+                remaining_shares=intent.size_shares,
+                amount_usdc=intent.amount_usdc,
                 notional_usdc=intent.notional_usdc,
                 order_id=order_id,
                 status=OrderStatus.SUBMITTED,
@@ -487,7 +487,7 @@ def _existing_order_size(snapshot: AccountSnapshot | None, result: OrderResult) 
         return Decimal("0")
     for order in snapshot.open_orders_for_market(result.condition_id, result.token_id):
         if order.order_id == result.order_id or (
-            result.order_id is None and order.idempotency_key == getattr(result.intent, "idempotency_key", None)
+            result.order_id is None and order.idempotency_key == (result.intent.idempotency_key if result.intent is not None else None)
         ):
             return order.remaining_shares or order.size_shares or Decimal("0")
     return Decimal("0")

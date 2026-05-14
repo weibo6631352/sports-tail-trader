@@ -21,8 +21,12 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Awaitable, Callable, Iterable, Mapping
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable, Mapping
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from polymarket_trader.domain.position import Position
+    from polymarket_trader.infra.polymarket.schemas import GammaMarketDTO
 
 from polymarket_trader.domain.events import (
     AuditEvent,
@@ -51,8 +55,8 @@ class _ResolvedMarket:
     closed: bool
 
 
-GammaMarketByConditionLookup = Callable[[str], Awaitable[Any | None]]
-PositionsProvider = Callable[[], Iterable[Any]]
+GammaMarketByConditionLookup = Callable[[str], Awaitable["GammaMarketDTO | None"]]
+PositionsProvider = Callable[[], Iterable["Position"]]
 # AuditEventRepository.list_audit_events_snapshot 返回 RepositoryPage[AuditEvent]——
 # 收紧契约让 callsite 不需要 hasattr/dict 兼容兜底（之前 Any 的双形态歧义）。
 AuditEventsQuery = Callable[..., Awaitable[RepositoryPage[AuditEvent]]]
@@ -85,11 +89,10 @@ class SettlementScannerService:
         condition_ids: list[str] = []
         seen: set[str] = set()
         for position in positions:
-            cid = getattr(position, "condition_id", None)
+            cid = position.condition_id
             if not cid or cid in seen:
                 continue
-            shares = getattr(position, "shares", None)
-            if shares is None or shares == Decimal("0"):
+            if position.shares == Decimal("0"):
                 continue
             seen.add(cid)
             condition_ids.append(cid)
@@ -177,33 +180,31 @@ class SettlementScannerService:
             )
 
 
-def _resolve_from_gamma_payload(condition_id: str, payload: Any) -> _ResolvedMarket | None:
+def _resolve_from_gamma_payload(condition_id: str, payload: "GammaMarketDTO") -> _ResolvedMarket | None:
     """从 gamma 市场 payload 推断结算结果。
 
     Gamma 在结算后会把 ``outcomePrices`` 设成 ``["1", "0"]`` / ``["0", "1"]``；
     ``closed`` 也会被置为 True。token_ids 与 outcomes 顺序一致。
     """
 
-    raw = getattr(payload, "raw", None)
-    if not isinstance(raw, Mapping):
+    if not isinstance(payload.raw, Mapping):
         return None
-    closed = bool(getattr(payload, "closed", False))
-    if not closed:
+    if not payload.closed:
         return None
-    outcome_prices = _coerce_outcome_prices(raw)
+    outcome_prices = _coerce_outcome_prices(payload.raw)
     if outcome_prices is None:
         return _ResolvedMarket(condition_id=condition_id, winning_token_id=None, winning_outcome=None, closed=True)
     winning_idx = _winning_index(outcome_prices)
     if winning_idx is None:
         return _ResolvedMarket(condition_id=condition_id, winning_token_id=None, winning_outcome=None, closed=True)
-    outcomes = getattr(payload, "outcomes", ())
+    outcomes = payload.outcomes
     if winning_idx >= len(outcomes):
         return _ResolvedMarket(condition_id=condition_id, winning_token_id=None, winning_outcome=None, closed=True)
     outcome = outcomes[winning_idx]
     return _ResolvedMarket(
         condition_id=condition_id,
-        winning_token_id=getattr(outcome, "token_id", None),
-        winning_outcome=getattr(outcome, "outcome", None),
+        winning_token_id=outcome.token_id,
+        winning_outcome=outcome.outcome,
         closed=True,
     )
 

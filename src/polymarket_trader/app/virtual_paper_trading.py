@@ -10,7 +10,10 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 from decimal import Decimal
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Mapping, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from polymarket_trader.main import RuntimeComponents
 from uuid import uuid4
 
 from polymarket_trader.app.paper import PaperSubmitOnlyOrderClient, PaperVirtualLedger
@@ -19,7 +22,7 @@ from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.order import OrderResultStatus
+from polymarket_trader.domain.order import OrderResult, OrderResultStatus, TradableOrderIntent
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.infra.db.repositories.market import MarketRepository
 from polymarket_trader.infra.outbox.local_queue import LocalOutbox
@@ -54,7 +57,7 @@ _REST_ORDERBOOK_FALLBACK_BUDGET = 30
 
 
 async def run_virtual_paper_trade(
-    runtime: Any,
+    runtime: RuntimeComponents,
     *,
     condition_id: str | None = None,
     token_id: str | None = None,
@@ -191,7 +194,7 @@ class _CandidateSelection:
 
 
 async def _select_candidate(
-    runtime: Any,
+    runtime: RuntimeComponents,
     *,
     condition_id: str | None,
     token_id: str | None,
@@ -327,7 +330,7 @@ async def _select_candidate(
 
 
 def _build_plan(
-    runtime: Any,
+    runtime: RuntimeComponents,
     *,
     market: Market,
     token_id: str,
@@ -424,8 +427,7 @@ def _result_payload(
             "paper_simulations": [
                 {
                     "trace_id": trace_id,
-                    "status": outcome.response.status if isinstance(outcome.response.status, str)
-                    else getattr(outcome.response.status, "value", None),
+                    "status": str(outcome.response.status) if outcome.response.status is not None else None,
                     "reason": outcome.response.reason,
                     "matched_shares": _decimal_text(outcome.response.matched_shares),
                     "spent_usdc": _decimal_text(outcome.response.spent_usdc),
@@ -771,9 +773,9 @@ def _empty_paper_pnl() -> dict[str, Any]:
 
 def _paper_pnl_payload(
     *,
-    entry_order: Any | None,
-    follow_up_intent: Any | None,
-    follow_up_order: Any | None,
+    entry_order: OrderResult | None,
+    follow_up_intent: TradableOrderIntent | None,
+    follow_up_order: OrderResult | None,
     ledger: PaperVirtualLedger,
 ) -> dict[str, Any]:
     """计算虚拟盘 P&L。
@@ -785,9 +787,9 @@ def _paper_pnl_payload(
 
     if entry_order is None:
         return _empty_paper_pnl()
-    entry_spent = Decimal(str(getattr(entry_order, "spent_usdc", "0") or "0"))
+    entry_spent = entry_order.spent_usdc
     # entry_shares 已是 net of buy-side share fee（fill_engine 中 matched_shares 扣过）
-    entry_shares = Decimal(str(getattr(entry_order, "matched_shares", "0") or "0"))
+    entry_shares = entry_order.matched_shares
     fees_paid = ledger.fees_accrued_usdc
     if follow_up_intent is None:
         projected_exit_value = entry_shares
@@ -797,7 +799,7 @@ def _paper_pnl_payload(
             "basis": "entry_fill_waiting_for_settlement_net_after_taker_fees",
             "realized": False,
             "profitable": projected_pnl > Decimal("0"),
-            "entry_price": _decimal_text(getattr(entry_order, "price", None)),
+            "entry_price": _decimal_text(entry_order.price),
             "entry_spent_usdc": _decimal_text(entry_spent),
             "entry_size_shares": _decimal_text(entry_shares),
             "exit_price": _decimal_text(Decimal("1")),
@@ -808,7 +810,7 @@ def _paper_pnl_payload(
             "fees_paid_usdc": _decimal_text(fees_paid),
             "warning": "projected_settlement_profit_not_realized_until_resolution",
         }
-    exit_price = Decimal(str(getattr(follow_up_intent, "price", "0") or "0"))
+    exit_price = follow_up_intent.price
     projected_exit_value = entry_shares * exit_price
     projected_pnl = projected_exit_value - entry_spent
     projected_return_pct = Decimal("0") if entry_spent <= Decimal("0") else projected_pnl / entry_spent * Decimal("100")
@@ -816,7 +818,7 @@ def _paper_pnl_payload(
         "basis": "entry_fill_vs_follow_up_limit_net_after_taker_fees",
         "realized": False,
         "profitable": projected_pnl > Decimal("0"),
-        "entry_price": _decimal_text(getattr(entry_order, "price", None)),
+        "entry_price": _decimal_text(entry_order.price),
         "entry_spent_usdc": _decimal_text(entry_spent),
         "entry_size_shares": _decimal_text(entry_shares),
         "exit_price": _decimal_text(exit_price),
@@ -856,28 +858,28 @@ def _clone_account_store(snapshot: AccountSnapshot) -> AccountStateStore:
     return store
 
 
-def _account_snapshot(runtime: Any) -> AccountSnapshot:
-    account_state = getattr(runtime, "account_state_store", None)
+def _account_snapshot(runtime: RuntimeComponents) -> AccountSnapshot:
+    account_state = runtime.account_state_store
     if account_state is not None:
         return account_state.snapshot()
     return AccountSnapshot()
 
 
-def _registry_markets(runtime: Any) -> tuple[Market, ...]:
-    registry = getattr(runtime, "registry", None)
+def _registry_markets(runtime: RuntimeComponents) -> tuple[Market, ...]:
+    registry = runtime.registry
     if registry is None:
         return ()
     return tuple(registry.snapshot().markets)
 
 
 async def _resolve_market(
-    runtime: Any,
+    runtime: RuntimeComponents,
     *,
     condition_id: str | None = None,
     token_id: str | None = None,
     market_slug: str | None = None,
 ) -> Market | None:
-    registry = getattr(runtime, "registry", None)
+    registry = runtime.registry
     if registry is not None:
         if condition_id:
             market = registry.get_by_condition_id(condition_id)
@@ -891,7 +893,7 @@ async def _resolve_market(
             market = registry.get_by_slug(market_slug)
             if market is not None:
                 return market
-    session_factory = getattr(runtime, "db_session_factory", None)
+    session_factory = runtime.db_session_factory
     if session_factory is None:
         return None
     async with session_factory() as session:
@@ -909,18 +911,15 @@ async def _resolve_market(
     return None
 
 
-def _orderbook(runtime: Any, token_id: str) -> OrderbookSnapshot | None:
+def _orderbook(runtime: RuntimeComponents, token_id: str) -> OrderbookSnapshot | None:
     """同步取 market_ws snapshot；REST fallback 走 ``_orderbook_with_rest_fallback``。"""
 
-    worker = getattr(runtime, "market_ws_worker", None)
-    snapshot = None if worker is None else getattr(worker, "snapshot", None)
-    if not callable(snapshot):
-        return None
-    return snapshot(token_id)
+    worker = runtime.market_ws_worker
+    return None if worker is None else worker.snapshot(token_id)
 
 
 async def _orderbook_with_rest_fallback(
-    runtime: Any,
+    runtime: RuntimeComponents,
     token_id: str,
     *,
     rest_budget_remaining: int,
@@ -938,11 +937,11 @@ async def _orderbook_with_rest_fallback(
     """
 
     ws_snapshot = _orderbook(runtime, token_id)
-    if ws_snapshot is not None and getattr(ws_snapshot, "best_ask", None) is not None:
+    if ws_snapshot is not None and ws_snapshot.best_ask is not None:
         return ws_snapshot, rest_budget_remaining, False
     if rest_budget_remaining <= 0:
         return ws_snapshot, rest_budget_remaining, False
-    clob_client = getattr(runtime, "clob_client", None)
+    clob_client = runtime.clob_client
     if not isinstance(clob_client, _OrderbookFallbackClient):
         return ws_snapshot, rest_budget_remaining, False
     try:
@@ -957,15 +956,15 @@ async def _orderbook_with_rest_fallback(
     )
 
 
-def _resolve_market_by_token(runtime: Any, token_id: str) -> Market | None:
-    registry = getattr(runtime, "registry", None)
+def _resolve_market_by_token(runtime: RuntimeComponents, token_id: str) -> Market | None:
+    registry = runtime.registry
     if registry is None:
         return None
     return registry.get_by_token_id(token_id)
 
 
-def _entry_metadata_for_market(runtime: Any, market: Market) -> dict[str, Any]:
-    store = getattr(runtime, "entry_metadata_store", None)
+def _entry_metadata_for_market(runtime: RuntimeComponents, market: Market) -> dict[str, Any]:
+    store = runtime.entry_metadata_store
     if store is None:
         return {}
     return dict(
@@ -977,8 +976,8 @@ def _entry_metadata_for_market(runtime: Any, market: Market) -> dict[str, Any]:
     )
 
 
-def _entry_metadata_record_for_market(runtime: Any, market: Market):
-    store = getattr(runtime, "entry_metadata_store", None)
+def _entry_metadata_record_for_market(runtime: RuntimeComponents, market: Market):
+    store = runtime.entry_metadata_store
     if store is None:
         return None
     return store.find(
@@ -988,27 +987,27 @@ def _entry_metadata_record_for_market(runtime: Any, market: Market):
     )
 
 
-def _trading_decision_service(runtime: Any) -> TradingDecisionService:
-    service = getattr(runtime, "trading_decision_service", None)
+def _trading_decision_service(runtime: RuntimeComponents) -> TradingDecisionService:
+    service = runtime.trading_decision_service
     if service is None:
         raise RuntimeError("trading_decision_service unavailable")
     return service
 
 
-def _real_sign_client(runtime: Any) -> PolymarketOrderExecutionClient | None:
-    trading_client = getattr(runtime, "trading_client", None)
+def _real_sign_client(runtime: RuntimeComponents) -> PolymarketOrderExecutionClient | None:
+    trading_client = runtime.trading_client
     if trading_client is None:
         return None
     return PolymarketOrderExecutionClient(trading_client)
 
 
-def _settings_decimal(runtime: Any, name: str) -> Decimal:
+def _settings_decimal(runtime: RuntimeComponents, name: str) -> Decimal:
     value = _settings_value(runtime, name)
     return value if isinstance(value, Decimal) else Decimal(str(value or "0"))
 
 
-def _settings_value(runtime: Any, name: str, *, default: Any = None) -> Any:
-    settings = getattr(runtime, "settings", None)
+def _settings_value(runtime: RuntimeComponents, name: str, *, default: Any = None) -> Any:
+    settings = runtime.settings
     if settings is None:
         return default
     return getattr(settings, name, default)

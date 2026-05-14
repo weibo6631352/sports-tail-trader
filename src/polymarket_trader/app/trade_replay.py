@@ -225,7 +225,7 @@ def _replay_keys(
 ) -> tuple[tuple[str, str], ...]:
     keys: set[tuple[str, str]] = set()
     for item in (*orders, *fills, *audit_events):
-        key = _key(getattr(item, "condition_id", None), getattr(item, "token_id", None))
+        key = _key(item.condition_id, item.token_id)
         if key is not None:
             keys.add(key)
     if filters.trace_id is None:

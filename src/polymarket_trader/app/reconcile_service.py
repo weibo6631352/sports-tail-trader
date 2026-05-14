@@ -414,10 +414,10 @@ def _action_from_intent(
             intent=intent,
             metadata=metadata,
         )
-    target_notional_usdc = getattr(intent, "amount_usdc", None)
-    if target_notional_usdc is None and getattr(intent, "price", None) is not None:
-        size_shares = getattr(intent, "size_shares", None)
-        if size_shares is not None:
+    target_notional_usdc = intent.amount_usdc
+    if target_notional_usdc is None:
+        size_shares = intent.size_shares
+        if size_shares is not None and intent.price:
             target_notional_usdc = intent.price * size_shares
     return ReconcileAction(
         action_type=ReconcileActionType.SUBMIT_ORDER,
@@ -427,7 +427,7 @@ def _action_from_intent(
         market_slug=intent.market_slug or market.market_slug,
         reason=reason,
         source_order_side=intent.side,
-        target_size_shares=getattr(intent, "size_shares", None),
+        target_size_shares=intent.size_shares,
         target_notional_usdc=target_notional_usdc,
         intent=intent,
         metadata=metadata,

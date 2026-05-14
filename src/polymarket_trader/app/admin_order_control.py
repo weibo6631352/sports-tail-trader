@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from polymarket_trader.main import RuntimeComponents
 
 from polymarket_trader.app.admin_operations import market_status_allowed_for_manual_order
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text
@@ -41,7 +44,7 @@ class AdminOrderController:
     def __init__(
         self,
         *,
-        runtime: Any | None,
+        runtime: RuntimeComponents | None,
         strategy_id: str,
         serializer: AdminSerializer,
         account_snapshot: Callable[[], AccountSnapshot],
@@ -159,7 +162,7 @@ class AdminOrderController:
                 "replace_review": self._serializer.review(replace_review),
             }
 
-        account_state = getattr(self._runtime, "account_state_store", None)
+        account_state = self._runtime.account_state_store if self._runtime is not None else None
         if account_state is not None:
             AccountStateProjector(account_state, strategy_id=self._strategy_id).apply_replace_result(
                 market,
@@ -192,7 +195,7 @@ class AdminOrderController:
         """Admin 触发 replace 必须落 audit。worker 路径的 ORDER_CANCEL_REQUESTED 不覆盖
         管理面 replace；CLAUDE.md §10「可审计」要求 admin 写动作 + 结果都进 outbox。"""
 
-        event_bus = getattr(self._runtime, "event_bus", None)
+        event_bus = self._runtime.event_bus if self._runtime is not None else None
         if event_bus is None:
             return
         payload = {
