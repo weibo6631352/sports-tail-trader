@@ -175,8 +175,14 @@ def _market_requires_market_ws(
     now = now or _utc_now()
     record = _entry_metadata_record_for_market(runtime, market)
     if record is not None:
-        # record 存在 = 外部 live state 已覆盖此 market，按原 live state 判定不放兜底；
-        # 显式拒（signal_allowed=False）必须立刻 return 避免 polymarket 兜底误绕过。
+        # OUTRIGHT/SERIES 由专用 worker 写入 series_state/game_odds/season_odds_snapshot，
+        # 不依赖 live_state——先判，避免误写的 signal_allowed=False 永久封锁这类市场
+        # （市场重新分类时旧 False 记录会残留）。
+        metadata = record.metadata or {}
+        if metadata.get("series_state") or metadata.get("game_odds") or metadata.get("season_odds_snapshot"):
+            return _market_active_in_polymarket(market, now=now)
+        # 以下逻辑针对依赖 live_state 的市场（SINGLE_GAME）：
+        # 显式拒（signal_allowed=False）立刻返回，避免 polymarket 兜底误绕过。
         signal_reason = (record.live_state_signal_reason or "").strip()
         if record.live_state_signal_allowed is False and signal_reason != "market_end_too_far":
             return False
@@ -190,11 +196,6 @@ def _market_requires_market_ws(
                 return True
             if _market_end_within_tail_window(market, now=now):
                 return True
-        # series_state / game_odds / season_odds_snapshot 由专用 worker 写入，
-        # 这类 market 没有 live_state_phase——但仍然需要盘口订阅用于实时决策。
-        metadata = record.metadata or {}
-        if metadata.get("series_state") or metadata.get("game_odds") or metadata.get("season_odds_snapshot"):
-            return _market_active_in_polymarket(market, now=now)
         # record 存在但 phase 不匹配（如 scheduled 未开赛）—— 不订阅。
         return False
     # record 不存在 = 外部 live state 没覆盖（典型：ATP Challenger / WTA 125 / ITF

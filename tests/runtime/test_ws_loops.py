@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Mapping
 
-from polymarket_trader.domain.market import Market, MarketOutcome
+from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.runtime import ws_loops
 from polymarket_trader.runtime.entry_metadata import EntryMetadataRecord
 from polymarket_trader.workers.market_ws import MarketWsWorker
@@ -185,6 +185,77 @@ def test_market_ws_prewarms_live_market_even_before_tail_signal_window() -> None
     token_ids = ws_loops.market_ws_subscription_token_ids(runtime)
 
     assert token_ids == ("ghibaudo-token", "pieri-token")
+
+
+def test_market_ws_subscribes_outright_with_season_odds_despite_signal_allowed_false() -> None:
+    """OUTRIGHT 市场有 season_odds_snapshot 时，signal_allowed=False 不应封锁订阅。
+
+    market_end_too_far 场景之外的 signal_allowed=False 对 SINGLE_GAME 是硬封锁，但
+    OUTRIGHT/SERIES 市场的元数据来自专用 worker，与 live_state 无关。市场若曾被误判为
+    SINGLE_GAME、live_state_worker 写入 False 后又被重新分类，旧值不能永久封锁。
+    """
+    market = Market(
+        condition_id="nba-champion-2026-condition",
+        market_slug="nba-2026-champion-boston-celtics",
+        event_slug="nba-2026-champion",
+        end_date=datetime(2026, 5, 6, 6, 0, tzinfo=timezone.utc),  # 过去 → 仍允许订阅
+        trading_status=TradingStatus.ELIGIBLE,
+        outcomes=(
+            MarketOutcome(token_id="celtics-token", outcome="Boston Celtics"),
+            MarketOutcome(token_id="lakers-token", outcome="LA Lakers"),
+        ),
+    )
+    runtime = SimpleNamespace(
+        registry=_FakeRegistry((market,)),
+        entry_metadata_store=_FakeEntryMetadataStore(
+            EntryMetadataRecord(
+                condition_id=market.condition_id,
+                metadata={"season_odds_snapshot": {"fair_probabilities": {"Boston Celtics": "0.32"}}},
+                live_state_signal_allowed=False,
+                live_state_signal_reason="no_live_game_found",
+                live_state_phase=None,
+                live_state_payload={},
+            )
+        ),
+        account_state_store=None,
+    )
+
+    token_ids = ws_loops.market_ws_subscription_token_ids(runtime)
+
+    assert token_ids == ("celtics-token", "lakers-token")
+
+
+def test_market_ws_blocks_single_game_with_signal_allowed_false() -> None:
+    """SINGLE_GAME 的 signal_allowed=False（非 market_end_too_far）应保持封锁不变。"""
+    market = Market(
+        condition_id="nba-game-condition",
+        market_slug="nba-game-boston-vs-miami-2026-05-01",
+        event_slug="nba-game-boston-vs-miami-2026-05-01",
+        end_date=datetime(2026, 5, 1, 6, 0, tzinfo=timezone.utc),
+        trading_status=TradingStatus.ELIGIBLE,
+        outcomes=(
+            MarketOutcome(token_id="boston-token", outcome="Boston Celtics"),
+            MarketOutcome(token_id="miami-token", outcome="Miami Heat"),
+        ),
+    )
+    runtime = SimpleNamespace(
+        registry=_FakeRegistry((market,)),
+        entry_metadata_store=_FakeEntryMetadataStore(
+            EntryMetadataRecord(
+                condition_id=market.condition_id,
+                metadata={"live_game": {"status": "scheduled"}},
+                live_state_signal_allowed=False,
+                live_state_signal_reason="game_not_started",
+                live_state_phase="scheduled",
+                live_state_payload={},
+            )
+        ),
+        account_state_store=None,
+    )
+
+    token_ids = ws_loops.market_ws_subscription_token_ids(runtime)
+
+    assert token_ids == ()
 
 
 def test_market_ws_priority_token_ids_returns_exposed_tokens() -> None:
