@@ -134,25 +134,20 @@ class AdminRuntimeQueryMixin:
         items = []
 
         for record in store.records():
-            updated_at = getattr(record, "updated_at", None)
+            updated_at = record.updated_at
             age_ms = None
-            if updated_at is not None:
-                try:
-                    ts = updated_at.timestamp() if isinstance(updated_at, datetime) else None
-                    if ts is not None:
-                        age_ms = now_ms - int(ts * 1000)
-                except Exception:
-                    pass
+            try:
+                age_ms = now_ms - int(updated_at.timestamp() * 1000)
+            except Exception:
+                pass
 
-            signal_allowed = getattr(record, "live_state_signal_allowed", None)
-            has_live_state = bool(getattr(record, "live_state_payload", None))
             items.append({
-                "condition_id": getattr(record, "condition_id", None),
-                "market_slug": getattr(record, "market_slug", None),
-                "event_slug": getattr(record, "event_slug", None),
-                "source": getattr(record, "source", None),
-                "has_live_state": has_live_state,
-                "signal_allowed": signal_allowed,
+                "condition_id": record.condition_id,
+                "market_slug": record.market_slug,
+                "event_slug": record.event_slug,
+                "source": record.source,
+                "has_live_state": bool(record.live_state_payload),
+                "signal_allowed": record.live_state_signal_allowed,
                 "staleness_ms": age_ms,
                 "updated_at": jsonable(updated_at),
             })

@@ -112,7 +112,7 @@ def market_ws_subscription_token_ids(runtime: Any) -> tuple[str, ...]:
             continue
         # 按 end_date 升序排（near-end 优先）；缺 end_date 排到最后。
         end_ts = float("inf")
-        end = getattr(market, "end_date", None)
+        end = market.end_date
         if end is not None:
             if end.tzinfo is None:
                 end = end.replace(tzinfo=timezone.utc)
@@ -192,7 +192,7 @@ def _market_requires_market_ws(
                 return True
         # series_state / game_odds / season_odds_snapshot 由专用 worker 写入，
         # 这类 market 没有 live_state_phase——但仍然需要盘口订阅用于实时决策。
-        metadata = getattr(record, "metadata", None) or {}
+        metadata = record.metadata or {}
         if metadata.get("series_state") or metadata.get("game_odds") or metadata.get("season_odds_snapshot"):
             return _market_active_in_polymarket(market, now=now)
         # record 存在但 phase 不匹配（如 scheduled 未开赛）—— 不订阅。
@@ -211,7 +211,7 @@ def _market_active_in_polymarket(market: Any, *, now: datetime) -> bool:
 
     if market.trading_status != TradingStatus.ELIGIBLE:
         return False
-    end = getattr(market, "end_date", None)
+    end = market.end_date
     if end is None:
         # 无 end_date 通常是赛季级 outright 市场——长期不订阅 WS 避免占用名额。
         return False
@@ -229,7 +229,7 @@ def _market_end_within_tail_window(market: Any, *, now: datetime) -> bool:
     调用侧已提前放行，ended 未封盘市场也不受该窗口限制。
     """
 
-    market_end = getattr(market, "end_date", None)
+    market_end = market.end_date
     if market_end is None:
         return True
     if market_end.tzinfo is None:
