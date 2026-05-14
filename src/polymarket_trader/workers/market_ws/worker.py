@@ -644,7 +644,7 @@ class MarketWsWorker:
                 "snapshot": self._book_projector.snapshot_payload(snapshot),
                 "spread": self._book_projector.serialize_decimal(snapshot.spread),
                 "ask_depth": self._book_projector.serialize_decimal(snapshot.buyable_ask_depth()),
-                "snapshot_time": snapshot.snapshot_time.isoformat(),
+                "snapshot_time": snapshot.received_at.isoformat(),
                 "needs_rest_snapshot": state.needs_rest_snapshot,
             },
         )

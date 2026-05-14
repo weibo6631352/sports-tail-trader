@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from polymarket_trader.main import RuntimeComponents
 
 from polymarket_trader.extension_api.manifest import ConfiguredExtension
 
@@ -54,9 +57,9 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
     私有 helper（_serializer / _runtime_view / _resolve_market / ...）保留在本类内。
     """
 
-    runtime: Any | None = None
+    runtime: RuntimeComponents | None = None
 
-    def bind_runtime(self, runtime: Any) -> "AdminService":
+    def bind_runtime(self, runtime: RuntimeComponents) -> "AdminService":
         return AdminService(runtime=runtime)
 
     def _serializer(self) -> AdminSerializer:
@@ -194,9 +197,14 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
     def _runtime_strategy_id(self) -> str | None:
         """读取当前运行时加载的扩展策略 id，供候选过滤等内存视图使用。"""
 
-        extension = getattr(self.runtime, "extension", None) if self.runtime is not None else None
-        spec = getattr(extension, "spec", None) if extension is not None else None
-        return getattr(spec, "strategy_id", None) if spec is not None else None
+        if self.runtime is None:
+            return None
+        try:
+            extension = self.runtime.extension
+        except RuntimeError:
+            return None
+        spec = getattr(extension, "spec", None)
+        return getattr(spec, "strategy_id", None)
 
     def _entry_metadata_for_market(self, market: Market) -> dict[str, Any]:
         store = self._entry_metadata_store()
@@ -226,7 +234,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             return () if market is None else (market,)
 
         store = self._entry_metadata_store()
-        registry = getattr(self.runtime, "registry", None)
+        registry = self.runtime.registry if self.runtime else None
         if store is None or registry is None:
             return ()
 
@@ -255,7 +263,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         return tuple(markets.values())
 
     def _project_manual_entry_result(self, review, *, snapshot: AccountSnapshot) -> None:
-        account_state = getattr(self.runtime, "account_state_store", None)
+        account_state = self.runtime.account_state_store if self.runtime else None
         if account_state is None or review.order_result is None:
             return
         strategy_id = self._runtime_strategy_id()
@@ -266,7 +274,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         projector.apply_result_flags(review.order_result, snapshot=snapshot)
 
     async def _publish_candidate_confirmation_review(self, *, market: Market, plan, review) -> None:
-        event_bus = getattr(self.runtime, "event_bus", None)
+        event_bus = self.runtime.event_bus if self.runtime else None
         if event_bus is None or plan.intent is None:
             return
         await event_bus.publish(
@@ -299,52 +307,40 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         )
 
     def _account_snapshot(self) -> AccountSnapshot:
-        account_state = getattr(self.runtime, "account_state_store", None)
-        if account_state is not None:
-            return account_state.snapshot()
-        return AccountSnapshot()
+        store = self.runtime.account_state_store if self.runtime else None
+        return store.snapshot() if store is not None else AccountSnapshot()
 
     def _registry_snapshot(self) -> MarketRegistrySnapshot:
-        registry = getattr(self.runtime, "registry", None)
-        if registry is not None:
-            return registry.snapshot()
-        return MarketRegistrySnapshot(tuple())
+        registry = self.runtime.registry if self.runtime else None
+        return registry.snapshot() if registry is not None else MarketRegistrySnapshot(tuple())
 
     def _has_db_session_factory(self) -> bool:
-        return getattr(self.runtime, "db_session_factory", None) is not None
+        return self.runtime is not None and self.runtime.db_session_factory is not None
 
     def _market_ws_snapshot(self, token_id: str) -> OrderbookSnapshot | None:
-        worker = getattr(self.runtime, "market_ws_worker", None)
-        if worker is None:
-            return None
-        snapshot = getattr(worker, "snapshot", None)
-        if not callable(snapshot):
-            return None
-        return snapshot(token_id)
+        worker = self.runtime.market_ws_worker if self.runtime else None
+        return worker.snapshot(token_id) if worker is not None else None
 
     def _clob_client(self) -> Any:
-        clob_client = getattr(self.runtime, "clob_client", None)
-        if clob_client is None:
+        if self.runtime is None:
             raise RuntimeError("clob_client unavailable")
-        return clob_client
+        return self.runtime.clob_client
 
     def _trading_service(self) -> TradingService:
-        trading_service = getattr(self.runtime, "trading_service", None)
-        if trading_service is None:
+        if self.runtime is None:
             raise RuntimeError("trading_service unavailable")
-        return trading_service
+        return self.runtime.trading_service
 
     def _trading_decision_service(self) -> TradingDecisionService:
-        trading_decision_service = getattr(self.runtime, "trading_decision_service", None)
-        if trading_decision_service is None:
+        if self.runtime is None:
             raise RuntimeError("trading_decision_service unavailable")
-        return trading_decision_service
+        return self.runtime.trading_decision_service
 
     def _entry_metadata_store(self) -> Any | None:
-        return getattr(self.runtime, "entry_metadata_store", None)
+        return self.runtime.entry_metadata_store if self.runtime else None
 
     def _settings_value(self, name: str) -> Any:
-        settings = getattr(self.runtime, "settings", None)
+        settings = self.runtime.settings if self.runtime else None
         return None if settings is None else getattr(settings, name, None)
 
     def _resolve_market(
@@ -354,7 +350,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         condition_id: str | None = None,
         token_id: str | None = None,
     ) -> Market | None:
-        registry = getattr(self.runtime, "registry", None)
+        registry = self.runtime.registry if self.runtime else None
         if registry is not None:
             if condition_id is not None:
                 market = registry.get_by_condition_id(condition_id)
@@ -371,7 +367,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         return None
 
     async def _with_repositories(self, callback: Callable[[_RepositoryGroup], Any]) -> Any:
-        session_factory = getattr(self.runtime, "db_session_factory", None)
+        session_factory = self.runtime.db_session_factory if self.runtime else None
         if session_factory is None:
             raise RuntimeError("db_session_factory unavailable")
         async with session_factory() as session:

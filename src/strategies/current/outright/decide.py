@@ -8,7 +8,7 @@ from decimal import Decimal
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.extension_api import DecisionKind, ExtensionContext, ExtensionDecision, ExtensionPorts, MarketTokenView
 
-from strategies.current.config import CurrentStrategyConfig, OUTRIGHT_FALLBACK_ENTRY_PRICE
+from strategies.current.config import CurrentStrategyConfig
 from strategies.current.outright.evaluator import evaluate_outright_opportunity
 from strategies.current.outright.match import season_odds_from_metadata
 from strategies.current.outright.risk import check_outright_entry_risk
@@ -173,7 +173,7 @@ def decide_outright_entry(
     return ExtensionDecision.buy(
         reason=evaluation.reason,
         token_id=evaluation.candidate.token_id if evaluation.candidate else None,
-        price=evaluation.entry_price_cap or OUTRIGHT_FALLBACK_ENTRY_PRICE,
+        price=evaluation.entry_price_cap,  # evaluator asserts non-None when accepted
         amount_usdc=proposed_amount,
         market_slug=market.market_slug,
         decision_kind=DecisionKind.ENTRY,

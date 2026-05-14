@@ -118,7 +118,7 @@ def _build_registry(market: Market) -> MarketRegistry:
 def test_pause_and_resume_trading_drive_supervisor_phase() -> None:
     supervisor = _build_supervisor()
     supervisor._phase = RuntimePhase.TRADING_ENABLED
-    service = AdminService(runtime=SimpleNamespace(supervisor=supervisor))
+    service = AdminService(runtime=SimpleNamespace(supervisor=supervisor, event_bus=None))
 
     pause = asyncio.run(service.pause_trading(reason="market_alarm", operator="op"))
     assert pause["status"] == "ok"
@@ -132,7 +132,7 @@ def test_pause_and_resume_trading_drive_supervisor_phase() -> None:
 
 
 def test_pause_trading_returns_failed_when_supervisor_missing() -> None:
-    service = AdminService(runtime=SimpleNamespace())
+    service = AdminService(runtime=SimpleNamespace(supervisor=None, event_bus=None))
     result = asyncio.run(service.pause_trading(reason="manual_pause"))
     assert result == {"status": "failed", "reason": "supervisor_unavailable"}
 
@@ -203,7 +203,7 @@ def test_pause_trading_skips_audit_when_event_bus_missing() -> None:
     # event_bus 不可用时不应崩溃；response 标明 audit_published=False，方便监控告警
     supervisor = _build_supervisor()
     supervisor._phase = RuntimePhase.TRADING_ENABLED
-    service = AdminService(runtime=SimpleNamespace(supervisor=supervisor))
+    service = AdminService(runtime=SimpleNamespace(supervisor=supervisor, event_bus=None))
 
     result = asyncio.run(service.pause_trading(reason="manual_pause", operator="op"))
 
@@ -237,6 +237,7 @@ def test_cancel_order_routes_through_trading_service() -> None:
             registry=registry,
             account_state_store=account_state,
             trading_service=trading_service,
+            event_bus=None,
         )
     )
 
@@ -412,7 +413,7 @@ def test_pause_and_resume_market_manual_update_account_state_pauses() -> None:
 
 
 def test_pause_market_manual_returns_failed_when_store_missing() -> None:
-    service = AdminService(runtime=SimpleNamespace())
+    service = AdminService(runtime=SimpleNamespace(account_state_store=None))
     result = asyncio.run(service.pause_market_manual(condition_id="0xcond"))
     assert result == {"status": "failed", "reason": "account_state_store_unavailable"}
 

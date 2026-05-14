@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from polymarket_trader.domain.market import Market
     from polymarket_trader.domain.orderbook import OrderbookSnapshot
     from polymarket_trader.infra.db import RepositoryPage
+    from polymarket_trader.main import RuntimeComponents
     from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 
 
@@ -27,7 +28,7 @@ class AdminQueryHost(Protocol):
     不引入运行时校验。
     """
 
-    runtime: Any
+    runtime: RuntimeComponents | None
 
     def _serializer(self) -> "AdminSerializer": ...
 

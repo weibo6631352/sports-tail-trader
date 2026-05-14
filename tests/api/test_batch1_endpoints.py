@@ -242,14 +242,15 @@ def test_compute_latency_payload_aggregates_per_stage() -> None:
 
     events = tuple(_event(ms) for ms in (100, 200, 300, 400, 500))
     payload = _compute_latency_payload(events, ("order_submitted",), 100, 60000)
-    stages = payload["stages"]
-    assert stages["queue_to_ack"]["count"] == 5
+    # stages 是 list；按 stage name 查找
+    stages_by_name = {s["stage"]: s for s in payload["stages"]}
+    assert stages_by_name["queue_to_ack"]["sample_count"] == 5
     # 5 个样本 100/200/300/400/500，p50 = 300
-    assert stages["queue_to_ack"]["percentiles_ms"]["p50"] == pytest.approx(300.0)
-    assert stages["queue_to_ack"]["min_ms"] == 100.0
-    assert stages["queue_to_ack"]["max_ms"] == 500.0
+    assert stages_by_name["queue_to_ack"]["p50_ms"] == pytest.approx(300.0)
+    assert stages_by_name["queue_to_ack"]["min_ms"] == 100.0
+    assert stages_by_name["queue_to_ack"]["max_ms"] == 500.0
     # queue_to_sign 是 25/50/75/100/125
-    assert stages["queue_to_sign"]["percentiles_ms"]["p50"] == pytest.approx(75.0)
+    assert stages_by_name["queue_to_sign"]["p50_ms"] == pytest.approx(75.0)
 
 
 def test_compute_latency_payload_skips_missing_or_inverted_timestamps() -> None:
@@ -263,7 +264,8 @@ def test_compute_latency_payload_skips_missing_or_inverted_timestamps() -> None:
     )
     payload = _compute_latency_payload(events, ("order_submitted",), 100, None)
     # 只有 1 个事件给出有效的 queue_to_ack；倒序被丢弃，None payload 被丢弃
-    assert payload["stages"]["queue_to_ack"]["count"] == 1
+    stages_by_name = {s["stage"]: s for s in payload["stages"]}
+    assert stages_by_name["queue_to_ack"]["sample_count"] == 1
     assert payload["sample_count"] == 4  # 总取样数即使无效也保留
 
 

@@ -10,7 +10,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from polymarket_trader.main import RuntimeComponents
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
@@ -178,19 +181,22 @@ def _live_source_gap_scope_markets(runtime: Any, markets: Sequence[Market]) -> t
     return tuple(scoped)
 
 
-def _runtime_extension_hooks(runtime: Any) -> Any | None:
+def _runtime_extension_hooks(runtime: RuntimeComponents) -> Any | None:
     """提取运行时已装配的扩展 hooks。
 
-    Admin 查询不直接依赖具体策略包；优先使用 runtime.extension，并在 API 运行时
-    只暴露应用服务对象时，从 MarketService 读取同一份 universe hooks。
+    Admin 查询不直接依赖具体策略包；extension 不可用时（无配置扩展）从 MarketService
+    读取同一份 universe hooks。RuntimeError: extension property 无扩展时抛；返回
+    None 让调用方退回全量 markets 诊断。
     """
 
-    extension = getattr(runtime, "extension", None)
-    hooks = getattr(extension, "hooks", None)
-    if hooks is not None:
-        return hooks
-    market_service = getattr(runtime, "market_service", None)
-    return getattr(market_service, "extension_hooks", None)
+    try:
+        return runtime.extension.hooks
+    except (RuntimeError, AttributeError):
+        pass
+    try:
+        return runtime.market_service.extension_hooks
+    except AttributeError:
+        return None
 
 
 def _live_source_gap_urgency(

@@ -85,8 +85,9 @@ def test_latency_percentiles_snapshot_empty_payload_without_db() -> None:
     assert payload["sample_count"] == 0
     assert payload["sample_limit"] == 10
     assert payload["window_ms"] == 60_000
-    assert "queue_to_sign" in payload["stages"]
-    assert payload["stages"]["queue_to_sign"]["count"] == 0
+    stages_by_name = {s["stage"]: s for s in payload["stages"]}
+    assert "queue_to_sign" in stages_by_name
+    assert stages_by_name["queue_to_sign"]["sample_count"] == 0
 
 
 def test_latency_percentiles_uses_supplied_event_types() -> None:

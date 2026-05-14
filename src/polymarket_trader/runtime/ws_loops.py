@@ -4,9 +4,13 @@ import asyncio
 import logging
 from contextlib import suppress
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 from uuid import uuid4
 
+if TYPE_CHECKING:
+    from polymarket_trader.main import RuntimeComponents
+
+from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics
 from polymarket_trader.runtime.status import WorkerLifecycleState
 
@@ -131,30 +135,28 @@ def market_ws_subscription_token_ids(runtime: Any) -> tuple[str, ...]:
     return tuple(token_ids)
 
 
-def _account_snapshot(runtime: Any) -> Any | None:
-    store = getattr(runtime, "account_state_store", None)
-    snapshot = getattr(store, "snapshot", None)
-    if callable(snapshot):
-        return snapshot()
-    return None
+def _account_snapshot(runtime: RuntimeComponents) -> AccountSnapshot | None:
+    store = runtime.account_state_store
+    return store.snapshot() if store is not None else None
 
 
-def _account_exposure_keys(account_snapshot: Any | None) -> tuple[set[str], set[str]]:
+def _account_exposure_keys(account_snapshot: AccountSnapshot | None) -> tuple[set[str], set[str]]:
     condition_ids: set[str] = set()
     token_ids: set[str] = set()
     if account_snapshot is None:
         return condition_ids, token_ids
-    for item in tuple(getattr(account_snapshot, "positions", ())) + tuple(
-        getattr(account_snapshot, "open_orders", ())
-    ):
-        if getattr(item, "settled_zero_value", False):
+    for position in account_snapshot.positions:
+        if position.settled_zero_value:
             continue
-        condition_id = str(getattr(item, "condition_id", "") or "").strip()
-        token_id = str(getattr(item, "token_id", "") or "").strip()
-        if condition_id:
-            condition_ids.add(condition_id)
-        if token_id:
-            token_ids.add(token_id)
+        if position.condition_id:
+            condition_ids.add(position.condition_id)
+        if position.token_id:
+            token_ids.add(position.token_id)
+    for order in account_snapshot.open_orders:
+        if order.condition_id:
+            condition_ids.add(order.condition_id)
+        if order.token_id:
+            token_ids.add(order.token_id)
     return condition_ids, token_ids
 
 
@@ -236,16 +238,10 @@ def _market_end_within_tail_window(market: Any, *, now: datetime) -> bool:
     return seconds_until_end <= _MARKET_WS_TAIL_WINDOW_SECONDS
 
 
-def _entry_metadata_record_for_market(runtime: Any, market: Any) -> Any:
+def _entry_metadata_record_for_market(runtime: RuntimeComponents, market: Any) -> Any:
     """读取 entry metadata 强类型记录；缺失时返回 None。"""
 
-    store = getattr(runtime, "entry_metadata_store", None)
-    if store is None:
-        return None
-    finder = getattr(store, "find", None)
-    if not callable(finder):
-        return None
-    return finder(
+    return runtime.entry_metadata_store.find(
         condition_id=market.condition_id,
         market_slug=market.market_slug,
         event_slug=market.event_slug,
@@ -301,14 +297,11 @@ def _drain_queue(queue: asyncio.Queue[Mapping[str, Any]]) -> None:
             queue.get_nowait()
 
 
-def _trigger_reconcile_after_user_ws_connect(runtime: Any) -> None:
+def _trigger_reconcile_after_user_ws_connect(runtime: RuntimeComponents) -> None:
     """User WS 恢复后立即唤醒账户 reconcile，避免等待下一次周期调度。"""
 
-    scheduler = getattr(runtime, "scheduler", None)
-    if scheduler is None:
-        return
     with suppress(KeyError):
-        scheduler.trigger_now("periodic_reconcile")
+        runtime.scheduler.trigger_now("periodic_reconcile")
 
 
 async def stream_market_ws_messages(

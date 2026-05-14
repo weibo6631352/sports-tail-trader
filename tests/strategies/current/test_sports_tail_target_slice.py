@@ -4891,6 +4891,7 @@ async def _run_admin_live_source_gap_diagnostics_flow() -> dict[str, object]:
             registry=registry,
             entry_metadata_store=live_store,
             extension=CurrentStrategy(config=CurrentStrategyConfig()),
+            settings=None,
         )
     )
     return await service.list_sports_live_source_gaps(
@@ -4940,6 +4941,7 @@ async def _run_admin_live_source_gap_with_market_service_hooks_flow() -> dict[st
             registry=registry,
             entry_metadata_store=live_store,
             market_service=MarketService(extension_hooks=strategy.hooks),
+            settings=None,
         )
     )
     return await service.list_sports_live_source_gaps(

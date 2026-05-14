@@ -143,7 +143,7 @@ def test_list_outbox_pending_returns_runtime_events_filtered_by_trace_id() -> No
 
 def test_list_outbox_pending_returns_empty_when_runtime_outbox_missing() -> None:
     host = _Host()
-    host.runtime = type("RT", (), {})()
+    host.runtime = type("RT", (), {"outbox": None})()
     payload = asyncio.run(host.list_outbox_pending(limit=10, offset=0))
     assert payload == {"items": [], "total": 0, "limit": 10, "offset": 0}
 

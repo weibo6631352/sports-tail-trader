@@ -248,7 +248,7 @@ class MarketBookProjector:
             "spread": self.serialize_decimal(snapshot.spread),
             "ask_depth": self.serialize_decimal(snapshot.buyable_ask_depth()),
             "received_at": snapshot.received_at.isoformat(),
-            "snapshot_time": snapshot.snapshot_time.isoformat(),
+            "snapshot_time": snapshot.received_at.isoformat(),
         }
 
     def serialize_decimal(self, value: Decimal | None) -> str | None:

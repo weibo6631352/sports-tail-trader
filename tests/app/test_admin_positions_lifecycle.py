@@ -40,6 +40,7 @@ def _run_list_positions(positions: tuple[Position, ...]) -> dict[str, object]:
             runtime=SimpleNamespace(
                 account_state_store=account_state,
                 db_session_factory=None,
+                registry=None,
             )
         )
         return await service.list_positions()

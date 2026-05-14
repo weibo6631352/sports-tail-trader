@@ -17,8 +17,11 @@ import logging
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from polymarket_trader.main import RuntimeComponents
 
 from polymarket_trader.app.admin_operations import (
     market_status_allowed_for_manual_order,
@@ -58,7 +61,7 @@ def _resolve_admin_bankroll(account: AccountSnapshot, portfolio_budget_usdc: Any
 class AdminControlsMixin:
     """受控人工操作。每个方法仍经过统一交易主链路。"""
 
-    runtime: Any | None  # 宿主声明真正的字段；这里只是给类型检查器看
+    runtime: RuntimeComponents | None  # 宿主声明真正的字段；这里只是给类型检查器看
 
     async def reconcile(
         self,
@@ -70,7 +73,7 @@ class AdminControlsMixin:
     ) -> dict[str, Any]:
         from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 
-        reconcile_worker = getattr(self.runtime, "reconcile_worker", None)
+        reconcile_worker = self.runtime.reconcile_worker if self.runtime else None
         resolved_trace_id = trace_id or uuid4().hex
         if reconcile_worker is None:
             return {
@@ -88,7 +91,7 @@ class AdminControlsMixin:
                 "condition_ids": list(condition_id_filter) if condition_id_filter else [],
             },
         )
-        event_bus = getattr(self.runtime, "event_bus", None)
+        event_bus = self.runtime.event_bus if self.runtime else None
         if event_bus is not None:
             event_bus.publish_nowait(
                 OutboxPriority.P1,
@@ -298,7 +301,7 @@ class AdminControlsMixin:
 
         from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 
-        event_bus = getattr(self.runtime, "event_bus", None)
+        event_bus = self.runtime.event_bus if self.runtime else None
         if event_bus is None:
             return {"status": "failed", "reason": "event_bus_unavailable"}
         trace_id = uuid4().hex
@@ -345,13 +348,13 @@ class AdminControlsMixin:
 
         from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 
-        supervisor = getattr(self.runtime, "supervisor", None)
+        supervisor = self.runtime.supervisor if self.runtime else None
         if supervisor is None:
             return {"status": "failed", "reason": "supervisor_unavailable"}
         normalized_reason = reason.strip() or "manual_pause"
-        phase_before = getattr(supervisor.snapshot().phase, "value", "unknown")
+        phase_before = supervisor.snapshot().phase.value
         supervisor.pause_trading(normalized_reason)
-        phase_after = getattr(supervisor.snapshot().phase, "value", "unknown")
+        phase_after = supervisor.snapshot().phase.value
 
         # 主交易开关变更是高敏操作，必须落审计——CLAUDE.md §3 / §10
         # 要求拒绝、降级、恢复动作可审计；event_bus 不可用时不应静默失败。
@@ -367,7 +370,7 @@ class AdminControlsMixin:
                 "phase_after": phase_after,
             },
         )
-        event_bus = getattr(self.runtime, "event_bus", None)
+        event_bus = self.runtime.event_bus if self.runtime else None
         if event_bus is not None:
             event_bus.publish_nowait(
                 OutboxPriority.P1,
@@ -410,14 +413,14 @@ class AdminControlsMixin:
 
         from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 
-        supervisor = getattr(self.runtime, "supervisor", None)
+        supervisor = self.runtime.supervisor if self.runtime else None
         if supervisor is None:
             return {"status": "failed", "reason": "supervisor_unavailable"}
-        phase_before = getattr(supervisor.snapshot().phase, "value", "unknown")
+        phase_before = supervisor.snapshot().phase.value
         previous_pause_reason = supervisor.snapshot().manual_pause_reason
         supervisor.resume_trading()
         snapshot = supervisor.snapshot()
-        phase_after = getattr(snapshot.phase, "value", "unknown")
+        phase_after = snapshot.phase.value
 
         trace_id = trace_id or uuid4().hex
         logger.warning(
@@ -431,7 +434,7 @@ class AdminControlsMixin:
                 "phase_after": phase_after,
             },
         )
-        event_bus = getattr(self.runtime, "event_bus", None)
+        event_bus = self.runtime.event_bus if self.runtime else None
         if event_bus is not None:
             event_bus.publish_nowait(
                 OutboxPriority.P1,
@@ -574,7 +577,7 @@ class AdminControlsMixin:
 
         from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 
-        event_bus = getattr(self.runtime, "event_bus", None)
+        event_bus = self.runtime.event_bus if self.runtime else None
         if event_bus is None:
             return
         order_id = order.order_id or normalize_order_id(order)
@@ -766,7 +769,7 @@ class AdminControlsMixin:
         (依赖 account_state 内部变更通道)，未来补独立 trading_paused_for_market
         事件时直接消费此参数。"""
 
-        account_state = getattr(self.runtime, "account_state_store", None)
+        account_state = self.runtime.account_state_store if self.runtime else None
         if account_state is None:
             return {"status": "failed", "reason": "account_state_store_unavailable"}
         normalized_reason = reason.strip() or "manual_pause"
@@ -795,7 +798,7 @@ class AdminControlsMixin:
     ) -> dict[str, Any]:
         """人工恢复某市场。仅清除 market_pauses 中对应条目。"""
 
-        account_state = getattr(self.runtime, "account_state_store", None)
+        account_state = self.runtime.account_state_store if self.runtime else None
         if account_state is None:
             return {"status": "failed", "reason": "account_state_store_unavailable"}
         account_state.resume_market(condition_id)

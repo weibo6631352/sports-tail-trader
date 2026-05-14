@@ -98,7 +98,7 @@ class AdminSportsQueryMixin(_Base):
         匹配覆盖率，不触发 discovery、订阅或交易判断。
         """
 
-        registry = getattr(self.runtime, "registry", None)
+        registry = self.runtime.registry if self.runtime else None
         store = self._entry_metadata_store()
         if registry is None:
             empty = page_payload(self._slice_sequence((), limit=limit, offset=offset), serializer=lambda item: item)
@@ -126,9 +126,10 @@ class AdminSportsQueryMixin(_Base):
         )
         if now is None:
             now = datetime.now(timezone.utc)
-        settings = getattr(self.runtime, "settings", None)
+        from polymarket_trader.config import Settings
+        settings = self.runtime.settings if self.runtime else None
         league_codes = (
-            getattr(settings, "sports_live_state_league_codes", ()) if settings is not None else ()
+            settings.sports_live_state_league_codes if isinstance(settings, Settings) else ()
         )
         supported_league_prefixes: frozenset[str] | None = (
             frozenset(code.lower() for code in league_codes if code) or None

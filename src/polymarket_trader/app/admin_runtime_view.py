@@ -3,18 +3,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import logging
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
+
+if TYPE_CHECKING:
+    from polymarket_trader.main import RuntimeComponents
 
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
 from polymarket_trader.config import Settings
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.extension_api.manifest import ConfiguredExtension
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
+from polymarket_trader.infra.polymarket.clob_client import ClobClient
+from polymarket_trader.infra.polymarket.data_client import DataClient
+from polymarket_trader.infra.polymarket.gamma_client import GammaClient
 from polymarket_trader.runtime.event_bus import QueueDepthSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.runtime.status import RuntimeSnapshot
+from polymarket_trader.runtime.supervisor import Supervisor
 from polymarket_trader.serialization import utc_now
-from polymarket_trader.workers.sports_live_state_worker import SportsLiveSyncResult
+from polymarket_trader.workers.market_ws.worker import MarketWsWorker
+from polymarket_trader.workers.sports_live_state_worker import SportsLiveSyncResult, SportsLiveStateWorker
 
 logger = logging.getLogger(__name__)
 _RUNTIME_MARKET_SAMPLE_LIMIT = 20
@@ -60,7 +68,7 @@ def _dedupe_warnings(values: list[Any]) -> list[Any]:
 
 @dataclass(frozen=True, slots=True)
 class AdminRuntimeView:
-    runtime: Any | None = None
+    runtime: RuntimeComponents | None = None
 
     def health_snapshot(self) -> dict[str, Any]:
         return {
@@ -102,7 +110,7 @@ class AdminRuntimeView:
             "settings": self._settings_snapshot(),
             "identity": await self._identity_snapshot(),
             "runtime": runtime_status,
-            "bootstrap_summary": jsonable(getattr(self.runtime, "bootstrap_summary", {})),
+            "bootstrap_summary": jsonable(self.runtime.bootstrap_summary if self.runtime else {}),
             "market_discovery": self._market_discovery_snapshot(),
             "sports_live_sync": self._sports_live_sync_snapshot(),
             "registry": {
@@ -144,11 +152,10 @@ class AdminRuntimeView:
         }
 
     def _supervisor_snapshot(self) -> dict[str, Any]:
-        supervisor = getattr(self.runtime, "supervisor", None)
-        snapshot = getattr(supervisor, "snapshot", None)
-        if not callable(snapshot):
+        supervisor: Supervisor | None = self.runtime.supervisor if self.runtime else None
+        if supervisor is None:
             return {}
-        value = snapshot()
+        value = supervisor.snapshot()
         # 生产路径返回 RuntimeSnapshot dataclass；少数 test stub 可能返裸 mapping，
         # 后者用 jsonable 兜底——isinstance narrow 替代 hasattr 反射。
         payload = value.as_dict() if isinstance(value, RuntimeSnapshot) else jsonable(value)
@@ -218,7 +225,7 @@ class AdminRuntimeView:
             "last_reconcile_at": readiness.get("last_reconcile_at")
             or account_payload.get("last_reconcile_at")
             or fallback_reconcile_at,
-            "portfolio_budget_usdc": decimal_text(getattr(self._settings(), "portfolio_budget_usdc", None)),
+            "portfolio_budget_usdc": decimal_text((s_ := self._settings()) and isinstance(s_, Settings) and s_.portfolio_budget_usdc),
             "queue_depth": supervisor.get("queue_depths") or jsonable(self._event_bus_snapshot()),
             "persistence": supervisor.get("persistence") or jsonable(self._persistence_snapshot()),
             "blocking_reasons": tuple(readiness.get("blocking_reasons", ())),
@@ -266,7 +273,7 @@ class AdminRuntimeView:
 
     def _strategy_config(self) -> Any | None:
         """获取策略配置实例（ConfiguredExtension 协议）；未装配或不支持时返回 None。"""
-        extension = getattr(self.runtime, "extension", None)
+        extension = self.runtime.extension if self.runtime else None
         if isinstance(extension, ConfiguredExtension):
             return extension.config
         return None
@@ -280,10 +287,11 @@ class AdminRuntimeView:
         """
 
         settings = self._settings()
-        if settings is None:
+        if not isinstance(settings, Settings):
             return None
-        budget = _decimal_or_none(getattr(settings, "portfolio_budget_usdc", None))
-        # kelly_* 参数已迁移到策略配置，从 extension.config 读取。
+        budget: Decimal | None = settings.portfolio_budget_usdc
+        # kelly_* 参数已迁移到策略配置，从 extension.config 读取。extension config 类型
+        # 由策略包决定，框架层只能通过反射读取（跨扩展边界属于合法 adapter getattr）。
         strategy_cfg = self._strategy_config()
         max_position_fraction = _decimal_or_none(
             getattr(strategy_cfg, "kelly_max_position_fraction", None)
@@ -301,7 +309,7 @@ class AdminRuntimeView:
         return min(candidates)
 
     def _config_readiness_snapshot(self) -> dict[str, Any]:
-        settings = getattr(self.runtime, "readiness", None)
+        settings = self.runtime.readiness if self.runtime else None
         if settings is not None:
             return settings.as_dict()
         return {
@@ -322,24 +330,21 @@ class AdminRuntimeView:
 
     async def _identity_snapshot(self) -> dict[str, Any]:
         settings = self._settings()
-        wallet_address = None
-        for component_name in ("clob_client", "data_client"):
-            component = getattr(self.runtime, component_name, None)
-            if component is None:
-                continue
-            candidate = getattr(component, "default_wallet_address", None)
-            if callable(candidate):
-                candidate = candidate()
-            if candidate:
-                wallet_address = str(candidate)
-                break
-        funder_address = (
-            _text_or_none(getattr(settings, "polymarket_funder_address", None))
-            if settings is not None
-            else None
-        )
+        wallet_address: str | None = None
+        if self.runtime is not None:
+            clob: ClobClient | None = self.runtime.clob_client
+            data: DataClient | None = self.runtime.data_client
+            for client in (clob, data):
+                if client is not None:
+                    candidate = client.default_wallet_address()
+                    if candidate:
+                        wallet_address = str(candidate)
+                        break
+        funder_address = _text_or_none(settings.polymarket_funder_address) if isinstance(settings, Settings) else None
         profile_address = funder_address or _text_or_none(wallet_address)
         profile = await self._public_profile(profile_address)
+        # profile 来自 GammaClient 外部 API，返回类型随 API 版本变化，框架层用反射读取字段属于
+        # 合法 adapter 边界——GammaClient.get_public_profile 返回 Any。
         display_username_public = (
             None if profile is None else getattr(profile, "display_username_public", None)
         )
@@ -349,9 +354,7 @@ class AdminRuntimeView:
         return {
             "wallet_address": wallet_address,
             "funder_address": funder_address,
-            "signature_type": (
-                getattr(settings, "polymarket_signature_type", None) if settings is not None else None
-            ),
+            "signature_type": settings.polymarket_signature_type if isinstance(settings, Settings) else None,
             "profile_address": (
                 _text_or_none(None if profile is None else getattr(profile, "proxy_wallet", None))
                 or profile_address
@@ -374,12 +377,11 @@ class AdminRuntimeView:
     async def _public_profile(self, address: str | None) -> Any | None:
         if address is None:
             return None
-        gamma_client = getattr(self.runtime, "gamma_client", None)
-        get_public_profile = getattr(gamma_client, "get_public_profile", None)
-        if not callable(get_public_profile):
+        gamma_client: GammaClient | None = self.runtime.gamma_client if self.runtime else None
+        if gamma_client is None:
             return None
         try:
-            return await get_public_profile(address, timeout_s=2.0)
+            return await gamma_client.get_public_profile(address, timeout_s=2.0)
         except Exception as exc:
             logger.warning(
                 "polymarket public profile lookup failed",
@@ -395,31 +397,31 @@ class AdminRuntimeView:
         )
 
     def _account_snapshot(self) -> AccountSnapshot:
-        account_state = getattr(self.runtime, "account_state_store", None)
+        account_state = self.runtime.account_state_store if self.runtime else None
         if account_state is not None:
             return account_state.snapshot()
         return AccountSnapshot()
 
     def _registry_snapshot(self) -> MarketRegistrySnapshot:
-        registry = getattr(self.runtime, "registry", None)
+        registry = self.runtime.registry if self.runtime else None
         if registry is not None:
             return registry.snapshot()
         return MarketRegistrySnapshot(tuple())
 
     def _event_bus_snapshot(self) -> QueueDepthSnapshot | None:
-        event_bus = getattr(self.runtime, "event_bus", None)
+        event_bus = self.runtime.event_bus if self.runtime else None
         if event_bus is None:
             return None
         return event_bus.snapshot()
 
     def _persistence_snapshot(self) -> Any | None:
-        worker = getattr(self.runtime, "persistence_worker", None)
+        worker = self.runtime.persistence_worker if self.runtime else None
         if worker is None:
             return None
         return worker.snapshot()
 
     def _market_discovery_snapshot(self) -> dict[str, Any]:
-        state = getattr(self.runtime, "market_discovery_scan", None)
+        state = self.runtime.market_discovery_scan if self.runtime else None
         if state is None:
             return {
                 "round_id": 0,
@@ -439,31 +441,30 @@ class AdminRuntimeView:
                 "consecutive_failures": 0,
             }
         return {
-            "round_id": int(getattr(state, "round_id", 0)),
-            "cursor_active": getattr(state, "after_cursor", None) is not None
-            or bool(getattr(state, "query_cursors", {})),
-            "query_cursors": jsonable(getattr(state, "query_cursors", {})),
-            "completed_query_names": sorted(str(name) for name in getattr(state, "completed_query_names", ())),
-            "active_cursor_count": len(getattr(state, "query_cursors", {})),
-            "completed_query_count": len(getattr(state, "completed_query_names", ())),
-            "round_started_at": jsonable(getattr(state, "round_started_at", None)),
-            "last_round_completed_at": jsonable(getattr(state, "last_round_completed_at", None)),
-            "pages_scanned_in_round": int(getattr(state, "pages_scanned_in_round", 0)),
-            "markets_seen_in_round": int(getattr(state, "markets_seen_in_round", 0)),
-            "last_completed_round_pages": int(getattr(state, "last_completed_round_pages", 0)),
-            "last_completed_round_markets": int(getattr(state, "last_completed_round_markets", 0)),
-            "last_page_size": int(getattr(state, "last_page_size", 0)),
-            "last_tick_started_at": jsonable(getattr(state, "last_tick_started_at", None)),
-            "last_tick_completed_at": jsonable(getattr(state, "last_tick_completed_at", None)),
-            "last_tick_requests": int(getattr(state, "last_tick_requests", 0)),
-            "last_tick_markets": int(getattr(state, "last_tick_markets", 0)),
-            "last_error": getattr(state, "last_error", None),
-            "consecutive_failures": int(getattr(state, "consecutive_failures", 0)),
+            "round_id": state.round_id,
+            "cursor_active": state.after_cursor is not None or bool(state.query_cursors),
+            "query_cursors": jsonable(state.query_cursors),
+            "completed_query_names": sorted(str(name) for name in state.completed_query_names),
+            "active_cursor_count": len(state.query_cursors),
+            "completed_query_count": len(state.completed_query_names),
+            "round_started_at": jsonable(state.round_started_at),
+            "last_round_completed_at": jsonable(state.last_round_completed_at),
+            "pages_scanned_in_round": state.pages_scanned_in_round,
+            "markets_seen_in_round": state.markets_seen_in_round,
+            "last_completed_round_pages": state.last_completed_round_pages,
+            "last_completed_round_markets": state.last_completed_round_markets,
+            "last_page_size": state.last_page_size,
+            "last_tick_started_at": jsonable(state.last_tick_started_at),
+            "last_tick_completed_at": jsonable(state.last_tick_completed_at),
+            "last_tick_requests": state.last_tick_requests,
+            "last_tick_markets": state.last_tick_markets,
+            "last_error": state.last_error,
+            "consecutive_failures": state.consecutive_failures,
         }
 
     def _sports_live_sync_snapshot(self) -> dict[str, Any]:
-        worker = getattr(self.runtime, "sports_live_state_worker", None)
-        if worker is not None and callable(getattr(worker, "status_snapshot", None)):
+        worker: SportsLiveStateWorker | None = self.runtime.sports_live_state_worker if self.runtime else None
+        if worker is not None:
             status = worker.status_snapshot()
             # 生产路径返回 SportsLiveSyncResult dataclass；test stub 走 jsonable 兜底。
             if isinstance(status, SportsLiveSyncResult):
@@ -471,31 +472,23 @@ class AdminRuntimeView:
             else:
                 payload = jsonable(status)
                 snapshot = dict(payload) if isinstance(payload, Mapping) else {"value": payload}
-            # 缺口 1 接线：admin runtime view 暴露 per-market 源选择信息。
-            recent_sources_fn = getattr(worker, "recent_match_sources", None)
-            if callable(recent_sources_fn):
-                recent_sources = list(recent_sources_fn(limit=_SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT))
-                # 后端持续暴露 truncated 标记，便于前端展示"还有更早匹配未展示"。
-                full = recent_sources_fn(limit=None)
-                snapshot["recent_match_sources"] = recent_sources
-                snapshot["recent_match_sources_limit"] = _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT
-                snapshot["recent_match_sources_truncated"] = (
-                    len(full) > _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT
-                )
+            recent_sources = list(worker.recent_match_sources(limit=_SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT))
+            # 后端持续暴露 truncated 标记，便于前端展示"还有更早匹配未展示"。
+            full_count = len(worker.recent_match_sources(limit=None))
+            snapshot["recent_match_sources"] = recent_sources
+            snapshot["recent_match_sources_limit"] = _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT
+            snapshot["recent_match_sources_truncated"] = full_count > _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT
             return snapshot
         settings = self._settings()
+        live_enabled = settings.sports_live_state_enabled if isinstance(settings, Settings) else False
         return {
-            "enabled": bool(getattr(settings, "sports_live_state_enabled", False)),
+            "enabled": live_enabled,
             "source": "sports_live_aggregate",
             "running": False,
             "last_started_at": None,
             "last_completed_at": None,
             "last_success_at": None,
-            "last_error": (
-                "sports_live_state_worker_unavailable"
-                if bool(getattr(settings, "sports_live_state_enabled", False))
-                else None
-            ),
+            "last_error": "sports_live_state_worker_unavailable" if live_enabled else None,
             "consecutive_failures": 0,
             "last_events_seen": 0,
             "last_markets_seen": 0,
@@ -503,7 +496,7 @@ class AdminRuntimeView:
             "last_records_written": 0,
             "last_unmatched_markets": 0,
             "last_entry_signals_published": 0,
-            "leagues": list(getattr(settings, "sports_live_state_league_codes", ())),
+            "leagues": list(settings.sports_live_state_league_codes if isinstance(settings, Settings) else ()),
             "source_statuses": [],
             "recent_match_sources": [],
             "recent_match_sources_limit": _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT,
@@ -511,13 +504,10 @@ class AdminRuntimeView:
         }
 
     def _market_ws_snapshot(self, token_id: str) -> OrderbookSnapshot | None:
-        worker = getattr(self.runtime, "market_ws_worker", None)
+        worker: MarketWsWorker | None = self.runtime.market_ws_worker if self.runtime else None
         if worker is None:
             return None
-        snapshot = getattr(worker, "snapshot", None)
-        if not callable(snapshot):
-            return None
-        return snapshot(token_id)
+        return worker.snapshot(token_id)
 
-    def _settings(self) -> Any | None:
-        return getattr(self.runtime, "settings", None)
+    def _settings(self) -> Settings | None:
+        return self.runtime.settings if self.runtime else None

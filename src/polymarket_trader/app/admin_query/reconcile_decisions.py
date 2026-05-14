@@ -165,8 +165,8 @@ class AdminReconcileDecisionsQueryMixin:
         offset: int = 0,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        runtime_outbox = getattr(self.runtime, "outbox", None)
-        if runtime_outbox is not None and hasattr(runtime_outbox, "pending_events"):
+        runtime_outbox = self.runtime.outbox if self.runtime else None
+        if runtime_outbox is not None:
             events = runtime_outbox.pending_events()
             if trace_id is not None:
                 events = tuple(event for event in events if event.trace_id == trace_id)

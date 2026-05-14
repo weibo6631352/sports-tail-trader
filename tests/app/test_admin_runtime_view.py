@@ -6,6 +6,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from polymarket_trader.app.admin_runtime_view import AdminRuntimeView
+from polymarket_trader.config import Settings
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.market import Market, MarketOutcome
 from polymarket_trader.extension_api.manifest import ConfiguredExtension
@@ -46,12 +47,19 @@ def test_runtime_snapshot_uses_sample_field_names_for_markets() -> None:
         runtime = SimpleNamespace(
             registry=registry,
             supervisor=None,
-            settings=SimpleNamespace(),
+            readiness=None,
+            settings=Settings.model_construct(),
+            extension=None,
             account_state_store=None,
             event_bus=None,
             persistence_worker=None,
             market_discovery_scan=None,
             sports_live_state_worker=None,
+            market_ws_worker=None,
+            clob_client=None,
+            data_client=None,
+            gamma_client=None,
+            bootstrap_summary={},
         )
         return await AdminRuntimeView(runtime=runtime).runtime_snapshot()
 
@@ -89,11 +97,19 @@ def test_readiness_warns_when_available_balance_cannot_cover_configured_order_si
     runtime = SimpleNamespace(
         supervisor=None,
         readiness=_Readiness(),
-        settings=SimpleNamespace(portfolio_budget_usdc=Decimal("1000000")),
+        settings=Settings.model_construct(portfolio_budget_usdc=Decimal("1000000")),
         extension=_Extension(),
         account_state_store=_AccountStore(account),
         event_bus=None,
         persistence_worker=None,
+        registry=None,
+        market_discovery_scan=None,
+        sports_live_state_worker=None,
+        market_ws_worker=None,
+        clob_client=None,
+        data_client=None,
+        gamma_client=None,
+        bootstrap_summary={},
     )
 
     payload = AdminRuntimeView(runtime=runtime).readiness_snapshot()

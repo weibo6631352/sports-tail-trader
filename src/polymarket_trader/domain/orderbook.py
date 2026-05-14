@@ -32,11 +32,6 @@ class OrderbookSnapshot:
             return None
         return self.best_ask - self.best_bid
 
-    @property
-    def snapshot_time(self) -> datetime:
-        # 交易路径里常把 received_at 当成快照时间；这里保留一个语义更直白的只读别名。
-        return self.received_at
-
     def buyable_ask_depth(self, max_price: Decimal | None = None) -> Decimal:
         # 买入深度只看 ask 侧；调用方可按需传入价格上限做额外筛选。
         total = Decimal("0")

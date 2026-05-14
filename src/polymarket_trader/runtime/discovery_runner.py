@@ -4,10 +4,14 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import logging
-from typing import Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 from uuid import uuid4
 
+from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.extension_api import DiscoveryQuery
+
+if TYPE_CHECKING:
+    from polymarket_trader.main import RuntimeComponents
 
 _MARKET_DISCOVERY_EVENT_PAGE_LIMIT = 50
 _MARKET_DISCOVERY_MARKET_BUDGET_PER_TICK = 1000
@@ -45,7 +49,7 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _sync(sync_runtime_metrics: RuntimeMetricsSync | None, runtime: Any) -> None:
+def _sync(sync_runtime_metrics: RuntimeMetricsSync | None, runtime: RuntimeComponents) -> None:
     if sync_runtime_metrics is not None:
         sync_runtime_metrics(runtime)
 
@@ -156,7 +160,7 @@ class FullMarketDiscoveryState:
 
 
 async def run_market_discovery_scan(
-    runtime: Any,
+    runtime: RuntimeComponents,
     *,
     sync_runtime_metrics: RuntimeMetricsSync | None = None,
 ) -> None:
@@ -286,7 +290,7 @@ async def run_market_discovery_scan(
         _sync(sync_runtime_metrics, runtime)
 
 
-async def expand_live_event_market_discovery(runtime: Any) -> None:
+async def expand_live_event_market_discovery(runtime: RuntimeComponents) -> None:
     """对已匹配直播事件按 event slug 精确补齐同场子盘口。
 
     常规 title_search discovery 会受查询轮转和分页预算影响；实盘中一旦
@@ -315,7 +319,7 @@ async def expand_live_event_market_discovery(runtime: Any) -> None:
         state.live_event_expanded_at[event_slug] = _utc_now()
 
 
-async def refresh_priority_condition_ids(runtime: Any) -> None:
+async def refresh_priority_condition_ids(runtime: RuntimeComponents) -> None:
     """P3.1：对持仓/挂单市场按独立快速间隔（15s）单独拉取 Gamma 市场快照。
 
     常规全量 Gamma 轮转可能数分钟才回到某个 condition_id；有持仓的市场需要
@@ -327,7 +331,7 @@ async def refresh_priority_condition_ids(runtime: Any) -> None:
     condition_ids = _priority_condition_ids_due_for_refresh(runtime, now=_utc_now())
     if not condition_ids:
         return
-    gamma_client = getattr(runtime, "gamma_client", None)
+    gamma_client = runtime.gamma_client
     if gamma_client is None:
         return
     fetched = 0
@@ -353,7 +357,7 @@ async def refresh_priority_condition_ids(runtime: Any) -> None:
         fetched += 1
 
 
-def _priority_condition_ids_due_for_refresh(runtime: Any, *, now: datetime) -> tuple[str, ...]:
+def _priority_condition_ids_due_for_refresh(runtime: RuntimeComponents, *, now: datetime) -> tuple[str, ...]:
     """从账户持仓/挂单中提取需要快速刷新的 condition_id 集合。"""
 
     account_snapshot = _account_snapshot_for_discovery(runtime)
@@ -361,12 +365,18 @@ def _priority_condition_ids_due_for_refresh(runtime: Any, *, now: datetime) -> t
         return ()
     state = runtime.market_discovery_scan
     due: list[str] = []
-    for item in tuple(getattr(account_snapshot, "positions", ())) + tuple(
-        getattr(account_snapshot, "open_orders", ())
-    ):
-        if getattr(item, "settled_zero_value", False):
+    for position in account_snapshot.positions:
+        if position.settled_zero_value:
             continue
-        condition_id = str(getattr(item, "condition_id", "") or "").strip()
+        condition_id = position.condition_id
+        if not condition_id:
+            continue
+        refreshed_at = state.priority_condition_refreshed_at.get(condition_id)
+        if refreshed_at is not None and (now - refreshed_at).total_seconds() < _PRIORITY_CONDITION_REFRESH_SECONDS:
+            continue
+        due.append(condition_id)
+    for order in account_snapshot.open_orders:
+        condition_id = order.condition_id
         if not condition_id:
             continue
         refreshed_at = state.priority_condition_refreshed_at.get(condition_id)
@@ -376,26 +386,19 @@ def _priority_condition_ids_due_for_refresh(runtime: Any, *, now: datetime) -> t
     return tuple(dict.fromkeys(due))
 
 
-def _account_snapshot_for_discovery(runtime: Any) -> Any | None:
-    store = getattr(runtime, "account_state_store", None)
-    snapshot = getattr(store, "snapshot", None)
-    if callable(snapshot):
-        return snapshot()
-    return None
+def _account_snapshot_for_discovery(runtime: RuntimeComponents) -> AccountSnapshot | None:
+    return runtime.account_state_store.snapshot()
 
 
-def _live_event_slugs_for_expansion(runtime: Any, *, now: datetime) -> tuple[str, ...]:
-    store = getattr(runtime, "entry_metadata_store", None)
-    records = getattr(store, "records", None)
-    if not callable(records):
-        return ()
+def _live_event_slugs_for_expansion(runtime: RuntimeComponents, *, now: datetime) -> tuple[str, ...]:
+    store = runtime.entry_metadata_store
     state = runtime.market_discovery_scan
     slugs: list[str] = []
-    for record in records():
-        event_slug = str(getattr(record, "event_slug", "") or "").strip()
+    for record in store.records():
+        event_slug = (record.event_slug or "").strip()
         if not event_slug:
             continue
-        phase = (getattr(record, "live_state_phase", "") or "").strip().lower()
+        phase = (record.live_state_phase or "").strip().lower()
         if phase not in {"live", "ended"}:
             continue
         expanded_at = state.live_event_expanded_at.get(event_slug)
@@ -406,7 +409,7 @@ def _live_event_slugs_for_expansion(runtime: Any, *, now: datetime) -> tuple[str
 
 
 async def fetch_full_market_discovery_page(
-    runtime: Any,
+    runtime: RuntimeComponents,
     *,
     query: DiscoveryQuery | None = None,
 ) -> tuple[tuple[Any, ...], str | None]:
@@ -432,8 +435,8 @@ DEFAULT_DISCOVERY_QUERY = DiscoveryQuery()
 _FRAMEWORK_DISCOVERY_PARAM_KEYS = {"limit", "after_cursor"}
 
 
-def _discovery_queries(runtime: Any) -> tuple[DiscoveryQuery, ...]:
-    hooks = getattr(getattr(runtime, "extension", None), "hooks", None)
+def _discovery_queries(runtime: RuntimeComponents) -> tuple[DiscoveryQuery, ...]:
+    hooks = runtime.extension.hooks
     queries = (*_live_game_discovery_queries(runtime, hooks), *_configured_discovery_queries(hooks))
     return _dedupe_discovery_queries(queries) or (DEFAULT_DISCOVERY_QUERY,)
 
@@ -446,22 +449,20 @@ def _configured_discovery_queries(hooks: Any) -> tuple[DiscoveryQuery, ...]:
     return queries or (DEFAULT_DISCOVERY_QUERY,)
 
 
-def _live_game_discovery_queries(runtime: Any, hooks: Any) -> tuple[DiscoveryQuery, ...]:
+def _live_game_discovery_queries(runtime: RuntimeComponents, hooks: Any) -> tuple[DiscoveryQuery, ...]:
     """从直播状态 worker 的最近比赛快照中提取策略高意图查询。
 
     ``hooks`` 这里没用——live state 相关 hook 在 ``extension.live_state_hooks``，
     策略未实现时直接跳过；framework 不再向核心 ExtensionHooks 强制 live state 接口。
     """
 
-    worker = getattr(runtime, "sports_live_state_worker", None)
-    last_events = getattr(worker, "last_events", None)
-    if not callable(last_events):
+    worker = runtime.sports_live_state_worker
+    if worker is None:
         return ()
-    events = tuple(last_events())
+    events = tuple(worker.last_events())
     if not events:
         return ()
-    extension = getattr(runtime, "extension", None)
-    live_state_hooks = getattr(extension, "live_state_hooks", None) if extension is not None else None
+    live_state_hooks = runtime.extension.live_state_hooks
     if live_state_hooks is None:
         return ()
     return tuple(

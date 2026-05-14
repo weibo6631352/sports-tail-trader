@@ -86,7 +86,7 @@ class AdminRuntimeQueryMixin:
         的实时队列深度与容量。深度/容量比过高表明持久化链路出现瓶颈。
         """
 
-        event_bus = getattr(self.runtime, "event_bus", None) if self.runtime is not None else None
+        event_bus = self.runtime.event_bus if self.runtime else None
         if event_bus is None:
             return {"available": False}
 

@@ -23,6 +23,8 @@ from polymarket_trader.app.extension_host import load_extension
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
 from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.config import ConfigIssue, ConfigLoadError, Settings, StartupReadiness, load_settings
+from polymarket_trader.domain.account import AccountSnapshot
+from polymarket_trader.domain.allocation import current_exposure_usdc
 from polymarket_trader.domain.events import AuditEvent, DomainEvent, OutboxPriority
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.market import Market
@@ -741,7 +743,61 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         account_state_store=account_state_store,
     )
 
-    def entry_metadata_for_event(event, _snapshot):
+    def _portfolio_exposure_metadata(
+        snapshot: AccountSnapshot | None,
+        current_condition_id: str | None,
+        current_event_slug: str | None,
+    ) -> dict[str, str]:
+        """按 market family 聚合持仓 + open BUY 敞口，供策略风控读取。
+
+        跳过当前 market 自身持仓（risk check 用 proposed_amount 对比），
+        只聚合其他 outright / series market 的既有敞口。
+        在 entry_metadata 热路径同步执行：仅内存遍历 + O(1) registry 查询，无 IO。
+        """
+        if snapshot is None:
+            return {}
+        positions = snapshot.positions
+        open_orders = snapshot.open_orders
+        if not positions and not open_orders:
+            return {}
+
+        orders_by_condition: dict[str, list] = {}
+        for order in open_orders:
+            orders_by_condition.setdefault(order.condition_id, []).append(order)
+
+        outright_total = Decimal("0")
+        outright_event = Decimal("0")
+        series_total = Decimal("0")
+        series_event = Decimal("0")
+
+        for position in positions:
+            if position.condition_id == current_condition_id:
+                continue
+            pos_market = registry.get_by_condition_id(position.condition_id)
+            if pos_market is None:
+                continue
+            descriptor = describe_sports_market(pos_market)
+            pos_orders = orders_by_condition.get(position.condition_id, ())
+            exposure = current_exposure_usdc(position, pos_orders)
+            if descriptor.market_family == SportsMarketFamily.OUTRIGHT:
+                outright_total += exposure
+                if current_event_slug and pos_market.event_slug == current_event_slug:
+                    outright_event += exposure
+            elif descriptor.market_family == SportsMarketFamily.SERIES:
+                series_total += exposure
+                if current_event_slug and pos_market.event_slug == current_event_slug:
+                    series_event += exposure
+
+        result: dict[str, str] = {}
+        if outright_total:
+            result["outright_total_exposure_usdc"] = str(outright_total)
+            result["outright_event_exposure_usdc"] = str(outright_event)
+        if series_total:
+            result["series_total_exposure_usdc"] = str(series_total)
+            result["series_event_exposure_usdc"] = str(series_event)
+        return result
+
+    def entry_metadata_for_event(event, snapshot: AccountSnapshot | None):
         market = None
         if event.condition_id is not None:
             market = registry.get_by_condition_id(event.condition_id)
@@ -749,7 +805,15 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
             market = registry.get_by_token_id(event.token_id)
         if market is None and event.market_slug is not None:
             market = registry.get_by_slug(event.market_slug)
-        return entry_metadata_store.metadata_for_event(event, market=market)
+        base = entry_metadata_store.metadata_for_event(event, market=market)
+        exposure = _portfolio_exposure_metadata(
+            snapshot,
+            current_condition_id=market.condition_id if market else event.condition_id,
+            current_event_slug=market.event_slug if market else event.event_slug,
+        )
+        if exposure:
+            return {**base, **exposure}
+        return base
 
     def entry_metadata_for_market(market):
         return entry_metadata_store.metadata_for(

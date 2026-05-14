@@ -86,7 +86,7 @@ class _Host(AdminSportsQueryMixin):
     ) -> None:
         self._store = store
         if registry_none:
-            self.runtime = type("RT", (), {})()  # 没有 registry 属性
+            self.runtime = type("RT", (), {"registry": None, "settings": None})()  # registry=None → early return
         else:
             self.runtime = type(
                 "RT",
