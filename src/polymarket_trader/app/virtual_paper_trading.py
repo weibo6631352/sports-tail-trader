@@ -810,7 +810,7 @@ def _paper_pnl_payload(
             "fees_paid_usdc": _decimal_text(fees_paid),
             "warning": "projected_settlement_profit_not_realized_until_resolution",
         }
-    exit_price = follow_up_intent.price
+    exit_price = follow_up_intent.price or Decimal("0")
     projected_exit_value = entry_shares * exit_price
     projected_pnl = projected_exit_value - entry_spent
     projected_return_pct = Decimal("0") if entry_spent <= Decimal("0") else projected_pnl / entry_spent * Decimal("100")
