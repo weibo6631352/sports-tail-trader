@@ -69,8 +69,12 @@ def test_merge_keeps_events_without_overlap_as_singletons() -> None:
     assert len(report.groups) == 2
 
 
-def test_merge_uses_participant_external_ids_for_grouping() -> None:
-    """两源 event 级 ID 没交集，但同一 home 球队带 nba external_id → 应合并。"""
+def test_merge_does_not_use_participant_external_ids_for_grouping() -> None:
+    """两源 event 级 ID 没交集，且队伍 ID 不参与合并键 → 不应合并（各自为 singleton）。
+
+    相同对阵球队在连续两天的比赛会共享队伍 ID，若参与合并键会产生跨日误合并，
+    因此 _collect_keys 只用事件级 external_id，不用 participant external_id。
+    """
     a = LiveEvent(
         source="espn",
         source_event_id="e1",
@@ -100,7 +104,8 @@ def test_merge_uses_participant_external_ids_for_grouping() -> None:
         external_ids={"nba": "n2"},
     )
     report = ExternalIdIndex.merge((a, b))
-    assert report.id_merge_count == 1
+    assert report.id_merge_count == 0
+    assert report.singleton_count == 2
 
 
 def test_merge_on_empty_input_returns_empty_report() -> None:

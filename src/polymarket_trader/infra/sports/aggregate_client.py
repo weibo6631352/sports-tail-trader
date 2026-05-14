@@ -288,6 +288,16 @@ class SportsLiveAggregateClient:
             for scheme, value in member.external_ids.items():
                 merged_ids.setdefault(scheme, value)
 
+        # 主源缺少 baseball_state 时，从权重最高的有该字段的成员补充。
+        # 官方 MLB API 源有详细局面数据，但 ESPN 优先级可能偶尔抢主源；
+        # 融合时不应丢弃可用的结构化局面。
+        baseball_state = primary.baseball_state
+        if baseball_state is None and primary.kind == LiveEventKind.TEAM_MATCH:
+            for member in sorted(members, key=lambda e: self._weight(e, league), reverse=True):
+                if member.baseball_state is not None:
+                    baseball_state = member.baseball_state
+                    break
+
         contributing = tuple(sorted({m.source for m in members}))
         all_conflicts = (*primary.source_conflicts, *status_conflicts, *score_conflicts)
 
@@ -296,6 +306,7 @@ class SportsLiveAggregateClient:
             status=status_value,
             participants=participants,
             race_state=race_state,
+            baseball_state=baseball_state,
             external_ids=merged_ids,
             contributing_sources=contributing,
             source_conflicts=all_conflicts,

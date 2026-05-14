@@ -124,10 +124,11 @@ class ExternalIdIndex:
 
 
 def _collect_keys(event: LiveEvent) -> tuple[tuple[str, str], ...]:
-    """从 LiveEvent.external_ids + 各 Participant.external_ids 抽取 (scheme, value) 对。
+    """从 LiveEvent.external_ids 抽取 (scheme, value) 对。
 
-    Participant 的 ID 也参与 group 合并（例如电竞同一支战队在多源各自有 id，
-    通过 participant external_ids 可达成跨源关联）。空字符串值跳过。
+    只用事件级 ID（gamePk、ESPN game id 等），不用 participant（队伍）ID。
+    队伍 ID 在同一对阵球队的连续比赛（如相邻两天的相同主客队）里会产生跨日误合并，
+    而跨源事件匹配已由文本+时间桶兜底 (_text_key) 负责。空字符串值跳过。
     """
 
     keys: set[tuple[str, str]] = set()
@@ -135,10 +136,4 @@ def _collect_keys(event: LiveEvent) -> tuple[tuple[str, str], ...]:
         text = str(value or "").strip()
         if text:
             keys.add((str(scheme).strip().lower(), text))
-    for participant in event.participants:
-        for scheme, value in participant.external_ids.items():
-            text = str(value or "").strip()
-            if text:
-                # participant id 单独命名空间，避免与 event 级 id 冲突
-                keys.add((f"p:{str(scheme).strip().lower()}:{participant.role}", text))
     return tuple(keys)

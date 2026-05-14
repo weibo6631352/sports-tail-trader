@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 import httpx
@@ -44,6 +44,9 @@ _DEFAULT_LEAGUE_PATHS: dict[str, str] = {
 }
 # 缺 payload.totalCompetitions 时的默认 best_of。
 _DEFAULT_BEST_OF: dict[str, int] = {"nba": 7, "nhl": 7, "mlb": 7}
+# 当今日 scoreboard 找不到系列赛时，向前回溯的最大天数。
+# 季后赛系列赛相邻两场间最多相差 2 天（主客场轮换），7 天足以覆盖所有休赛空档。
+_SERIES_DATE_FALLBACK_DAYS = 7
 
 
 class SeriesStateClient(Protocol):
@@ -106,26 +109,36 @@ class EspnSeriesStateClient:
             return None
         observed_at = observed_at or utc_now(self._now_provider)
         operation = f"espn_series:{sport_key}"
-        try:
-            response = await self._client.get(path)
-            response.raise_for_status()
-        except Exception as exc:
-            raise normalize_sports_data_error(exc, operation=operation) from exc
-        payload = json_mapping_from_response(response, operation=operation)
-        try:
-            return parse_espn_scoreboard_series(
-                payload,
-                sport_key=sport_key,
-                series_key=series_key,
-                observed_at=observed_at,
-            )
-        except Exception:
-            logger.warning(
-                "series_state.client_payload_invalid",
-                extra={"sport_key": sport_key, "series_key": series_key},
-                exc_info=True,
-            )
-            return None
+        # 先查今天，找不到时向前回溯至多 _SERIES_DATE_FALLBACK_DAYS 天。
+        # 季后赛相邻两场最多间隔 2 天，7 天足够覆盖所有休赛空档。
+        today = observed_at.astimezone(timezone.utc).date()
+        for day_offset in range(_SERIES_DATE_FALLBACK_DAYS + 1):
+            params: dict[str, str] = {}
+            if day_offset > 0:
+                params["dates"] = (today - timedelta(days=day_offset)).strftime("%Y%m%d")
+            try:
+                response = await self._client.get(path, params=params)
+                response.raise_for_status()
+            except Exception as exc:
+                raise normalize_sports_data_error(exc, operation=operation) from exc
+            payload = json_mapping_from_response(response, operation=operation)
+            try:
+                state = parse_espn_scoreboard_series(
+                    payload,
+                    sport_key=sport_key,
+                    series_key=series_key,
+                    observed_at=observed_at,
+                )
+            except Exception:
+                logger.warning(
+                    "series_state.client_payload_invalid",
+                    extra={"sport_key": sport_key, "series_key": series_key, "day_offset": day_offset},
+                    exc_info=True,
+                )
+                return None
+            if state is not None:
+                return state
+        return None
 
 
 def parse_espn_scoreboard_series(
@@ -225,11 +238,26 @@ def _series_from_event(
     competitors = competition.get("competitors")
     if not isinstance(competitors, Sequence) or len(competitors) < 2:
         return None
+    # ESPN payload 有两套 wins 来源：
+    # 1. competition.series.competitors[].wins：系列赛专用，是最准确的来源。
+    # 2. competition.competitors[].records[type=series/playoff].summary（"2-1"）：
+    #    部分联赛/赛段没有此节点，不可依赖。
+    # 先从 series.competitors 建立 team_id → wins 映射，供 _competitor_summary 查找。
+    series_wins: dict[str, int] = {}
+    for sc in (series.get("competitors") or []):
+        if isinstance(sc, Mapping):
+            tid = str(sc.get("id") or "").strip()
+            w = sc.get("wins")
+            if tid and w is not None:
+                try:
+                    series_wins[tid] = int(w)
+                except (TypeError, ValueError):
+                    pass
     # competitors 数组 ESPN 习惯第 0 个是 home / 第 1 个是 away；本模块按
     # 这个顺序映射 team_a = home，team_b = away。后续 evaluator 通过
     # team_resolver 反向匹配 outcome 文本，不依赖此顺序的语义。
-    team_a_name, wins_a = _competitor_summary(competitors[0])
-    team_b_name, wins_b = _competitor_summary(competitors[1])
+    team_a_name, wins_a = _competitor_summary(competitors[0], series_wins=series_wins)
+    team_b_name, wins_b = _competitor_summary(competitors[1], series_wins=series_wins)
     if not team_a_name or not team_b_name:
         return None
     best_of = _best_of(series, sport_key)
@@ -245,19 +273,23 @@ def _series_from_event(
     )
 
 
-def _competitor_summary(competitor: Any) -> tuple[str, int]:
+def _competitor_summary(competitor: Any, *, series_wins: dict[str, int] | None = None) -> tuple[str, int]:
     if not isinstance(competitor, Mapping):
         return "", 0
     team = competitor.get("team")
     name = ""
+    team_id = ""
     if isinstance(team, Mapping):
+        team_id = str(team.get("id") or "").strip()
         for key in ("displayName", "name", "shortDisplayName", "abbreviation"):
             value = team.get(key)
             if value:
                 name = str(value).strip()
                 break
-    # series.wins 在 ESPN payload 里通常落在 competitor.records[].summary （"2-1"）
-    # 或 series.competitors 节点。先尝试常见结构。
+    # 优先从调用方传入的 series.competitors 映射取 wins（最权威）。
+    if series_wins and team_id and team_id in series_wins:
+        return name, series_wins[team_id]
+    # 回退：竞争者自身 records 节点里类型为 series/playoff 的条目。
     wins = 0
     records = competitor.get("records")
     if isinstance(records, Sequence):

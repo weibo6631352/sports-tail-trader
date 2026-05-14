@@ -36,16 +36,16 @@ def test_discovery_queries_prioritize_live_game_queries_before_broad_queries() -
         discovery_queries=lambda: (DiscoveryQuery.title_search("nhl"),),
     )
     live_state_hooks = SimpleNamespace(
-        discovery_queries_for_live_games=lambda games: (
+        discovery_queries_for_live_events=lambda events: (
             DiscoveryQuery(
-                name=f"live:{games[0].source_event_id}:oilers",
+                name=f"live:{events[0].source_event_id}:oilers",
                 params={"title_search": "oilers", "tag_slug": "sports"},
             ),
         ),
     )
     runtime = SimpleNamespace(
         extension=SimpleNamespace(hooks=hooks, live_state_hooks=live_state_hooks),
-        sports_live_state_worker=SimpleNamespace(last_games=lambda: (game,)),
+        sports_live_state_worker=SimpleNamespace(last_events=lambda: (game,)),
     )
 
     queries = discovery_runner._discovery_queries(runtime)
@@ -169,9 +169,9 @@ def test_run_market_discovery_scan_records_failure_when_gamma_raises() -> None:
         ),
         extension=SimpleNamespace(
             hooks=SimpleNamespace(discovery_queries=lambda: (DiscoveryQuery.title_search("nba"),)),
-            live_state_hooks=SimpleNamespace(discovery_queries_for_live_games=lambda games: ()),
+            live_state_hooks=SimpleNamespace(discovery_queries_for_live_events=lambda events: ()),
         ),
-        sports_live_state_worker=SimpleNamespace(last_games=lambda: ()),
+        sports_live_state_worker=SimpleNamespace(last_events=lambda: ()),
         gamma_client=_ErrorGammaClient(),
         metrics=SimpleNamespace(inc_counter=lambda name, value: None),
         entry_metadata_store=SimpleNamespace(records=lambda: ()),

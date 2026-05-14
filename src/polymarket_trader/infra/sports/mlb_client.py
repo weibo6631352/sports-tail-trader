@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -58,15 +58,25 @@ class MlbStatsApiClient:
             await self._client.aclose()
 
     async def list_events(self) -> SportsLiveSnapshot:
-        """拉取 MLB 当前比赛日 schedule。"""
+        """拉取 MLB 当前比赛日 schedule（含前一 ET 日，捕获跨午夜仍在进行的比赛）。"""
 
         observed_at = utc_now(self._now_provider)
-        date_text = observed_at.astimezone(self._scoreboard_timezone).strftime("%m/%d/%Y")
+        local_now = observed_at.astimezone(self._scoreboard_timezone)
+        date_text = local_now.strftime("%m/%d/%Y")
+        prev_date_text = (local_now - timedelta(days=1)).strftime("%m/%d/%Y")
+        # MLB API 支持逗号分隔多日期：同时拉昨日以捕获跨午夜仍在直播的比赛。
+        start_date = prev_date_text
+        end_date = date_text
         operation = "mlb_schedule"
         try:
             response = await self._client.get(
                 "/api/v1/schedule",
-                params={"sportId": 1, "hydrate": "linescore,team", "date": date_text},
+                params={
+                    "sportId": 1,
+                    "hydrate": "linescore,team",
+                    "startDate": start_date,
+                    "endDate": end_date,
+                },
             )
             response.raise_for_status()
         except Exception as exc:
@@ -121,6 +131,7 @@ def _parse_game(raw_game: Mapping[str, Any], *, observed_at: datetime) -> LiveEv
     linescore = raw_game.get("linescore")
     linescore_payload = linescore if isinstance(linescore, Mapping) else {}
     source_event_id = str(raw_game.get("gamePk") or raw_game.get("gameGuid") or "")
+    event_start_time = _parse_game_date(raw_game.get("gameDate"))
     return LiveEvent(
         source="mlb",
         source_event_id=source_event_id,
@@ -132,6 +143,7 @@ def _parse_game(raw_game: Mapping[str, Any], *, observed_at: datetime) -> LiveEv
         period=_period_label(linescore_payload, raw_status),
         seconds_remaining=None,
         observed_at=observed_at,
+        event_start_time=event_start_time,
         raw_status=raw_status,
         external_ids={"mlb": source_event_id} if source_event_id else {},
         baseball_state=_baseball_state(linescore_payload),
@@ -241,3 +253,15 @@ def _team_name_from_linescore_side(payload: Mapping[str, Any]) -> str | None:
     team = payload.get("team")
     team_mapping = team if isinstance(team, Mapping) else {}
     return first_text(team_mapping, "name", "teamName", "clubName")
+
+
+def _parse_game_date(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        return None

@@ -372,11 +372,11 @@ def _live_game_discovery_queries(runtime: Any, hooks: Any) -> tuple[DiscoveryQue
     """
 
     worker = getattr(runtime, "sports_live_state_worker", None)
-    last_games = getattr(worker, "last_games", None)
-    if not callable(last_games):
+    last_events = getattr(worker, "last_events", None)
+    if not callable(last_events):
         return ()
-    games = tuple(last_games())
-    if not games:
+    events = tuple(last_events())
+    if not events:
         return ()
     extension = getattr(runtime, "extension", None)
     live_state_hooks = getattr(extension, "live_state_hooks", None) if extension is not None else None
@@ -384,7 +384,7 @@ def _live_game_discovery_queries(runtime: Any, hooks: Any) -> tuple[DiscoveryQue
         return ()
     return tuple(
         query
-        for query in live_state_hooks.discovery_queries_for_live_games(games)
+        for query in live_state_hooks.discovery_queries_for_live_events(events)
         if isinstance(query, DiscoveryQuery) and query.name.strip()
     )
 

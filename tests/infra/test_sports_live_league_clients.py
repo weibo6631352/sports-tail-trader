@@ -541,7 +541,7 @@ def test_league_clients_use_expected_public_endpoints() -> None:
         requests.append(
             (
                 request.url.path,
-                request.url.params.get("date"),
+                request.url.params.get("startDate") or request.url.params.get("date"),
                 request.url.params.get("d"),
                 request.url.params.get("s"),
             )
@@ -602,7 +602,7 @@ def test_league_clients_use_expected_public_endpoints() -> None:
     assert requests == [
         ("/static/json/liveData/scoreboard/todaysScoreboard_00.json", None, None, None),
         ("/v1/score/2026-04-27", None, None, None),
-        ("/api/v1/schedule", "04/27/2026", None, None),
+        ("/api/v1/schedule", "04/26/2026", None, None),
         ("/api/v1/sport/basketball/scheduled-events/2026-04-28", None, None, None),
         ("/api/v1/sport/ice-hockey/scheduled-events/2026-04-28", None, None, None),
         ("/api/v1/json/3/eventsday.php", None, "2026-04-28", "Ice Hockey"),

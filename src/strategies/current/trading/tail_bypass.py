@@ -92,7 +92,15 @@ def _baseball_tail_state_reached(state: BaseballGameState) -> bool:
     current_inning = _int_value(state.current_inning)
     outs = _int_value(state.outs)
     occupied_bases = tuple(state.occupied_bases or ())
-    return current_inning is not None and current_inning >= 9 and outs is not None and outs >= 2 and not occupied_bases
+    if current_inning is None or outs is None:
+        return False
+    # 第 9 局及以上：2 出局垒上无人（分差由评估器二次校验）
+    if current_inning >= 9 and outs >= 2 and not occupied_bases:
+        return True
+    # 第 8 局：1+ 出局即可触发信号，分差阈值由 evaluator._mlb_eighth_moneyline_lead_reached 负责
+    if current_inning == 8 and outs >= 1:
+        return True
+    return False
 
 
 def _tennis_moneyline_tail_state_reached(state: TennisGameState) -> bool:

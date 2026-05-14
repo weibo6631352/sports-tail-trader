@@ -5,6 +5,8 @@
 这份内存快照、不发起 IO。
 
 cadence 默认 600s（10 分钟）；比赛中实际波动通常是局间，足够。
+每次成功刷新后发布 ENTRY_SIGNAL_TRIGGERED，使 TradingDecisionWorker 周期性
+重新评估系列赛市场（无实时比分更新时 WS 不会推新快照，需此处补信号）。
 """
 
 from __future__ import annotations
@@ -12,10 +14,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Mapping
+from uuid import uuid4
 
+from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
 from polymarket_trader.infra.sports.series_state_client import SeriesStateClient
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
+from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.serialization import jsonable
 from strategies.current.series.types import SeriesState
@@ -45,6 +50,7 @@ class SeriesStateWorker:
         series_key_for: SeriesKeyResolver,
         ttl_seconds: int = 600,
         enabled: bool = False,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._client = client
         self._registry = registry
@@ -54,6 +60,7 @@ class SeriesStateWorker:
         self._series_key_for = series_key_for
         self._ttl_seconds = max(60, int(ttl_seconds))
         self._enabled = enabled
+        self._event_bus = event_bus
         self._last_fetched_at: dict[str, datetime] = {}
         self._last_started_at: datetime | None = None
         self._last_error: str | None = None
@@ -77,25 +84,50 @@ class SeriesStateWorker:
             series_key = self._series_key_for(market)
             if not series_key:
                 continue
-            if not self._should_refresh(market.condition_id):
-                continue
-            try:
-                state = await self._client.fetch(
-                    sport_key=sport_key,
-                    series_key=series_key,
-                )
-            except Exception as exc:
-                self._consecutive_failures += 1
-                self._last_error = f"{market.market_slug}: {exc}"
-                continue
-            self._consecutive_failures = 0
-            self._last_fetched_at[market.condition_id] = _utc_now()
-            if state is None:
-                continue
-            self._upsert(market, state)
-            refreshed += 1
+            if self._should_refresh(market.condition_id):
+                try:
+                    state = await self._client.fetch(
+                        sport_key=sport_key,
+                        series_key=series_key,
+                    )
+                except Exception as exc:
+                    self._consecutive_failures += 1
+                    self._last_error = f"{market.market_slug}: {exc}"
+                    continue
+                self._consecutive_failures = 0
+                self._last_fetched_at[market.condition_id] = _utc_now()
+                if state is not None:
+                    self._upsert(market, state)
+                    refreshed += 1
+            # 发信号无论本轮是否重新拉取——系列赛 WS 盘口无比赛时不推新快照，
+            # 需由此周期信号驱动 TradingDecisionWorker 重估入场机会。
+            if self._has_series_state(market.condition_id):
+                await self._publish_entry_signals(market)
         self._last_markets_refreshed = refreshed
         return refreshed
+
+    def _has_series_state(self, condition_id: str) -> bool:
+        record = self._entry_metadata_store.find(condition_id=condition_id)
+        return record is not None and bool((record.metadata or {}).get("series_state"))
+
+    async def _publish_entry_signals(self, market: Market) -> None:
+        if self._event_bus is None:
+            return
+        for token_id in market.token_ids:
+            await self._event_bus.publish(
+                OutboxPriority.P1,
+                DomainEvent(
+                    trace_id=f"series-state-{uuid4().hex}",
+                    event_type=DomainEventType.ENTRY_SIGNAL_TRIGGERED,
+                    event_id=uuid4().hex,
+                    market_slug=market.market_slug,
+                    event_slug=market.event_slug,
+                    condition_id=market.condition_id,
+                    token_id=token_id,
+                    reason="series_state_refreshed",
+                    payload={"origin": "series_state_worker"},
+                ),
+            )
 
     def _should_refresh(self, condition_id: str) -> bool:
         last = self._last_fetched_at.get(condition_id)

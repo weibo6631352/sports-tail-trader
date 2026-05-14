@@ -188,6 +188,11 @@ def _market_requires_market_ws(
                 return True
             if _market_end_within_tail_window(market, now=now):
                 return True
+        # series_state / game_odds / season_odds_snapshot 由专用 worker 写入，
+        # 这类 market 没有 live_state_phase——但仍然需要盘口订阅用于实时决策。
+        metadata = getattr(record, "metadata", None) or {}
+        if metadata.get("series_state") or metadata.get("game_odds") or metadata.get("season_odds_snapshot"):
+            return _market_active_in_polymarket(market, now=now)
         # record 存在但 phase 不匹配（如 scheduled 未开赛）—— 不订阅。
         return False
     # record 不存在 = 外部 live state 没覆盖（典型：ATP Challenger / WTA 125 / ITF

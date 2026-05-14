@@ -184,7 +184,7 @@ class CurrentStrategyConfig:
     tail_moneyline_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     tail_spreads_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     tail_totals_max_entry_price: Decimal = Decimal("0.99")
-    tail_moneyline_max_entry_price: Decimal = Decimal("0.97")
+    tail_moneyline_max_entry_price: Decimal = Decimal("0.98")
     tail_tennis_locked_moneyline_max_entry_price: Decimal = Decimal("0.995")
     tail_spreads_max_entry_price: Decimal = Decimal("0.96")
     tail_min_liquidity_usdc: Decimal = Decimal("1")

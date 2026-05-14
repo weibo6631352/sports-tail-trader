@@ -117,6 +117,8 @@ def decide_series_entry(
                 "execution_permission": permission.value,
                 "token_id": token_view.token_id,
                 "outcome_label": token_view.outcome,
+                "tail_action": permission.value,
+                "tail_reason": f"series_{evaluation.sub_type.value}_entry_accepted",
             },
         )
 
@@ -162,11 +164,21 @@ def decide_series_entry(
             },
         )
 
-    entry_price = _series_entry_price(evaluation, fallback=settings.max_entry_price)
+    # 用 best_ask 作为 FAK 订单价格，与 single_game tail 行为一致（hooks.py）。
+    # entry_price_cap 已在 evaluator 验证 best_ask <= cap，不用于实际下单限价。
+    # 这样 risk manager 计算 amount_usdc / price 得到的 shares 等于实际成交量，
+    # 避免因 cap > best_ask 导致 min_order_not_met 误拒。
+    order_best_ask = token_view.orderbook.best_ask if token_view.orderbook is not None else None
+    if order_best_ask is None:
+        return ExtensionDecision.skip(
+            reason="series_missing_best_ask_for_order",
+            metadata={"market_family": "series", "series_sub_type": sub_type.value},
+        )
+    entry_price_cap = _series_entry_price(evaluation, fallback=settings.max_entry_price)
     return ExtensionDecision.buy(
         reason=f"series_{sub_type.value}_entry_accepted",
         token_id=evaluation.candidate.token_id,
-        price=entry_price,
+        price=order_best_ask,
         amount_usdc=proposed_amount,
         market_slug=market.market_slug,
         decision_kind=DecisionKind.ENTRY,
@@ -175,6 +187,10 @@ def decide_series_entry(
             "series_sub_type": evaluation.sub_type.value,
             "series_metadata": dict(evaluation.metadata),
             "series_fair_value": str(evaluation.fair_value) if evaluation.fair_value else None,
+            "series_entry_price_cap": str(entry_price_cap),
+            "tail_action": "auto_execute",
+            "tail_reason": f"series_{sub_type.value}_entry_accepted",
+            "execution_permission": permission.value,
         },
     )
 

@@ -172,10 +172,12 @@ class Settings(BaseSettings):
     sports_season_odds_interval_seconds: int = Field(default=1800, ge=300)
     sports_season_odds_ttl_seconds: int = Field(default=1800, ge=60)
 
-    # 系列赛热态子系统：服务于 series WINNER 实盘定价。10 分钟级 cadence。
+    # 系列赛热态子系统：服务于 series WINNER 实盘定价。
+    # interval=60s：每分钟发一次入场信号（无比赛时 WS 不推盘口更新，需此信号补驱动）。
+    # ttl=600s：ESPN scoreboard 每 10 分钟重新拉取一次（减少外部请求）。
     sports_series_state_enabled: bool = False
     sports_series_state_base_url: str = "https://site.api.espn.com"
-    sports_series_state_interval_seconds: int = Field(default=600, ge=60)
+    sports_series_state_interval_seconds: int = Field(default=60, ge=60)
     sports_series_state_ttl_seconds: int = Field(default=600, ge=60)
     sports_series_state_timeout_s: float = Field(default=5.0, ge=0.5)
 

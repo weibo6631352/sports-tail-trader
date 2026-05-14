@@ -467,6 +467,7 @@ def _build_series_state_worker(
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
     extension: BusinessExtension,
+    event_bus: EventBus | None = None,
 ) -> tuple[SeriesStateWorker, SeriesStateClient] | tuple[None, None]:
     """按 settings 装配 series_state_worker。
 
@@ -513,6 +514,7 @@ def _build_series_state_worker(
         series_key_for=_series_key,
         ttl_seconds=settings.sports_series_state_ttl_seconds,
         enabled=True,
+        event_bus=event_bus,
     )
     return worker, client
 
@@ -836,6 +838,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         registry=registry,
         entry_metadata_store=entry_metadata_store,
         extension=extension,
+        event_bus=event_bus,
     )
     game_odds_worker, game_odds_client = _build_game_odds_worker(
         settings,
