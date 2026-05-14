@@ -13,6 +13,7 @@ OrderExecutor 的主链路，不绕过统一服务。
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -39,6 +40,8 @@ from polymarket_trader.workers.trading_decision import (
     snapshot_available_usdc,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _resolve_admin_bankroll(account: AccountSnapshot, portfolio_budget_usdc: Any) -> Decimal:
     """同 EntryPlanner / worker 一致的 bankroll 口径。Admin/manual 入口同样要走 Kelly。"""
@@ -62,17 +65,48 @@ class AdminControlsMixin:
         *,
         trace_id: str | None = None,
         condition_ids: Sequence[str] | None = None,
+        reason: str = "",
+        authorized_by: str = "operator",
     ) -> dict[str, Any]:
+        from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
+
         reconcile_worker = getattr(self.runtime, "reconcile_worker", None)
+        resolved_trace_id = trace_id or uuid4().hex
         if reconcile_worker is None:
             return {
                 "status": "failed",
                 "reason": "reconcile_worker_unavailable",
-                "trace_id": trace_id or uuid4().hex,
+                "trace_id": resolved_trace_id,
             }
         condition_id_filter = normalize_condition_ids(condition_ids)
+        logger.warning(
+            "admin reconcile triggered",
+            extra={
+                "authorized_by": authorized_by,
+                "reason": reason,
+                "trace_id": resolved_trace_id,
+                "condition_ids": list(condition_id_filter) if condition_id_filter else [],
+            },
+        )
+        event_bus = getattr(self.runtime, "event_bus", None)
+        if event_bus is not None:
+            event_bus.publish_nowait(
+                OutboxPriority.P1,
+                DomainEvent(
+                    trace_id=resolved_trace_id,
+                    event_type=DomainEventType.RECONCILE_STARTED,
+                    event_id=uuid4().hex,
+                    reason=reason or "admin_reconcile",
+                    payload={
+                        "authorized_by": authorized_by,
+                        "reason": reason,
+                        "condition_ids": list(condition_id_filter) if condition_id_filter else [],
+                        "occurred_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                ),
+            )
         result = await reconcile_worker.reconcile_once(
-            trace_id=trace_id,
+            trace_id=resolved_trace_id,
             condition_ids=condition_id_filter or None,
         )
         return self._serializer().reconcile_result(result)
@@ -301,6 +335,7 @@ class AdminControlsMixin:
         *,
         reason: str = "manual_pause",
         operator: str = "manual",
+        authorized_by: str = "operator",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         """人工触发暂停自动交易。phase 立即切到 PAUSED，等用户 resume 才恢复。
@@ -321,6 +356,17 @@ class AdminControlsMixin:
         # 主交易开关变更是高敏操作，必须落审计——CLAUDE.md §3 / §10
         # 要求拒绝、降级、恢复动作可审计；event_bus 不可用时不应静默失败。
         trace_id = trace_id or uuid4().hex
+        logger.warning(
+            "admin pause_trading triggered",
+            extra={
+                "operator": operator,
+                "authorized_by": authorized_by,
+                "reason": normalized_reason,
+                "trace_id": trace_id,
+                "phase_before": phase_before,
+                "phase_after": phase_after,
+            },
+        )
         event_bus = getattr(self.runtime, "event_bus", None)
         if event_bus is not None:
             event_bus.publish_nowait(
@@ -332,6 +378,7 @@ class AdminControlsMixin:
                     reason=normalized_reason,
                     payload={
                         "operator": operator,
+                        "authorized_by": authorized_by,
                         "reason": normalized_reason,
                         "phase_before": phase_before,
                         "phase_after": phase_after,
@@ -343,6 +390,7 @@ class AdminControlsMixin:
             "status": "ok",
             "trace_id": trace_id,
             "operator": operator,
+            "authorized_by": authorized_by,
             "reason": normalized_reason,
             "phase": phase_after,
             "phase_before": phase_before,
@@ -354,6 +402,8 @@ class AdminControlsMixin:
         self,
         *,
         operator: str = "manual",
+        reason: str = "",
+        authorized_by: str = "operator",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         """人工恢复自动交易。仅清除 manual_pause_reason 并回到 TRADING_ENABLED；其他降级原因仍生效。"""
@@ -370,6 +420,17 @@ class AdminControlsMixin:
         phase_after = getattr(snapshot.phase, "value", "unknown")
 
         trace_id = trace_id or uuid4().hex
+        logger.warning(
+            "admin resume_trading triggered",
+            extra={
+                "operator": operator,
+                "authorized_by": authorized_by,
+                "reason": reason,
+                "trace_id": trace_id,
+                "phase_before": phase_before,
+                "phase_after": phase_after,
+            },
+        )
         event_bus = getattr(self.runtime, "event_bus", None)
         if event_bus is not None:
             event_bus.publish_nowait(
@@ -378,9 +439,11 @@ class AdminControlsMixin:
                     trace_id=trace_id,
                     event_type=DomainEventType.TRADING_RESUMED,
                     event_id=uuid4().hex,
-                    reason="manual_resume",
+                    reason=reason or "manual_resume",
                     payload={
                         "operator": operator,
+                        "authorized_by": authorized_by,
+                        "reason": reason,
                         "phase_before": phase_before,
                         "phase_after": phase_after,
                         "previous_manual_pause_reason": previous_pause_reason,
@@ -393,6 +456,7 @@ class AdminControlsMixin:
             "status": "ok",
             "trace_id": trace_id,
             "operator": operator,
+            "authorized_by": authorized_by,
             "phase": phase_after,
             "phase_before": phase_before,
             "manual_pause_reason": snapshot.manual_pause_reason,
@@ -414,6 +478,16 @@ class AdminControlsMixin:
         """人工撤单。走 TradingService → OrderExecutor，与策略撤单同一条主链路。"""
 
         trace_id = trace_id or uuid4().hex
+        logger.warning(
+            "admin cancel_order triggered",
+            extra={
+                "operator": operator,
+                "reason": reason,
+                "order_id": order_id,
+                "condition_id": condition_id,
+                "trace_id": trace_id,
+            },
+        )
         account = self._account_snapshot()
         source_order = self._find_open_order(
             account,
@@ -747,6 +821,15 @@ class AdminControlsMixin:
         上限 20 单，防止一次 admin 操作占用交易服务过久。
         """
 
+        logger.warning(
+            "admin bulk_cancel_orders triggered",
+            extra={
+                "operator": operator,
+                "reason": reason,
+                "order_count": len(order_ids),
+                "trace_id": trace_id,
+            },
+        )
         results = []
         succeeded = 0
         failed = 0

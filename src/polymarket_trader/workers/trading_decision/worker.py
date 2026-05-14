@@ -140,6 +140,10 @@ class TradingDecisionWorker:
         # 单测可以设 < 1s 让 idle heartbeat 路径快速触发；运行时仍用 60s 默认。
         self._idle_heartbeat_seconds = max(0.001, float(idle_heartbeat_seconds))
         self._market_lifecycle: dict[str, MarketLifecycle] = {}
+        # P3.5: (strategy_id, reason) → count，供 admin/observability 查询哪个策略因何跳过了多少次。
+        self._skip_reason_histogram: dict[tuple[str, str], int] = {}
+        # P3.6: condition_id → [(lifecycle, timestamp), …]，记录每次状态转换的时间点。
+        self._lifecycle_timeline: dict[str, list[tuple[MarketLifecycle, datetime]]] = {}
         self._order_result_processor = TradingOrderResultProcessor(
             host=self,
             trading_decision_service=self._trading_decision_service,
@@ -368,7 +372,7 @@ class TradingDecisionWorker:
             market_slug=plan.market.market_slug,
             condition_id=plan.market.condition_id,
             token_id=plan.intent.token_id,
-            reason="" if review.risk_decision is None else review.risk_decision.reason,
+            reason="risk_decision_unavailable" if review.risk_decision is None else review.risk_decision.reason,
             payload={
                 "entry_event_id": event.event_id,
                 "origin": TRADING_DECISION_WORKER_ORIGIN,
@@ -542,7 +546,7 @@ class TradingDecisionWorker:
             market_slug=intent.market_slug,
             condition_id=intent.condition_id,
             token_id=intent.token_id,
-            reason="" if review.order_result is None else review.order_result.reason,
+            reason="order_result_unavailable" if review.order_result is None else review.order_result.reason,
             payload={
                 "phase": "position_exit",
                 "source_event_id": event.event_id,
@@ -620,6 +624,9 @@ class TradingDecisionWorker:
         }
         if extra_payload:
             payload.update(extra_payload)
+        strategy_id = self._trading_decision_service.strategy_id or "unknown"
+        key = (strategy_id, reason or "unknown_reason")
+        self._skip_reason_histogram[key] = self._skip_reason_histogram.get(key, 0) + 1
         skipped = await self._publish(
             DomainEventType.SKIPPED,
             trace_id=trace_id,
@@ -823,6 +830,8 @@ class TradingDecisionWorker:
         if market is None or lifecycle is None:
             return
         self._market_lifecycle[market.condition_id] = lifecycle
+        timeline = self._lifecycle_timeline.setdefault(market.condition_id, [])
+        timeline.append((lifecycle, _utc_now()))
 
     def _transition_market_by_result(self, order_result: OrderResult, lifecycle: MarketLifecycle) -> None:
         market = market_from_result(order_result)
@@ -851,6 +860,8 @@ class TradingDecisionWorker:
         if condition_id is None:
             return
         self._market_lifecycle[condition_id] = MarketLifecycle.PAUSED
+        timeline = self._lifecycle_timeline.setdefault(condition_id, [])
+        timeline.append((MarketLifecycle.PAUSED, _utc_now()))
         if self._account_state_store is not None:
             self._account_state_store.pause_market(
                 condition_id,
@@ -867,6 +878,16 @@ class TradingDecisionWorker:
         if condition_id is None:
             return None
         return self._market_lifecycle.get(condition_id)
+
+    @property
+    def skip_reason_histogram(self) -> dict[tuple[str, str], int]:
+        """P3.5: (strategy_id, reason) → count。只读快照，admin 查询用。"""
+        return dict(self._skip_reason_histogram)
+
+    @property
+    def lifecycle_timeline(self) -> dict[str, list[tuple[MarketLifecycle, datetime]]]:
+        """P3.6: condition_id → [(lifecycle, utc_timestamp), …]。只读快照，admin 查询用。"""
+        return {cid: list(entries) for cid, entries in self._lifecycle_timeline.items()}
 
     def _market_fromsnapshot_position(
         self,

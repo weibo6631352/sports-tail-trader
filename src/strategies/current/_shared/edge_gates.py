@@ -118,6 +118,21 @@ def check_entry_gates(
     )
 
 
+def implied_mid_probability(best_bid: Decimal | None, best_ask: Decimal | None) -> Decimal | None:
+    """盘口中价作为市场隐含概率估算。
+
+    mid = (best_bid + best_ask) / 2，仅在双侧报价均存在且 spread > 0 时有效。
+    结果只用于审计 metadata，不参与风控判定。
+    """
+
+    if best_bid is None or best_ask is None:
+        return None
+    spread = best_ask - best_bid
+    if spread <= Decimal("0"):
+        return None
+    return (best_bid + best_ask) / 2
+
+
 def _clamp(value: Decimal) -> Decimal:
     if value < _PRICE_FLOOR:
         return _PRICE_FLOOR
@@ -134,4 +149,5 @@ __all__ = [
     "REASON_PRICE_ABOVE_FAIR",
     "check_entry_gates",
     "entry_price_cap",
+    "implied_mid_probability",
 ]

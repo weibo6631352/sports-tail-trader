@@ -1,0 +1,16 @@
+# 当前策略运行时参数覆盖。
+# 所有字段对应 CurrentStrategyConfig 的字段名；未填写的字段使用代码内默认值。
+# 由 EXTENSION_CONFIG_PATH 指定路径加载；留空时全部使用默认值。
+#
+# Kelly sizing 参数（策略层参数，不进框架 Settings）：
+# - half Kelly（quarter Kelly × confidence shrinkage 之后约 1/4 effective）
+# - 单仓 30% bankroll；round-up over-bet 上限 ratio=5（最坏单笔 1.5 USDC）
+# - min_edge 100bps（与 strategy implied edge 对齐）；min_stake 0.30 让低价 tail 能下
+# - drawdown lockout 0.4 → 跌穿 60% peak 才停（小账户波动允许）
+kelly_fraction = "0.5"
+kelly_max_position_fraction = "0.30"
+kelly_min_edge = "0.01"
+kelly_min_stake_usdc = "0.30"
+kelly_allow_round_up_to_market_min = true
+kelly_round_up_max_overbet_ratio = "5.0"
+kelly_drawdown_halt_fraction = "0.4"

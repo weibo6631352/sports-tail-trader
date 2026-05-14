@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
 from polymarket_trader.config import Settings
 from polymarket_trader.domain.account import AccountSnapshot
+from polymarket_trader.extension_api.manifest import ConfiguredExtension
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.runtime.event_bus import QueueDepthSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
@@ -263,6 +264,13 @@ class AdminRuntimeView:
             return (_LOW_ENTRY_FUNDS_WARNING,)
         return ()
 
+    def _strategy_config(self) -> Any | None:
+        """获取策略配置实例（ConfiguredExtension 协议）；未装配或不支持时返回 None。"""
+        extension = getattr(self.runtime, "extension", None)
+        if isinstance(extension, ConfiguredExtension):
+            return extension.config
+        return None
+
     def _configured_entry_floor_usdc(self) -> Decimal | None:
         """Kelly 框架下"账户余额低于 floor 就告警"的提示阈值。
 
@@ -274,19 +282,18 @@ class AdminRuntimeView:
         settings = self._settings()
         if settings is None:
             return None
-        candidates: list[Decimal] = []
-        # admin_runtime_view 在测试和早期 boot 阶段可能拿到不完整的 settings——
-        # ``getattr(..., None)`` 不是字段默认值（不会与 Settings field default 漂移），
-        # None 仅表示"该字段缺失，跳过"；不污染语义。
         budget = _decimal_or_none(getattr(settings, "portfolio_budget_usdc", None))
+        # kelly_* 参数已迁移到策略配置，从 extension.config 读取。
+        strategy_cfg = self._strategy_config()
         max_position_fraction = _decimal_or_none(
-            getattr(settings, "kelly_max_position_fraction", None)
+            getattr(strategy_cfg, "kelly_max_position_fraction", None)
         )
+        min_stake = _decimal_or_none(getattr(strategy_cfg, "kelly_min_stake_usdc", None))
+        candidates: list[Decimal] = []
         if budget is not None and max_position_fraction is not None and max_position_fraction > 0:
             position_floor = budget * max_position_fraction
             if position_floor > Decimal("0"):
                 candidates.append(position_floor)
-        min_stake = _decimal_or_none(getattr(settings, "kelly_min_stake_usdc", None))
         if min_stake is not None and min_stake > Decimal("0"):
             candidates.append(min_stake)
         if not candidates:

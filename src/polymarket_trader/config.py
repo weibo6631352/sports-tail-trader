@@ -94,28 +94,6 @@ class Settings(BaseSettings):
     market_sync_interval_seconds: int = Field(default=60, ge=1)
     order_retry_limit: int = Field(default=2, ge=0)
 
-    # Kelly sizing 框架参数（策略层不再用绝对 USDC 上限；改用 bankroll fraction）
-    # κ 默认 0.25 = quarter Kelly：模型不确定性下的工业标准（max drawdown 约半 full Kelly）。
-    kelly_fraction: Decimal = Field(default=Decimal("0.25"), gt=Decimal("0"), le=Decimal("1"))
-    # 单市场不超过 bankroll 的 fraction（隐式上限并发头寸数 ≈ 1/fraction）。
-    kelly_max_position_fraction: Decimal = Field(default=Decimal("0.10"), gt=Decimal("0"), le=Decimal("1"))
-    # 最低 edge 阈值；实测 edge < 200 bps 时 Kelly 公式对 p 估计误差极敏感，不下单。
-    kelly_min_edge: Decimal = Field(default=Decimal("0.02"), ge=Decimal("0"))
-    # 框架硬下限 USDC；实际 effective_min_stake = max(此值, market.min_order_size × price)。
-    kelly_min_stake_usdc: Decimal = Field(default=Decimal("1"), gt=Decimal("0"))
-    # Kelly 推荐 stake < market min 时是否凑齐到 market min（轻度 over-bet）。
-    # 关闭时这类候选直接 reject，bankroll 较小阶段会出现"全市场都下不了"的尴尬。
-    kelly_allow_round_up_to_market_min: bool = True
-    # 凑齐金额上限 = position_cap × ratio。1.0=凑齐金额最多到 cap；> 1 时让 RiskManager
-    # 的 effective position cap 同步放宽（== max_position_fraction × ratio）——这是
-    # bankroll 极小阶段（如 5 USDC）唯一能下单的方式，相当于显式接受单笔 over-bet。
-    # le=100 软上限防误配 1000+；正常上线后应降回 1.0（启用 Kelly 单仓纪律）。
-    kelly_round_up_max_overbet_ratio: Decimal = Field(
-        default=Decimal("1"), gt=Decimal("0"), le=Decimal("100")
-    )
-    # drawdown lockout：bankroll 跌破 peak × halt_fraction 时拒新仓。0 关闭。
-    kelly_drawdown_halt_fraction: Decimal = Field(default=Decimal("0.5"), ge=Decimal("0"), le=Decimal("1"))
-
     # audit_events 表保留期（天）。实测 sports_live_state_recorded + market_discovered
     # 每天累积百万级 row，长期运行会让查询变慢且占用大量磁盘。retention job 每天跑
     # 一次 ``DELETE WHERE created_at < now() - interval N days``，让 audit 表稳态
@@ -155,6 +133,18 @@ class Settings(BaseSettings):
     sports_live_state_leagues: str = "nba,nhl,nfl,mlb,tennis,sports"
     sports_live_state_interval_seconds: int = Field(default=5, ge=5)
     sports_live_state_timeout_s: float = Field(default=5.0, ge=0.1)
+    # 各直播源独立超时覆盖；None 表示回退到 sports_live_state_timeout_s 全局值。
+    sports_live_state_timeout_s_espn: float | None = None
+    sports_live_state_timeout_s_sofascore: float | None = None
+    sports_live_state_timeout_s_nba: float | None = None
+    sports_live_state_timeout_s_nhl: float | None = None
+    sports_live_state_timeout_s_mlb: float | None = None
+    sports_live_state_timeout_s_thesportsdb: float | None = None
+    sports_live_state_timeout_s_tennis_live_data: float | None = None
+    sports_live_state_timeout_s_api_football: float | None = None
+    sports_live_state_timeout_s_pandascore: float | None = None
+    sports_live_state_timeout_s_college_football_data: float | None = None
+    sports_live_state_timeout_s_ncaa_api: float | None = None
     sports_live_state_publish_entry_signals: bool = True
     sports_live_state_health_cooldown_base_s: float = Field(default=60.0, ge=1.0)
     sports_live_state_health_eviction_s: float = Field(default=1800.0, ge=60.0)
@@ -352,6 +342,12 @@ class Settings(BaseSettings):
         """返回启用的外部体育直播状态源代码。"""
 
         return _csv_codes(self.sports_live_state_sources)
+
+    def sports_live_source_timeout(self, source_name: str) -> float:
+        """返回指定直播源的超时秒数；未单独配置时回退到全局值。"""
+
+        override = getattr(self, f"sports_live_state_timeout_s_{source_name.lower()}", None)
+        return override if override is not None else self.sports_live_state_timeout_s
 
     def _compose_database_url(self, *, mask_password: bool) -> str:
         password = self._secret_value(self.database_password)

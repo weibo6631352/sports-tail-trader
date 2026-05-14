@@ -59,6 +59,7 @@ def decide_series_entry(
         buyable_usdc = buyable * best_ask if best_ask is not None else Decimal("0")
         inputs = SeriesEvaluatorInputs(
             best_ask=best_ask,
+            best_bid=orderbook.best_bid if orderbook is not None else None,
             buyable_liquidity_usdc=buyable_usdc,
             now=now,
             min_edge_bps=settings.min_edge_bps,

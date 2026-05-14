@@ -27,6 +27,7 @@ class SportsMarketType(StrEnum):
     MONEYLINE = "moneyline"
     SPREADS = "spreads"
     BINARY_PROP = "binary_prop"
+    PLAYER_PROP = "player_prop"
 
 
 class SportsMarketFamily(StrEnum):
@@ -127,6 +128,7 @@ class SportsMarketSnapshot:
     scope_type: SportsMarketScopeType = SportsMarketScopeType.FULL_GAME
     scope_number: int | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    best_bid: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)

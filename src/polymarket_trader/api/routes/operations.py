@@ -22,6 +22,8 @@ class ReconcileRequest(BaseModel):
     # 上限 200 防 DoS：reconciler 在 batch 扫描里读热状态，违反 CLAUDE.md §7
     # 「reconciler 不在批量扫描里长时间持有交易状态写锁」就会反向阻塞主链路。
     condition_ids: list[str] = Field(default_factory=list, max_length=200)
+    reason: str = Field(default="", max_length=256)
+    authorized_by: str = Field(default="operator", min_length=1, max_length=64)
 
 
 class ParameterSweepRequest(BaseModel):
@@ -66,12 +68,15 @@ class PauseTradingRequest(BaseModel):
     # reason 进审计日志，限长防 DoS / 存储溢出。
     reason: str = Field(default="manual_pause", min_length=1, max_length=200)
     operator: str = Field(default="manual", min_length=1, max_length=64)
+    authorized_by: str = Field(default="operator", min_length=1, max_length=64)
     # 前端 confirmAction 生成；后端 audit_events 用它串"操作意图 + 审计事件"。
     trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class ResumeTradingRequest(BaseModel):
     operator: str = Field(default="manual", min_length=1, max_length=64)
+    reason: str = Field(default="", max_length=256)
+    authorized_by: str = Field(default="operator", min_length=1, max_length=64)
     trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
@@ -83,6 +88,8 @@ async def reconcile(
     return await service.reconcile(
         trace_id=request.trace_id,
         condition_ids=tuple(request.condition_ids),
+        reason=request.reason,
+        authorized_by=request.authorized_by,
     )
 
 
@@ -195,6 +202,7 @@ async def pause_trading(
     return await service.pause_trading(
         reason=request.reason,
         operator=request.operator,
+        authorized_by=request.authorized_by,
         trace_id=request.trace_id,
     )
 
@@ -206,5 +214,7 @@ async def resume_trading(
 ) -> dict[str, object]:
     return await service.resume_trading(
         operator=request.operator,
+        reason=request.reason,
+        authorized_by=request.authorized_by,
         trace_id=request.trace_id,
     )

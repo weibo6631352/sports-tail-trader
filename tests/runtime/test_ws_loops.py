@@ -185,3 +185,56 @@ def test_market_ws_prewarms_live_market_even_before_tail_signal_window() -> None
     token_ids = ws_loops.market_ws_subscription_token_ids(runtime)
 
     assert token_ids == ("ghibaudo-token", "pieri-token")
+
+
+def test_market_ws_priority_token_ids_returns_exposed_tokens() -> None:
+    """P3.2：持仓/挂单的 token_id 应出现在 priority 集合中。"""
+
+    class _FakeAccountSnapshot:
+        def __init__(self):
+            self.positions = [
+                type("Pos", (), {"condition_id": "cond-1", "token_id": "tok-1", "settled_zero_value": False})()
+            ]
+            self.open_orders = [
+                type("Order", (), {"condition_id": "cond-2", "token_id": "tok-2", "settled_zero_value": False})()
+            ]
+
+    runtime = type("RT", (), {
+        "account_state_store": type("S", (), {"snapshot": staticmethod(lambda: _FakeAccountSnapshot())})()
+    })()
+
+    priority = ws_loops.market_ws_priority_token_ids(runtime)
+
+    assert "tok-1" in priority
+    assert "tok-2" in priority
+
+
+def test_market_ws_priority_token_ids_empty_without_account_store() -> None:
+    """P3.2：无账户存储时 priority 集合为空（安全降级）。"""
+
+    runtime = type("RT", (), {"account_state_store": None})()
+
+    priority = ws_loops.market_ws_priority_token_ids(runtime)
+
+    assert priority == frozenset()
+
+
+def test_market_ws_priority_token_ids_excludes_settled_zero() -> None:
+    """P3.2：settled_zero_value=True 的仓位不列入 priority。"""
+
+    class _FakeAccountSnapshot:
+        def __init__(self):
+            self.positions = [
+                type("Pos", (), {"condition_id": "cond-a", "token_id": "tok-a", "settled_zero_value": True})(),
+                type("Pos", (), {"condition_id": "cond-b", "token_id": "tok-b", "settled_zero_value": False})(),
+            ]
+            self.open_orders = []
+
+    runtime = type("RT", (), {
+        "account_state_store": type("S", (), {"snapshot": staticmethod(lambda: _FakeAccountSnapshot())})()
+    })()
+
+    priority = ws_loops.market_ws_priority_token_ids(runtime)
+
+    assert "tok-a" not in priority
+    assert "tok-b" in priority

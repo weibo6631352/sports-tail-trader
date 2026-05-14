@@ -66,6 +66,7 @@ def _inputs(
 ) -> SeriesEvaluatorInputs:
     return SeriesEvaluatorInputs(
         best_ask=best_ask,
+        best_bid=None,
         buyable_liquidity_usdc=buyable_liquidity_usdc,
         now=_NOW,
         min_edge_bps=800,
@@ -142,6 +143,7 @@ def test_price_above_fair_rejects() -> None:
     # min_edge=0 让 cap=fair；best_ask=fair → PRICE_ABOVE_FAIR
     inputs = SeriesEvaluatorInputs(
         best_ask=Decimal("0.95"),  # > fair value caps to 0.95 anyway
+        best_bid=None,
         buyable_liquidity_usdc=Decimal("500"),
         now=_NOW,
         min_edge_bps=0,

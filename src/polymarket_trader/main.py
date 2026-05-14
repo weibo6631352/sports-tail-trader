@@ -100,7 +100,7 @@ from polymarket_trader.runtime.ws_loops import (
     run_market_ws as _run_market_ws,
     run_user_ws as _run_user_ws,
 )
-from polymarket_trader.extension_api import BusinessExtension
+from polymarket_trader.extension_api import BusinessExtension, ConfiguredExtension
 from polymarket_trader.extension_api.manifest import ConfigValidator
 from polymarket_trader.workers.market_discovery_worker import MarketDiscoveryWorker
 from polymarket_trader.workers.market_ws import MarketWsWorker
@@ -227,28 +227,28 @@ def _build_sports_live_state_client(
         espn_client = EspnScoreboardClient(
             base_url=settings.sports_live_state_espn_base_url,
             leagues=espn_leagues,
-            timeout_s=settings.sports_live_state_timeout_s,
+            timeout_s=settings.sports_live_source_timeout("espn"),
         )
         providers.append(("espn", espn_client.list_events))
         closers.append(espn_client.aclose)
     if "nba" in source_codes and "nba" in league_codes:
         nba_client = NbaLiveScoreboardClient(
             base_url=settings.sports_live_state_nba_base_url,
-            timeout_s=settings.sports_live_state_timeout_s,
+            timeout_s=settings.sports_live_source_timeout("nba"),
         )
         providers.append(("nba", nba_client.list_events))
         closers.append(nba_client.aclose)
     if "nhl" in source_codes and "nhl" in league_codes:
         nhl_client = NhlScoreApiClient(
             base_url=settings.sports_live_state_nhl_base_url,
-            timeout_s=settings.sports_live_state_timeout_s,
+            timeout_s=settings.sports_live_source_timeout("nhl"),
         )
         providers.append(("nhl", nhl_client.list_events))
         closers.append(nhl_client.aclose)
     if "mlb" in source_codes and "mlb" in league_codes:
         mlb_client = MlbStatsApiClient(
             base_url=settings.sports_live_state_mlb_base_url,
-            timeout_s=settings.sports_live_state_timeout_s,
+            timeout_s=settings.sports_live_source_timeout("mlb"),
         )
         providers.append(("mlb", mlb_client.list_events))
         closers.append(mlb_client.aclose)
@@ -259,7 +259,7 @@ def _build_sports_live_state_client(
                 base_url=settings.sports_live_state_sofascore_base_url,
                 sports=sofascore_sports,
                 league_codes=settings.sports_live_state_league_codes,
-                timeout_s=settings.sports_live_state_timeout_s,
+                timeout_s=settings.sports_live_source_timeout("sofascore"),
                 lookback_days=settings.sports_live_state_sofascore_lookback_days,
                 lookahead_days=settings.sports_live_state_sofascore_lookahead_days,
             )
@@ -272,7 +272,7 @@ def _build_sports_live_state_client(
                 base_url=settings.sports_live_state_thesportsdb_base_url,
                 sports=thesportsdb_sports,
                 league_codes=settings.sports_live_state_league_codes,
-                timeout_s=settings.sports_live_state_timeout_s,
+                timeout_s=settings.sports_live_source_timeout("thesportsdb"),
             )
             providers.append(("thesportsdb", thesportsdb_client.list_events))
             closers.append(thesportsdb_client.aclose)
@@ -289,7 +289,7 @@ def _build_sports_live_state_client(
                 base_url=settings.sports_live_state_pandascore_base_url,
                 api_token=token_value,
                 videogame_slugs=videogames or None,
-                timeout_s=settings.sports_live_state_timeout_s,
+                timeout_s=settings.sports_live_source_timeout("pandascore"),
             )
             providers.append(("pandascore", pandascore_client.list_events))
             closers.append(pandascore_client.aclose)
@@ -301,7 +301,7 @@ def _build_sports_live_state_client(
             tennis_client = TennisLiveDataClient(
                 base_url=settings.sports_live_state_tennis_live_data_base_url,
                 api_token=token_value,
-                timeout_s=settings.sports_live_state_timeout_s,
+                timeout_s=settings.sports_live_source_timeout("tennis_live_data"),
             )
             providers.append(("tennis_live_data", tennis_client.list_events))
             closers.append(tennis_client.aclose)
@@ -312,7 +312,7 @@ def _build_sports_live_state_client(
             api_football_client = ApiFootballClient(
                 base_url=settings.sports_live_state_api_football_base_url,
                 api_token=token_value,
-                timeout_s=settings.sports_live_state_timeout_s,
+                timeout_s=settings.sports_live_source_timeout("api_football"),
             )
             providers.append(("api_football", api_football_client.list_events))
             closers.append(api_football_client.aclose)
@@ -331,14 +331,19 @@ def _build_sports_live_state_client(
                 ncaa_api_base_url=settings.sports_live_state_ncaa_api_base_url,
                 cfbd_token=token_value,
                 sports=tuple(cfbd_sports),
-                timeout_s=settings.sports_live_state_timeout_s,
+                timeout_s=settings.sports_live_source_timeout("college_football_data"),
             )
             providers.append(("college_football_data", cfbd_client.list_events))
             closers.append(cfbd_client.aclose)
     # 聚合器超时是"单个 provider 完整快照"的预算；像 ESPN/SofaScore 这类 provider
     # 内部会按多个 sport/league 拉取，预算需要高于单次 HTTP timeout，避免刚拿到部分
     # 实盘数据时被外层取消。各 provider 已并行隔离，放宽这里不会阻塞交易主链路。
-    provider_timeout_s = max(settings.sports_live_state_timeout_s * _PROVIDER_TIMEOUT_MULTIPLIER, _PROVIDER_TIMEOUT_FLOOR_S)
+    # 取各启用源中最大单次超时作为基准，确保 SofaScore 等慢源不被聚合层提前取消。
+    max_source_timeout_s = max(
+        (settings.sports_live_source_timeout(source_name) for source_name, _ in providers),
+        default=settings.sports_live_state_timeout_s,
+    )
+    provider_timeout_s = max(max_source_timeout_s * _PROVIDER_TIMEOUT_MULTIPLIER, _PROVIDER_TIMEOUT_FLOOR_S)
     return SportsLiveAggregateClient(
         providers=tuple(providers),
         closers=tuple(closers),
@@ -668,6 +673,12 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     extension_issues = _validate_extension_config(extension, settings)
     if extension_issues:
         raise ConfigLoadError(list(extension_issues))
+    # 从扩展侧读取策略配置实例（kelly_* 等策略参数）；未实现 ConfiguredExtension 协议的
+    # 扩展使用框架侧默认值兜底（不会出现在当前策略，仅防御性保留）。
+    from strategies.current.config import CurrentStrategyConfig as _CurrentStrategyConfig
+    strategy_config: _CurrentStrategyConfig = (
+        extension.config if isinstance(extension, ConfiguredExtension) else _CurrentStrategyConfig()
+    )
     # settings 是框架侧不变量，由 composition root 直接绑定。strategy.* 默认值由
     # 策略自己在 __init__ 时通过 ports.parameter.register_strategy_defaults 注册——
     # 框架不读策略私有属性，避免跨层 duck-typing。
@@ -753,13 +764,13 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         trading_service=trading_service,
         account_state_store=account_state_store,
         portfolio_budget_usdc=settings.portfolio_budget_usdc,
-        kelly_fraction=settings.kelly_fraction,
-        kelly_max_position_fraction=settings.kelly_max_position_fraction,
-        kelly_min_edge=settings.kelly_min_edge,
-        kelly_min_stake_usdc=settings.kelly_min_stake_usdc,
-        kelly_allow_round_up_to_market_min=settings.kelly_allow_round_up_to_market_min,
-        kelly_round_up_max_overbet_ratio=settings.kelly_round_up_max_overbet_ratio,
-        kelly_drawdown_halt_fraction=settings.kelly_drawdown_halt_fraction,
+        kelly_fraction=strategy_config.kelly_fraction,
+        kelly_max_position_fraction=strategy_config.kelly_max_position_fraction,
+        kelly_min_edge=strategy_config.kelly_min_edge,
+        kelly_min_stake_usdc=strategy_config.kelly_min_stake_usdc,
+        kelly_allow_round_up_to_market_min=strategy_config.kelly_allow_round_up_to_market_min,
+        kelly_round_up_max_overbet_ratio=strategy_config.kelly_round_up_max_overbet_ratio,
+        kelly_drawdown_halt_fraction=strategy_config.kelly_drawdown_halt_fraction,
         order_retry_limit=settings.order_retry_limit,
         entry_metadata_provider=entry_metadata_for_event,
         parameter_store=parameter_store,

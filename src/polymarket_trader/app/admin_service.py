@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
 
+from polymarket_trader.extension_api.manifest import ConfiguredExtension
+
 from polymarket_trader.app.admin_order_control import AdminOrderController
 from polymarket_trader.app.admin_runtime_view import AdminRuntimeView
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
@@ -93,9 +95,14 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         manual_confirmation: "ManualConfirmation | None" = None,
     ):
         # runtime.settings 是 main.py 启动后绑定的强字段——admin 路径不可能在
-        # settings 缺失时执行。kelly_* 全部走 settings 直读，避免 getattr default
-        # 制造第二份字段默认值（与 Settings field default 漂移）。
+        # settings 缺失时执行。kelly_* 从策略侧 ConfiguredExtension.config 读取；
+        # 策略配置是 kelly_* 的唯一真相来源，不再走框架 Settings。
         settings = self.runtime.settings
+        extension = self.runtime.extension
+        from strategies.current.config import CurrentStrategyConfig as _CurrentStrategyConfig
+        strategy_config: _CurrentStrategyConfig = (
+            extension.config if isinstance(extension, ConfiguredExtension) else _CurrentStrategyConfig()
+        )
         return self._trading_decision_service().build_entry_plan(
             market=market,
             orderbook=orderbook,
@@ -106,13 +113,13 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             trace_id=trace_id,
             portfolio_budget_usdc=settings.portfolio_budget_usdc,
             available_usdc=account.available_usdc,
-            kelly_fraction=settings.kelly_fraction,
-            kelly_max_position_fraction=settings.kelly_max_position_fraction,
-            kelly_min_edge=settings.kelly_min_edge,
-            kelly_min_stake_usdc=settings.kelly_min_stake_usdc,
-            kelly_allow_round_up_to_market_min=settings.kelly_allow_round_up_to_market_min,
-            kelly_round_up_max_overbet_ratio=settings.kelly_round_up_max_overbet_ratio,
-            kelly_drawdown_halt_fraction=settings.kelly_drawdown_halt_fraction,
+            kelly_fraction=strategy_config.kelly_fraction,
+            kelly_max_position_fraction=strategy_config.kelly_max_position_fraction,
+            kelly_min_edge=strategy_config.kelly_min_edge,
+            kelly_min_stake_usdc=strategy_config.kelly_min_stake_usdc,
+            kelly_allow_round_up_to_market_min=strategy_config.kelly_allow_round_up_to_market_min,
+            kelly_round_up_max_overbet_ratio=strategy_config.kelly_round_up_max_overbet_ratio,
+            kelly_drawdown_halt_fraction=strategy_config.kelly_drawdown_halt_fraction,
             positions=account.positions,
             open_orders=account.open_orders,
             metadata=metadata if metadata is not None else self._entry_metadata_for_market(market),
@@ -276,7 +283,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
                 event_slug=market.event_slug,
                 condition_id=market.condition_id,
                 token_id=plan.intent.token_id,
-                reason="" if review.risk_decision is None else review.risk_decision.reason,
+                reason="risk_decision_unavailable" if review.risk_decision is None else review.risk_decision.reason,
                 payload={
                     "origin": "admin_candidate_confirm",
                     "entry_origin": TRADING_DECISION_WORKER_ORIGIN,

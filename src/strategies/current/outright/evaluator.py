@@ -22,6 +22,7 @@ from strategies.current._shared.edge_gates import (
     REASON_MISSING_BEST_ASK,
     REASON_PRICE_ABOVE_FAIR,
     check_entry_gates,
+    implied_mid_probability,
 )
 from strategies.current.outright.pricing import (
     outright_exit_price_target,
@@ -53,6 +54,7 @@ def evaluate_outright_opportunity(
     outcome_label: str,
     token_id: str,
     best_ask: Decimal | None,
+    best_bid: Decimal | None = None,
     buyable_liquidity_usdc: Decimal,
     now: datetime,
     max_season_odds_age_seconds: int,
@@ -119,6 +121,7 @@ def evaluate_outright_opportunity(
         min_profit_per_share=min_profit_per_share,
     )
     action = outright_action_for_permission(execution_permission)
+    implied = implied_mid_probability(best_bid, best_ask)
     metadata: dict[str, Any] = {
         "fair_value": str(fair_value),
         "entry_price_cap": str(entry_cap),
@@ -127,6 +130,8 @@ def evaluate_outright_opportunity(
         "snapshot_age_seconds": age,
         "tail_action": to_tail_action(action).value,
     }
+    if implied is not None:
+        metadata["implied_mid_prob"] = str(implied)
     if extra_metadata:
         metadata.update(extra_metadata)
     return OutrightEvaluation(

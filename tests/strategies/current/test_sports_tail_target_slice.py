@@ -4727,26 +4727,31 @@ async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
     market_ws = _MarketWs({"over": orderbook})
     account_state = AccountStateStore()
     account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+    _strategy = CurrentStrategy(
+        config=CurrentStrategyConfig(
+            kelly_fraction=Decimal("0.25"),
+            kelly_max_position_fraction=Decimal("1"),
+            kelly_min_edge=Decimal("0"),
+            kelly_min_stake_usdc=Decimal("1"),
+            kelly_allow_round_up_to_market_min=True,
+            kelly_round_up_max_overbet_ratio=Decimal("1"),
+            kelly_drawdown_halt_fraction=Decimal("0"),
+        )
+    )
     service = AdminService(
         runtime=SimpleNamespace(
             settings=SimpleNamespace(
                 portfolio_budget_usdc=Decimal("10"),
-                kelly_fraction=Decimal("0.25"),
-                kelly_max_position_fraction=Decimal("1"),
-                kelly_min_edge=Decimal("0"),
-                kelly_min_stake_usdc=Decimal("1"),
-                kelly_allow_round_up_to_market_min=True,
-                kelly_round_up_max_overbet_ratio=Decimal("1"),
-                kelly_drawdown_halt_fraction=Decimal("0"),
                 order_retry_limit=2,
             ),
+            extension=_strategy,
             registry=registry,
             market_ws_worker=market_ws,
             account_state_store=account_state,
             entry_metadata_store=EntryMetadataStore(),
             trading_decision_service=TradingDecisionService(
                 strategy_id="sports_tail",
-                extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+                extension_hooks=_strategy.hooks,
                 registry=registry,
                 orderbook_reader=market_ws.snapshot,
             ),
@@ -4805,26 +4810,31 @@ async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
     market_ws = _MarketWs(snapshots)
     account_state = AccountStateStore()
     account_state.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+    _strategy = CurrentStrategy(
+        config=CurrentStrategyConfig(
+            kelly_fraction=Decimal("0.25"),
+            kelly_max_position_fraction=Decimal("1"),
+            kelly_min_edge=Decimal("0"),
+            kelly_min_stake_usdc=Decimal("1"),
+            kelly_allow_round_up_to_market_min=True,
+            kelly_round_up_max_overbet_ratio=Decimal("1"),
+            kelly_drawdown_halt_fraction=Decimal("0"),
+        )
+    )
     service = AdminService(
         runtime=SimpleNamespace(
             settings=SimpleNamespace(
                 portfolio_budget_usdc=Decimal("10"),
-                kelly_fraction=Decimal("0.25"),
-                kelly_max_position_fraction=Decimal("1"),
-                kelly_min_edge=Decimal("0"),
-                kelly_min_stake_usdc=Decimal("1"),
-                kelly_allow_round_up_to_market_min=True,
-                kelly_round_up_max_overbet_ratio=Decimal("1"),
-                kelly_drawdown_halt_fraction=Decimal("0"),
                 order_retry_limit=2,
             ),
+            extension=_strategy,
             registry=registry,
             market_ws_worker=market_ws,
             account_state_store=account_state,
             entry_metadata_store=live_store,
             trading_decision_service=TradingDecisionService(
                 strategy_id="sports_tail",
-                extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
+                extension_hooks=_strategy.hooks,
                 registry=registry,
                 orderbook_reader=market_ws.snapshot,
             ),

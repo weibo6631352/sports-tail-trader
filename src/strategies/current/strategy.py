@@ -134,6 +134,10 @@ class CurrentStrategy:
         return self
 
     @property
+    def config(self) -> CurrentStrategyConfig:
+        return self._config
+
+    @property
     def league_source_affinity(self) -> Mapping[str, tuple[str, ...]] | None:
         return self._config.league_source_affinity or None
 

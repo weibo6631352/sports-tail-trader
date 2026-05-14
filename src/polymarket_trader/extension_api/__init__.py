@@ -33,6 +33,7 @@ from polymarket_trader.extension_api.live_state import LiveStateMatch
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
 from polymarket_trader.extension_api.manifest import (
     BusinessExtension,
+    ConfiguredExtension,
     ConfigValidator,
     ExtensionFactory,
     ExtensionManifest,
@@ -64,6 +65,7 @@ __all__ = (
     "BusinessExtension",
     "ClockPort",
     "ConfigReadPort",
+    "ConfiguredExtension",
     "ConfigValidator",
     "DecisionKind",
     "DomainEventType",

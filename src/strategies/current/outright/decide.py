@@ -85,6 +85,7 @@ def decide_outright_entry(
             outcome_label=token_view.outcome,
             token_id=token_view.token_id,
             best_ask=best_ask,
+            best_bid=orderbook.best_bid if orderbook is not None else None,
             buyable_liquidity_usdc=buyable_usdc,
             now=now,
             max_season_odds_age_seconds=config.tail_outright_max_season_odds_age_seconds,

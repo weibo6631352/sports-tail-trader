@@ -839,6 +839,16 @@ class RiskManager:
         notional_usdc: Decimal,
     ) -> RiskDecision | None:
         if orderbook is None:
+            # orderbook 缺失时不拒绝，但必须留下可审计记录，不能静默跳过
+            checks.append(
+                RiskCheck(
+                    name="liquidity_gate",
+                    passed=True,
+                    reason="liquidity_check_skipped_no_orderbook",
+                    field="orderbook",
+                    value=None,
+                )
+            )
             return None
         if intent.side != OrderSide.BUY:
             return None
@@ -1138,6 +1148,12 @@ def _resolve_market_flags(
             market_open = market.trading_status == TradingStatus.ELIGIBLE
         if resolved is None:
             resolved = market.trading_status == TradingStatus.RESOLVED
+    # market 和所有 flag 都为 None 意味着完全无市场信息；
+    # 保守方向：假设市场不活跃/不开放，而不是假设安全通过
+    if market is None and market_active is None and market_open is None:
+        market_active = False
+        market_open = False
+        clob_enabled = False if clob_enabled is None else clob_enabled
     market_active = True if market_active is None else market_active
     market_open = True if market_open is None else market_open
     clob_enabled = True if clob_enabled is None else clob_enabled

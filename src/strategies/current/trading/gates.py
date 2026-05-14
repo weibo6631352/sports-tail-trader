@@ -115,6 +115,7 @@ def _tail_entry_gate(
         token_id=target.token_id,
         line=descriptor.line,
         best_ask=best_ask,
+        best_bid=context.orderbook.best_bid,
         buyable_liquidity_usdc=_ask_depth_notional(
             context.orderbook,
             price_cap=_tail_price_cap(

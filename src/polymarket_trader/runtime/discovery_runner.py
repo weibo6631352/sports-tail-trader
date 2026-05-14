@@ -16,6 +16,11 @@ _MARKET_DISCOVERY_MAX_RUNTIME_MS = 200.0
 _LIVE_EVENT_EXPANSION_BUDGET_PER_TICK = 1
 _LIVE_EVENT_EXPANSION_REFRESH_SECONDS = 30.0
 MARKET_DISCOVERY_TICK_SECONDS = 0.5
+# P3.1：持仓/挂单市场独立快速刷新间隔。常规 Gamma 全量轮转可能几分钟才回到某个
+# condition_id；有持仓的市场每 15s 单独拉一次，确保盘口状态不滞后。
+_PRIORITY_CONDITION_REFRESH_SECONDS = 15.0
+# 每 tick 最多为 priority 市场额外发出 1 次 gamma 请求，避免挤占常规发现预算。
+_PRIORITY_CONDITION_REFRESH_BUDGET_PER_TICK = 1
 # 单次失败的基础回退，下次重试至少等这么久。
 MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS = 5
 # 指数回退上限：5 → 10 → 20 → 40 → 60s 后封顶。tail 策略对发现实时性要求高，
@@ -67,6 +72,8 @@ class FullMarketDiscoveryState:
     consecutive_failures: int = 0
     last_query_names: tuple[str, ...] = ()
     live_event_expanded_at: dict[str, datetime] = field(default_factory=dict)
+    # P3.1：记录各 priority condition_id 上次单独刷新的时间，避免重复请求。
+    priority_condition_refreshed_at: dict[str, datetime] = field(default_factory=dict)
 
     def start_tick(self) -> None:
         self.last_tick_started_at = _utc_now()
@@ -230,6 +237,7 @@ async def run_market_discovery_scan(
             if state.last_tick_markets >= _MARKET_DISCOVERY_MARKET_BUDGET_PER_TICK:
                 break
         await expand_live_event_market_discovery(runtime)
+        await refresh_priority_condition_ids(runtime)
     except Exception as exc:
         state.record_failure(str(exc))
         backoff_seconds = _retry_backoff_seconds(state.consecutive_failures)
@@ -251,6 +259,11 @@ async def run_market_discovery_scan(
                 "retry_after_seconds": backoff_seconds,
             },
         )
+        # 连续失败时在本次调用内也主动等待，避免紧循环打爆 gamma API。
+        # 调度器层已通过 should_retry() 时间门控；这里的 sleep 是额外保险，
+        # 确保即使调度间隔极短，连续失败也能得到指数回退缓冲。
+        if state.consecutive_failures > 0:
+            await asyncio.sleep(min(5.0 * (2 ** (state.consecutive_failures - 1)), 60.0))
     else:
         state.finish_tick()
         if round_completed and completed_round_id is not None:
@@ -300,6 +313,75 @@ async def expand_live_event_market_discovery(runtime: Any) -> None:
                 trace_id=f"market-discovery-live-event-{uuid4().hex}",
             )
         state.live_event_expanded_at[event_slug] = _utc_now()
+
+
+async def refresh_priority_condition_ids(runtime: Any) -> None:
+    """P3.1：对持仓/挂单市场按独立快速间隔（15s）单独拉取 Gamma 市场快照。
+
+    常规全量 Gamma 轮转可能数分钟才回到某个 condition_id；有持仓的市场需要
+    更频繁的盘口状态更新，确保 TradingDecisionWorker 读到的 registry 不滞后。
+    每 tick 最多发 1 次额外 gamma 请求，不挤占常规发现预算。
+    """
+
+    state = runtime.market_discovery_scan
+    condition_ids = _priority_condition_ids_due_for_refresh(runtime, now=_utc_now())
+    if not condition_ids:
+        return
+    gamma_client = getattr(runtime, "gamma_client", None)
+    if gamma_client is None:
+        return
+    fetched = 0
+    for condition_id in condition_ids:
+        if fetched >= _PRIORITY_CONDITION_REFRESH_BUDGET_PER_TICK:
+            break
+        try:
+            market_dto = await gamma_client.get_market(condition_id, timeout_s=2.0)
+        except Exception as exc:
+            logger.debug(
+                "priority_condition_refresh failed",
+                extra={"condition_id": condition_id, "reason": str(exc)},
+            )
+            # 单次失败不中断其他 priority 市场的刷新，也不更新 refreshed_at，
+            # 下次 tick 会自然重试。
+            continue
+        await runtime.market_discovery_worker.ingest_source_page(
+            {"markets": [dict(market_dto.raw)]},
+            source="gamma.priority_refresh",
+            trace_id=f"priority-refresh-{condition_id[:8]}-{uuid4().hex}",
+        )
+        state.priority_condition_refreshed_at[condition_id] = _utc_now()
+        fetched += 1
+
+
+def _priority_condition_ids_due_for_refresh(runtime: Any, *, now: datetime) -> tuple[str, ...]:
+    """从账户持仓/挂单中提取需要快速刷新的 condition_id 集合。"""
+
+    account_snapshot = _account_snapshot_for_discovery(runtime)
+    if account_snapshot is None:
+        return ()
+    state = runtime.market_discovery_scan
+    due: list[str] = []
+    for item in tuple(getattr(account_snapshot, "positions", ())) + tuple(
+        getattr(account_snapshot, "open_orders", ())
+    ):
+        if getattr(item, "settled_zero_value", False):
+            continue
+        condition_id = str(getattr(item, "condition_id", "") or "").strip()
+        if not condition_id:
+            continue
+        refreshed_at = state.priority_condition_refreshed_at.get(condition_id)
+        if refreshed_at is not None and (now - refreshed_at).total_seconds() < _PRIORITY_CONDITION_REFRESH_SECONDS:
+            continue
+        due.append(condition_id)
+    return tuple(dict.fromkeys(due))
+
+
+def _account_snapshot_for_discovery(runtime: Any) -> Any | None:
+    store = getattr(runtime, "account_state_store", None)
+    snapshot = getattr(store, "snapshot", None)
+    if callable(snapshot):
+        return snapshot()
+    return None
 
 
 def _live_event_slugs_for_expansion(runtime: Any, *, now: datetime) -> tuple[str, ...]:

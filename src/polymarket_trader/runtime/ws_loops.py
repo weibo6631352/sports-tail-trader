@@ -275,6 +275,18 @@ def user_ws_auth_payload(runtime: Any) -> dict[str, str] | None:
     }
 
 
+def market_ws_priority_token_ids(runtime: Any) -> frozenset[str]:
+    """P3.2：返回当前持仓/挂单对应的 token_id 集合（最高优先级订阅）。
+
+    这些 token 有资金暴露，订阅集变化时必须立即重建连接，
+    不受 _MARKET_WS_RESUBSCRIBE_THRESHOLD 限制。
+    """
+
+    account_snapshot = _account_snapshot(runtime)
+    _, exposed_token_ids = _account_exposure_keys(account_snapshot)
+    return frozenset(exposed_token_ids)
+
+
 async def _cancel_task(task: asyncio.Task[None] | None) -> None:
     if task is None:
         return
@@ -463,10 +475,16 @@ async def run_market_ws(runtime: Any) -> None:
                 # market_discovery 持续发现新市场导致握手永远无法完成。
                 subscribed_set = set(subscribed_token_ids)
                 desired_set = set(desired_token_ids)
-                delta = len(desired_set.symmetric_difference(subscribed_set))
+                changed_token_ids = desired_set.symmetric_difference(subscribed_set)
+                delta = len(changed_token_ids)
+                # P3.2：有持仓/挂单的 priority token 发生变化时立即重建连接，
+                # 不受 _MARKET_WS_RESUBSCRIBE_THRESHOLD 限制。
+                # 资金已暴露的市场失去实时盘口更新会直接影响交易决策质量。
+                priority_token_ids = market_ws_priority_token_ids(runtime)
+                priority_delta = bool(changed_token_ids & priority_token_ids)
                 needs_reconnect = (
                     desired_token_ids != subscribed_token_ids
-                    and (stream_task is None or delta > _MARKET_WS_RESUBSCRIBE_THRESHOLD)
+                    and (stream_task is None or priority_delta or delta > _MARKET_WS_RESUBSCRIBE_THRESHOLD)
                 )
                 if needs_reconnect:
                     await _cancel_task(stream_task)

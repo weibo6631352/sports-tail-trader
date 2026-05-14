@@ -141,6 +141,23 @@ class CurrentStrategyConfig:
             达标时补 profit-take SELL，避免继续长期占用资金。
     """
 
+    # Kelly sizing 参数（策略层决策参数，不进框架 Settings）。
+    # κ 默认 0.25 = quarter Kelly：模型不确定性下的工业标准（max drawdown 约半 full Kelly）。
+    kelly_fraction: Decimal = Decimal("0.25")
+    # 单市场不超过 bankroll 的 fraction（隐式上限并发头寸数 ≈ 1/fraction）。
+    kelly_max_position_fraction: Decimal = Decimal("0.10")
+    # 最低 edge 阈值；实测 edge < 200 bps 时 Kelly 公式对 p 估计误差极敏感，不下单。
+    kelly_min_edge: Decimal = Decimal("0.02")
+    # 框架硬下限 USDC；实际 effective_min_stake = max(此值, market.min_order_size × price)。
+    kelly_min_stake_usdc: Decimal = Decimal("1")
+    # Kelly 推荐 stake < market min 时是否凑齐到 market min（轻度 over-bet）。
+    kelly_allow_round_up_to_market_min: bool = True
+    # 凑齐金额上限 = position_cap × ratio。1.0=凑齐金额最多到 cap；> 1 时让 RiskManager
+    # 的 effective position cap 同步放宽——bankroll 极小阶段唯一能下单的方式。
+    kelly_round_up_max_overbet_ratio: Decimal = Decimal("1")
+    # drawdown lockout：bankroll 跌破 peak × halt_fraction 时拒新仓。0 关闭。
+    kelly_drawdown_halt_fraction: Decimal = Decimal("0.5")
+
     entry_no_price_max: Decimal = Decimal("0.99")
     exit_no_price: Decimal = Decimal("0.995")
     auto_exit_enabled: bool = False

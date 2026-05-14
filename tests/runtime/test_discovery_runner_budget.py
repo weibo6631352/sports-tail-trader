@@ -141,6 +141,128 @@ def test_live_event_expansion_uses_stale_live_metadata_event_slugs() -> None:
     assert discovery_runner._live_event_slugs_for_expansion(runtime, now=now) == ("atp-live-1",)
 
 
+def test_priority_condition_refresh_skips_recently_refreshed() -> None:
+    """P3.1：最近 15s 内已刷新过的 condition_id 不再重复请求。"""
+
+    now = datetime(2026, 4, 29, 9, 20, tzinfo=timezone.utc)
+    state = discovery_runner.FullMarketDiscoveryState()
+    # cond-1 刚刚 10s 前刷新过 → 未到 15s 间隔，不应列入 due。
+    state.priority_condition_refreshed_at["cond-1"] = now - timedelta(seconds=10)
+    # cond-2 20s 前刷新过 → 超过间隔，应列入 due。
+    state.priority_condition_refreshed_at["cond-2"] = now - timedelta(seconds=20)
+    account_snapshot = SimpleNamespace(
+        positions=(
+            SimpleNamespace(condition_id="cond-1", token_id="t1", settled_zero_value=False),
+            SimpleNamespace(condition_id="cond-2", token_id="t2", settled_zero_value=False),
+        ),
+        open_orders=(),
+    )
+    runtime = SimpleNamespace(
+        market_discovery_scan=state,
+        account_state_store=SimpleNamespace(snapshot=lambda: account_snapshot),
+    )
+
+    due = discovery_runner._priority_condition_ids_due_for_refresh(runtime, now=now)
+
+    assert "cond-1" not in due
+    assert "cond-2" in due
+
+
+def test_priority_condition_refresh_skips_settled_zero_positions() -> None:
+    """P3.1：settled_zero_value=True 的仓位不列入 priority 刷新队列。"""
+
+    now = datetime(2026, 4, 29, 9, 20, tzinfo=timezone.utc)
+    state = discovery_runner.FullMarketDiscoveryState()
+    account_snapshot = SimpleNamespace(
+        positions=(
+            SimpleNamespace(condition_id="cond-settled", token_id="ts", settled_zero_value=True),
+            SimpleNamespace(condition_id="cond-active", token_id="ta", settled_zero_value=False),
+        ),
+        open_orders=(),
+    )
+    runtime = SimpleNamespace(
+        market_discovery_scan=state,
+        account_state_store=SimpleNamespace(snapshot=lambda: account_snapshot),
+    )
+
+    due = discovery_runner._priority_condition_ids_due_for_refresh(runtime, now=now)
+
+    assert "cond-settled" not in due
+    assert "cond-active" in due
+
+
+def test_refresh_priority_condition_ids_fetches_market_and_ingests() -> None:
+    """P3.1：对到期 priority 市场调用 gamma.get_market 并 ingest，更新 refreshed_at。"""
+
+    ingested: list[str] = []
+    fetched: list[str] = []
+
+    class _FakeGammaClient:
+        async def get_market(self, condition_id: str, *, timeout_s: float) -> SimpleNamespace:
+            fetched.append(condition_id)
+            return SimpleNamespace(raw={"condition_id": condition_id})
+
+    state = discovery_runner.FullMarketDiscoveryState()
+    # 只有 cond-exp 到期（无 refreshed_at 记录）
+    account_snapshot = SimpleNamespace(
+        positions=(
+            SimpleNamespace(condition_id="cond-exp", token_id="t", settled_zero_value=False),
+        ),
+        open_orders=(),
+    )
+
+    async def fake_ingest(page, *, source, trace_id):
+        ingested.append(source)
+
+    runtime = SimpleNamespace(
+        market_discovery_scan=state,
+        account_state_store=SimpleNamespace(snapshot=lambda: account_snapshot),
+        gamma_client=_FakeGammaClient(),
+        market_discovery_worker=SimpleNamespace(ingest_source_page=fake_ingest),
+    )
+
+    asyncio.run(discovery_runner.refresh_priority_condition_ids(runtime))
+
+    assert fetched == ["cond-exp"]
+    assert ingested == ["gamma.priority_refresh"]
+    assert "cond-exp" in state.priority_condition_refreshed_at
+
+
+def test_refresh_priority_condition_ids_caps_at_budget() -> None:
+    """P3.1：单 tick 最多发 _PRIORITY_CONDITION_REFRESH_BUDGET_PER_TICK 次请求。"""
+
+    fetched: list[str] = []
+
+    class _FakeGammaClient:
+        async def get_market(self, condition_id: str, *, timeout_s: float) -> SimpleNamespace:
+            fetched.append(condition_id)
+            return SimpleNamespace(raw={"condition_id": condition_id})
+
+    state = discovery_runner.FullMarketDiscoveryState()
+    # 3 个到期市场，但 budget=1 只允许拉 1 次
+    account_snapshot = SimpleNamespace(
+        positions=(
+            SimpleNamespace(condition_id=f"cond-{i}", token_id=f"t{i}", settled_zero_value=False)
+            for i in range(3)
+        ),
+        open_orders=(),
+    )
+
+    async def fake_ingest(page, *, source, trace_id):
+        pass
+
+    runtime = SimpleNamespace(
+        market_discovery_scan=state,
+        account_state_store=SimpleNamespace(snapshot=lambda: account_snapshot),
+        gamma_client=_FakeGammaClient(),
+        market_discovery_worker=SimpleNamespace(ingest_source_page=fake_ingest),
+    )
+
+    asyncio.run(discovery_runner.refresh_priority_condition_ids(runtime))
+
+    assert len(fetched) <= discovery_runner._PRIORITY_CONDITION_REFRESH_BUDGET_PER_TICK
+
+
 def test_run_market_discovery_scan_records_failure_when_gamma_raises() -> None:
     """Exception path (line 233): gamma error → state.consecutive_failures increments."""
 

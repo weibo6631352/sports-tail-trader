@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from datetime import datetime
 
+from strategies.current._shared.edge_gates import implied_mid_probability
 from strategies.sports_framework import (
     LiveGameState,
     SportsMarketFamily,
@@ -38,6 +39,7 @@ def _datetime_text(value: datetime | None) -> str | None:
 
 
 def _candidate(game: LiveGameState, market: SportsMarketSnapshot) -> SportsTailCandidate:
+    implied = implied_mid_probability(market.best_bid, market.best_ask)
     return SportsTailCandidate(
         game=game,
         market=market,
@@ -47,7 +49,9 @@ def _candidate(game: LiveGameState, market: SportsMarketSnapshot) -> SportsTailC
             "market_type": market.market_type.value,
             "side": market.side.value,
             "line": str(market.line) if market.line is not None else None,
+            "best_bid": str(market.best_bid) if market.best_bid is not None else None,
             "best_ask": str(market.best_ask) if market.best_ask is not None else None,
+            "implied_mid_prob": str(implied) if implied is not None else None,
             "scope_type": market_scope(market).scope_type.value,
             "scope_number": market_scope(market).scope_number,
             "market_end_date": _datetime_text(market.market_end_date),

@@ -18,6 +18,9 @@ from .records import (
 
 logger = logging.getLogger(__name__)
 
+# 单条记录写入失败后的最大重试次数；超过后转 dead_letter。
+_PERSISTENCE_MAX_RETRIES = 3
+
 # Repository 契约必须提供的 (batch_method, single_method) 名称表。
 # infra/db/persistence.py 内 single 永远是 batch 的 list 包装；这里固定查表，
 # 不在 worker 端做 hasattr 探测兜底（CLAUDE.md §8）。
@@ -165,7 +168,7 @@ class PersistenceWorker:
         batch_size: int = 64,
         poll_timeout_s: float = 1.0,
         drain_timeout_s: float = 0.05,
-        max_retry_count: int = 3,
+        max_retry_count: int = _PERSISTENCE_MAX_RETRIES,
         low_priority_merge_window_s: float = 0.05,
     ) -> None:
         if not strategy_id:
@@ -210,8 +213,9 @@ class PersistenceWorker:
         if event is None:
             return None
 
+        effective_batch_size = self._adaptive_batch_size()
         batch = [event]
-        batch.extend(await self._drain_batch())
+        batch.extend(await self._drain_batch(effective_batch_size))
         coalesced_batch, merged_events = self._coalesce_low_priority(batch)
         result = await self._persist_batch(coalesced_batch, merged_events=merged_events)
         self._recent_results.append(result)
@@ -255,13 +259,34 @@ class PersistenceWorker:
         except (asyncio.TimeoutError, TimeoutError):
             return None
 
-    async def _drain_batch(self) -> list[OutboxEvent]:
+    def _adaptive_batch_size(self) -> int:
+        """根据 outbox pending 事件数动态调整批量大小。
+
+        pending < 16  → 8（低流量，减延迟）
+        pending < 64  → 32
+        pending < 256 → 64（默认）
+        pending >= 256 → 128（高吞吐，减往返）
+        """
+        try:
+            pending, _, _ = self._outbox_depths()
+        except Exception:
+            return self._batch_size
+        if pending < 16:
+            return 8
+        if pending < 64:
+            return 32
+        if pending < 256:
+            return 64
+        return 128
+
+    async def _drain_batch(self, batch_size: int | None = None) -> list[OutboxEvent]:
         if self._outbox is None:
             return []
+        limit = batch_size if batch_size is not None else self._batch_size
         events: list[OutboxEvent] = []
         loop = asyncio.get_running_loop()
         deadline = loop.time() + max(self._drain_timeout_s, self._low_priority_merge_window_s)
-        while len(events) + 1 < self._batch_size:
+        while len(events) + 1 < limit:
             timeout = deadline - loop.time()
             if timeout <= 0:
                 break
@@ -493,9 +518,18 @@ class PersistenceWorker:
     async def _retry_or_dead_letter(self, event: OutboxEvent, reason: str) -> str:
         if self._outbox is None:
             raise RuntimeError("PersistenceWorker requires an outbox")
-        if _is_retryable_error(reason) and event.retry_count < self._max_retry_count:
+        if event.retry_count < self._max_retry_count:
             await self._outbox.retry(event, last_error=reason)
             return "retry"
+        logger.warning(
+            "persistence event dead-lettered after max retries",
+            extra={
+                "event_id": event.event_id,
+                "retry_count": event.retry_count,
+                "max_retries": self._max_retry_count,
+                "reason": reason,
+            },
+        )
         await self._outbox.dead_letter(event, last_error=reason)
         return "dead_letter"
 
@@ -583,23 +617,3 @@ class PersistenceWorker:
                 dead_letter_depth = len(dead_letters)
         return outbox_depth, retained_depth, dead_letter_depth
 
-    def _is_retryable_error(self, reason: str) -> bool:
-        lowered = reason.lower()
-        if "missing repository method" in lowered:
-            return False
-        if "validation" in lowered or "schema" in lowered:
-            return False
-        if "typeerror" in lowered or "valueerror" in lowered or "keyerror" in lowered:
-            return False
-        return True
-
-
-def _is_retryable_error(reason: str) -> bool:
-    lowered = reason.lower()
-    if "missing repository method" in lowered:
-        return False
-    if "validation" in lowered or "schema" in lowered:
-        return False
-    if "typeerror" in lowered or "valueerror" in lowered or "keyerror" in lowered:
-        return False
-    return True

@@ -268,20 +268,20 @@ class TradingService:
                 "decision_kind": operation,
             },
         )
-        publish_nowait = getattr(bus, "publish_nowait", None)
         try:
-            if callable(publish_nowait):
-                publish_nowait(OutboxPriority.P3, event)
-            else:
-                # 测试桩可能只实现 publish；兜底为 fire-and-forget task。
-                import asyncio
-                import inspect
+            bus.publish_nowait(OutboxPriority.P3, event)
+        except AttributeError:
+            # event_bus 不支持 publish_nowait（如测试桩）——降级为 fire-and-forget task。
+            import asyncio
 
-                result = bus.publish(OutboxPriority.P3, event)
-                if inspect.isawaitable(result):
-                    asyncio.ensure_future(result)
+            asyncio.ensure_future(bus.publish(OutboxPriority.P3, event))
         except Exception:
-            logger.debug("trading_service.publish_risk_event_failed", exc_info=True)
+            # 审计事件投递失败必须可见，但不能阻塞 P0 主链路（§7）。
+            logger.warning(
+                "trading_service.publish_risk_event_failed",
+                exc_info=True,
+                extra={"trace_id": intent.trace_id, "condition_id": intent.condition_id},
+            )
             return
 
     def _publish_lifecycle(

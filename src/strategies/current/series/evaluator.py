@@ -26,6 +26,7 @@ from strategies.current._shared.edge_gates import (
     REASON_MISSING_BEST_ASK,
     REASON_PRICE_ABOVE_FAIR,
     check_entry_gates,
+    implied_mid_probability,
 )
 from strategies.current.series.classifier import classify_series_sub_type
 from strategies.current.series.handicap_model import (
@@ -79,6 +80,7 @@ class SeriesEvaluatorInputs:
     """
 
     best_ask: Decimal | None
+    best_bid: Decimal | None
     buyable_liquidity_usdc: Decimal
     now: datetime
     min_edge_bps: int
@@ -401,6 +403,7 @@ def _prepare_common(
 
 _FAKE_INPUTS = SeriesEvaluatorInputs(
     best_ask=None,
+    best_bid=None,
     buyable_liquidity_usdc=Decimal("0"),
     now=datetime(1970, 1, 1, tzinfo=timezone.utc),
     min_edge_bps=0,
@@ -448,6 +451,9 @@ def _gate_and_pack(
     accepted_metadata.update(gate.metadata)
     accepted_metadata["fair_value"] = str(fair_value)
     accepted_metadata["entry_price_cap"] = str(entry_cap)
+    implied = implied_mid_probability(inputs.best_bid, inputs.best_ask)
+    if implied is not None:
+        accepted_metadata["implied_mid_prob"] = str(implied)
     return SeriesEvaluation(
         accepted=True,
         sub_type=sub_type,

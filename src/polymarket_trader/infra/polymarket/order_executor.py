@@ -63,7 +63,7 @@ def _request_idempotency_key(
     price: Decimal | None = None,
     amount_usdc: Decimal | None = None,
     size_shares: Decimal | None = None,
-    market_slug: str | None = None,
+    market_slug: str | None = None,  # kept for call-site compat, not used in key
     order_id: str | None = None,
     new_price: Decimal | None = None,
     post_only: bool = False,
@@ -78,7 +78,6 @@ def _request_idempotency_key(
         trace_id,
         condition_id,
         token_id,
-        market_slug or "",
         side.value if side is not None else "",
         order_type.value if order_type is not None else "",
         "" if price is None else str(price),
@@ -234,10 +233,12 @@ class PolymarketOrderExecutor:
         return await self._execute(request, intent)
 
     async def aclose(self) -> None:
-        self._thread_pool.shutdown(wait=False, cancel_futures=True)
+        # wait=True 确保正在进行的 EIP-712 签名任务完成后再关闭线程池，避免签名中断导致订单状态不确定。
+        await asyncio.to_thread(self._thread_pool.shutdown, wait=True, cancel_futures=False)
 
     def close(self) -> None:
-        self._thread_pool.shutdown(wait=False, cancel_futures=True)
+        # 同步等待签名任务完成，防止关闭时中断进行中的订单签名。
+        self._thread_pool.shutdown(wait=True, cancel_futures=False)
 
     def _build_submit_request(self, intent: BuyOrderIntent | SellOrderIntent) -> OrderExecutionRequest:
         return OrderExecutionRequest(
@@ -729,12 +730,11 @@ class PolymarketOrderExecutor:
     def _trim_completed_cache(self) -> None:
         while len(self._completed) > self._max_cached_results:
             key, _ = self._completed.popitem(last=False)
-            entry = self._idempotency_index.get(key)
-            if entry is not None:
-                self._idempotency_index[key] = _IdempotencyEntry(signature=entry.signature)
+            # _idempotency_index 同步删除，防止长期运行时 task=None 的幽灵条目无限积累。
             # 缓存淘汰 = 同 idempotency_key 重发会重新执行而非返回缓存。这种"被动失效"
             # 对实盘资金是潜在风险（CLAUDE.md §3「禁止 resting BUY」就靠幂等防重复挂单）。
             # 记一条 WARNING 让运维知道压力上来了；正常稳态不会到 1024+ 在飞的订单。
+            self._idempotency_index.pop(key, None)
             logger.warning(
                 "order_executor: idempotency cache evicted key=%s (cap=%d, current=%d). "
                 "Subsequent retries on this key will re-execute, not dedupe.",

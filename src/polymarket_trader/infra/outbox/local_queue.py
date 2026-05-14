@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import replace
+from datetime import datetime, timezone
 from itertools import count
 
 from polymarket_trader.domain.events import (
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_ENQUEUE_TIMEOUT = 0.01
 DEFAULT_RAW_RESPONSE_SUMMARY_LIMIT = OUTBOX_RAW_RESPONSE_SUMMARY_LIMIT
 RETAINED_OVERFLOW_REASON = "retained_low_priority_overflow"
+RETAINED_TTL_EXPIRED_REASON = "retained_ttl_expired"
 
 
 class LocalOutbox:
@@ -25,10 +27,12 @@ class LocalOutbox:
         *,
         enqueue_timeout: float = DEFAULT_ENQUEUE_TIMEOUT,
         retained_max_size: int | None = None,
+        retained_ttl_seconds: float | None = None,
     ) -> None:
         self._max_size = max_size
         self._retained_max_size = retained_max_size if retained_max_size is not None else max_size
         self._enqueue_timeout = enqueue_timeout
+        self._retained_ttl_seconds = retained_ttl_seconds
         self._sequence = count()
         self._ready: asyncio.PriorityQueue[tuple[int, int, str]] = asyncio.PriorityQueue(maxsize=max_size)
         self._events_by_id: dict[str, OutboxEvent] = {}
@@ -200,6 +204,24 @@ class LocalOutbox:
         self._enforce_retained_capacity()
 
     def _enforce_retained_capacity(self) -> None:
+        if self._retained_ttl_seconds is not None:
+            now = datetime.now(timezone.utc)
+            expired = [
+                (event_id, event)
+                for event_id, event in list(self._retained.items())
+                if event_id not in self._queued_event_ids
+                and (now - event.created_at).total_seconds() > self._retained_ttl_seconds
+            ]
+            for event_id, event in expired:
+                self._retained.pop(event_id, None)
+                self._events_by_id.pop(event_id, None)
+                merge_key = event.merge_key
+                if merge_key is not None and self._merge_index.get(merge_key) == event_id:
+                    self._merge_index.pop(merge_key, None)
+                self._dead_letters.append(
+                    replace(event, last_error=event.last_error or RETAINED_TTL_EXPIRED_REASON)
+                )
+
         if self._retained_max_size is None or self._retained_max_size <= 0:
             return
         while len(self._retained) > self._retained_max_size:

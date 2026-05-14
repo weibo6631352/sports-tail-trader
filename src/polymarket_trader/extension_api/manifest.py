@@ -34,6 +34,19 @@ class BusinessExtension(Protocol):
 
 
 @runtime_checkable
+class ConfiguredExtension(Protocol):
+    """扩展可选实现：暴露策略运行时配置实例。
+
+    框架通过该协议在组合根读取策略配置，避免 getattr duck-typing 或硬编码
+    具体策略类型。实现了该协议的扩展可以让 build_runtime 和 admin_service
+    从策略侧直接读 kelly_* 等策略参数，而不是走框架 Settings。
+    """
+
+    @property
+    def config(self) -> Any: ...
+
+
+@runtime_checkable
 class ConfigValidator(Protocol):
     """扩展可选实现：在框架启动期对策略侧配置进行联合校验。
 

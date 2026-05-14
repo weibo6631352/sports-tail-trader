@@ -64,6 +64,7 @@ def _candidate(outcome_label: str = "Over 5.5", *, market: Market | None = None,
 def _inputs(*, best_ask: Decimal | None = Decimal("0.40")) -> SeriesEvaluatorInputs:
     return SeriesEvaluatorInputs(
         best_ask=best_ask,
+        best_bid=None,
         buyable_liquidity_usdc=Decimal("100"),
         now=_NOW,
         min_edge_bps=500,
