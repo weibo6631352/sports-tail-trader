@@ -9,8 +9,11 @@ from decimal import Decimal
 import hashlib
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from polymarket_trader.app.admin_service import AdminService
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -102,7 +105,7 @@ from polymarket_trader.runtime.ws_loops import (
     run_market_ws as _run_market_ws,
     run_user_ws as _run_user_ws,
 )
-from polymarket_trader.extension_api import BusinessExtension, ConfiguredExtension
+from polymarket_trader.extension_api import BusinessExtension, resolve_kelly_params
 from polymarket_trader.extension_api.manifest import ConfigValidator
 from polymarket_trader.workers.market_discovery_worker import MarketDiscoveryWorker
 from polymarket_trader.workers.market_ws import MarketWsWorker
@@ -114,9 +117,7 @@ from polymarket_trader.workers.sports_season_state_worker import SportsSeasonSta
 from polymarket_trader.workers.series_state_worker import SeriesStateWorker
 from polymarket_trader.workers.game_odds_worker import GameOddsWorker
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
-from strategies.current.outcomes import describe_sports_market, SportsMarketFamily
-from strategies.current.series.classifier import classify_series_sub_type
-from strategies.current.series.types import SeriesSubType
+from polymarket_trader.extension_api.hooks import MarketClassificationHooks
 from polymarket_trader.workers.user_ws import UserWsWorker
 from polymarket_trader.infra.sports.series_state_client import (
     EspnSeriesStateClient,
@@ -188,7 +189,7 @@ class RuntimeComponents:
     maintenance_thread_pool: ThreadPoolExecutor
     maintenance_process_pool: ProcessPoolExecutor
     background_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
-    admin_service: object | None = None
+    admin_service: AdminService | None = None
     sse_subscription_registry: SseSubscriptionRegistry | None = None
     bootstrap_summary: dict[str, Any] = field(default_factory=dict)
     season_state_store: SeasonStateStore | None = None
@@ -403,6 +404,7 @@ def _build_season_odds_worker(
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
     extension: BusinessExtension,
+    event_bus: EventBus | None = None,
 ) -> tuple[SportsSeasonOddsWorker, SeasonOddsClient] | tuple[None, None]:
     """按 settings 装配 sports_season_odds_worker；缺 api_key 或未启用 outright 时返回 (None, None)。
 
@@ -422,27 +424,13 @@ def _build_season_odds_worker(
             if r.strip()
         ),
     )
+    _classifier = extension if isinstance(extension, MarketClassificationHooks) else None
+
     def _is_outright(market: Market) -> bool:
-        descriptor = describe_sports_market(market)
-        return descriptor.accepted and descriptor.market_family == SportsMarketFamily.OUTRIGHT
+        return _classifier.is_outright_market(market) if _classifier is not None else False
 
     def _sport_key(market: Market) -> str | None:
-        # 简单映射：从 tags / category 推断。NBA/NHL/NFL/MLB 等明确 league 直接转 TheOddsAPI sport_key。
-        text = " ".join(filter(None, (
-            market.category or "",
-            *(market.tags or ()),
-        ))).lower()
-        if "nba" in text or "basketball" in text:
-            return "basketball_nba"
-        if "nhl" in text or "hockey" in text:
-            return "icehockey_nhl"
-        if "nfl" in text or "american football" in text:
-            return "americanfootball_nfl"
-        if "mlb" in text or "baseball" in text:
-            return "baseball_mlb"
-        if "epl" in text or "premier league" in text:
-            return "soccer_epl"
-        return None
+        return _classifier.sport_key_for_season_odds(market) if _classifier is not None else None
 
     def _market_key(market: Market) -> str:
         return market.event_slug or market.market_slug or ""
@@ -456,16 +444,9 @@ def _build_season_odds_worker(
         market_key_for=_market_key,
         ttl_seconds=settings.sports_season_odds_ttl_seconds,
         enabled=True,
+        event_bus=event_bus,
     )
     return worker, client
-
-
-def _is_series_winner_market(market: Market) -> bool:
-    """market 是否归到 series WINNER 子类型。"""
-    descriptor = describe_sports_market(market)
-    if not descriptor.accepted or descriptor.market_family != SportsMarketFamily.SERIES:
-        return False
-    return classify_series_sub_type(market) == SeriesSubType.WINNER
 
 
 def _build_series_state_worker(
@@ -488,19 +469,13 @@ def _build_series_state_worker(
         timeout_s=settings.sports_series_state_timeout_s,
     )
 
+    _classifier = extension if isinstance(extension, MarketClassificationHooks) else None
+
     def _sport_key(market: Market) -> str | None:
-        # 复用 outright/season_odds 同款联赛识别——series winner 仅支持 NBA/NHL/MLB。
-        text = " ".join(filter(None, (
-            market.category or "",
-            *(market.tags or ()),
-        ))).lower()
-        if "nba" in text or "basketball" in text:
-            return "nba"
-        if "nhl" in text or "hockey" in text:
-            return "nhl"
-        if "mlb" in text or "baseball" in text:
-            return "mlb"
-        return None
+        return _classifier.sport_key_for_series_state(market) if _classifier is not None else None
+
+    def _is_series_winner(market: Market) -> bool:
+        return _classifier.is_series_winner_market(market) if _classifier is not None else False
 
     def _series_key(market: Market) -> str | None:
         # event_slug 是稳定可读 key（"celtics-vs-knicks-2026-series" 类）；
@@ -517,7 +492,7 @@ def _build_series_state_worker(
         registry=registry,
         entry_metadata_store=entry_metadata_store,
         sport_key_for=_sport_key,
-        is_series_winner_market=_is_series_winner_market,
+        is_series_winner_market=_is_series_winner,
         series_key_for=_series_key,
         ttl_seconds=settings.sports_series_state_ttl_seconds,
         enabled=True,
@@ -532,6 +507,7 @@ def _build_game_odds_worker(
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
     extension: BusinessExtension,
+    event_bus: EventBus | None = None,
 ) -> tuple[GameOddsWorker, GameOddsClient] | tuple[None, None]:
     """按 settings 装配 game_odds_worker；缺 api_key 时返回 (None, None)。"""
 
@@ -549,18 +525,13 @@ def _build_game_odds_worker(
         ),
     )
 
+    _classifier = extension if isinstance(extension, MarketClassificationHooks) else None
+
     def _sport_key(market: Market) -> str | None:
-        text = " ".join(filter(None, (
-            market.category or "",
-            *(market.tags or ()),
-        ))).lower()
-        if "nba" in text or "basketball" in text:
-            return "basketball_nba"
-        if "nhl" in text or "hockey" in text:
-            return "icehockey_nhl"
-        if "mlb" in text or "baseball" in text:
-            return "baseball_mlb"
-        return None
+        return _classifier.sport_key_for_game_odds(market) if _classifier is not None else None
+
+    def _is_series_winner(market: Market) -> bool:
+        return _classifier.is_series_winner_market(market) if _classifier is not None else False
 
     def _game_key(market: Market) -> str | None:
         # 与 series_state 同源 key：让两个 worker 用同一标识，便于审计串联。
@@ -571,10 +542,11 @@ def _build_game_odds_worker(
         registry=registry,
         entry_metadata_store=entry_metadata_store,
         sport_key_for=_sport_key,
-        is_series_winner_market=_is_series_winner_market,
+        is_series_winner_market=_is_series_winner,
         game_key_for=_game_key,
         ttl_seconds=settings.sports_game_odds_ttl_seconds,
         enabled=True,
+        event_bus=event_bus,
     )
     return worker, client
 
@@ -637,7 +609,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     entry_metadata_store = EntryMetadataStore()
     outbox = LocalOutbox(max_size=settings.persistence_event_queue_max_size)
     event_bus.bind_persistence_sink(build_domain_event_outbox_sink(outbox))
-    sse_subscription_registry = SseSubscriptionRegistry()
+    sse_subscription_registry = SseSubscriptionRegistry(soft_cap=settings.sse_subscriber_cap)
     event_bus.add_broadcast_listener(sse_subscription_registry.broadcast)
     db_engine = build_engine(settings.database_url)
     db_session_factory = build_session_factory(settings.database_url)
@@ -677,10 +649,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         raise ConfigLoadError(list(extension_issues))
     # 从扩展侧读取策略配置实例（kelly_* 等策略参数）；未实现 ConfiguredExtension 协议的
     # 扩展使用框架侧默认值兜底（不会出现在当前策略，仅防御性保留）。
-    from strategies.current.config import CurrentStrategyConfig as _CurrentStrategyConfig
-    strategy_config: _CurrentStrategyConfig = (
-        extension.config if isinstance(extension, ConfiguredExtension) else _CurrentStrategyConfig()
-    )
+    strategy_config = resolve_kelly_params(extension)
     # settings 是框架侧不变量，由 composition root 直接绑定。strategy.* 默认值由
     # 策略自己在 __init__ 时通过 ports.parameter.register_strategy_defaults 注册——
     # 框架不读策略私有属性，避免跨层 duck-typing。
@@ -743,6 +712,8 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         account_state_store=account_state_store,
     )
 
+    _exposure_classifier = extension if isinstance(extension, MarketClassificationHooks) else None
+
     def _portfolio_exposure_metadata(
         snapshot: AccountSnapshot | None,
         current_condition_id: str | None,
@@ -754,7 +725,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         只聚合其他 outright / series market 的既有敞口。
         在 entry_metadata 热路径同步执行：仅内存遍历 + O(1) registry 查询，无 IO。
         """
-        if snapshot is None:
+        if snapshot is None or _exposure_classifier is None:
             return {}
         positions = snapshot.positions
         open_orders = snapshot.open_orders
@@ -776,14 +747,14 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
             pos_market = registry.get_by_condition_id(position.condition_id)
             if pos_market is None:
                 continue
-            descriptor = describe_sports_market(pos_market)
+            family_label = _exposure_classifier.market_family_label(pos_market)
             pos_orders = orders_by_condition.get(position.condition_id, ())
             exposure = current_exposure_usdc(position, pos_orders)
-            if descriptor.market_family == SportsMarketFamily.OUTRIGHT:
+            if family_label == "outright":
                 outright_total += exposure
                 if current_event_slug and pos_market.event_slug == current_event_slug:
                     outright_event += exposure
-            elif descriptor.market_family == SportsMarketFamily.SERIES:
+            elif family_label == "series":
                 series_total += exposure
                 if current_event_slug and pos_market.event_slug == current_event_slug:
                     series_event += exposure
@@ -907,6 +878,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         registry=registry,
         entry_metadata_store=entry_metadata_store,
         extension=extension,
+        event_bus=event_bus,
     )
     series_state_worker, series_state_client = _build_series_state_worker(
         settings,
@@ -920,6 +892,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         registry=registry,
         entry_metadata_store=entry_metadata_store,
         extension=extension,
+        event_bus=event_bus,
     )
     scheduler = Scheduler()
     supervisor = Supervisor(

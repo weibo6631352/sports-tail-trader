@@ -7,7 +7,7 @@ from uuid import uuid4
 if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents
 
-from polymarket_trader.extension_api.manifest import ConfiguredExtension
+from polymarket_trader.extension_api.manifest import resolve_kelly_params
 
 from polymarket_trader.app.admin_order_control import AdminOrderController
 from polymarket_trader.app.admin_runtime_view import AdminRuntimeView
@@ -23,7 +23,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
-from polymarket_trader.workers.trading_decision import (
+from polymarket_trader.app.decision_serialization import (
     TRADING_DECISION_WORKER_ORIGIN,
     serialize_allocation,
     serialize_allocation_plan,
@@ -101,11 +101,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         # settings 缺失时执行。kelly_* 从策略侧 ConfiguredExtension.config 读取；
         # 策略配置是 kelly_* 的唯一真相来源，不再走框架 Settings。
         settings = self.runtime.settings
-        extension = self.runtime.extension
-        from strategies.current.config import CurrentStrategyConfig as _CurrentStrategyConfig
-        strategy_config: _CurrentStrategyConfig = (
-            extension.config if isinstance(extension, ConfiguredExtension) else _CurrentStrategyConfig()
-        )
+        strategy_config = resolve_kelly_params(self.runtime.extension)
         return self._trading_decision_service().build_entry_plan(
             market=market,
             orderbook=orderbook,
@@ -203,8 +199,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             extension = self.runtime.extension
         except RuntimeError:
             return None
-        spec = getattr(extension, "spec", None)
-        return getattr(spec, "strategy_id", None)
+        return extension.spec.strategy_id
 
     def _entry_metadata_for_market(self, market: Market) -> dict[str, Any]:
         store = self._entry_metadata_store()

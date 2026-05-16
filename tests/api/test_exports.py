@@ -143,32 +143,20 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
 
     captured: dict[str, Any] = {}
 
-    async def _stream_orders(
-        session: Any, time_range: TimeRange | None, limit: int
-    ) -> AsyncIterator[OrderModel]:
-        captured["orders"] = {"time_range": time_range, "limit": limit}
-        for row in orders[:limit]:
+    _seed_by_resource: dict[str, list[Any]] = {
+        "orders": orders,
+        "fills": fills,
+        "audit_events": audits,
+    }
+
+    async def _fake_stream_resource_rows(
+        session: Any, resource: str, time_range: Any, limit: int
+    ) -> AsyncIterator[Any]:
+        captured[resource] = {"time_range": time_range, "limit": limit}
+        for row in _seed_by_resource.get(resource, [])[:limit]:
             yield row
 
-    async def _stream_fills(
-        session: Any, time_range: TimeRange | None, limit: int
-    ) -> AsyncIterator[FillModel]:
-        captured["fills"] = {"time_range": time_range, "limit": limit}
-        for row in fills[:limit]:
-            yield row
-
-    async def _stream_audits(
-        session: Any, time_range: TimeRange | None, limit: int
-    ) -> AsyncIterator[AuditEventModel]:
-        captured["audit_events"] = {"time_range": time_range, "limit": limit}
-        for row in audits[:limit]:
-            yield row
-
-    monkeypatch.setitem(exports_module._STREAM_FN_BY_RESOURCE, "orders", _stream_orders)
-    monkeypatch.setitem(exports_module._STREAM_FN_BY_RESOURCE, "fills", _stream_fills)
-    monkeypatch.setitem(
-        exports_module._STREAM_FN_BY_RESOURCE, "audit_events", _stream_audits
-    )
+    monkeypatch.setattr(exports_module, "stream_resource_rows", _fake_stream_resource_rows)
 
     app.state.captured = captured  # type: ignore[attr-defined]
     return app

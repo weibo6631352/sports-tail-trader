@@ -158,7 +158,7 @@ class ReconcileWorker:
         trigger = None
         if self._event_bus is not None:
             trigger = await self._event_bus.next_maintenance_event()
-        trace_id = getattr(trigger, "trace_id", None) or uuid4().hex
+        trace_id = (trigger.trace_id if trigger is not None else None) or uuid4().hex
         started_at = _utc_now()
         self._running = True
         self._last_started_at = started_at
@@ -221,7 +221,7 @@ class ReconcileWorker:
         condition_ids: tuple[str, ...] | None = None,
         refresh_market_authority: bool = True,
     ) -> ReconcileWorkerResult:
-        trace_id = trace_id or getattr(trigger_event, "trace_id", None) or uuid4().hex
+        trace_id = trace_id or (trigger_event.trace_id if trigger_event is not None else None) or uuid4().hex
         self._running = True
         self._last_started_at = _utc_now()
         self._last_trace_id = trace_id

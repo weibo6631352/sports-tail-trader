@@ -5,7 +5,7 @@
 - `manifest.py`：策略 manifest
 - `strategy.py`：策略装配入口
 - `config.py`：策略配置 dataclass
-- `identity.py` / `runtime_limits.py`：策略身份与配置驱动的 runtime 限额
+- `identity.py`：策略身份
 - `allocation.py` / `discovery.py`：候选预算分配 / 远端 discovery 查询构造
 - `parameter_overrides.py`：策略侧 ParameterPort scope；让深层 helper 通过 ContextVar 读 runtime override 值
 - `calibration.py` / `live_sample_validation.py`：calibration 与活样本质量校验

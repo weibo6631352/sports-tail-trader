@@ -8,8 +8,9 @@
 - 每个 listener 一条 ``asyncio.Queue(maxsize=1000)``。满队时丢最旧（drop-oldest）
   并以一条 ``subscription_lag`` marker 入队，告诉订阅方有跳过；同一批连续溢出
   只标记一次，避免 lag marker 自己又把队列灌满。
-- 订阅软上限来自策略包 ``strategies.current.runtime_limits.SSE_SUBSCRIBER_CAP``；
-  达到上限直接 429 + ``Retry-After: 5``，由客户端退避重连，不让运行时无限承压。
+- 订阅软上限由 ``Settings.sse_subscriber_cap`` 控制（默认 32），通过 main.py
+  在构造 ``SseSubscriptionRegistry`` 时传入 ``soft_cap``；达到上限直接
+  429 + ``Retry-After: 5``，由客户端退避重连，不让运行时无限承压。
 - ``heartbeat_ms`` 由客户端按需声明，框架仅夹在 [5000, 60000] 之间；超出周期
   仍无事件就送一条 SSE comment 心跳。
 """
@@ -29,7 +30,6 @@ from fastapi.responses import StreamingResponse
 
 from polymarket_trader.api.deps import get_runtime
 from polymarket_trader.serialization import jsonable
-from strategies.current.runtime_limits import SSE_SUBSCRIBER_CAP
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ class SseSubscriptionRegistry:
     实现里只做 ``put_nowait`` + 偶发的 drop-oldest，绝不 await。
     """
 
-    def __init__(self, *, soft_cap: int = SSE_SUBSCRIBER_CAP) -> None:
+    def __init__(self, *, soft_cap: int = 32) -> None:
         self._listeners: set[_Listener] = set()
         self._soft_cap = max(1, soft_cap)
         self._dropped_total = 0

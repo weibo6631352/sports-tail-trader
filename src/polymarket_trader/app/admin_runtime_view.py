@@ -7,12 +7,15 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents
+    from polymarket_trader.workers.market_ws.worker import MarketWsWorker
+    from polymarket_trader.workers.sports_live_state_worker import SportsLiveStateWorker
 
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
 from polymarket_trader.config import Settings
 from polymarket_trader.domain.account import AccountSnapshot
-from polymarket_trader.extension_api.manifest import ConfiguredExtension
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
+from polymarket_trader.domain.sports_live import SportsLiveSyncStatus
+from polymarket_trader.extension_api.manifest import _KELLY_DEFAULTS, resolve_kelly_params
 from polymarket_trader.infra.polymarket.clob_client import ClobClient
 from polymarket_trader.infra.polymarket.data_client import DataClient
 from polymarket_trader.infra.polymarket.gamma_client import GammaClient
@@ -21,8 +24,6 @@ from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.runtime.status import RuntimeSnapshot
 from polymarket_trader.runtime.supervisor import Supervisor
 from polymarket_trader.serialization import utc_now
-from polymarket_trader.workers.market_ws.worker import MarketWsWorker
-from polymarket_trader.workers.sports_live_state_worker import SportsLiveSyncResult, SportsLiveStateWorker
 
 logger = logging.getLogger(__name__)
 _RUNTIME_MARKET_SAMPLE_LIMIT = 20
@@ -271,13 +272,6 @@ class AdminRuntimeView:
             return (_LOW_ENTRY_FUNDS_WARNING,)
         return ()
 
-    def _strategy_config(self) -> Any | None:
-        """获取策略配置实例（ConfiguredExtension 协议）；未装配或不支持时返回 None。"""
-        extension = self.runtime.extension if self.runtime else None
-        if isinstance(extension, ConfiguredExtension):
-            return extension.config
-        return None
-
     def _configured_entry_floor_usdc(self) -> Decimal | None:
         """Kelly 框架下"账户余额低于 floor 就告警"的提示阈值。
 
@@ -290,13 +284,10 @@ class AdminRuntimeView:
         if not isinstance(settings, Settings):
             return None
         budget: Decimal | None = settings.portfolio_budget_usdc
-        # kelly_* 参数已迁移到策略配置，从 extension.config 读取。extension config 类型
-        # 由策略包决定，框架层只能通过反射读取（跨扩展边界属于合法 adapter getattr）。
-        strategy_cfg = self._strategy_config()
-        max_position_fraction = _decimal_or_none(
-            getattr(strategy_cfg, "kelly_max_position_fraction", None)
-        )
-        min_stake = _decimal_or_none(getattr(strategy_cfg, "kelly_min_stake_usdc", None))
+        extension = self.runtime.extension if self.runtime else None
+        kelly = resolve_kelly_params(extension) if extension is not None else _KELLY_DEFAULTS
+        max_position_fraction = kelly.kelly_max_position_fraction
+        min_stake = kelly.kelly_min_stake_usdc
         candidates: list[Decimal] = []
         if budget is not None and max_position_fraction is not None and max_position_fraction > 0:
             position_floor = budget * max_position_fraction
@@ -466,8 +457,8 @@ class AdminRuntimeView:
         worker: SportsLiveStateWorker | None = self.runtime.sports_live_state_worker if self.runtime else None
         if worker is not None:
             status = worker.status_snapshot()
-            # 生产路径返回 SportsLiveSyncResult dataclass；test stub 走 jsonable 兜底。
-            if isinstance(status, SportsLiveSyncResult):
+            # 生产路径返回 SportsLiveSyncStatus dataclass；test stub 走 jsonable 兜底。
+            if isinstance(status, SportsLiveSyncStatus):
                 snapshot = status.as_dict()
             else:
                 payload = jsonable(status)

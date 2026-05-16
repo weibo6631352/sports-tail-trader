@@ -21,7 +21,7 @@ from polymarket_trader.extension_api.decisions import (
     UniverseDecision,
 )
 from polymarket_trader.extension_api.errors import ExtensionLoadError
-from polymarket_trader.extension_api.hooks import ExtensionHooks, LiveStateHooks
+from polymarket_trader.extension_api.hooks import ExtensionHooks, LiveStateHooks, MarketClassificationHooks, SportsDiagnosticHooks
 from polymarket_trader.extension_api.lifecycle import (
     LifecycleBus,
     LifecycleCallback,
@@ -38,6 +38,8 @@ from polymarket_trader.extension_api.manifest import (
     ExtensionFactory,
     ExtensionManifest,
     ExtensionSpec,
+    KellyParams,
+    resolve_kelly_params,
 )
 from polymarket_trader.extension_api.ports import (
     AccountReadPort,
@@ -83,12 +85,15 @@ __all__ = (
     "ExtensionSpec",
     "Fill",
     "HistoryReadPort",
+    "KellyParams",
     "LifecycleBus",
     "LifecycleCallback",
     "LifecycleEnvelope",
     "LifecycleEvent",
     "LiveStateHooks",
     "LiveStateMatch",
+    "MarketClassificationHooks",
+    "SportsDiagnosticHooks",
     "ManualConfirmation",
     "MarketReadPort",
     "MarketTokenView",
@@ -105,5 +110,6 @@ __all__ = (
     "UniverseDecision",
     "load_extension_config",
     "load_mapping_file",
+    "resolve_kelly_params",
     "toolkit",
 )

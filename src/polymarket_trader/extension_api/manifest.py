@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Protocol, runtime_checkable
 
 from polymarket_trader.extension_api.hooks import ExtensionHooks, LiveStateHooks
@@ -44,6 +45,43 @@ class ConfiguredExtension(Protocol):
 
     @property
     def config(self) -> Any: ...
+
+
+@dataclass(frozen=True, slots=True)
+class KellyParams:
+    """Kelly 仓位计算参数的框架侧值容器。
+
+    ``resolve_kelly_params`` 从 ``ConfiguredExtension.config`` 提取；不可用时返回保守默认值。
+    框架通过此类型在 ``build_runtime`` 和 ``AdminService`` 中传递 Kelly 参数，
+    避免直接依赖策略包配置类型。
+    """
+
+    kelly_fraction: Decimal = Decimal("0.25")
+    kelly_max_position_fraction: Decimal = Decimal("0.10")
+    kelly_min_edge: Decimal = Decimal("0.02")
+    kelly_min_stake_usdc: Decimal = Decimal("1")
+    kelly_allow_round_up_to_market_min: bool = True
+    kelly_round_up_max_overbet_ratio: Decimal = Decimal("1")
+    kelly_drawdown_halt_fraction: Decimal = Decimal("0.5")
+
+
+_KELLY_DEFAULTS = KellyParams()
+
+
+def resolve_kelly_params(extension: BusinessExtension) -> KellyParams:
+    """从 ConfiguredExtension.config 提取 Kelly 参数，不可用时返回保守默认值。"""
+    config: Any = extension.config if isinstance(extension, ConfiguredExtension) else None
+    if config is None:
+        return _KELLY_DEFAULTS
+    return KellyParams(
+        kelly_fraction=getattr(config, "kelly_fraction", _KELLY_DEFAULTS.kelly_fraction),
+        kelly_max_position_fraction=getattr(config, "kelly_max_position_fraction", _KELLY_DEFAULTS.kelly_max_position_fraction),
+        kelly_min_edge=getattr(config, "kelly_min_edge", _KELLY_DEFAULTS.kelly_min_edge),
+        kelly_min_stake_usdc=getattr(config, "kelly_min_stake_usdc", _KELLY_DEFAULTS.kelly_min_stake_usdc),
+        kelly_allow_round_up_to_market_min=getattr(config, "kelly_allow_round_up_to_market_min", _KELLY_DEFAULTS.kelly_allow_round_up_to_market_min),
+        kelly_round_up_max_overbet_ratio=getattr(config, "kelly_round_up_max_overbet_ratio", _KELLY_DEFAULTS.kelly_round_up_max_overbet_ratio),
+        kelly_drawdown_halt_fraction=getattr(config, "kelly_drawdown_halt_fraction", _KELLY_DEFAULTS.kelly_drawdown_halt_fraction),
+    )
 
 
 @runtime_checkable

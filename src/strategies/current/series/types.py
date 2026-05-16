@@ -11,12 +11,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market
+from polymarket_trader.extension_api.live_state import SeriesState as SeriesState  # re-export
 
 
 class SeriesSubType(StrEnum):
@@ -86,22 +86,6 @@ class SeriesCandidate:
     def condition_id(self) -> str:
         return self.market.condition_id
 
-
-@dataclass(frozen=True, slots=True)
-class SeriesState:
-    """系列赛热态快照。
-
-    本 worktree 仅承载类型定义；数据采集与匹配在 Worktree 3 落地。所有定价模型
-    都从这里读热态，不允许从原始 ``ExtensionContext.metadata`` 读裸字段。
-    """
-
-    team_a: str
-    team_b: str
-    wins_a: int
-    wins_b: int
-    best_of: int
-    next_game_at: datetime | None
-    observed_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

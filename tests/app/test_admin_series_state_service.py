@@ -12,13 +12,39 @@ from types import SimpleNamespace
 
 import pytest
 
+from collections.abc import Mapping
+from typing import Any
+
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.domain.market import Market, MarketOutcome
+from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
+from polymarket_trader.extension_api.live_state import SeriesState
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.registry import MarketRegistry
+from strategies.current.outright.match import season_odds_from_metadata
+from strategies.current.outright.team_resolver import resolve_market_team_debug
+from strategies.current.series.match import series_state_from_metadata
 
 
 _NOW = datetime(2026, 5, 13, 18, 0, tzinfo=timezone.utc)
+
+
+class _DiagnosticExtension:
+    """SportsDiagnosticHooks stub backed by actual strategy functions."""
+
+    def series_state_from_metadata(self, metadata: Mapping[str, Any]) -> SeriesState | None:
+        return series_state_from_metadata(metadata)
+
+    def season_odds_from_metadata(self, metadata: Mapping[str, Any]) -> SeasonOddsSnapshot | None:
+        return season_odds_from_metadata(metadata)
+
+    def resolve_outright_team_debug_payload(
+        self, market: Market, metadata: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        snapshot = season_odds_from_metadata(metadata)
+        if snapshot is None:
+            return None
+        return resolve_market_team_debug(market, snapshot).as_payload()
 
 
 def _runtime(*, registry: MarketRegistry, store: EntryMetadataStore) -> SimpleNamespace:
@@ -37,7 +63,7 @@ def _runtime(*, registry: MarketRegistry, store: EntryMetadataStore) -> SimpleNa
         trading_service=None,
         trading_decision_service=None,
         db_session_factory=None,
-        extension=None,
+        extension=_DiagnosticExtension(),
     )
 
 

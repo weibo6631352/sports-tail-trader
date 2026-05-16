@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Callable, Iterable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
+
+if TYPE_CHECKING:
+    from polymarket_trader.app.parameter_store import ParameterStore
 from uuid import uuid4
 
 from polymarket_trader.app.trading_decision_service import EntryPlan, TradingDecisionService
@@ -52,6 +56,10 @@ HeartbeatCallback = Callable[..., None]
 # Worker 长时间空闲等事件时，仍要定期触发 heartbeat 让 supervisor 区分「卡死」和「空等」。
 # 60s 在 N13 观测的"4 分钟无心跳"上下文里足够灵敏，又不会刷屏。
 _TRADING_DECISION_IDLE_HEARTBEAT_SECONDS = 60.0
+# _lifecycle_timeline LRU 上限：跟踪市场数超过此值时淘汰最久未更新的条目。
+# 每个市场最多保留最近 _LIFECYCLE_HISTORY_PER_MARKET 次转换记录。
+_LIFECYCLE_MARKET_CAP = 500
+_LIFECYCLE_HISTORY_PER_MARKET = 50
 
 POSITION_INCREASE_LIFECYCLES = {
     MarketLifecycle.POSITION_OPEN,
@@ -95,7 +103,6 @@ class TradingDecisionWorker:
         open_orders_provider: OpenOrdersProvider | None = None,
         account_state_store: AccountStateStore | None = None,
         portfolio_budget_usdc: Decimal = Decimal("0"),
-        available_usdc: Decimal | None = None,
         kelly_fraction: Decimal = Decimal("0.25"),
         kelly_max_position_fraction: Decimal = Decimal("0.10"),
         kelly_min_edge: Decimal = Decimal("0.02"),
@@ -103,11 +110,9 @@ class TradingDecisionWorker:
         kelly_allow_round_up_to_market_min: bool = True,
         kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
         kelly_drawdown_halt_fraction: Decimal = Decimal("0.5"),
-        balance_usdc: Decimal | None = None,
-        allowance_usdc: Decimal | None = None,
         order_retry_limit: int | None = None,
         entry_metadata_provider: EntryMetadataProvider | None = None,
-        parameter_store: Any | None = None,
+        parameter_store: "ParameterStore | None" = None,
         heartbeat: HeartbeatCallback | None = None,
         idle_heartbeat_seconds: float = _TRADING_DECISION_IDLE_HEARTBEAT_SECONDS,
     ) -> None:
@@ -122,7 +127,6 @@ class TradingDecisionWorker:
         # 静态启动值（来自 Settings）；运行时通过 ``parameter_store`` 的 override
         # 覆盖。每次 review 前用 property 读出当前值——这样 agent PUT 后立刻生效。
         self._portfolio_budget_usdc_default = portfolio_budget_usdc
-        self._available_usdc = available_usdc
         self._kelly_fraction_default = kelly_fraction
         self._kelly_max_position_fraction_default = kelly_max_position_fraction
         self._kelly_min_edge_default = kelly_min_edge
@@ -130,8 +134,6 @@ class TradingDecisionWorker:
         self._kelly_allow_round_up_default = kelly_allow_round_up_to_market_min
         self._kelly_round_up_max_overbet_ratio_default = kelly_round_up_max_overbet_ratio
         self._kelly_drawdown_halt_fraction_default = kelly_drawdown_halt_fraction
-        self._balance_usdc = balance_usdc
-        self._allowance_usdc = allowance_usdc
         self._order_retry_limit_default = order_retry_limit
         self._parameter_store = parameter_store
         self._entry_metadata_provider = entry_metadata_provider
@@ -140,10 +142,11 @@ class TradingDecisionWorker:
         # 单测可以设 < 1s 让 idle heartbeat 路径快速触发；运行时仍用 60s 默认。
         self._idle_heartbeat_seconds = max(0.001, float(idle_heartbeat_seconds))
         self._market_lifecycle: dict[str, MarketLifecycle] = {}
-        # P3.5: (strategy_id, reason) → count，供 admin/observability 查询哪个策略因何跳过了多少次。
+        # (strategy_id, reason) → count，供 admin/observability 查询哪个策略因何跳过了多少次。
         self._skip_reason_histogram: dict[tuple[str, str], int] = {}
-        # P3.6: condition_id → [(lifecycle, timestamp), …]，记录每次状态转换的时间点。
-        self._lifecycle_timeline: dict[str, list[tuple[MarketLifecycle, datetime]]] = {}
+        # condition_id → [(lifecycle, timestamp), …]，记录每次状态转换的时间点。
+        # OrderedDict + cap = LRU 防止无限增长（见 _LIFECYCLE_MARKET_CAP）。
+        self._lifecycle_timeline: OrderedDict[str, list[tuple[MarketLifecycle, datetime]]] = OrderedDict()
         self._order_result_processor = TradingOrderResultProcessor(
             host=self,
             trading_decision_service=self._trading_decision_service,
@@ -268,9 +271,7 @@ class TradingDecisionWorker:
             token_id=event.token_id,
             account_snapshot=snapshot,
             portfolio_budget_usdc=self._portfolio_budget_usdc,
-            available_usdc=(
-                self._available_usdc if self._available_usdc is not None else snapshot_available_usdc(snapshot)
-            ),
+            available_usdc=snapshot_available_usdc(snapshot),
             kelly_fraction=self._kelly_fraction,
             kelly_max_position_fraction=self._kelly_max_position_fraction,
             kelly_min_edge=self._kelly_min_edge,
@@ -348,10 +349,8 @@ class TradingDecisionWorker:
             condition_positions=_condition_positions(snapshot, plan.market.condition_id),
             allocation_plan=plan.allocation_plan,
             classification_passed=True,
-            balance_usdc=self._balance_usdc if self._balance_usdc is not None else snapshot_available_usdc(snapshot),
-            allowance_usdc=(
-                self._allowance_usdc if self._allowance_usdc is not None else snapshot_allowance(snapshot)
-            ),
+            balance_usdc=snapshot_available_usdc(snapshot),
+            allowance_usdc=snapshot_allowance(snapshot),
             bankroll_usdc=_resolve_bankroll_for_review(
                 portfolio_budget_usdc=self._portfolio_budget_usdc,
                 snapshot=snapshot,
@@ -804,15 +803,7 @@ class TradingDecisionWorker:
     def _snapshot(self) -> AccountSnapshot | None:
         if self._account_state_store is not None:
             return self._account_state_store.snapshot()
-        if self._balance_usdc is None and self._allowance_usdc is None:
-            return None
-        return AccountSnapshot(
-            balance_usdc=self._balance_usdc or Decimal("0"),
-            allowance_usdc=self._allowance_usdc or Decimal("0"),
-            positions=tuple(self._positions_provider()),
-            open_orders=tuple(self._open_orders_provider()),
-            allow_new_entries=True,
-        )
+        return None
 
     def _build_positions_provider(self) -> PositionsProvider:
         if self._account_state_store is None:
@@ -830,8 +821,19 @@ class TradingDecisionWorker:
         if market is None or lifecycle is None:
             return
         self._market_lifecycle[market.condition_id] = lifecycle
-        timeline = self._lifecycle_timeline.setdefault(market.condition_id, [])
-        timeline.append((lifecycle, _utc_now()))
+        self._record_lifecycle(market.condition_id, lifecycle)
+
+    def _record_lifecycle(self, condition_id: str, lifecycle: MarketLifecycle) -> None:
+        if condition_id not in self._lifecycle_timeline:
+            if len(self._lifecycle_timeline) >= _LIFECYCLE_MARKET_CAP:
+                self._lifecycle_timeline.popitem(last=False)
+            self._lifecycle_timeline[condition_id] = []
+        else:
+            self._lifecycle_timeline.move_to_end(condition_id)
+        history = self._lifecycle_timeline[condition_id]
+        history.append((lifecycle, _utc_now()))
+        if len(history) > _LIFECYCLE_HISTORY_PER_MARKET:
+            del history[: len(history) - _LIFECYCLE_HISTORY_PER_MARKET]
 
     def _transition_market_by_result(self, order_result: OrderResult, lifecycle: MarketLifecycle) -> None:
         market = market_from_result(order_result)
@@ -845,7 +847,9 @@ class TradingDecisionWorker:
             if order_result.status in {OrderResultStatus.FULL_FILL, OrderResultStatus.PARTIAL_FILL}:
                 self._transition_market_by_result(order_result, MarketLifecycle.POSITION_OPEN)
             elif order_result.status == OrderResultStatus.LIVE:
-                self._transition_market_by_result(order_result, MarketLifecycle.PAUSED)
+                # 买单挂单未成交 → 暂停该市场直到 reconciler 处理。与 _pause_market 保持
+                # 同步，确保 AccountStateStore.is_market_paused 返回 True，让 admin 可见。
+                self._pause_market(order_result.condition_id, reason="resting_buy_order")
             elif order_result.status == OrderResultStatus.NO_FILL:
                 self._transition_market_by_result(order_result, MarketLifecycle.ENTRY_READY)
             elif order_result.status in {OrderResultStatus.REJECTED, OrderResultStatus.FAILED, OrderResultStatus.UNKNOWN_TIMEOUT}:
@@ -860,8 +864,7 @@ class TradingDecisionWorker:
         if condition_id is None:
             return
         self._market_lifecycle[condition_id] = MarketLifecycle.PAUSED
-        timeline = self._lifecycle_timeline.setdefault(condition_id, [])
-        timeline.append((MarketLifecycle.PAUSED, _utc_now()))
+        self._record_lifecycle(condition_id, MarketLifecycle.PAUSED)
         if self._account_state_store is not None:
             self._account_state_store.pause_market(
                 condition_id,
@@ -930,10 +933,8 @@ class TradingDecisionWorker:
             condition_open_orders=_condition_orders(snapshot, intent.condition_id),
             condition_positions=_condition_positions(snapshot, intent.condition_id),
             classification_passed=True,
-            balance_usdc=self._balance_usdc if self._balance_usdc is not None else snapshot_available_usdc(snapshot),
-            allowance_usdc=(
-                self._allowance_usdc if self._allowance_usdc is not None else snapshot_allowance(snapshot)
-            ),
+            balance_usdc=snapshot_available_usdc(snapshot),
+            allowance_usdc=snapshot_allowance(snapshot),
             bankroll_usdc=_resolve_bankroll_for_review(
                 portfolio_budget_usdc=self._portfolio_budget_usdc,
                 snapshot=snapshot,

@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from typing import Mapping
 from uuid import uuid4
 
+import logging
+
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
 from polymarket_trader.infra.sports.series_state_client import SeriesStateClient
@@ -23,7 +25,9 @@ from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.serialization import jsonable
-from strategies.current.series.types import SeriesState
+from polymarket_trader.extension_api.live_state import SeriesState
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -93,6 +97,7 @@ class SeriesStateWorker:
                 except Exception as exc:
                     self._consecutive_failures += 1
                     self._last_error = f"{market.market_slug}: {exc}"
+                    logger.warning("series_state_fetch_failed", extra={"market_slug": market.market_slug, "error": str(exc), "consecutive_failures": self._consecutive_failures})
                     continue
                 self._consecutive_failures = 0
                 self._last_fetched_at[market.condition_id] = _utc_now()

@@ -16,15 +16,8 @@ from polymarket_trader.app.admin_service_helpers import (
 )
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.time_filters import TimeRange
+from polymarket_trader.extension_api.hooks import SportsDiagnosticHooks
 from polymarket_trader.serialization import jsonable
-
-# 这两段 import 跨 app → strategies 边界（与 ``infra/sports/series_state_client.py``
-# 同模式）：``series_state`` 元数据键的约定属于 series 策略包，admin 诊断必须读到
-# 同一份强类型解析与 team_resolver trace 才能给运维一致的诊断结果，没有 framework
-# 侧的等价物可复用——所以让 admin 直接调策略包的纯函数（无副作用、无状态）。
-from strategies.current.outright.match import season_odds_from_metadata
-from strategies.current.outright.team_resolver import resolve_market_team_debug
-from strategies.current.series.match import series_state_from_metadata
 
 
 if TYPE_CHECKING:
@@ -239,9 +232,11 @@ class AdminSportsQueryMixin(_Base):
             return payload
         if now is None:
             now = datetime.now(timezone.utc)
+        extension = self.runtime.extension if self.runtime else None
+        diagnostics = extension if isinstance(extension, SportsDiagnosticHooks) else None
         items: list[dict[str, Any]] = []
         for record in store.records():
-            state = series_state_from_metadata(record.metadata)
+            state = None if diagnostics is None else diagnostics.series_state_from_metadata(record.metadata)
             if state is None:
                 continue
             age_seconds = max(0.0, (now - state.observed_at).total_seconds())
@@ -282,6 +277,8 @@ class AdminSportsQueryMixin(_Base):
         还是文本归一化遗漏标点 / 别名。返回 ``None`` 时由路由层翻译成 404。
         """
 
+        extension = self.runtime.extension if self.runtime else None
+        diagnostics = extension if isinstance(extension, SportsDiagnosticHooks) else None
         market = self._resolve_market(
             condition_id=condition_id,
             market_slug=market_slug,
@@ -289,34 +286,36 @@ class AdminSportsQueryMixin(_Base):
         if market is None:
             return None
         metadata = self._entry_metadata_for_market(market)
-        snapshot = season_odds_from_metadata(metadata)
+        market_payload: dict[str, Any] = {
+            "condition_id": market.condition_id,
+            "market_slug": market.market_slug,
+            "event_slug": market.event_slug,
+            "market_question": market.market_question,
+            "event_title": market.event_title,
+        }
+        if diagnostics is None:
+            return {
+                "market": market_payload,
+                "snapshot_available": False,
+                "reason": "diagnostic_hooks_unavailable",
+                "trace": None,
+            }
+        snapshot = diagnostics.season_odds_from_metadata(metadata)
         if snapshot is None:
             return {
-                "market": {
-                    "condition_id": market.condition_id,
-                    "market_slug": market.market_slug,
-                    "event_slug": market.event_slug,
-                    "market_question": market.market_question,
-                    "event_title": market.event_title,
-                },
+                "market": market_payload,
                 "snapshot_available": False,
                 "reason": "missing_season_odds",
                 "trace": None,
             }
-        trace = resolve_market_team_debug(market, snapshot)
+        trace_payload = diagnostics.resolve_outright_team_debug_payload(market, metadata)
         return {
-            "market": {
-                "condition_id": market.condition_id,
-                "market_slug": market.market_slug,
-                "event_slug": market.event_slug,
-                "market_question": market.market_question,
-                "event_title": market.event_title,
-            },
+            "market": market_payload,
             "snapshot_available": True,
             "snapshot_market_key": snapshot.market_key,
             "snapshot_source": snapshot.source,
             "snapshot_observed_at": jsonable(snapshot.observed_at),
-            "trace": trace.as_payload(),
+            "trace": trace_payload,
         }
 
 

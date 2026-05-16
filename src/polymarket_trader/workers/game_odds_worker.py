@@ -13,7 +13,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Mapping
+from uuid import uuid4
 
+import logging
+
+from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
 from polymarket_trader.infra.sports.game_odds_client import (
     GameOddsClient,
@@ -21,7 +25,10 @@ from polymarket_trader.infra.sports.game_odds_client import (
     GameSpreadSnapshot,
 )
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
+from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -48,6 +55,7 @@ class GameOddsWorker:
         game_key_for: GameKeyResolver,
         ttl_seconds: int = 1800,
         enabled: bool = False,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._client = client
         self._registry = registry
@@ -57,6 +65,7 @@ class GameOddsWorker:
         self._game_key_for = game_key_for
         self._ttl_seconds = max(60, int(ttl_seconds))
         self._enabled = enabled
+        self._event_bus = event_bus
         self._last_fetched_at: dict[str, datetime] = {}
         self._last_started_at: datetime | None = None
         self._last_error: str | None = None
@@ -90,6 +99,7 @@ class GameOddsWorker:
             except Exception as exc:
                 self._consecutive_failures += 1
                 self._last_error = f"{market.market_slug}: {exc}"
+                logger.warning("game_odds_fetch_failed", extra={"market_slug": market.market_slug, "error": str(exc), "consecutive_failures": self._consecutive_failures})
                 continue
             # spreads 缺失不影响 h2h 主路径：series WINNER 仍可用 h2h；只在
             # HANDICAP single_game scope 缺数据时由 evaluator 报 MISSING_GAME_SPREADS。
@@ -101,14 +111,35 @@ class GameOddsWorker:
                 )
             except Exception as exc:
                 self._last_error = f"spreads:{market.market_slug}: {exc}"
+                logger.warning("game_spreads_fetch_failed", extra={"market_slug": market.market_slug, "error": str(exc)})
             self._consecutive_failures = 0
             self._last_fetched_at[market.condition_id] = _utc_now()
             if snapshot is None and spread_snapshot is None:
                 continue
             self._upsert(market, snapshot, spread_snapshot)
+            await self._publish_entry_signals(market)
             refreshed += 1
         self._last_markets_refreshed = refreshed
         return refreshed
+
+    async def _publish_entry_signals(self, market: Market) -> None:
+        if self._event_bus is None:
+            return
+        for token_id in market.token_ids:
+            await self._event_bus.publish(
+                OutboxPriority.P1,
+                DomainEvent(
+                    trace_id=f"game-odds-{uuid4().hex}",
+                    event_type=DomainEventType.ENTRY_SIGNAL_TRIGGERED,
+                    event_id=uuid4().hex,
+                    market_slug=market.market_slug,
+                    event_slug=market.event_slug,
+                    condition_id=market.condition_id,
+                    token_id=token_id,
+                    reason="game_odds_refreshed",
+                    payload={"origin": "game_odds_worker"},
+                ),
+            )
 
     def _should_refresh(self, condition_id: str) -> bool:
         last = self._last_fetched_at.get(condition_id)

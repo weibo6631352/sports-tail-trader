@@ -119,7 +119,7 @@ def evaluate_tail_opportunity(
         return _evaluate_nfl_manual_review(candidate, policy)
 
     if market.market_type == SportsMarketType.BINARY_PROP:
-        return _accept(candidate, "binary_prop_requires_specific_model", ExecutionPermission.RECORD_ONLY)
+        return _reject(candidate, "binary_prop_no_tail_model")
 
     if is_tennis_game(game):
         if market.market_type == SportsMarketType.TOTALS:
@@ -136,8 +136,6 @@ def evaluate_tail_opportunity(
         return _evaluate_moneyline(candidate, policy)
     if market.market_type == SportsMarketType.SPREADS:
         return _evaluate_spreads(candidate, policy)
-    if market.market_type == SportsMarketType.BINARY_PROP:
-        return _accept(candidate, "binary_prop_requires_specific_model", ExecutionPermission.RECORD_ONLY)
     return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
 
 

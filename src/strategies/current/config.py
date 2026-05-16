@@ -280,10 +280,7 @@ class CurrentStrategyConfig:
     tail_outright_reassessment_interval_seconds: int = 3600
     tail_outright_exit_edge_target: Decimal = Decimal("0.03")
     tail_outright_min_profit_per_share: Decimal = Decimal("0.02")
-    tail_outright_stop_loss_pct: Decimal = Decimal("0.30")
-    tail_outright_fair_value_drift_pct: Decimal = Decimal("0.15")
     tail_outright_min_remaining_days: int = 7
-    tail_outright_late_min_pnl_pct: Decimal = Decimal("0.05")
     tail_outright_entry_maker_max_resting_seconds: int = 86400
     tail_outright_min_orderbook_depth_usdc: Decimal = Decimal("100")
 

@@ -193,6 +193,9 @@ class Settings(BaseSettings):
     trading_queue_warn_depth: int = Field(default=100, ge=0)
     entry_signal_to_submit_warn_ms: int = Field(default=500, ge=1)
 
+    # SSE fan-out 订阅者并发上限；超过返回 429 Retry-After=5。
+    sse_subscriber_cap: int = Field(default=32, ge=1)
+
     # === API 服务暴露面（Admin 路由是高危写入入口，必须能在 prod 关掉 Swagger 文档
     # 和强制 token 鉴权）===
     # 默认 True 便于本机开发；prod 必须显式 EXPOSE_OPENAPI_DOCS=false。

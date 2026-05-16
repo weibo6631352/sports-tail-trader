@@ -50,17 +50,15 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from polymarket_trader.app.extension_host import load_extension
 from polymarket_trader.app.sports_live_calibration import (
     SportsLiveCalibrationReport,
     run_calibration,
 )
 from polymarket_trader.config import load_settings
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
-from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.infra.sports.aggregate_client import SportsLiveAggregateClient
 from polymarket_trader.main import _build_sports_live_state_client
-
-from strategies.current.live_state import best_live_match
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -149,10 +147,6 @@ def load_markets_from_fixture(path: str | Path) -> tuple[Market, ...]:
     return tuple(markets)
 
 
-def _strategy_match(market: Market, events: tuple[LiveEvent, ...]) -> Any:
-    return best_live_match(market, events)
-
-
 async def _amain(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
     settings = load_settings()
@@ -160,12 +154,28 @@ async def _amain(argv: Sequence[str] | None = None) -> int:
     league_filter = [s.strip().upper() for s in args.leagues.split(",") if s.strip()]
     aggregate_client: SportsLiveAggregateClient = _build_sports_live_state_client(settings)
 
+    match_fn: Any = None
     if args.markets_fixture:
         markets: tuple[Market, ...] = load_markets_from_fixture(args.markets_fixture)
-        match_fn: Any = _strategy_match
+        if settings.extension_module:
+            extension = load_extension(module_path=settings.extension_module)
+            live_state_hooks = extension.live_state_hooks
+            if live_state_hooks is not None:
+                match_fn = live_state_hooks.match_live_state
+            else:
+                print(
+                    "WARNING: extension has no live_state_hooks — running aggregate-only mode "
+                    "(per-market match rates will not be computed)",
+                    file=sys.stderr,
+                )
+        else:
+            print(
+                "WARNING: extension_module not configured — running aggregate-only mode "
+                "(per-market match rates will not be computed)",
+                file=sys.stderr,
+            )
     else:
         markets = ()
-        match_fn = None
 
     try:
         report: SportsLiveCalibrationReport = await run_calibration(

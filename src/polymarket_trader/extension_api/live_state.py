@@ -1,10 +1,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import LiveEvent
+
+
+@dataclass(frozen=True, slots=True)
+class SeriesState:
+    """系列赛热态快照——framework 级类型，infra/workers/策略均使用此定义。
+
+    infra 层（series_state_client）生产，workers 层写入 metadata store，
+    策略层的 evaluator 消费。不允许策略包定义独立副本。
+    """
+
+    team_a: str
+    team_b: str
+    wins_a: int
+    wins_b: int
+    best_of: int
+    next_game_at: datetime | None
+    observed_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

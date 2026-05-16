@@ -38,7 +38,8 @@ from polymarket_trader.domain.order import (
     SellOrderIntent,
 )
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
-from polymarket_trader.workers.trading_decision import (
+from polymarket_trader.extension_api.manifest import _KELLY_DEFAULTS, resolve_kelly_params
+from polymarket_trader.app.decision_serialization import (
     snapshot_allowance,
     snapshot_available_usdc,
 )
@@ -245,6 +246,7 @@ class AdminControlsMixin:
                 "candidate": self._candidate_payload(market, token_id, plan),
             }
 
+        _kelly = resolve_kelly_params(self.runtime.extension) if self.runtime else _KELLY_DEFAULTS
         review = await self._trading_service().review_intent(
             plan.intent,
             market=market,
@@ -256,11 +258,11 @@ class AdminControlsMixin:
             balance_usdc=snapshot_available_usdc(account),
             allowance_usdc=snapshot_allowance(account),
             bankroll_usdc=_resolve_admin_bankroll(account, self._settings_value("portfolio_budget_usdc")),
-            kelly_max_position_fraction=self._settings_value("kelly_max_position_fraction"),
-            kelly_round_up_max_overbet_ratio=self._settings_value("kelly_round_up_max_overbet_ratio"),
+            kelly_max_position_fraction=_kelly.kelly_max_position_fraction,
+            kelly_round_up_max_overbet_ratio=_kelly.kelly_round_up_max_overbet_ratio,
             current_equity_usdc=account.equity_usdc,
             peak_bankroll_usdc=account.peak_bankroll_usdc,
-            kelly_drawdown_halt_fraction=self._settings_value("kelly_drawdown_halt_fraction"),
+            kelly_drawdown_halt_fraction=_kelly.kelly_drawdown_halt_fraction,
             order_retry_limit=self._settings_value("order_retry_limit"),
             operation="admin_confirm_entry",
         )
@@ -599,7 +601,7 @@ class AdminControlsMixin:
             OutboxPriority.P1,
             DomainEvent(
                 trace_id=trace_id,
-                event_type=getattr(DomainEventType, event_type_pre),
+                event_type=DomainEventType[event_type_pre],
                 event_id=uuid4().hex,
                 market_slug=order.market_slug,
                 condition_id=order.condition_id,
@@ -616,7 +618,7 @@ class AdminControlsMixin:
             OutboxPriority.P1,
             DomainEvent(
                 trace_id=trace_id,
-                event_type=getattr(DomainEventType, event_type_post),
+                event_type=DomainEventType[event_type_post],
                 event_id=uuid4().hex,
                 market_slug=order.market_slug,
                 condition_id=order.condition_id,
@@ -719,6 +721,7 @@ class AdminControlsMixin:
             market_slug=market.market_slug,
             order_type=OrderType.GTC,
         )
+        _kelly = resolve_kelly_params(self.runtime.extension) if self.runtime else _KELLY_DEFAULTS
         review = await trading_service.sell(
             intent,
             market=market,
@@ -729,11 +732,11 @@ class AdminControlsMixin:
             balance_usdc=snapshot_available_usdc(account),
             allowance_usdc=snapshot_allowance(account),
             bankroll_usdc=_resolve_admin_bankroll(account, self._settings_value("portfolio_budget_usdc")),
-            kelly_max_position_fraction=self._settings_value("kelly_max_position_fraction"),
-            kelly_round_up_max_overbet_ratio=self._settings_value("kelly_round_up_max_overbet_ratio"),
+            kelly_max_position_fraction=_kelly.kelly_max_position_fraction,
+            kelly_round_up_max_overbet_ratio=_kelly.kelly_round_up_max_overbet_ratio,
             current_equity_usdc=account.equity_usdc,
             peak_bankroll_usdc=account.peak_bankroll_usdc,
-            kelly_drawdown_halt_fraction=self._settings_value("kelly_drawdown_halt_fraction"),
+            kelly_drawdown_halt_fraction=_kelly.kelly_drawdown_halt_fraction,
             order_retry_limit=self._settings_value("order_retry_limit"),
         )
         result = review.order_result

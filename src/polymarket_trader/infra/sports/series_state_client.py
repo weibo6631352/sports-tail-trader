@@ -31,7 +31,7 @@ from polymarket_trader.infra.sports.common import (
     normalize_sports_data_error,
     utc_now,
 )
-from strategies.current.series.types import SeriesState
+from polymarket_trader.extension_api.live_state import SeriesState
 
 logger = logging.getLogger(__name__)
 

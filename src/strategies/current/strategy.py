@@ -12,6 +12,8 @@ from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import LiveEvent
+from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
+from polymarket_trader.extension_api.live_state import SeriesState
 
 from polymarket_trader.extension_api.lifecycle import LifecycleEnvelope as _LifecycleEnvelope, LifecycleEvent as _LifecycleEvent
 from polymarket_trader.extension_api import (
@@ -49,14 +51,19 @@ from strategies.current.outright import (
     resolve_outright_reject_label,
     size_outright_entry,
 )
+from strategies.current.outright.match import season_odds_from_metadata
+from strategies.current.outright.team_resolver import resolve_market_team_debug
 from strategies.current.parameter_overrides import active_ports_scope
 from strategies.current.recovery import decide_recovery
 from strategies.current.series import (
     decide_series_entry,
     resolve_series_reject_label,
     resolve_series_sub_type_label,
+    series_state_from_metadata,
     size_series_entry,
 )
+from strategies.current.series.classifier import classify_series_sub_type
+from strategies.current.series.types import SeriesSubType
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
 from strategies.current.trading import decide_entry, decide_exit, decide_follow_up, size_entry
 from strategies.current.trading.helpers import enrich_decision
@@ -380,6 +387,82 @@ class CurrentStrategy:
             existing_market=existing_market,
             reason=reason,
         )
+
+    # --- MarketClassificationHooks implementation ---
+
+    def is_outright_market(self, market: Market) -> bool:
+        descriptor = describe_sports_market(market)
+        return descriptor.accepted and descriptor.market_family == SportsMarketFamily.OUTRIGHT
+
+    def is_series_winner_market(self, market: Market) -> bool:
+        descriptor = describe_sports_market(market)
+        if not descriptor.accepted or descriptor.market_family != SportsMarketFamily.SERIES:
+            return False
+        return classify_series_sub_type(market) == SeriesSubType.WINNER
+
+    def sport_key_for_season_odds(self, market: Market) -> str | None:
+        text = " ".join(filter(None, (market.category or "", *(market.tags or ())))).lower()
+        if "nba" in text or "basketball" in text:
+            return "basketball_nba"
+        if "nhl" in text or "hockey" in text:
+            return "icehockey_nhl"
+        if "nfl" in text or "american football" in text:
+            return "americanfootball_nfl"
+        if "mlb" in text or "baseball" in text:
+            return "baseball_mlb"
+        if "epl" in text or "premier league" in text:
+            return "soccer_epl"
+        return None
+
+    def sport_key_for_series_state(self, market: Market) -> str | None:
+        text = " ".join(filter(None, (market.category or "", *(market.tags or ())))).lower()
+        if "nba" in text or "basketball" in text:
+            return "nba"
+        if "nhl" in text or "hockey" in text:
+            return "nhl"
+        if "mlb" in text or "baseball" in text:
+            return "mlb"
+        return None
+
+    def sport_key_for_game_odds(self, market: Market) -> str | None:
+        text = " ".join(filter(None, (market.category or "", *(market.tags or ())))).lower()
+        if "nba" in text or "basketball" in text:
+            return "basketball_nba"
+        if "nhl" in text or "hockey" in text:
+            return "icehockey_nhl"
+        if "mlb" in text or "baseball" in text:
+            return "baseball_mlb"
+        return None
+
+    def market_family_label(self, market: Market) -> str | None:
+        descriptor = describe_sports_market(market)
+        if not descriptor.accepted:
+            return None
+        return descriptor.market_family.value
+
+    # --- SportsDiagnosticHooks implementation ---
+
+    def series_state_from_metadata(
+        self, metadata: Mapping[str, Any]
+    ) -> SeriesState | None:
+        return series_state_from_metadata(metadata)
+
+    def season_odds_from_metadata(
+        self, metadata: Mapping[str, Any]
+    ) -> SeasonOddsSnapshot | None:
+        return season_odds_from_metadata(metadata)
+
+    def resolve_outright_team_debug_payload(
+        self,
+        market: Market,
+        metadata: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        snapshot = season_odds_from_metadata(metadata)
+        if snapshot is None:
+            return None
+        return resolve_market_team_debug(market, snapshot).as_payload()
+
+    # --- LiveStateHooks implementation ---
 
     def match_live_state(
         self,

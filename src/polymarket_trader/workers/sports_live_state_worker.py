@@ -13,7 +13,7 @@ from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
 
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
@@ -48,6 +48,7 @@ SportsLiveStateMatcher = Callable[
     LiveStateMatch | None,
 ]
 
+@runtime_checkable
 class SportsLiveMarketTracker(Protocol):
     """直播状态确认入场后，用于把 market 交给盘口热订阅的最小接口。"""
 
@@ -378,10 +379,8 @@ class SportsLiveStateWorker:
         tracker = self._market_tracker
         if callable(tracker):
             tracker(match.market)
-            return
-        track_market = getattr(tracker, "track_market", None)
-        if callable(track_market):
-            track_market(match.market)
+        elif isinstance(tracker, SportsLiveMarketTracker):
+            tracker.track_market(match.market)
 
     async def _publish_sports_live_state_recorded(
         self,

@@ -13,7 +13,7 @@ from polymarket_trader.extension_api import RecoveryDecision, ExtensionContext, 
 
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata, exit_price_for_context
-from strategies.current.outcomes import tail_token_targets
+from strategies.current.outcomes import describe_sports_market, SportsMarketFamily, tail_token_targets
 from strategies.current.tail import LiveGameStatus, live_game_state_from_metadata
 from strategies.current.trading.helpers import resolve_tick_size
 
@@ -326,6 +326,7 @@ def _stale_no_live_state_pause_reason(
 ) -> str | None:
     """检测「赛事起始已过 stale 阈值但完全无直播状态」的 stale market。
 
+    仅适用于 SINGLE_GAME：outright/series 不依赖直播源，不因缺失直播状态而 pause。
     意味着 market 已经脱离入场窗口、活跃直播源也无法提供数据（赛事结束 /
     联赛不被任何数据源覆盖）。继续保留在 registry 仅是 scanner 噪音；主动
     pause 让 reconcile / settle scanner 把它纳入退订路径。
@@ -333,6 +334,9 @@ def _stale_no_live_state_pause_reason(
 
     market = context.market
     if market is None or market.game_start_time is None:
+        return None
+    descriptor = describe_sports_market(market)
+    if descriptor is None or descriptor.market_family != SportsMarketFamily.SINGLE_GAME:
         return None
     if live_game_state_from_metadata(context.metadata) is not None:
         return None

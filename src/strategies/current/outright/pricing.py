@@ -9,6 +9,7 @@ exit_target。``OutrightFairValue`` 同时携带 value 与可审计的拒绝原�
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -24,6 +25,8 @@ _PRICE_CEILING = Decimal("0.99")
 _SIGMA_LOWER = Decimal("0.95")
 _SIGMA_UPPER = Decimal("1.05")
 _BINARY_OUTCOMES = frozenset({"yes", "no"})
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,8 +96,10 @@ def outright_exit_price_target(
 
 def _clamp(value: Decimal) -> Decimal:
     if value < _PRICE_FLOOR:
+        logger.warning("outright_fair_value_clamped", extra={"raw": str(value), "clamped": str(_PRICE_FLOOR)})
         return _PRICE_FLOOR
     if value > _PRICE_CEILING:
+        logger.warning("outright_fair_value_clamped", extra={"raw": str(value), "clamped": str(_PRICE_CEILING)})
         return _PRICE_CEILING
     return value
 

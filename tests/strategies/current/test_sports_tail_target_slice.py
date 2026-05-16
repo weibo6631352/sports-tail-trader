@@ -191,7 +191,10 @@ def test_universe_accepts_single_game_binary_props_for_whole_market_coverage() -
     assert decision.selected is True
 
 
-def test_single_game_binary_props_are_record_only_until_specific_model_exists() -> None:
+def test_single_game_binary_props_are_rejected_until_specific_model_exists() -> None:
+    # binary prop は tail が所有していないため SKIP（RECORD_ONLY ではない）。
+    # 将来 binary_prop 専用 evaluator が実装されたとき上流で処理できるよう、
+    # tail evaluator は pass-through せず明示的に reject する。
     game = live_game_state_from_metadata({"live_game": _moneyline_live_game()})
     market = SportsMarketSnapshot(
         market_type=SportsMarketType.BINARY_PROP,
@@ -212,9 +215,9 @@ def test_single_game_binary_props_are_record_only_until_specific_model_exists() 
         now=datetime(2026, 4, 27, 0, 0, 5, tzinfo=timezone.utc),
     )
 
-    assert result.accepted is True
-    assert result.action == TailAction.RECORD
-    assert result.reason == "binary_prop_requires_specific_model"
+    assert result.accepted is False
+    assert result.action == TailAction.REJECT
+    assert result.reason == "binary_prop_no_tail_model"
 
 
 def test_player_next_team_yes_no_is_outright_not_single_game_binary_prop() -> None:
@@ -4962,10 +4965,14 @@ async def _run_worker_without_live_game_state():
         registry=registry,
         orderbook_reader=lambda token_id: orderbook if token_id == "over" else None,
     )
+    account_state_store = AccountStateStore()
+    account_state_store.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+    account_state_store.mark_user_ws_connected(True)
+    account_state_store.mark_reconciled()
     worker = TradingDecisionWorker(
         trading_decision_service=service,
+        account_state_store=account_state_store,
         portfolio_budget_usdc=Decimal("10"),
-        available_usdc=Decimal("10"),
         kelly_fraction=Decimal("0.25"),
         kelly_max_position_fraction=Decimal("1"),
         kelly_min_edge=Decimal("0"),
@@ -4998,13 +5005,15 @@ async def _run_worker_with_live_state_entry_signal():
         registry=registry,
         orderbook_reader=lambda token_id: orderbook if token_id == "over" else None,
     )
+    account_state_store = AccountStateStore()
+    account_state_store.update_balances(balance_usdc=Decimal("10"), allowance_usdc=Decimal("10"))
+    account_state_store.mark_user_ws_connected(True)
+    account_state_store.mark_reconciled()
     worker = TradingDecisionWorker(
         trading_decision_service=service,
         trading_service=TradingService(executor=_NoFillExecutor()),
+        account_state_store=account_state_store,
         portfolio_budget_usdc=Decimal("10"),
-        available_usdc=Decimal("10"),
-        balance_usdc=Decimal("10"),
-        allowance_usdc=Decimal("10"),
         kelly_fraction=Decimal("0.25"),
         kelly_max_position_fraction=Decimal("1"),
         kelly_min_edge=Decimal("0"),

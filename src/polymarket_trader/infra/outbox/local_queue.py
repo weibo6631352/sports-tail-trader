@@ -28,9 +28,11 @@ class LocalOutbox:
         enqueue_timeout: float = DEFAULT_ENQUEUE_TIMEOUT,
         retained_max_size: int | None = None,
         retained_ttl_seconds: float | None = None,
+        dead_letter_max_size: int | None = None,
     ) -> None:
         self._max_size = max_size
         self._retained_max_size = retained_max_size if retained_max_size is not None else max_size
+        self._dead_letter_max_size = dead_letter_max_size if dead_letter_max_size is not None else max_size
         self._enqueue_timeout = enqueue_timeout
         self._retained_ttl_seconds = retained_ttl_seconds
         self._sequence = count()
@@ -126,7 +128,12 @@ class LocalOutbox:
         if merge_key is not None and self._merge_index.get(merge_key) == event_id:
             self._merge_index.pop(merge_key, None)
         self._dead_letters.append(dead_lettered)
+        self._trim_dead_letters()
         return dead_lettered
+
+    def snapshot(self) -> tuple[int, int, int]:
+        """返回 (ready_depth, retained_depth, dead_letter_depth) 供监控使用。"""
+        return self._ready.qsize(), len(self._retained), len(self._dead_letters)
 
     def get_dead_letters(self) -> tuple[OutboxEvent, ...]:
         return tuple(self._dead_letters)
@@ -221,6 +228,7 @@ class LocalOutbox:
                 self._dead_letters.append(
                     replace(event, last_error=event.last_error or RETAINED_TTL_EXPIRED_REASON)
                 )
+            self._trim_dead_letters()
 
         if self._retained_max_size is None or self._retained_max_size <= 0:
             return
@@ -244,6 +252,15 @@ class LocalOutbox:
             self._dead_letters.append(
                 replace(event, last_error=event.last_error or RETAINED_OVERFLOW_REASON)
             )
+        self._trim_dead_letters()
+
+    def _trim_dead_letters(self) -> None:
+        """dead_letters 超过 dead_letter_max_size 时丢弃最老的条目。"""
+        cap = self._dead_letter_max_size
+        if cap <= 0:
+            return
+        if len(self._dead_letters) > cap:
+            del self._dead_letters[: len(self._dead_letters) - cap]
 
     async def _enqueue_ready(self, event: OutboxEvent, *, timeout: float | None = None) -> bool:
         timeout = self._enqueue_timeout if timeout is None else timeout

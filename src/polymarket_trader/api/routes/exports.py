@@ -14,7 +14,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -22,19 +22,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from polymarket_trader.api.deps import build_time_range
 from polymarket_trader.api.rate_limit import rate_limit
-from polymarket_trader.domain.time_filters import TimeRange
-from polymarket_trader.infra.db.models import AuditEventModel, FillModel, OrderModel
-from polymarket_trader.infra.db.repositories import (
-    AuditEventRepository,
-    FillRepository,
-    OrderRepository,
+from polymarket_trader.app.export_service import (
+    ALLOWED_RESOURCES as _EXPORT_ALLOWED_RESOURCES,
+    columns_for_resource,
+    stream_resource_rows,
 )
 
 
 router = APIRouter(prefix="/exports", tags=["exports"])
 logger = logging.getLogger(__name__)
 
-_ALLOWED_RESOURCES = ("orders", "fills", "audit_events")
+_ALLOWED_RESOURCES = _EXPORT_ALLOWED_RESOURCES
 _ALLOWED_FORMATS = ("csv", "jsonl")
 DEFAULT_LIMIT = 10_000
 MAX_LIMIT = 100_000
@@ -47,18 +45,6 @@ _TRUNCATED_TIMEOUT = "truncated_per_row_timeout"
 
 _LIMIT_CLAMPED_HEADER = "X-Export-Warning"
 _LIMIT_CLAMPED_VALUE = "limit_clamped_to_100000"
-
-_RESOURCE_MODELS: dict[str, type[Any]] = {
-    "orders": OrderModel,
-    "fills": FillModel,
-    "audit_events": AuditEventModel,
-}
-
-
-def _columns_for(resource: str) -> tuple[str, ...]:
-    model = _RESOURCE_MODELS[resource]
-    return tuple(column.name for column in model.__table__.columns)
-
 
 def _resolve_session_factory(request: Request) -> async_sessionmaker[AsyncSession]:
     """优先取 app.state 注入的 session_factory；其次回退到 runtime。
@@ -73,43 +59,6 @@ def _resolve_session_factory(request: Request) -> async_sessionmaker[AsyncSessio
     if factory is None:
         raise HTTPException(status_code=503, detail="db_session_factory_unavailable")
     return factory
-
-
-async def _stream_orders(
-    session: AsyncSession, time_range: TimeRange | None, limit: int
-) -> AsyncIterator[OrderModel]:
-    repo = OrderRepository(session)
-    async for row in repo.stream_orders_in_range(time_range=time_range, limit=limit):
-        yield row
-
-
-async def _stream_fills(
-    session: AsyncSession, time_range: TimeRange | None, limit: int
-) -> AsyncIterator[FillModel]:
-    repo = FillRepository(session)
-    async for row in repo.stream_fills_in_range(time_range=time_range, limit=limit):
-        yield row
-
-
-async def _stream_audit_events(
-    session: AsyncSession, time_range: TimeRange | None, limit: int
-) -> AsyncIterator[AuditEventModel]:
-    repo = AuditEventRepository(session)
-    async for row in repo.stream_audit_events_in_range(time_range=time_range, limit=limit):
-        yield row
-
-
-_STREAM_FN_BY_RESOURCE: dict[
-    str,
-    Callable[
-        [AsyncSession, TimeRange | None, int],
-        AsyncIterator[Any],
-    ],
-] = {
-    "orders": _stream_orders,
-    "fills": _stream_fills,
-    "audit_events": _stream_audit_events,
-}
 
 
 def _row_value(row: Any, column: str) -> Any:
@@ -196,8 +145,7 @@ async def export_resource(
     time_range = build_time_range(since=since, until=until)
     clamped_limit = min(limit, MAX_LIMIT)
     session_factory = _resolve_session_factory(request)
-    columns = _columns_for(resource)
-    stream_fn = _STREAM_FN_BY_RESOURCE[resource]
+    columns = columns_for_resource(resource)
 
     if format == "csv":
         media_type = "text/csv; charset=utf-8"
@@ -208,7 +156,7 @@ async def export_resource(
 
     async def _row_iterator() -> AsyncIterator[Any]:
         async with session_factory() as session:
-            cursor = stream_fn(session, time_range, clamped_limit).__aiter__()
+            cursor = stream_resource_rows(session, resource, time_range, clamped_limit).__aiter__()
             while True:
                 try:
                     row = await asyncio.wait_for(

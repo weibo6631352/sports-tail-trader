@@ -52,6 +52,8 @@ class PersistenceOutbox(Protocol):
 
     async def dead_letter(self, event: str | OutboxEvent, *, last_error: str | None = None) -> OutboxEvent: ...
 
+    def snapshot(self) -> tuple[int, int, int]: ...
+
 
 @runtime_checkable
 class PersistenceRepository(Protocol):
@@ -586,34 +588,7 @@ class PersistenceWorker:
     def _outbox_depths(self) -> tuple[int, int, int]:
         if self._outbox is None:
             return 0, 0, 0
-
-        snapshot = getattr(self._outbox, "snapshot", None)
-        if callable(snapshot):
-            with suppress(Exception):
-                data = snapshot()
-                outbox_depth = int(getattr(data, "depth", 0))
-                retained_depth = int(getattr(data, "retained_depth", 0))
-                dead_letter_depth = int(getattr(data, "dead_letter_depth", 0))
-                if outbox_depth or retained_depth or dead_letter_depth:
-                    return outbox_depth, retained_depth, dead_letter_depth
-
-        ready = getattr(self._outbox, "_ready", None)
-        retained = getattr(self._outbox, "_retained", None)
-        dead_letters = getattr(self._outbox, "_dead_letters", None)
-        outbox_depth = 0
-        if ready is not None:
-            with suppress(Exception):
-                outbox_depth += ready.qsize()
-        if retained is not None:
-            with suppress(Exception):
-                outbox_depth += len(retained)
-        retained_depth = 0
-        if retained is not None:
-            with suppress(Exception):
-                retained_depth = len(retained)
-        dead_letter_depth = 0
-        if dead_letters is not None:
-            with suppress(Exception):
-                dead_letter_depth = len(dead_letters)
-        return outbox_depth, retained_depth, dead_letter_depth
+        with suppress(Exception):
+            return self._outbox.snapshot()
+        return 0, 0, 0
 
