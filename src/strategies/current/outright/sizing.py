@@ -114,5 +114,7 @@ def size_outright_entry(
         kelly_max_position_fraction=kelly_max_position_fraction,
         kelly_min_edge=context.kelly_min_edge or Decimal("0"),
         kelly_min_stake_usdc=kelly_min_stake_usdc,
+        kelly_allow_round_up_to_market_min=context.kelly_allow_round_up_to_market_min if context.kelly_allow_round_up_to_market_min is not None else True,
+        kelly_round_up_max_overbet_ratio=context.kelly_round_up_max_overbet_ratio or Decimal("1"),
     )
     return EntrySizing(allocation_plan=plan, reason="outright_kelly")
