@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import LiveEvent
@@ -71,10 +72,73 @@ from strategies.current.trading.helpers import enrich_decision
 logger = logging.getLogger(__name__)
 
 
+def _market_league_key(market: Market) -> str | None:
+    """market category + tags 文本中识别联盟标识，返回统一的内部 league key。"""
+    text = " ".join(filter(None, (market.category or "", *(market.tags or ())))).lower()
+    if "nba" in text or "basketball" in text:
+        return "nba"
+    if "nhl" in text or "hockey" in text:
+        return "nhl"
+    if "nfl" in text or "american football" in text:
+        return "nfl"
+    if "mlb" in text or "baseball" in text:
+        return "mlb"
+    if "epl" in text or "premier league" in text:
+        return "epl"
+    return None
+
+
+# league key → TheOddsAPI sport key（赛季胜率数据源格式）
+_SEASON_ODDS_KEY: dict[str, str] = {
+    "nba": "basketball_nba",
+    "nhl": "icehockey_nhl",
+    "nfl": "americanfootball_nfl",
+    "mlb": "baseball_mlb",
+    "epl": "soccer_epl",
+}
+
+# league key → 系列赛热态数据源 sport key（短格式）
+_SERIES_STATE_KEY: dict[str, str] = {
+    "nba": "nba",
+    "nhl": "nhl",
+    "mlb": "mlb",
+}
+
+# league key → 单场赔率数据源 sport key（TheOddsAPI 格式）
+_GAME_ODDS_KEY: dict[str, str] = {
+    "nba": "basketball_nba",
+    "nhl": "icehockey_nhl",
+    "mlb": "baseball_mlb",
+}
+
+
 _METRIC_OUTRIGHT_DECISION = "strategy_outright_decision_total"
 _METRIC_OUTRIGHT_REJECT = "strategy_outright_reject_total"
 _METRIC_SERIES_DECISION = "strategy_series_decision_total"
 _METRIC_SERIES_REJECT = "strategy_series_reject_total"
+
+
+@dataclass(frozen=True, slots=True)
+class _FamilyHandler:
+    """单个 market family 的 sizing / decide 函数对，统一注册到 _FAMILY_HANDLERS。
+
+    新增 family 只需在 _FAMILY_HANDLERS 加一条，不改 CurrentStrategy 主逻辑。
+    """
+
+    sizer: Callable
+    decider: Callable
+
+
+_FAMILY_HANDLERS: dict[SportsMarketFamily, _FamilyHandler] = {
+    SportsMarketFamily.OUTRIGHT: _FamilyHandler(
+        sizer=size_outright_entry,
+        decider=decide_outright_entry,
+    ),
+    SportsMarketFamily.SERIES: _FamilyHandler(
+        sizer=size_series_entry,
+        decider=decide_series_entry,
+    ),
+}
 
 
 class CurrentStrategy:
@@ -309,31 +373,26 @@ class CurrentStrategy:
         return build_live_event_discovery_queries(self._config, events)
 
     def size_entry(self, context: ExtensionContext) -> EntrySizing:
-        """outright / series family 各自走独立预算包络，与 single_game 互不挤占。"""
+        """按 market family 分派 sizing；未注册 family 走 single_game 路径。"""
         descriptor = describe_sports_market(context.market) if context.market else None
-        if descriptor is not None and descriptor.market_family == SportsMarketFamily.OUTRIGHT:
-            return size_outright_entry(self._config, context, self._ports)
-        if descriptor is not None and descriptor.market_family == SportsMarketFamily.SERIES:
-            return size_series_entry(self._config, context, self._ports)
+        family = descriptor.market_family if descriptor is not None else None
+        handler = _FAMILY_HANDLERS.get(family) if family is not None else None
+        if handler is not None:
+            return handler.sizer(self._config, context, self._ports)
         with active_ports_scope(self._ports):
             return size_entry(self._config, context)
 
     def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
-        """按 ``descriptor.market_family`` 分派到对应决策模块。"""
+        """按 market family 分派决策；未注册 family 走 single_game 路径。"""
         descriptor = describe_sports_market(context.market) if context.market else None
-        if descriptor is not None and descriptor.market_family == SportsMarketFamily.OUTRIGHT:
+        family = descriptor.market_family if descriptor is not None else None
+        handler = _FAMILY_HANDLERS.get(family) if family is not None else None
+        if handler is not None:
             decision = enrich_decision(
-                decide_outright_entry(self._config, context, self._ports),
+                handler.decider(self._config, context, self._ports),
                 default_kind=DecisionKind.ENTRY,
             )
-            self._record_outright_decision_metric(decision)
-            return decision
-        if descriptor is not None and descriptor.market_family == SportsMarketFamily.SERIES:
-            decision = enrich_decision(
-                decide_series_entry(self._config, context, self._ports),
-                default_kind=DecisionKind.ENTRY,
-            )
-            self._record_series_decision_metric(decision)
+            self._record_family_decision_metric(family, decision)
             return decision
         with active_ports_scope(self._ports):
             return enrich_decision(decide_entry(self._config, context), default_kind=DecisionKind.ENTRY)
@@ -401,38 +460,16 @@ class CurrentStrategy:
         return classify_series_sub_type(market) == SeriesSubType.WINNER
 
     def sport_key_for_season_odds(self, market: Market) -> str | None:
-        text = " ".join(filter(None, (market.category or "", *(market.tags or ())))).lower()
-        if "nba" in text or "basketball" in text:
-            return "basketball_nba"
-        if "nhl" in text or "hockey" in text:
-            return "icehockey_nhl"
-        if "nfl" in text or "american football" in text:
-            return "americanfootball_nfl"
-        if "mlb" in text or "baseball" in text:
-            return "baseball_mlb"
-        if "epl" in text or "premier league" in text:
-            return "soccer_epl"
-        return None
+        league = _market_league_key(market)
+        return _SEASON_ODDS_KEY.get(league)
 
     def sport_key_for_series_state(self, market: Market) -> str | None:
-        text = " ".join(filter(None, (market.category or "", *(market.tags or ())))).lower()
-        if "nba" in text or "basketball" in text:
-            return "nba"
-        if "nhl" in text or "hockey" in text:
-            return "nhl"
-        if "mlb" in text or "baseball" in text:
-            return "mlb"
-        return None
+        league = _market_league_key(market)
+        return _SERIES_STATE_KEY.get(league)
 
     def sport_key_for_game_odds(self, market: Market) -> str | None:
-        text = " ".join(filter(None, (market.category or "", *(market.tags or ())))).lower()
-        if "nba" in text or "basketball" in text:
-            return "basketball_nba"
-        if "nhl" in text or "hockey" in text:
-            return "icehockey_nhl"
-        if "mlb" in text or "baseball" in text:
-            return "baseball_mlb"
-        return None
+        league = _market_league_key(market)
+        return _GAME_ODDS_KEY.get(league)
 
     def market_family_label(self, market: Market) -> str | None:
         descriptor = describe_sports_market(market)
@@ -513,32 +550,30 @@ class CurrentStrategy:
                 break
         self._live_state_no_feasible_source = no_feasible
 
-    def _record_outright_decision_metric(self, decision: ExtensionDecision) -> None:
+    def _record_family_decision_metric(
+        self, family: SportsMarketFamily, decision: ExtensionDecision
+    ) -> None:
         metrics = self._ports.metrics
         if metrics is None:
             return
         outcome = "accepted" if decision.action.value == "buy" else "rejected"
-        metrics.inc_counter(_METRIC_OUTRIGHT_DECISION, labels={"outcome": outcome})
-        if outcome == "rejected":
-            reason = resolve_outright_reject_label(decision)
-            metrics.inc_counter(_METRIC_OUTRIGHT_REJECT, labels={"reason": reason})
-
-    def _record_series_decision_metric(self, decision: ExtensionDecision) -> None:
-        metrics = self._ports.metrics
-        if metrics is None:
-            return
-        sub_type = resolve_series_sub_type_label(decision)
-        outcome = "accepted" if decision.action.value == "buy" else "rejected"
-        metrics.inc_counter(
-            _METRIC_SERIES_DECISION,
-            labels={"sub_type": sub_type, "outcome": outcome},
-        )
-        if outcome == "rejected":
-            reason = resolve_series_reject_label(decision)
+        if family == SportsMarketFamily.OUTRIGHT:
+            metrics.inc_counter(_METRIC_OUTRIGHT_DECISION, labels={"outcome": outcome})
+            if outcome == "rejected":
+                metrics.inc_counter(
+                    _METRIC_OUTRIGHT_REJECT,
+                    labels={"reason": resolve_outright_reject_label(decision)},
+                )
+        elif family == SportsMarketFamily.SERIES:
+            sub_type = resolve_series_sub_type_label(decision)
             metrics.inc_counter(
-                _METRIC_SERIES_REJECT,
-                labels={"sub_type": sub_type, "reason": reason},
+                _METRIC_SERIES_DECISION, labels={"sub_type": sub_type, "outcome": outcome}
             )
+            if outcome == "rejected":
+                metrics.inc_counter(
+                    _METRIC_SERIES_REJECT,
+                    labels={"sub_type": sub_type, "reason": resolve_series_reject_label(decision)},
+                )
 
 
 def build_strategy(

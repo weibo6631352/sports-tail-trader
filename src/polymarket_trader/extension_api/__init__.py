@@ -3,11 +3,7 @@ from __future__ import annotations
 from polymarket_trader.extension_api.config_loader import load_extension_config, load_mapping_file
 from polymarket_trader.extension_api.context import (
     AccountSnapshotView,
-    AccountView,
-    BudgetView,
     ExtensionContext,
-    MarketView,
-    SizingView,
 )
 from polymarket_trader.extension_api.discovery import DiscoveryQuery
 from polymarket_trader.extension_api.decisions import (
@@ -61,9 +57,7 @@ from polymarket_trader.domain.events import AuditEvent, DomainEventType, Fill
 __all__ = (
     "AccountReadPort",
     "AccountSnapshotView",
-    "AccountView",
     "AuditEvent",
-    "BudgetView",
     "BusinessExtension",
     "ClockPort",
     "ConfigReadPort",
@@ -97,10 +91,8 @@ __all__ = (
     "ManualConfirmation",
     "MarketReadPort",
     "MarketTokenView",
-    "MarketView",
     "MetricsPort",
     "OrderbookReadPort",
-    "SizingView",
     "RecoveryDecision",
     "RuntimeReadPort",
     "StrategySummary",

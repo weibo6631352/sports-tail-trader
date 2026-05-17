@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Iterable, Mapping
 
@@ -27,6 +28,21 @@ from polymarket_trader.observability.trace import ensure_trace_id
 from polymarket_trader.runtime.registry import MarketRegistry
 
 OrderbookReader = Callable[[str], OrderbookSnapshot | None]
+
+
+@dataclass(frozen=True, slots=True)
+class _KellySizingState:
+    """Kelly + bankroll 运行时参数包——替代 **kelly_kwargs 字典传递，让类型检查可以捕捉字段漂移。"""
+
+    bankroll_usdc: Decimal
+    peak_bankroll_usdc: Decimal | None
+    kelly_fraction: Decimal
+    kelly_max_position_fraction: Decimal
+    kelly_min_edge: Decimal
+    kelly_min_stake_usdc: Decimal
+    kelly_allow_round_up_to_market_min: bool
+    kelly_round_up_max_overbet_ratio: Decimal
+    kelly_drawdown_halt_fraction: Decimal
 
 
 class EntryPlanner:
@@ -144,17 +160,17 @@ class EntryPlanner:
             if account_snapshot is not None
             else None
         )
-        kelly_kwargs: dict[str, Any] = {
-            "bankroll_usdc": bankroll_usdc,
-            "kelly_fraction": kelly_fraction,
-            "kelly_max_position_fraction": kelly_max_position_fraction,
-            "kelly_min_edge": kelly_min_edge,
-            "kelly_min_stake_usdc": kelly_min_stake_usdc,
-            "kelly_allow_round_up_to_market_min": kelly_allow_round_up_to_market_min,
-            "kelly_round_up_max_overbet_ratio": kelly_round_up_max_overbet_ratio,
-            "kelly_drawdown_halt_fraction": kelly_drawdown_halt_fraction,
-            "peak_bankroll_usdc": peak_bankroll_usdc,
-        }
+        kelly_state = _KellySizingState(
+            bankroll_usdc=bankroll_usdc,
+            peak_bankroll_usdc=peak_bankroll_usdc,
+            kelly_fraction=kelly_fraction,
+            kelly_max_position_fraction=kelly_max_position_fraction,
+            kelly_min_edge=kelly_min_edge,
+            kelly_min_stake_usdc=kelly_min_stake_usdc,
+            kelly_allow_round_up_to_market_min=kelly_allow_round_up_to_market_min,
+            kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
+            kelly_drawdown_halt_fraction=kelly_drawdown_halt_fraction,
+        )
         sizing = self._extension_hooks.size_entry(
             self._sizing_context(
                 trace_id=trace_id,
@@ -167,7 +183,7 @@ class EntryPlanner:
                 entry_candidates=entry_candidates,
                 portfolio_budget_usdc=portfolio_budget_usdc,
                 available_usdc=available_usdc,
-                kelly_kwargs=kelly_kwargs,
+                kelly_state=kelly_state,
                 metadata=base_metadata,
                 manual_confirmation=manual_confirmation,
             )
@@ -199,7 +215,7 @@ class EntryPlanner:
                     open_orders=_open_orders_for(open_orders, resolved_market.condition_id, focus_token_id),
                     portfolio_budget_usdc=portfolio_budget_usdc,
                     available_usdc=available_usdc,
-                    kelly_kwargs=kelly_kwargs,
+                    kelly_state=kelly_state,
                     allocation_plan=plan,
                     allocation=allocation,
                     metadata=base_metadata,
@@ -261,7 +277,7 @@ class EntryPlanner:
         entry_candidates: tuple[EntryCandidate, ...],
         portfolio_budget_usdc: Decimal,
         available_usdc: Decimal | None,
-        kelly_kwargs: Mapping[str, Any],
+        kelly_state: _KellySizingState,
         metadata: Mapping[str, Any],
         manual_confirmation: ManualConfirmation | None = None,
     ) -> ExtensionContext:
@@ -293,7 +309,15 @@ class EntryPlanner:
             now=orderbook.received_at,
             portfolio_budget_usdc=portfolio_budget_usdc,
             available_usdc=effective_available_usdc,
-            **kelly_kwargs,
+            bankroll_usdc=kelly_state.bankroll_usdc,
+            peak_bankroll_usdc=kelly_state.peak_bankroll_usdc,
+            kelly_fraction=kelly_state.kelly_fraction,
+            kelly_max_position_fraction=kelly_state.kelly_max_position_fraction,
+            kelly_min_edge=kelly_state.kelly_min_edge,
+            kelly_min_stake_usdc=kelly_state.kelly_min_stake_usdc,
+            kelly_allow_round_up_to_market_min=kelly_state.kelly_allow_round_up_to_market_min,
+            kelly_round_up_max_overbet_ratio=kelly_state.kelly_round_up_max_overbet_ratio,
+            kelly_drawdown_halt_fraction=kelly_state.kelly_drawdown_halt_fraction,
             manual_confirmation=manual_confirmation,
             metadata=context_metadata,
         )
@@ -310,7 +334,7 @@ class EntryPlanner:
         open_orders: tuple[Order, ...],
         portfolio_budget_usdc: Decimal,
         available_usdc: Decimal | None,
-        kelly_kwargs: Mapping[str, Any],
+        kelly_state: _KellySizingState,
         allocation_plan: AllocationPlan,
         allocation: Allocation,
         metadata: Mapping[str, Any],
@@ -344,7 +368,15 @@ class EntryPlanner:
             now=orderbook.received_at,
             portfolio_budget_usdc=portfolio_budget_usdc,
             available_usdc=available_usdc,
-            **kelly_kwargs,
+            bankroll_usdc=kelly_state.bankroll_usdc,
+            peak_bankroll_usdc=kelly_state.peak_bankroll_usdc,
+            kelly_fraction=kelly_state.kelly_fraction,
+            kelly_max_position_fraction=kelly_state.kelly_max_position_fraction,
+            kelly_min_edge=kelly_state.kelly_min_edge,
+            kelly_min_stake_usdc=kelly_state.kelly_min_stake_usdc,
+            kelly_allow_round_up_to_market_min=kelly_state.kelly_allow_round_up_to_market_min,
+            kelly_round_up_max_overbet_ratio=kelly_state.kelly_round_up_max_overbet_ratio,
+            kelly_drawdown_halt_fraction=kelly_state.kelly_drawdown_halt_fraction,
             allocation_plan=allocation_plan,
             allocation=allocation,
             amount_usdc=allocation.buy_budget_usdc,
