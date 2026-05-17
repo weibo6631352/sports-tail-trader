@@ -371,9 +371,8 @@ class EventBus:
                 logger.debug("event_bus broadcast listener failed", exc_info=True)
 
     def _trading_event_key(self, event: Any) -> str:
-        event_type = str(getattr(event, "event_type", ""))
         merge_key = getattr(event, "merge_key", None)
-        if event_type == DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED.value and merge_key:
+        if merge_key:
             return str(merge_key)
         event_id = getattr(event, "event_id", None)
         if event_id:

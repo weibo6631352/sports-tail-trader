@@ -131,6 +131,10 @@ class CurrentStrategyConfig:
         tail_mlb_eighth_moneyline_min_lead:
             MLB 第 8 局 moneyline 早期领先机会的最低领先分差。该规则还要求
             至少一出局且二/三垒无得分威胁，避免把普通中局波动提前纳入。
+        tail_mlb_ninth_moneyline_min_lead:
+            MLB 第 9 局（含延长赛）moneyline 早期领先机会的最低领先分差。
+            允许 0 出局即开始评估；阈值高于第 8 局规则（默认 3），因为价格
+            往往已上升到 0.93-0.97 区间，需要足够领先保证正期望。
         tail_recovery_profit_take_*:
             恢复侧对历史遗留或买入后缺失止盈挂单的近端仓位补救退出参数。
             默认只在持仓均价较高、无开放 SELL、且挂到下一档 tick 的预期毛利润
@@ -150,9 +154,9 @@ class CurrentStrategyConfig:
     kelly_allow_round_up_to_market_min: bool = True
     # 凑齐金额上限 = position_cap × ratio。1.0=凑齐金额最多到 cap；> 1 时让 RiskManager
     # 的 effective position cap 同步放宽——bankroll 极小阶段唯一能下单的方式。
-    kelly_round_up_max_overbet_ratio: Decimal = Decimal("1")
+    kelly_round_up_max_overbet_ratio: Decimal = Decimal("10")
     # drawdown lockout：bankroll 跌破 peak × halt_fraction 时拒新仓。0 关闭。
-    kelly_drawdown_halt_fraction: Decimal = Decimal("0.5")
+    kelly_drawdown_halt_fraction: Decimal = Decimal("0")
 
     entry_no_price_max: Decimal = Decimal("0.99")
     exit_no_price: Decimal = Decimal("0.995")
@@ -199,6 +203,7 @@ class CurrentStrategyConfig:
     tail_totals_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     tail_moneyline_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     tail_spreads_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
+    tail_min_entry_price: Decimal = Decimal("0.10")
     tail_totals_max_entry_price: Decimal = Decimal("0.99")
     tail_moneyline_max_entry_price: Decimal = Decimal("0.98")
     tail_tennis_locked_moneyline_max_entry_price: Decimal = Decimal("0.995")
@@ -219,6 +224,7 @@ class CurrentStrategyConfig:
     tail_min_under_safety_margin: Decimal = Decimal("2")
     tail_min_moneyline_lead: int = 6
     tail_mlb_eighth_moneyline_min_lead: int = 2
+    tail_mlb_ninth_moneyline_min_lead: int = 3
     tail_min_spread_safety_margin: Decimal = Decimal("2")
     # 相关性硬上限（与 Kelly 单市场 cap 互补）：单一事件 / 联赛 / 日新增 限额
     # = bankroll × fraction。bankroll 涨大时 cap 同步放大；bankroll 极小时 cap
@@ -338,6 +344,7 @@ def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
         totals_execution_permission=config.tail_totals_execution_permission,
         moneyline_execution_permission=config.tail_moneyline_execution_permission,
         spreads_execution_permission=config.tail_spreads_execution_permission,
+        min_entry_price=config.tail_min_entry_price,
         totals_max_entry_price=config.tail_totals_max_entry_price,
         moneyline_max_entry_price=config.tail_moneyline_max_entry_price,
         tennis_locked_moneyline_max_entry_price=config.tail_tennis_locked_moneyline_max_entry_price,
@@ -353,6 +360,7 @@ def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
         min_under_safety_margin=config.tail_min_under_safety_margin,
         min_moneyline_lead=config.tail_min_moneyline_lead,
         mlb_eighth_moneyline_min_lead=config.tail_mlb_eighth_moneyline_min_lead,
+        mlb_ninth_moneyline_min_lead=config.tail_mlb_ninth_moneyline_min_lead,
         min_spread_safety_margin=config.tail_min_spread_safety_margin,
     )
 

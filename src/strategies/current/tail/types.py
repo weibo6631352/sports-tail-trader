@@ -56,6 +56,7 @@ class TailRejectReason(StrEnum):
     MISSING_MARKET_LINE = "missing_market_line"
     MISSING_BEST_ASK = "missing_best_ask"
     PRICE_ABOVE_MAX = "price_above_max"
+    PRICE_BELOW_MIN = "price_below_min"
     LIQUIDITY_BELOW_MIN = "liquidity_below_min"
     OUTCOME_NOT_LOCKED = "outcome_not_locked"
     MISSING_SECONDS_REMAINING = "missing_seconds_remaining"
@@ -93,6 +94,7 @@ class TailPolicy:
     totals_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     moneyline_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     spreads_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
+    min_entry_price: Decimal = Decimal("0.10")
     totals_max_entry_price: Decimal = Decimal("0.99")
     moneyline_max_entry_price: Decimal = Decimal("0.97")
     tennis_locked_moneyline_max_entry_price: Decimal = Decimal("0.995")
@@ -108,6 +110,7 @@ class TailPolicy:
     min_under_safety_margin: Decimal = Decimal("2")
     min_moneyline_lead: int = 6
     mlb_eighth_moneyline_min_lead: int = 2
+    mlb_ninth_moneyline_min_lead: int = 3
     min_spread_safety_margin: Decimal = Decimal("2")
 
 

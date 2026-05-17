@@ -64,30 +64,28 @@ def test_trading_lane_does_not_coalesce_events_without_merge_key() -> None:
     asyncio.run(run())
 
 
-def test_trading_lane_does_not_coalesce_non_orderbook_events_with_merge_key() -> None:
+def test_trading_lane_coalesces_any_event_with_merge_key() -> None:
     async def run() -> None:
         bus = EventBus(trading_capacity=10)
         await bus.publish(
             OutboxPriority.P0,
             _event(
                 "first",
-                event_type="market_resolved_or_disabled",
-                merge_key="market_resolved_or_disabled|token-1",
+                event_type="entry_signal_triggered",
+                merge_key="orderbook_snapshot_updated|token-1",
             ),
         )
         await bus.publish(
             OutboxPriority.P0,
             _event(
                 "second",
-                event_type="market_resolved_or_disabled",
-                merge_key="market_resolved_or_disabled|token-1",
+                event_type="entry_signal_triggered",
+                merge_key="orderbook_snapshot_updated|token-1",
             ),
         )
 
-        first = await asyncio.wait_for(bus.next_trading_event(), timeout=0.1)
-        second = await asyncio.wait_for(bus.next_trading_event(), timeout=0.1)
-
-        assert first.event_id == "first"
-        assert second.event_id == "second"
+        event = await asyncio.wait_for(bus.next_trading_event(), timeout=0.1)
+        assert event.event_id == "second"
+        assert bus.trading_queue_depth() == 0
 
     asyncio.run(run())

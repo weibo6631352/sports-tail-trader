@@ -130,6 +130,7 @@ class SeriesStateWorker:
                     condition_id=market.condition_id,
                     token_id=token_id,
                     reason="series_state_refreshed",
+                    merge_key=f"orderbook_snapshot_updated|{token_id}",
                     payload={"origin": "series_state_worker"},
                 ),
             )

@@ -463,6 +463,9 @@ class SportsLiveStateWorker:
                     condition_id=market.condition_id,
                     token_id=token_id,
                     reason="sports_live_state_updated",
+                    # 与 ORDERBOOK_SNAPSHOT_UPDATED 共用同一 merge_key，使信号在满队列中
+                    # 复用已有 slot 而非等待新槽位，避免被 WS 洪流阻塞。
+                    merge_key=f"orderbook_snapshot_updated|{token_id}",
                     payload={
                         "origin": "sports_live_state_worker",
                         "source": event.source,

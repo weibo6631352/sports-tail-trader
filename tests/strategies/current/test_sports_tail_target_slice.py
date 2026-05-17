@@ -1528,7 +1528,7 @@ def test_moneyline_uses_live_home_away_names_instead_of_outcome_order() -> None:
     )
 
     assert losing_token.action.value == "skip"
-    assert losing_token.reason == "outcome_not_locked"
+    assert losing_token.reason == "price_below_min"
     assert winning_token.action.value == "buy"
     assert winning_token.token_id == "nc"
     assert winning_token.metadata["tail_reason"] == "ended_not_closed_moneyline"
@@ -2441,10 +2441,10 @@ def test_tennis_completed_set_winner_rejects_missing_best_ask() -> None:
     )
 
     # gates.py 启用 bid+tick fallback 后，best_ask 缺失但 best_bid+tick 可用时
-    # evaluator 用估算价（0.001+0.001=0.002）继续评估，下一个 gate 拒绝。该 token
-    # asks 数组为空所以 buyable_liquidity_usdc=0，触发 liquidity_below_min。
+    # evaluator 用估算价（0.001+0.001=0.002）继续评估。估算价 0.002 低于
+    # min_entry_price=0.50，触发 price_below_min（先于 liquidity_below_min 检查）。
     assert decision.action.value == "skip"
-    assert decision.reason == "liquidity_below_min"
+    assert decision.reason == "price_below_min"
 
 
 def test_ended_moneyline_rejects_missing_best_ask() -> None:
@@ -3270,7 +3270,7 @@ def test_live_kbo_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
             trace_id="trace-live-kbo-settlement-end-date",
             market=market,
             token_id="nc",
-            orderbook=_orderbook(token_id="nc", best_ask=Decimal("0.41")),
+            orderbook=_orderbook(token_id="nc", best_ask=Decimal("0.55")),
             amount_usdc=Decimal("10"),
             now=now,
             metadata={
@@ -3364,7 +3364,7 @@ def test_mlb_structured_tail_state_allows_official_source_age_above_generic_limi
     )
 
     assert decision.action.value == "buy"
-    assert decision.metadata["tail_reason"] == "mlb_moneyline_late_lead"
+    assert decision.metadata["tail_reason"] == "mlb_moneyline_ninth_lead"
 
 
 def test_mlb_moneyline_eighth_inning_leader_can_enter_when_no_scoring_threat() -> None:

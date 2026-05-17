@@ -137,6 +137,7 @@ class GameOddsWorker:
                     condition_id=market.condition_id,
                     token_id=token_id,
                     reason="game_odds_refreshed",
+                    merge_key=f"orderbook_snapshot_updated|{token_id}",
                     payload={"origin": "game_odds_worker"},
                 ),
             )

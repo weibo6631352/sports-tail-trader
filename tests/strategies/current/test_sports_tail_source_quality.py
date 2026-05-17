@@ -116,7 +116,7 @@ def test_mlb_moneyline_uses_baseball_state_instead_of_seconds_remaining() -> Non
 
     assert result.accepted is True
     assert result.action == TailAction.AUTO_EXECUTE
-    assert result.reason == "mlb_moneyline_late_lead"
+    assert result.reason == "mlb_moneyline_ninth_lead"
 
 
 def test_nfl_moneyline_requires_manual_review_even_with_clock_and_lead() -> None:
@@ -275,7 +275,7 @@ def test_tennis_first_set_winner_is_not_treated_as_match_moneyline() -> None:
         side=SportsMarketSide.HOME,
         token_id="home",
         line=None,
-        best_ask=Decimal("0.10"),
+        best_ask=Decimal("0.90"),
         buyable_liquidity_usdc=Decimal("10"),
         market_slug="wta-guo-jakupov-2026-04-27-first-set-winner-Guo-vs-Jakupovic",
     )
@@ -311,7 +311,7 @@ def test_tennis_first_set_winner_locked_from_per_set_score() -> None:
         side=SportsMarketSide.HOME,
         token_id="home",
         line=None,
-        best_ask=Decimal("0.10"),
+        best_ask=Decimal("0.97"),
         buyable_liquidity_usdc=Decimal("10"),
         market_slug="wta-guo-jakupov-2026-04-27-first-set-winner-Guo-vs-Jakupovic",
     )

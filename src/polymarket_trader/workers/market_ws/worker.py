@@ -93,7 +93,7 @@ class MarketWsWorkerStatus:
 
 @dataclass(frozen=True, slots=True)
 class MarketWsEvent(DomainEvent):
-    merge_key: str | None = None
+    pass
 
 
 class MarketWsWorker:

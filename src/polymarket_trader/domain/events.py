@@ -220,6 +220,9 @@ class EventEnvelope:
     token_id: str | None = None
     reason: str = ""
     created_at: datetime = field(default_factory=_utc_now)
+    # 队列去重 key：设置后 EventBus._trading_event_key 用此值合并同 key 的待处理事件，
+    # 避免每次发布都占新槽位。None 表示使用 event_id（每次唯一）。
+    merge_key: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "created_at", _normalize_datetime(self.created_at))

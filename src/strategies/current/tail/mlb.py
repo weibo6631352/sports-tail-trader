@@ -50,6 +50,9 @@ def _evaluate_mlb_moneyline(
     market = candidate.market
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    # 第 9 局及延长赛：领先差达标且无二/三垒威胁 → 早期接受（0 出局即可，价格通常仍 < 0.97）
+    if _mlb_ninth_moneyline_lead_reached(game, market.side, policy):
+        return _accept(candidate, "mlb_moneyline_ninth_lead", policy.moneyline_execution_permission)
     early_eighth_threat = _mlb_eighth_moneyline_threat_reject_reason(game, market.side, policy)
     if early_eighth_threat is not None:
         return _reject(candidate, early_eighth_threat.value)
@@ -154,6 +157,30 @@ def _mlb_eighth_moneyline_lead_reached(
     if state.current_inning != 8 or (state.outs or 0) < 1:
         return False
     if game.score_diff_for(side) < policy.mlb_eighth_moneyline_min_lead:
+        return False
+    occupied_bases = {int(base) for base in state.occupied_bases}
+    if occupied_bases.intersection({2, 3}):
+        return False
+    return side in {SportsMarketSide.HOME, SportsMarketSide.AWAY}
+
+
+def _mlb_ninth_moneyline_lead_reached(
+    game: LiveGameState,
+    side: SportsMarketSide,
+    policy: TailPolicy,
+) -> bool:
+    """识别 MLB 第 9 局及延长赛的 moneyline 领先方机会（0 出局即可触发）。
+
+    第 8 局规则（outs≥1）的高阈值版本：第 9 局起价格通常已升至 0.93-0.97，
+    需要更大领先（默认 3 分）确保正期望。二/三垒有人时跑垒威胁显著增大不开仓。
+    """
+
+    state = game.baseball_state
+    if state is None:
+        return False
+    if (state.current_inning or 0) < 9:
+        return False
+    if game.score_diff_for(side) < policy.mlb_ninth_moneyline_min_lead:
         return False
     occupied_bases = {int(base) for base in state.occupied_bases}
     if occupied_bases.intersection({2, 3}):
