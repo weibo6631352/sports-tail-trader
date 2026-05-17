@@ -387,7 +387,7 @@ class CurrentStrategy:
         descriptor = describe_sports_market(context.market) if context.market else None
         family = descriptor.market_family if descriptor is not None else None
         handler = _FAMILY_HANDLERS.get(family) if family is not None else None
-        if handler is not None:
+        if handler is not None and family is not None:
             decision = enrich_decision(
                 handler.decider(self._config, context, self._ports),
                 default_kind=DecisionKind.ENTRY,
@@ -461,15 +461,15 @@ class CurrentStrategy:
 
     def sport_key_for_season_odds(self, market: Market) -> str | None:
         league = _market_league_key(market)
-        return _SEASON_ODDS_KEY.get(league)
+        return _SEASON_ODDS_KEY.get(league) if league else None
 
     def sport_key_for_series_state(self, market: Market) -> str | None:
         league = _market_league_key(market)
-        return _SERIES_STATE_KEY.get(league)
+        return _SERIES_STATE_KEY.get(league) if league else None
 
     def sport_key_for_game_odds(self, market: Market) -> str | None:
         league = _market_league_key(market)
-        return _GAME_ODDS_KEY.get(league)
+        return _GAME_ODDS_KEY.get(league) if league else None
 
     def market_family_label(self, market: Market) -> str | None:
         descriptor = describe_sports_market(market)

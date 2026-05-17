@@ -7,7 +7,7 @@ from enum import IntEnum
 from itertools import count
 from typing import Any, Callable
 
-from polymarket_trader.domain.events import DomainEventType, OutboxPriority
+from polymarket_trader.domain.events import OutboxPriority
 
 logger = logging.getLogger(__name__)
 # 防 dict / queue drift 的健康度告警阈值——dict size > queue capacity × 此倍数 触发 warning。
