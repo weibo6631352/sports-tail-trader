@@ -1,0 +1,1486 @@
+cfor JSON output please add "?json=1" to the feed URL
+
+Your KEY is - 87ff5e514c6c415be05908deb2f15526
+
+
+--------------------------PREGAME ODDS-------------------
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=soccer_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=basket_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=tennis_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=hockey_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=handball_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=volleyball_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=football_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=baseball_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=cricket_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=rugby_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=rugbyleague_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=boxing_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=esports_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=futsal_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=mma_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=darts_10
+
+
+please note that without filters it may have a huge size and may no load in browser. you need to load it with GZIP compression in code or use filters (league, bookmaker, date etc) as described in documentation (SoccerDataFeed document - pregame odds section )
+
+example
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=soccer_10&league=1204
+
+a)Timestamp - Import only latest changes after last download, instead of loading full feed. Load full feed first time and then extract ts attribute value from downloaded feed.
+
+<scores sport="soccer" ts="1474825423341”>
+
+Apply ts value on next request to get updates only
+
+http://www.goalserve.com/getfeed/.../getodds/soccer?cat=soccer_10&ts=1474825423341
+
+b)Feed compressed using GZIP 
+c)Filter parameters
+     date_start - start date filter
+     date_end - end date filter. Can be null if you need to get matches just for 1 day - use only date_start in this case
+     bm - filter by bookmaker (comma separated)
+     market- filter by market (comma separated)
+     league - filter by category id (comma separated). If you want to filter by "gid" attribute add   "_"        symbol before gid value. For exame "&league=_2343,_2435".
+     match - filter by match id (comma separated)
+
+
+
+Pregame matches results:
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d-1
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/d-1
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d-1
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d-1
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d-1
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/home 
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d-1
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/d-1
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/home 
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/d-1
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/cricket/livescore
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/d-1
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/mma
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/futsal/home
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/home
+
+
+Inplay odds mapping with pregame stats feed
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/inplay-mapping
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/inplay-mapping
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/inplay-mapping
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/basketball/inplay-mapping
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/inplay-mapping
+
+
+--------------------------SOCCER-------------------
+
+
+for JSON output please add "?json=1" to the feed URL
+
+
+Soccer livescore  - provide livescore updates for all leagues:
+
+http://livescore.goalserve.com/api/v1/soccer/home?apiKey=87ff5e514c6c415be05908deb2f15526      - all livescores and today results from all leagues
+http://livescore.goalserve.com/api/v1/soccer/live?apiKey=87ff5e514c6c415be05908deb2f15526     - LIVE games only
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d-1 - all yesterday games from all leagyes
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d-2
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d-3
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d-4
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d-6
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d-7
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d1 - all tomorrow games from all leagues
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d2
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d3
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d4
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d5
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d6
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/d7
+
+
+
+Soccer full season fixtures - you can map fixtures with live score and stats by static_id:
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerfixtures/data/mapping - leagues ids list
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerfixtures/data/seasons - leagues seasons list
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerfixtures/leagueid/1204    - fixtures by league ID
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/abbr - team abbreviations
+
+
+Soccer historical data (updated list can be requested by email - support@goalserve.com):
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerhistory/leagueid/1204-2009-2010   - fixtures by league ID
+
+
+Soccer live stats - live match statistics and lineups
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerfixtures/data/mapping - leagues ids list
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerleague/1204 - teams/players by leagueID
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1005.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1007.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1425.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1422.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1204.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1399.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1398.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1397.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1229.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1225.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1226.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1221.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1217.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1218.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1322.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1205.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1197.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1198.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1199.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1352.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1344.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1361.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1269.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1265.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1086.xml  - Australia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1081.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1093.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1090.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1102.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1232.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1308.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1154.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1093.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1163.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1440.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1457.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1185.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1159.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1271.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1049.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1050.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1051.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1054.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1335.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1407.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1040.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1022.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1368.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/2556.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1342.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1056.xml  - world cup 2018
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1531.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1193.xml
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1282.xml
+
+You also can request past game stats by date attribute
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1204?date=21.09.2018
+
+Or using static_id and league id to get single match stats
+
+Example
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/match?id=2505310&league=1457
+
+
+Soccernew/home feed commentary_available="1193" attribute if not empty per match display if live stats feed is available for a given match 
+
+
+Predicted lineups for next game week available for selected leagues only (published 2-3 days in advance):
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1204_predicted.xml
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1229_predicted.xml
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1221_predicted.xml
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1269_predicted.xml
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1399_predicted.xml
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1005_predicted.xml
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/commentaries/1007_predicted.xml
+
+Injuries
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccernew/injuries
+
+
+
+
+Soccer Odds (content zipped using Gzip compression)
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=soccer_10
+
+a)Timestamp - Import only latest changes after last download, instead of loading full feed.<scores sport="soccer" ts="1474825423341">http://www.goalserve.com/getfeed/.../getodds/soccer?cat=soccer_10&ts=1474825423341b)Feed compressed using GZIP c)Filter parameters     date_start - start date filter     date_end - end date filter. Can be null if you need to get matches just for 1 day - use only date_start in this case     bm - filter by bookmaker (comma separated)     market- filter by market (comma separated)     league - filter by category id (comma separated). If you want to filter by "gid" attribute add   "_"        symbol before gid value. For exame "&league=_2343,_2435".     match - filter by match id (comma separated)
+
+
+Soccer video highlights:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerhighlights/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerhighlights/d-1
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerhighlights/d-2
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerhighlights/d-3
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerhighlights/d-4
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerhighlights/d-5
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerhighlights/d-6
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerhighlights/d-7
+
+Soccer league standings:
+
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/standings/1204.xml    - where 1204 is league id
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerfixtures/data/mapping - leagues ids list
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/standings/1390?season=2017-2018   - historical standings by league id and season value
+
+
+Soccer topscorers:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/topscorers/1022         - where 1022 is league id
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/topscorers/1022_assists
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/topscorers/1022_cards
+
+
+
+Soccer profiles/stats:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerstats/team/9260
+where 9260 is a team id
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerstats/player/193
+where 193 is a player id
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerstats/coach/105040
+where 105040 is a player id
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerstats/team/updated_list   - list with latest updated teams ONLY to not download all team profiles every time
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerstats/player/updated_list  - list with latest updated players ONLY to not download all team profiles every time
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerstats/coach/updated_list  - list with latest updated coaches ONLY to not download all team profiles every time
+
+
+Players and team by league ID
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/soccerleague/1204
+where 1204 is league id
+
+Soccer h2h:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/h2h/9249/9002
+
+Where 9249 and 9002 are team Id`s
+
+
+--------------------------BASEBALL-------------------
+
+for JSON output please add "?json=1" to the feed URL
+
+MLB
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/mlb_shedule   - MLB schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/mlb-scores      - MLB livescore
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/mlb-playbyplay      - MLB play by play
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/mlb_standings   - MLB standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/usa?date=dd.MM.yyyy    - past boxscores since 2010
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/mlb_shedule?date1=30.03.2023&date2=30.03.2023&showodds=true  - BOOKmaker ODDS by date (date format dd.MM.yyyy) 
+
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/1027_stats - season stats by team ID
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/1027_injuries  - team injuries list by team ID
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/1027_rosters  - team rosters by team ID
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/usa?playerimage=15826  - player images by player ID
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/mlb_player_batting
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/mlb_player_fielding
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/mlb_player_pitching
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/mlb_team_batting
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/mlb_team_fielding
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/mlb_team_pitching
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/nl_player_batting
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/nl_player_fielding
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/nl_player_pitching
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/nl_team_batting
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/nl_team_fielding
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/nl_team_pitching
+
+KBO
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/1118-scores - livescore
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/1118-scores?date=dd.MM.yyyy - match details by date
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/3712-rosters - team rosters by team ID
+
+NPB
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/1011-scores - livescore
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/1011-scores?date=dd.MM.yyyy - match details by date
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/3712-rosters - team rosters by team ID
+
+
+
+Bookmaker odds
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=baseball_10 
+
+
+Other leagues data
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/leagues - leagues list
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/1118  - league schedule by league id
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/1018_table - league standings by league ID
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/home     - livescore
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d-1 - yesterday matches
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d-2
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d-3
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d-4
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d-5
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d-6
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d-7
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d1 - tomorrow matches
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d2
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d3
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d4
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d5
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d6
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/baseball/d7
+
+
+--------------------------AMERICAN FOOTBALL-------------------
+
+for JSON output please add "?json=1" to the feed URL
+
+Am football:
+
+NFL scores/standings and schedule
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/nfl-scores  - NFL livescore
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/nfl-scores?date=dd.MM.yyyy   - past boxscores since 2010
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/nfl-playbyplay-scores  - NFL live play by play
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/nfl-shedule  - NFL schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/nfl-standings  - NFL standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/nfl-shedule?date1=18.05.2018&date2=18.05.2018&showodds=1  - BOOKmaker ODDS schedule by date period (date1 and date2)
+
+
+NCAA scores/standings and schedule
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/fbs-scores  - NCAA livescore
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/fbs-scores?date=dd.MM.yyyy   - past boxscores since 2010
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/fbs-playbyplay-scores  - NCAA live play by play
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/fbs-shedule  - NCAA schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/fbs-standings  - NCAA standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/fbs-shedule?date1=18.05.2018&date2=18.05.2018&showodds=1  - BOOKmaker ODDS schedule by date period (date1 and date2)
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/div3-scores
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/div3-shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/div3-standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/fcs-scores
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/fcs-shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/fcs-stand
+
+
+Team rosters, injures and season stats. Team logos are available in team roster file
+
+
+NFL teams by id
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/1691_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/1691_injuries
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/1691_player_stats
+
+
+NCAA teams by team id
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/1153_rosters   -  NCAA team profile feed where 1153 is a team id
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/1153_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/1153_player_stats
+
+
+
+NFL player images
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/football/usa?playerimage=15826  - player images
+
+
+
+-----XFL
+
+https://www.goalserve.com/getfeed/90a6ced269494c20772108d7d0e1ed26/xfl/xfl-scores
+
+Schedule
+
+https://www.goalserve.com/getfeed/90a6ced269494c20772108d7d0e1ed26/xfl/xfl-shedule
+
+Schedule
+
+https://www.goalserve.com/getfeed/90a6ced269494c20772108d7d0e1ed26/xfl/xfl-shedule?showodds=1
+
+Rosters by team ID
+
+https://www.goalserve.com/getfeed/90a6ced269494c20772108d7d0e1ed26/xfl/106_roster
+
+
+--------------------------BASKETBALL-------------------
+
+
+add ?json=1 parameter to convert into json
+
+Basketball:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/leagues  - leagues list
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1170   - fixtures by league ID (results are including player stats)
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1170_table - standings by league ID
+
+
+Livescore:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/home - livescore / today match results
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d-1 - yesterday match results
+
+
+Point by point history:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/home_p2p - match point by point history
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d-1_p2p - match point by point history
+
+
+
+
+Live player stats:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/home_stats - todays matches player stats. Updating in live
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d-1_stats - yesterday match player stats.
+
+Team/player profiles:
+
+https://www.goalserve.com/getfeed/6636fbd43be84b5bbd1a692d673e449c/bsktbl/team_profile?id=1062
+https://www.goalserve.com/getfeed/6636fbd43be84b5bbd1a692d673e449c/bsktbl/player_profile?id=1062
+
+max 20 ids per request separated by comma ","
+
+
+H2H teams:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/h2h_1375-1562  - h2h stats comparison by team ID
+
+Last 7/ next 7 days feeds
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d-1 - yesterday matches
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d-2
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d-3
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d-4
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d-5
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d-6
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d-7
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d1 - tomorrow games
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d2
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d3
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d4
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d5
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d6
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/d7
+
+
+Additional country feeds
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/argentina_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/austria_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/belgium_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/brazil_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/bulgaria_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/croatia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/cyprus_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/czechia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/denmark_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/england_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/estonia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/eurocups_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/finland_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/france_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/germany_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/greece_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/holland_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/israel_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/italy_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/norway_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/poland_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/russia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/serbia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/slovakia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/slovenia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/spain_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/sweden_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/turkey_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/ukraine_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/usa_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/worldcup_shedule
+
+
+
+
+
+
+USA basketball feeds NBA/NCAA
+
+hhttp://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/nba-shedule   - NBA schedule
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/nba-scores   - NBA livescore
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/nba-scores?date=dd.MM.yyyy    - past boxscores since 2010 by date ("dd.MM.yyyy")
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/nba-playbyplay  - NBA live commentaries
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/nba-scores?date=22.11.2010_pbp  - NBA play by play history by date ("dd.MM.yyyy")
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/nba-standings  - NBA standings
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/nba-shedule?date1=29.11.2022&date2=29.11.2022&showodds=1  - BOOKmaker ODDS schedule by date period (date1 and date2)
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1193_rosters   = team roster / team logo by team ID
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1193_stats  - team player season stats by team ID
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1193_injuries  - injuries reports by team ID
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/usa?playerimage=2011  - NBA and NCAA player images
+
+
+NCAA
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/ncaa-all-scores   - all divisions NCAA livescore
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/ncaa-scores   - TOP 25 NCAA livescore
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/ncaa-scores?date=19.01.2022_all  - old games stats by date attribute ("dd.MM.yyyy")
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/ncaa-playbyplay   - NCAA live commentaries
+https://www.goalserve.com/getfeed/432c3be1229741d8db2208d84eb5ef29/bsktbl/ncaa-scores?date=22.11.2010_pbp  - NCAA play by play history by date
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/ncaa-shedule   - NCAA schedule
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/ncaa-shedule?date1=16.05.2022&date2=15.05.2022&showodds=1  - BOOKmaker ODDS schedule by date period (date1 and date2)
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/ncaa-standings   - NCAA standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1985_rosters      - NCAA team profile where 1985 is a team id
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1985_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/ap-rankings
+
+Euroleague
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1287-scores
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1287-scores?date=12.02.2018 - scores by date
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1613_rosters  - team rosters by ID
+
+
+Australia NBL
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1183-scores
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1183-scores?date=12.02.2018 - scores by date
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1613_rosters  - team rosters by ID
+
+Greece Basket League
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/2490-scores
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/2490-scores?date=12.02.2018 - scores by date
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1613_rosters  - team rosters by ID
+
+Korea KBL Basket League
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1519-scores
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/1519-scores?date=07.02.2023 - scores by date
+
+
+
+
+WNBA
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/wnba-shedule   - WNBA schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/wnba-standings  - WNBA standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/wnba-scores   - WNBA livescore
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/wnba-scores?date=dd.MM.yyyy - old scores by date
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_atl_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_atl_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_chi_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_chi_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_con_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_con_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_ind_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_ind_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_nyl_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_nyl_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_was_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_was_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_dal_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_dal_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_lva_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_lva_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_las_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_las_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_min_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_min_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_pho_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_pho_stats
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_sea_rosters
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/bsktbl/w_sea_stats
+
+
+
+
+
+--------------------------TENNIS-------------------
+
+Tennis:
+
+----Data is provided in XML format. To change output to JSON add "?json=1" to the feed URL.
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/leagues  - leagues list
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/atp_tournaments - tounnaments season schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/wta_tournaments
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/10131  - tournament fixtures and results feed by tournament ID
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/10131-draw  - tournament draw by tournament id
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/home   - livescore
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/itf_today  - ITF livescore and results
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/itf_d1 - ITF tomorrow schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/tt_live  - Table Tennis livescore and results
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/home_gamestats  - live game stats for top matches
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d-1_gamestats 
+
+Past day scores can be obtained using d-feeds
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d-1   - yesterday games
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d-2
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d-3 
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d-4
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d-5
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d-6
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d-7
+
+Upcoming games
+
+ http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d1   - tomorrow games
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d2
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d3 
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d4
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d5
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d6
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d7
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/h2h_1998-1426  - h2h stats comparison by player ID
+
+Tennis rankings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/atp  - rankings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/wta  - rankings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/atp_race
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/wta_race
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/atp_doubles
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/wta_doubles
+
+Tennis Live Rankings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/atp_live
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/wta_live
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/atp_race_live
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/wta_race_live
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/atp_doubles_live
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/wta_doubles_live
+
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/atp_singles_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/wta_singles_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/atp_doubles_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/wta_doubles_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/challenger_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/challenger_women_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/itf_men_singles_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/itf_women_singles_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/itf_men_doubles_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/itf_women_doubles_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/teams_men_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/teams_women_shedule
+
+Point by point scores:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/home_p2p
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/d-1_p2p
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/profile?id=2010 - player profiles
+
+
+ITF live score:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/itf - ITF livescore
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/itf_shedule - ITF schedule
+
+Table tennis:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/ttf_today - Table Tennis today schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/ttf_d1 - Table Tennis tomorrow shedule
+
+Odds comparison
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=tennis_10
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=table_tennis_10
+
+
+a)Timestamp - Import only latest changes after last download, instead of loading full feed. Load full feed first time and then extract ts attribute value from downloaded feed.
+
+<scores sport="soccer" ts="1474825423341”>
+
+Apply ts value on next request to get updates only
+
+http://www.goalserve.com/getfeed/.../getodds/soccer?cat=tennis_10&ts=1474825423341
+
+b)Feed compressed using GZIP 
+c)Filter parameters
+     date_start - start date filter
+     date_end - end date filter. Can be null if you need to get matches just for 1 day - use only date_start in this case
+     bm - filter by bookmaker (comma separated)
+     market- filter by market (comma separated)
+     league - filter by category id (comma separated). If you want to filter by "gid" attribute add   "_"        symbol before gid value. For exame "&league=_2343,_2435".
+     match - filter by match id (comma separated)
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/tennis_scores/inplay-mapping   - mapping with inplay odds feed
+
+
+--------------------------CRICKET-------------------
+
+
+for JSON output please add "?json=1" to the feed URL
+
+Cricket livescore:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/cricket/livescore
+
+Cricket fixtures:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/cricket/schedule  - upcoming games
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=cricket_10  - upcoming games odds
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/cricketfixtures/tours/tours  - upcoming games that show feeds for team squads, fixtures and standings for every series
+
+Example
+
+<category name="Indian Premier League" file_path="/intl/1015" squads_file="/intl/1015_squads" table_file="/intl/1015_table" id="1015"/>
+
+
+
+
+
+Fixtures:
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/cricketfixtures/intl/1015  - full series fixtures. Updating every 1 hour
+
+1)Filter by not started games:
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/cricketfixtures/intl/1015?status=scheduled
+
+3)Filter by Match ID (several match IDs can be separated by comma)
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/cricketfixtures/intl/1015?match=13071991549
+
+Squads:
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/cricketfixtures/intl/1015_squads  - teams squads. Every player marked with T20, ODI, Test flags.
+
+
+
+
+
+Standings:
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/cricketfixtures/intl/1015_table - tournament standings if available
+
+
+Cricket profiles
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/cricket/profile?id=49920 - player profiles where 49920 is profileid attribute from live feed
+
+
+
+
+
+--------------------------ICE HOCKEY-------------------
+
+To change output to JSON please add "?json=1" to the feed URL
+
+Hockey:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/leagues  - leagues list
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1002 - fixtures by league ID
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1002_table - standings by league ID
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/h2h_1375-1562  - h2h stats comparison by team ID
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=hockey_10 - odds comparison
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/home     - livescore
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d-1 - yesterday matches
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d-2
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d-3
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d-4
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d-5
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d-6
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d-7
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d1 - tomorrow matches
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d2
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d3
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d4
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d5
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d6
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/d7
+
+NHL
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1144_rosters - rosters by team ID
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1144_stats - season stats by team ID
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1144_injuries - injuries by team ID
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/nhl-scores  — NHL livescore
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/nhl-scores?date=12.02.2018 - NHL scores by date
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/nhl-shedule   - NHL schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/nhl-standings  - NHL standings
+
+KHL
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1002-scores
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1002-scores?date=12.02.2018 - KHL scores by date
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1613_rosters  - KHL team rosters
+
+Finland Liiga
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1000-scores
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1000-scores?date=12.02.2018 - Liiga scores by date
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1613_rosters  - Liiga team rosters
+
+Czech Liga
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1006-scores
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1006-scores?date=12.02.2018 - scores by date
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1613_rosters  - team rosters
+
+SHL
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1004-scores
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1004-scores?date=12.02.2018 - scores by date
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/hockey/1613_rosters  - team rosters
+
+
+
+--------------------------HORSE RACING-------------------
+
+for JSON output please add "?json=1" to the feed URL
+
+Horse racing:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/usa
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/usa?date=dd.MM.yyyy old races by date
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/usa_tomorrow
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/uk
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/uk?date=dd.MM.yyyy old races by date
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/uk_tomorrow
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/australia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/australia_tomorrow
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/australia?date=dd.MM.yyyy old races by date
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/hk
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/hk_tomorrow
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/hk?date=dd.MM.yyyy old races by date
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/singapore
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/singapore_tomorrow
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/singapore?date=dd.MM.yyyy old races by date
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/dubai
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/dubai_tomorrow
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/dubai?date=dd.MM.yyyy old races by date
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/sa
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/sa?date=dd.MM.yyyy old races by date
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/france
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/france?date=dd.MM.yyyy old races by date
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/sweden
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/racing/sweden?date=dd.MM.yyyy old races by date
+
+
+--------------------------GOLF PGA-------------------
+
+
+To change output to JSON please add "?json=1" to the feed URL
+
+
+Golf:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/live  - live scoreboard
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/european_live  - live scoreboard DP Tour
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/liv_live - live scoreboard LIV
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/lpga_live - live scoreboard LPGA
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/live?date=dd.MM.yyyy - past scores by date
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/pga_schedule  - PGA schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/lpga_schedule  - PLGA schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/liv_schedule  - LIV schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/european_schedule  - DP Tour schedule
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/rankings - OWGR player ranking/players list
+
+
+Player profiles by id
+
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/profile?id=1153
+
+
+
+------OTHER SERIES-------
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/european_schedule  - EuropeanSeries schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/lpga_schedule  - LPGA schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/champions_schedule  - Champions schedule
+
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/european_live  - EuropeanSeries live leaderboard
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/lpga_live  - LPGA live leaderboard
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/champions_live  - Champions live leaderboard
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/golf/liv_live  - LIV live leaderboard
+
+
+
+
+--------------------------ESPORTS-------------------
+
+
+for JSON output please add "?json=1" to the feed URL
+
+Pregame odds
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/getodds/soccer?cat=esports_10
+
+Livescore
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/d-1 - yesterday
+
+
+Fixtures for 7 days
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/d1 - tomorrow
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/d2
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/d3
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/d4
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/d5
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/d6
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/d7
+
+
+
+Results matches by date
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/esports/home?date=dd.MM.yyyy
+
+
+--------------------------MOTOR RACING-------------------
+
+Motorsport feeds:
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/leagues - list of supported series, historical seasons, paths to standings, live feeds and schedules
+
+
+Formula 1
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/f1/f1-live   - live lap by lap feed. Updating every 10 seconds
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/f1/f1-results - season schedule/results feed
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/f1/f1-drivers - driver standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/f1/f1-teams - teams standings
+
+Moto GP
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/motogp-live   - live lap by lap feed. Updating every 10 seconds
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/motogp-schedule - season schedule/results feed
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/motogp-drivers - driver standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/motogp-teams - teams standings
+
+-----to be provided next week
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/motogp-schedule-2021 - historical season  schedule/results by series name/season value for last 10 years
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/motogp-drivers-2021 - historical driver standings by series name/season value  for last 10 years
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/1035-2021 - historical race results by Race ID and Season value.  for last 10 years
+
+
+
+Other racing series
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/moto2-live   - live lap by lap feed. Updating every 10 seconds
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/moto2-schedule - season schedule/results feed
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/moto2-drivers - driver standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/moto3-live   - live lap by lap feed Updating every 10 seconds
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/moto3-schedule - season schedule/results feed
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/moto3-drivers - driver standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/formula2-live   - live lap by lap feed. Updating every 10 seconds
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/formula2-schedule - season schedule/results feed
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/formula2-drivers - driver standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/formula2-teams - teams standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/formulae-live   - live lap by lap feed. Updating every 10 seconds
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/formulae-schedule - season schedule/results feed
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/formulae-drivers - driver standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/formulae-teams - teams standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/indycar-live   - live lap by lap feed. Updating every 10 seconds
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/indycar-schedule - season schedule/results feed
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/indycar-drivers - driver standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/nascar-live   - live lap by lap feed. Updating every 10 seconds
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/nascar-schedule - season schedule/results feed
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/motors/nascar-drivers - driver standings
+
+
+
+
+--------------------------RUGBY UNION-------------------
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/leagues  - leagues list
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/home - livescore
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/live_stats - live stats for top games
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/live_stats?date=dd.MM.yyyy - live stats for top games by date
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/england
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/england_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/europe
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/europe_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/france
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/france_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/italy
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/italy_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/worldcup
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/worldcup_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/southafrica
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/southafrica_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/newzealand
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/newzealand_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/georgia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/georgia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/wales
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/wales_shedule
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugby/h2h_1375-1562  - h2h stats comparison by team ID
+
+
+--------------------------RUGBY LEAGUE-------------------
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugbyleague/home - livescore
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugbyleague/england
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugbyleague/england_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugbyleague/europe
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugbyleague/europe_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugbyleague/australia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugbyleague/australia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugbyleague/worldcup
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugbyleague/worldcup_shedule
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugbyleague/1006-scores   - NRL live stats
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/rugbyleague/1006-scores?date=12.03.2020  - scores and stats by date (dd.MM.yyyy)
+
+
+--------------------------HANDBALL-------------------
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/leagues  - leagues list
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/austria
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/austria_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/austria_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/croatia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/croatia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/croatia_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/czechia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/czechia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/czechia_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/denmark
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/denmark_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/denmark_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/eurocups
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/eurocups_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/eurocups_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/finland
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/finland_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/finland_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/france
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/france_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/france_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/friendly
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/friendly_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/friendly_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/germany
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/germany_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/germany_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/home 
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/latest
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/live
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/norway
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/norway_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/norway_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/olympic
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/olympic_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/olympic_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/poland
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/poland_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/poland_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/romania
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/romania_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/romania_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/serbia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/serbia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/serbia_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/slovakia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/slovakia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/slovakia_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/slovenia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/slovenia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/slovenia_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/spain
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/spain_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/spain_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/sweden
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/sweden_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/sweden_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/switzerland
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/switzerland_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/switzerland_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/worldcup
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/worldcup_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/worldcup_standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/handball/h2h_1375-1562  - h2h stats comparison by team 
+
+
+
+--------------------------AFL AUSTRALIAN RULES-------------------
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/afl/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/afl/schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/afl/standings
+
+
+
+--------------------------VOLLEYBALL-------------------
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/leagues  - leagues list
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/croatia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/croatia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/croatia_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/czechia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/czechia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/czechia_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/denmark
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/denmark_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/denmark_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/eurocups
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/eurocups_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/eurocups_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/finland
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/finland_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/finland_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/france
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/france_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/france_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/germany
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/germany_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/germany_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/greece
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/greece_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/greece_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/italy
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/italy_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/italy_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/latest
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/norway
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/norway_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/norway_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/poland
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/poland_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/poland_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/russia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/russia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/russia_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/slovenia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/slovenia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/slovenia_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/spain
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/spain_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/spain_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/turkey
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/turkey_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/turkey_standings
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/worldcup
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/worldcup_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/worldcup_standings
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/volleyball/h2h_1375-1562  - h2h stats comparison by team ID
+
+
+
+--------------------------BOXING-------------------
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/bantamweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/bantamweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/catchweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/catchweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/cruiserweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/cruiserweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/featherweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/featherweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/featherweight_women
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/featherweight_women_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/flyweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/flyweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/flyweight_women
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/flyweight_women_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/heavyweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/heavyweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/lightheavyweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/lightheavyweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/lightmiddleweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/lightmiddleweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/lightweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/lightweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/lightweight_women
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/lightweight_women_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/lightwelterweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/lightwelterweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/middleweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/middleweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/middleweight_women
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/middleweight_women_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/superbantamweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/superbantamweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/superfeatherweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/superfeatherweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/superflyweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/superflyweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/superflyweight_women
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/superflyweight_women_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/superheavyweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/superheavyweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/supermiddleweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/supermiddleweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/supermiddleweight_women
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/supermiddleweight_women_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/welterweight
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/welterweight_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/welterweight_women
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/boxing/welterweight_women_shedule
+
+
+--------------------------MMA-------------------
+
+MMA/UFC:
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/mma/schedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/mma/live
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/mma/live?date=dd.MM.yyyy  - past fights stats
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/mma/fighters  - fighters list
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/mma/fighter?profile=86637 - fighter profile by ID
+
+--------------------------SNOOKER-------------------
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/asia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/asia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/australia
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/australia_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/brazil
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/brazil_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/china
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/china_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/eurocups
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/eurocups_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/germany
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/germany_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/scotland
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/scotland_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/thailand
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/thailand_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/uk
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/uk_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/wales
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/wales_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/worldcup
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/snooker/worldcup_shedule
+
+--------------------------DARTS-------------------
+
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/darts/denmark
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/darts/denmark_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/darts/uae
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/darts/uae_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/darts/home
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/darts/eurocups
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/darts/eurocups_shedule
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/darts/worldcup
+http://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/darts/worldcup_shedule
+
+
+--------------------------Olympics-------------------
+
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/olympic/medals
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/olympic/results
+https://www.goalserve.com/getfeed/87ff5e514c6c415be05908deb2f15526/olympic/schedules
+
+
+LOGOS/IMAGES:
+
+League logos by League ID (for several leagues add league IDs separated by comma):
+
+http://data2.goalserve.com:8084/api/v1/logotips/soccer/leagues?k=87ff5e514c6c415be05908deb2f15526&ids=1151
+
+
+Team logos by team ID (for several teams add team IDs separated by comma):
+
+http://data2.goalserve.com:8084/api/v1/logotips/soccer/teams?k=87ff5e514c6c415be05908deb2f15526&ids=9002,9240
+
+
+Player images for golf:
+
+http://data2.goalserve.com:8084/api/v1/logotips/golf/players?k=87ff5e514c6c415be05908deb2f15526&ids=1151
+
+
+
+Request schema:
+
+
+http://data2.goalserve.com:8084/api/v1/logotips/{SPORT_TYPES}/{CATEGORY}?k={USER_GUID}&ids={ENTITIES_IDS}
+
+{SPORT_TYPES} :
+     soccer,
+     basketball,
+     baseball,
+     amfootball,
+     hockey,
+     cricket,
+     golf,
+     rugby_union,
+     rugby_league
+
+{CATEGORY} :
+     leagues,
+     teams,
+     players
+
+{USER_GUID} : 
+     User's global unique identifier
+
+{ENTITIES_IDS} :
+     Comma separated ids of leagues or teams or players
+
+
+
+
+Requests limit - 1 request per second 
+
+
+
+
+PREGAME ODDS SETTLEMENTS:
+
+
+By odd name and marketed (return single odd result):
+
+http://oddsfeed.goalserve.com/api/v1/odds/pre-game/settlement?sportId=4&gsId=85471622&marketId=16&oddname=Under:8&k=87ff5e514c6c415be05908deb2f15526
+
+Using date time timestamp (all odds updated since given timestamp (max last 30 min)):
+
+http://oddsfeed.goalserve.com/api/v1/odds/pre-game/settlements?sportId=4&dateTime=1674834565&k=87ff5e514c6c415be05908deb2f15526&json=1
+
+By matches Ids (max 50 match ids per call)
+
+http://oddsfeed.goalserve.com/api/v1/odds/pre-game/settlements/matches?sportId=4&matchesIds=4734063,4734063,4734063,4734063&k=87ff5e514c6c415be05908deb2f15526&json=0
+
+
+sportId - sport id (soccer -4, basketball - 7, tennis - 5)
+gsId - match "id" attribute
+marketId - market Id
+oddname - odd name to check settlement 
+k - your goal serve user key (guid)
+
+dateTime= - return all odds settled since timestamp provided (unix timempstamp) in case if you want to receive updates for all matches and not by Id
+json=1 - to return json instead of xml
+
+Possible response value:
+
+<result>Loose</result>
+<result>Win</result>
+<result>Stake refund</result>
+<result>Half win</result>
+<result>Half loose</result>
+
+
+request limit - 1 request per second per sport
+
+
+

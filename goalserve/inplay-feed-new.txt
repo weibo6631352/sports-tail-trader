@@ -1,0 +1,57 @@
+Inplay odds feeds refresh every second (zipped JSON)
+
+http://inplay.goalserve.com/inplay-soccer.gz
+http://inplay.goalserve.com/inplay-basket.gz
+http://inplay.goalserve.com/inplay-tennis.gz
+http://inplay.goalserve.com/inplay-volleyball.gz
+http://inplay.goalserve.com/inplay-amfootball.gz
+http://inplay.goalserve.com/inplay-esports.gz
+http://inplay.goalserve.com/inplay-hockey.gz
+http://inplay.goalserve.com/inplay-baseball.gz
+
+
+
+Match result by ID and month/year which used to calculate inplay odds winning
+
+Match Results url scheme -
+http://inplay.goalserve.com/results/{yyyyMM}/{MATCH_ID}.json
+
+Example:
+http://inplay.goalserve.com/results/202104/59077136.json
+
+Where 
+202104  is yyyyMM
+59077136 is match id
+
+Results are available after game end and removed from main odds feed
+
+
+Time_status
+
+0 Not Started
+1 InPlay
+2 TO BE FIXED
+3 Ended
+4 Postponed
+5 Cancelled
+6 Walkover
+7 Interrupted
+8 Abandoned
+9 Retired
+99 Removed
+
+
+Odds Markets Dictionary url scheme:
+http://inplay.goalserve.com/dictionaries/odds-markets/{SPORT_TYPE}
+
+Example:
+http://inplay.goalserve.com/dictionaries/odds-markets/soccer
+
+
+Match States Dictionary scheme:
+http://inplay.goalserve.com/dictionaries/states/{SPORT_TYPE}
+
+Example:
+http://inplay.goalserve.com/dictionaries/states/soccer
+
+

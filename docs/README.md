@@ -14,6 +14,7 @@
 - 看日常启动和页面操作：看 [使用说明书](./使用说明书.md)
 - 看接口：起服务后访问 `http://127.0.0.1:8000/docs`（Swagger UI）或 `/openapi.json`
 - 看运行与故障处理：看 [runbook.md](./runbook.md)
+- 看 Goalserve 数据接口：看 [goalserve.md](./goalserve.md)
 
 ## 文档索引
 
@@ -25,6 +26,7 @@
 - [市场发现链路.md](./市场发现链路.md)：扩展 discovery hook、分页扫描、WS 热发现和运行时状态
 - [设计文档.md](./设计文档.md)：框架边界、运行时结构、业务扩展契约、前端边界和手续费工具
 - [runbook.md](./runbook.md)：故障处理
+- [goalserve.md](./goalserve.md)：Goalserve 体育数据接口说明（比分、盘中赔率、赛前赔率）
 
 ## 维护
 
