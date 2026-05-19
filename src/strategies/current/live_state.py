@@ -1063,9 +1063,10 @@ def _event_start_is_near_market_start(event: LiveEvent, market_start: datetime) 
     event_start = _event_start_time(event)
     if event_start is None:
         # event_start_time 缺失时用 observed_at 做保守过滤：
-        # 如果 market_start 比观测时间晚超过 24h，说明是未来场次，不应匹配已观测到的赛事。
+        # market_start 比观测时间晚超过 12h → 该 market 是次日场次，不应匹配已观测赛事。
+        # 12h（非 24h）防止"今日赛事"误匹配"次日同联赛 market"（两者相差约 22-23h）。
         observed = _ensure_utc(event.observed_at)
-        if observed is not None and market_start > observed + timedelta(hours=24):
+        if observed is not None and market_start > observed + timedelta(hours=12):
             return False
         return True
     tolerance = timedelta(hours=24) if _event_sport_code(event) == "tennis" else timedelta(hours=6)
