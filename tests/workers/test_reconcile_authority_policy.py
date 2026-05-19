@@ -474,7 +474,7 @@ async def test_unscoped_refresher_only_refreshes_markets_with_exposure() -> None
 @freeze_time("2026-05-12T00:00:00Z")
 async def test_reconcile_prunes_expired_idle_market_from_registry_and_market_ws() -> None:
     expired_market = _market(1).with_metadata(
-        end_date=datetime.now(timezone.utc) - timedelta(hours=1)
+        end_date=datetime.now(timezone.utc) - timedelta(hours=7)
     )
     active_market = _market(2).with_metadata(
         end_date=datetime.now(timezone.utc) + timedelta(hours=1)

@@ -12,5 +12,11 @@ kelly_max_position_fraction = "0.30"
 kelly_min_edge = "0.01"
 kelly_min_stake_usdc = "0.30"
 kelly_allow_round_up_to_market_min = true
-kelly_round_up_max_overbet_ratio = "5.0"
+kelly_round_up_max_overbet_ratio = "10.0"
 kelly_drawdown_halt_fraction = "0.4"
+
+# 扫尾入场时间窗口：最后5分钟（300s）涵盖篮球4Q更多机会；
+# 价格更低（0.78-0.88 vs 0.88-0.93）→ 每次进场盈利空间更大。
+# 领先 6 分以上 + 最后 5 分钟 → win rate ≈ 88-92%，期望值正。
+tail_max_moneyline_seconds_remaining = 300
+tail_max_spreads_seconds_remaining = 180

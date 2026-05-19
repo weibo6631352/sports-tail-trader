@@ -6,10 +6,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.market import Market, TradingStatus
+
+# Polymarket sports 市场的 end_date 通常等于 game_start_time（赛事开始时间），而非赛事真正结束时间。
+# 为保证在比赛进行中（最长 ~4h）仍持续跟踪，跟 end_date 比较时加 6h 宽限期。
+_END_DATE_GRACE = timedelta(hours=6)
 
 TERMINAL_LIVE_STATE_PAUSE_REASONS = frozenset(
     {
@@ -62,7 +66,10 @@ def inactive_market_reason(
 
 
 def market_end_date_elapsed(market: Market, *, now: datetime) -> bool:
-    """判断 market 的结束时间是否已经过去，兼容 naive datetime。"""
+    """判断 market 的结束时间（含宽限期）是否已经过去，兼容 naive datetime。
+
+    宽限期见 _END_DATE_GRACE：sports 市场 end_date = game_start_time，宽限期让赛事全程被跟踪。
+    """
 
     if market.end_date is None:
         return False
@@ -71,7 +78,7 @@ def market_end_date_elapsed(market: Market, *, now: datetime) -> bool:
         market_end = market_end.replace(tzinfo=timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
-    return market_end.astimezone(timezone.utc) <= now.astimezone(timezone.utc)
+    return (market_end + _END_DATE_GRACE).astimezone(timezone.utc) <= now.astimezone(timezone.utc)
 
 
 def market_has_exposure(account_snapshot: AccountSnapshot, market: Market) -> bool:

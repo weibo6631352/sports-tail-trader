@@ -80,7 +80,7 @@ def test_market_service_does_not_subscribe_new_expired_idle_market() -> None:
     )
 
     outcome = service.ingest_raw_market(
-        _raw_market(end_date=datetime.now(timezone.utc) - timedelta(hours=1)),
+        _raw_market(end_date=datetime.now(timezone.utc) - timedelta(hours=7)),
         source="test",
         trace_id="trace-1",
     )

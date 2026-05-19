@@ -124,6 +124,10 @@ class LiveMarketMatch:
                 "contributing_sources": list(self.contributing_sources),
                 "confidence": self.confidence,
             },
+            "goalserve_moneyline": _extract_goalserve_moneyline(self.event),
+            "goalserve_spread": _extract_goalserve_spread(self.event),
+            "goalserve_totals": _extract_goalserve_totals(self.event),
+            "goalserve_halftime": _extract_goalserve_halftime_odds(self.event),
         }
 
 
@@ -217,6 +221,217 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
                 for d in event.drivers
             ],
         },
+    }
+
+
+def _goalserve_markets(event: LiveEvent) -> list[dict[str, Any]] | None:
+    """从 source_payload 取 Goalserve odds markets 列表，供各盘口提取函数共用。"""
+    payload = event.source_payload
+    if not payload:
+        return None
+    odds_dict = payload.get("goalserve_odds")
+    if not isinstance(odds_dict, dict):
+        return None
+    markets = odds_dict.get("markets")
+    if not isinstance(markets, list) or not markets:
+        return None
+    return markets
+
+
+def _extract_goalserve_moneyline(event: LiveEvent) -> dict[str, Any] | None:
+    """从 event.source_payload 提取 Goalserve Money Line 赔率，供 entry 定价用。
+
+    返回 None 表示本事件没有 Goalserve odds 或 Money Line 盘口被暂停/不存在。
+    调用侧应视 None 为"无 Goalserve 定价信号"，不阻塞入场判断。
+    """
+    markets = _goalserve_markets(event)
+    if markets is None:
+        return None
+    # 优先取名称含 "Money Line" 且未暂停的盘口，退而其次取第一个未暂停盘口
+    ml_market = next(
+        (m for m in markets if "money line" in m.get("name", "").lower() and not m.get("suspended")),
+        next((m for m in markets if not m.get("suspended")), None),
+    )
+    if ml_market is None:
+        return None
+    outcomes = ml_market.get("outcomes", [])
+    home_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("home", "1")), None)
+    away_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("away", "2")), None)
+    if home_outcome is None or away_outcome is None:
+        return None
+    try:
+        home_eu = float(home_outcome.get("value_eu", 0) or 0)
+        away_eu = float(away_outcome.get("value_eu", 0) or 0)
+        if home_eu <= 0 or away_eu <= 0:
+            return None
+        home_implied = round(1.0 / home_eu, 6)
+        away_implied = round(1.0 / away_eu, 6)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return {
+        "market_name": ml_market.get("name"),
+        "home_eu": home_eu,
+        "away_eu": away_eu,
+        "home_implied_prob": home_implied,
+        "away_implied_prob": away_implied,
+        "suspended": bool(ml_market.get("suspended")),
+        "home_suspended": bool(home_outcome.get("suspended")),
+        "away_suspended": bool(away_outcome.get("suspended")),
+    }
+
+
+def _extract_goalserve_spread(event: LiveEvent) -> dict[str, Any] | None:
+    """从 Goalserve odds 提取让分盘（Spread/Handicap）数据，供策略方向确认用。
+
+    让分盘口可验证"哪支球队被看好赢得更多分"，用于与 Moneyline 交叉确认方向性。
+    返回 None 表示无让分盘口数据，不影响主入场判断。
+    """
+    markets = _goalserve_markets(event)
+    if markets is None:
+        return None
+    spread_market = next(
+        (
+            m for m in markets
+            if (
+                ("spread" in m.get("name", "").lower() or "handicap" in m.get("name", "").lower())
+                and "2nd half" not in m.get("name", "").lower()
+                and "quarter" not in m.get("name", "").lower()
+                and not m.get("suspended")
+            )
+        ),
+        None,
+    )
+    if spread_market is None:
+        return None
+    outcomes = spread_market.get("outcomes", [])
+    home_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("home", "1")), None)
+    away_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("away", "2")), None)
+    if home_outcome is None or away_outcome is None:
+        return None
+    try:
+        home_eu = float(home_outcome.get("value_eu", 0) or 0)
+        away_eu = float(away_outcome.get("value_eu", 0) or 0)
+        if home_eu <= 0 or away_eu <= 0:
+            return None
+        home_implied = round(1.0 / home_eu, 6)
+        away_implied = round(1.0 / away_eu, 6)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return {
+        "market_name": spread_market.get("name"),
+        "home_handicap": home_outcome.get("handicap"),
+        "away_handicap": away_outcome.get("handicap"),
+        "home_eu": home_eu,
+        "away_eu": away_eu,
+        "home_implied_prob": home_implied,
+        "away_implied_prob": away_implied,
+        "suspended": bool(spread_market.get("suspended")),
+        "home_suspended": bool(home_outcome.get("suspended")),
+        "away_suspended": bool(away_outcome.get("suspended")),
+    }
+
+
+def _extract_goalserve_totals(event: LiveEvent) -> dict[str, Any] | None:
+    """从 Goalserve odds 提取大小分盘（Totals/Over-Under）数据，供策略进攻节奏判断用。
+
+    大小分盘反映书商对比赛总得分走向的预判，篮球/冰球/棒球场景下可作辅助方向信号。
+    返回 None 表示无大小分数据，不影响主入场判断。
+    """
+    markets = _goalserve_markets(event)
+    if markets is None:
+        return None
+    totals_market = next(
+        (
+            m for m in markets
+            if (
+                (
+                    "over" in m.get("name", "").lower()
+                    or "total" in m.get("name", "").lower()
+                    or "under" in m.get("name", "").lower()
+                )
+                and "2nd half" not in m.get("name", "").lower()
+                and "quarter" not in m.get("name", "").lower()
+                and not m.get("suspended")
+            )
+        ),
+        None,
+    )
+    if totals_market is None:
+        return None
+    outcomes = totals_market.get("outcomes", [])
+    over_outcome = next((o for o in outcomes if "over" in o.get("name", "").lower()), None)
+    under_outcome = next((o for o in outcomes if "under" in o.get("name", "").lower()), None)
+    if over_outcome is None or under_outcome is None:
+        return None
+    try:
+        over_eu = float(over_outcome.get("value_eu", 0) or 0)
+        under_eu = float(under_outcome.get("value_eu", 0) or 0)
+        if over_eu <= 0 or under_eu <= 0:
+            return None
+        over_implied = round(1.0 / over_eu, 6)
+        under_implied = round(1.0 / under_eu, 6)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return {
+        "market_name": totals_market.get("name"),
+        "total_line": over_outcome.get("handicap") or under_outcome.get("handicap"),
+        "over_eu": over_eu,
+        "under_eu": under_eu,
+        "over_implied_prob": over_implied,
+        "under_implied_prob": under_implied,
+        "suspended": bool(totals_market.get("suspended")),
+        "over_suspended": bool(over_outcome.get("suspended")),
+        "under_suspended": bool(under_outcome.get("suspended")),
+    }
+
+
+def _extract_goalserve_halftime_odds(event: LiveEvent) -> dict[str, Any] | None:
+    """从 Goalserve odds 提取半场/第二节盘口，作为领先方走势确认信号。
+
+    半场盘口（2nd Half / 2nd Quarter 等）的赔率变化反映领先方能否保持优势，
+    可用于验证"当前领先程度是否足以支撑扫尾买入"。
+    返回 None 表示无半场盘口，不影响主判断。
+    """
+    markets = _goalserve_markets(event)
+    if markets is None:
+        return None
+    # 优先取 2nd Half Money Line，其次任意含 "half" 且 Money Line 的盘口
+    half_market = next(
+        (
+            m for m in markets
+            if (
+                ("2nd half" in m.get("name", "").lower() or "half" in m.get("name", "").lower())
+                and "money line" in m.get("name", "").lower()
+                and not m.get("suspended")
+            )
+        ),
+        None,
+    )
+    if half_market is None:
+        return None
+    outcomes = half_market.get("outcomes", [])
+    home_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("home", "1")), None)
+    away_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("away", "2")), None)
+    if home_outcome is None or away_outcome is None:
+        return None
+    try:
+        home_eu = float(home_outcome.get("value_eu", 0) or 0)
+        away_eu = float(away_outcome.get("value_eu", 0) or 0)
+        if home_eu <= 0 or away_eu <= 0:
+            return None
+        home_implied = round(1.0 / home_eu, 6)
+        away_implied = round(1.0 / away_eu, 6)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return {
+        "market_name": half_market.get("name"),
+        "home_eu": home_eu,
+        "away_eu": away_eu,
+        "home_implied_prob": home_implied,
+        "away_implied_prob": away_implied,
+        "suspended": bool(half_market.get("suspended")),
+        "home_suspended": bool(home_outcome.get("suspended")),
+        "away_suspended": bool(away_outcome.get("suspended")),
     }
 
 
@@ -771,6 +986,16 @@ def _market_sport_codes(market: Market) -> set[str]:
         ("ice-hockey", ("nhl", "ahl", "hockey", "ice hockey")),
         ("american-football", ("nfl", "ncaaf", "american football")),
         ("football", ("soccer", "football", "mls", "nwsl", "epl")),
+        ("volleyball", ("volleyball",)),
+        ("cricket", ("cricket", "ipl", "t20", "test match", "odi")),
+        ("rugby", ("rugby", "six nations", "rugby union", "rugby league")),
+        ("handball", ("handball",)),
+        ("mma", ("mma", "ufc", "bellator", "mixed martial arts")),
+        ("boxing", ("boxing",)),
+        ("golf", ("golf", "pga tour", "masters", "open championship", "ryder cup", "lpga")),
+        ("horse-racing", ("horse racing", "cheltenham", "kentucky derby", "grand national", "horse race")),
+        ("formula1", ("formula 1", "formula1", "f1", "grand prix", "monaco gp")),
+        ("motogp", ("motogp", "moto gp")),
     )
     return {sport for sport, tokens in mapping if any(f" {token} " in f" {text} " for token in tokens)}
 
@@ -794,6 +1019,26 @@ def _event_sport_code(event: LiveEvent) -> str | None:
         return "tennis"
     if "football" in text or "soccer" in text:
         return "football"
+    if "volleyball" in text:
+        return "volleyball"
+    if "cricket" in text:
+        return "cricket"
+    if "rugby" in text:
+        return "rugby"
+    if "handball" in text:
+        return "handball"
+    if "mma" in text or "ufc" in text:
+        return "mma"
+    if "boxing" in text:
+        return "boxing"
+    if "golf" in text:
+        return "golf"
+    if "horse" in text and "racing" in text:
+        return "horse-racing"
+    if "formula" in text or "grand prix" in text:
+        return "formula1"
+    if "motogp" in text:
+        return "motogp"
     return None
 
 
@@ -805,12 +1050,23 @@ def _normalize_sport_code(value: str) -> str:
         return "ice-hockey"
     if normalized in {"tabletennis"}:
         return "table-tennis"
+    if normalized in {"amfootball", "american-football"}:
+        return "american-football"
+    if normalized.startswith("golf-"):
+        return "golf"
+    if normalized.startswith("horse-racing-"):
+        return "horse-racing"
     return normalized
 
 
 def _event_start_is_near_market_start(event: LiveEvent, market_start: datetime) -> bool:
     event_start = _event_start_time(event)
     if event_start is None:
+        # event_start_time 缺失时用 observed_at 做保守过滤：
+        # 如果 market_start 比观测时间晚超过 24h，说明是未来场次，不应匹配已观测到的赛事。
+        observed = _ensure_utc(event.observed_at)
+        if observed is not None and market_start > observed + timedelta(hours=24):
+            return False
         return True
     tolerance = timedelta(hours=24) if _event_sport_code(event) == "tennis" else timedelta(hours=6)
     return abs(event_start - market_start) <= tolerance
