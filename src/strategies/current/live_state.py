@@ -224,6 +224,12 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
     }
 
 
+def _is_moneyline_market_name(name: str) -> bool:
+    """匹配 Goalserve Money Line 盘口名称，兼容带空格和不带空格两种写法。"""
+    n = name.lower()
+    return "money line" in n or "moneyline" in n
+
+
 def _goalserve_markets(event: LiveEvent) -> list[dict[str, Any]] | None:
     """从 source_payload 取 Goalserve odds markets 列表，供各盘口提取函数共用。"""
     payload = event.source_payload
@@ -247,10 +253,14 @@ def _extract_goalserve_moneyline(event: LiveEvent) -> dict[str, Any] | None:
     markets = _goalserve_markets(event)
     if markets is None:
         return None
-    # 只取名称含 "Money Line" 且未暂停的盘口——不用非 Money Line 盘口作为
-    # fallback，因为让分/大小分盘口的隐含概率语义不同，用错来源会导致交叉验证误判。
+    # 只取名称含 "money line" 或 "moneyline" 且未暂停的盘口——不用非 Money Line
+    # 盘口作为 fallback，因为让分/大小分盘口的隐含概率语义不同，用错来源会导致
+    # 交叉验证误判。同时支持带空格 ("money line") 和不带空格 ("moneyline") 两种写法。
     ml_market = next(
-        (m for m in markets if "money line" in m.get("name", "").lower() and not m.get("suspended")),
+        (
+            m for m in markets
+            if _is_moneyline_market_name(m.get("name", "")) and not m.get("suspended")
+        ),
         None,
     )
     if ml_market is None:
@@ -402,7 +412,7 @@ def _extract_goalserve_halftime_odds(event: LiveEvent) -> dict[str, Any] | None:
             m for m in markets
             if (
                 ("2nd half" in m.get("name", "").lower() or "half" in m.get("name", "").lower())
-                and "money line" in m.get("name", "").lower()
+                and _is_moneyline_market_name(m.get("name", ""))
                 and not m.get("suspended")
             )
         ),
