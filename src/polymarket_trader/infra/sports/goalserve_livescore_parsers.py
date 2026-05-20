@@ -682,6 +682,9 @@ _XML_LIVE_STATUSES = frozenset({
     "1st set", "2nd set", "3rd set", "4th set", "5th set",
     "1st half", "2nd half", "halftime",
     "delayed",
+    # Generic fallback — some Goalserve feeds return "In Progress" without a
+    # specific period/quarter string; this catches those cases.
+    "in progress", "inprogress", "live",
 })
 _XML_ENDED_STATUSES = frozenset({
     "finished", "final", "ft", "after over time", "after et", "after pen.",
