@@ -195,3 +195,16 @@ runtime -> domain
 - 让数据库、持久化、日志或报表路径决定交易热路径是否能继续运行。
 - 把 `single_game` 当成业务范围限制。
 - 让 resting BUY 长期挂着不修复。
+
+## 16. Goalserve 数据缺失排查原则
+
+Goalserve 覆盖面极广，任何主要联赛/赛事在 Goalserve 上几乎必然有数据。如果发现某场比赛在 Goalserve 中找不到对应的实时直播数据（`missing_live_game_state`、源匹配失败等），**首先假定是我们这边的问题**，而不是 Goalserve 没数据，需要排查以下几点：
+
+1. **路由问题**：该运动的 feed 路径是否正确配置（inplay vs livescore vs getfeed）？
+2. **认证/网络**：inplay feed 是否 403（IP 白名单）？livescore API key 是否有效？
+3. **解析问题**：parser 是否正确处理了该运动的 XML/JSON 格式？是否静默丢弃了数据？
+4. **名称匹配**：团队名拼写/格式是否导致市场文本匹配失败？
+5. **时区/日期**：市场 slug 日期是否与事件实际 UTC 日期不一致（如午夜场次）？
+6. **配置未启用**：该运动是否被加入了 `GOALSERVE_LIVESCORE_SPORTS`（或对应 `.env` 变量）？
+
+确认非 Goalserve 数据问题后，才考虑使用其他数据源作为补充。
