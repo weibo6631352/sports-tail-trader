@@ -230,6 +230,7 @@ _SOCCER_EXTRA_TIME_SECONDS = 1800       # 加时赛 30 分钟（上下半场各 
 _BASKETBALL_REGULATION_SECONDS = 2880   # NBA 48 分钟；欧洲联赛 40 分钟取最大值
 _BASKETBALL_OVERTIME_BUFFER_SECONDS = 300  # 加时赛 5 分钟
 _HOCKEY_REGULATION_SECONDS = 3600       # NHL/冰球 60 分钟
+_AMFOOTBALL_REGULATION_SECONDS = 3600   # NFL/CFL/大学橄榄球 60 分钟比赛时钟
 
 
 def _soccer_seconds_remaining(et: int | None, status: SportsLiveGameStatus) -> int | None:
@@ -269,6 +270,19 @@ def _hockey_seconds_remaining(et: int | None, status: SportsLiveGameStatus) -> i
     if et < _HOCKEY_REGULATION_SECONDS:
         return max(0, _HOCKEY_REGULATION_SECONDS - et)
     return 300  # 加时赛：NHL 5 分钟 OT
+
+
+def _amfootball_seconds_remaining(et: int | None, status: SportsLiveGameStatus) -> int | None:
+    """从已进行比赛时钟秒数估算橄榄球剩余秒数（纯比赛时钟）。
+
+    注意：橄榄球终盘 2 分钟时钟暂停频繁，实际挂钟时间可能远超时钟剩余时间，
+    settlement buffer 由调用方处理。
+    """
+    if et is None or status != SportsLiveGameStatus.LIVE:
+        return None
+    if et < _AMFOOTBALL_REGULATION_SECONDS:
+        return max(0, _AMFOOTBALL_REGULATION_SECONDS - et)
+    return 300  # 加时赛 OT 5 分钟
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +575,7 @@ def _parse_amfootball(state_dict: dict[str, Any], observed_at: datetime) -> list
         status = _stp_to_status(stp)
         stats = ev.get("stats", {})
         home_score, away_score = _score_pair(stats, "g")
+        et = _int_val(ev.get("et"))
         odds = _parse_odds_ws(ev.get("odds", []), event_id)
         home_name = ev.get("t1", {}).get("n", "")
         away_name = ev.get("t2", {}).get("n", "")
@@ -577,7 +592,7 @@ def _parse_amfootball(state_dict: dict[str, Any], observed_at: datetime) -> list
                 ),
                 status=status,
                 period=str(ev.get("sc", "")),
-                seconds_remaining=None,
+                seconds_remaining=_amfootball_seconds_remaining(et, status),
                 event_name=f"{home_name} vs {away_name}",
                 event_start_time=_parse_start_time(ev.get("st")),
                 external_ids={"goalserve": event_id},
