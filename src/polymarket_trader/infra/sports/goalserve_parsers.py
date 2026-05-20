@@ -17,6 +17,7 @@ WS 消息关键字段：
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -423,6 +424,33 @@ def _parse_hockey(state_dict: dict[str, Any], observed_at: datetime) -> list[Liv
 # Baseball
 # ---------------------------------------------------------------------------
 
+def _parse_baseball_state(sc_raw: str, status: SportsLiveGameStatus) -> BaseballGameState:
+    """尝试从 sc（state code）字段解析当前局数和上/下半局。
+
+    WS 格式未明文文档化，根据已知惯例尝试常见格式：
+    - 纯数字（"7"）→ 第 7 局，上半局未知
+    - "TOP7" / "T7" → 第 7 局上半
+    - "BOT7" / "B7" / "BTM7" → 第 7 局下半
+    若解析失败（unknown / not LIVE），返回 None 字段，保持旧行为。
+    """
+    if status != SportsLiveGameStatus.LIVE or not sc_raw:
+        return BaseballGameState(current_inning=None, inning_half=None)
+    sc = sc_raw.strip().upper()
+    half: str | None = None
+    if sc.startswith(("TOP", "T")) and not sc.startswith("T0"):
+        half = "top"
+        sc = re.sub(r"^(TOP|T)", "", sc)
+    elif sc.startswith(("BOT", "BTM", "B")) and not sc.startswith("B0"):
+        half = "bottom"
+        sc = re.sub(r"^(BOT|BTM|B)", "", sc)
+    try:
+        inning = int(sc)
+        if 1 <= inning <= 20:  # 合理局数范围
+            return BaseballGameState(current_inning=inning, inning_half=half)
+    except (ValueError, TypeError):
+        pass
+    return BaseballGameState(current_inning=None, inning_half=None)
+
 
 def _parse_baseball(state_dict: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     results: list[LiveEvent] = []
@@ -431,11 +459,8 @@ def _parse_baseball(state_dict: dict[str, Any], observed_at: datetime) -> list[L
         status = _stp_to_status(stp)
         stats = ev.get("stats", {})
         home_score, away_score = _score_pair(stats, "g")
-        # WS 棒球局分不在 stats.g 子键中，仅取总分
-        baseball_state = BaseballGameState(
-            current_inning=None,
-            inning_half=None,
-        )
+        sc_raw = str(ev.get("sc", ""))
+        baseball_state = _parse_baseball_state(sc_raw, status)
         odds = _parse_odds_ws(ev.get("odds", []), event_id)
         home_name = ev.get("t1", {}).get("n", "")
         away_name = ev.get("t2", {}).get("n", "")
