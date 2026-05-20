@@ -247,10 +247,11 @@ def _extract_goalserve_moneyline(event: LiveEvent) -> dict[str, Any] | None:
     markets = _goalserve_markets(event)
     if markets is None:
         return None
-    # 优先取名称含 "Money Line" 且未暂停的盘口，退而其次取第一个未暂停盘口
+    # 只取名称含 "Money Line" 且未暂停的盘口——不用非 Money Line 盘口作为
+    # fallback，因为让分/大小分盘口的隐含概率语义不同，用错来源会导致交叉验证误判。
     ml_market = next(
         (m for m in markets if "money line" in m.get("name", "").lower() and not m.get("suspended")),
-        next((m for m in markets if not m.get("suspended")), None),
+        None,
     )
     if ml_market is None:
         return None
