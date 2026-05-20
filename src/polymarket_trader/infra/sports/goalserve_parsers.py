@@ -478,10 +478,13 @@ def _parse_tennis(state_dict: dict[str, Any], observed_at: datetime) -> list[Liv
         stats = ev.get("stats", {})
         # WS 网球：stats.g = [home_sets, away_sets]（盘数）
         home_sets, away_sets = _score_pair(stats, "g")
+        sets_a = home_sets or 0
+        sets_b = away_sets or 0
         tennis_state = TennisGameState(
-            home_sets_won=home_sets or 0,
-            away_sets_won=away_sets or 0,
-            current_set=None,
+            home_sets_won=sets_a,
+            away_sets_won=sets_b,
+            # current_set = 已完成盘数 + 1；当 status 为 LIVE 时为当前打的盘。
+            current_set=sets_a + sets_b + 1 if status == SportsLiveGameStatus.LIVE else None,
             home_current_set_games=None,
             away_current_set_games=None,
             set_scores=(),
@@ -500,8 +503,8 @@ def _parse_tennis(state_dict: dict[str, Any], observed_at: datetime) -> list[Liv
                 league=ev.get("ctry_name", ""),
                 sport="tennis",
                 participants=(
-                    Participant(role="home", name=home_name, score=home_sets, external_ids={"goalserve": event_id}),
-                    Participant(role="away", name=away_name, score=away_sets, external_ids={"goalserve": event_id}),
+                    Participant(role="home", name=home_name, score=sets_a, external_ids={"goalserve": event_id}),
+                    Participant(role="away", name=away_name, score=sets_b, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
                 period=str(ev.get("sc", "")),

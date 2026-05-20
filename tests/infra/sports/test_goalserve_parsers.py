@@ -382,3 +382,24 @@ def test_hockey_overtime_has_buffer() -> None:
     # et=3700 (> 3600 regulation) → 300 sec OT buffer
     events = parse_goalserve_ws_events("hockey", _state("ev1", sport="hockey", stp=1, et=3700), observed_at=_OBSERVED)
     assert events[0].seconds_remaining == 300
+
+
+def test_tennis_live_current_set_inferred_from_sets_won() -> None:
+    # 1-0 sets, live → current_set = 1+0+1 = 2 (playing 2nd set)
+    events = parse_goalserve_ws_events(
+        "tennis",
+        _state("ev1", sport="tennis", stp=1, home_score=1, away_score=0),
+        observed_at=_OBSERVED,
+    )
+    assert events[0].tennis_state is not None
+    assert events[0].tennis_state.current_set == 2
+
+
+def test_tennis_not_live_current_set_none() -> None:
+    events = parse_goalserve_ws_events(
+        "tennis",
+        _state("ev1", sport="tennis", stp=3, home_score=2, away_score=1),
+        observed_at=_OBSERVED,
+    )
+    assert events[0].tennis_state is not None
+    assert events[0].tennis_state.current_set is None
