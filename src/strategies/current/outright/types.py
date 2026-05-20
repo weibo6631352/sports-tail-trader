@@ -44,6 +44,7 @@ class OutrightRejectReason(StrEnum):
     PER_MARKET_CAP_EXCEEDED = "per_market_cap_exceeded"
     MARKET_END_PASSED = "market_end_passed"
     SOURCE_CONFLICT = "source_conflict"
+    CAPITAL_EFFICIENCY_BELOW_MIN = "capital_efficiency_below_min"
 
 
 @dataclass(frozen=True, slots=True)

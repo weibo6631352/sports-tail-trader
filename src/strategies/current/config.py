@@ -329,6 +329,9 @@ class CurrentStrategyConfig:
     tail_outright_min_remaining_days: int = 7
     tail_outright_entry_maker_max_resting_seconds: int = 86400
     tail_outright_min_orderbook_depth_usdc: Decimal = Decimal("100")
+    # Outright 资金效率门槛（每天最低预期利润，美元）。
+    # 防止持有几个月但利润极薄的 outright 头寸长期占用资金。
+    tail_outright_min_expected_profit_per_day_usdc: Decimal = Decimal("0.02")
 
     # Series WINNER family 配置。默认 budget=0 + RECORD_ONLY；与 outright 同样
     # 双 flip（permission=AUTO_EXECUTE + budget>0）才会真实下单。

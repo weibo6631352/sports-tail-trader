@@ -12,7 +12,7 @@ from strategies.current.config import CurrentStrategyConfig
 from strategies.current.outright.evaluator import evaluate_outright_opportunity
 from strategies.current.outright.match import season_odds_from_metadata
 from strategies.current.outright.risk import check_outright_entry_risk
-from strategies.current.outright.types import OutrightEvaluation
+from strategies.current.outright.types import OutrightEvaluation, OutrightRejectReason
 from strategies.current.parameter_overrides import effective_decimal, effective_int
 from strategies.current.tail.types import ExecutionPermission
 from strategies.current.trading.helpers import decimal_from_metadata
@@ -170,6 +170,28 @@ def decide_outright_entry(
                 "outright_metadata": dict(evaluation.metadata),
             },
         )
+
+    entry_price = evaluation.entry_price_cap
+    if entry_price is None:
+        entry_price = Decimal("0")
+    eff_passed, eff_meta = _outright_capital_efficiency_metadata(
+        proposed_amount,
+        entry_price,
+        market_end_at,
+        now,
+        config.tail_outright_min_expected_profit_per_day_usdc,
+    )
+    if not eff_passed:
+        return ExtensionDecision.skip(
+            reason=f"outright_{OutrightRejectReason.CAPITAL_EFFICIENCY_BELOW_MIN.value}",
+            metadata={
+                "market_family": "outright",
+                "outright_reject_reason": OutrightRejectReason.CAPITAL_EFFICIENCY_BELOW_MIN.value,
+                "outright_metadata": dict(evaluation.metadata),
+                **eff_meta,
+            },
+        )
+
     return ExtensionDecision.buy(
         reason=evaluation.reason,
         token_id=evaluation.candidate.token_id if evaluation.candidate else None,
@@ -184,6 +206,7 @@ def decide_outright_entry(
             "outright_exit_price_target": (
                 str(evaluation.exit_price_target) if evaluation.exit_price_target else None
             ),
+            **eff_meta,
         },
     )
 
@@ -196,3 +219,41 @@ def resolve_outright_reject_label(decision: ExtensionDecision) -> str:
     if decision.reason:
         return decision.reason
     return "unspecified"
+
+
+def _outright_capital_efficiency_metadata(
+    proposed_amount: Decimal,
+    entry_price: Decimal,
+    market_end_at: datetime | None,
+    now: datetime,
+    min_per_day_usdc: Decimal,
+) -> tuple[bool, dict[str, object]]:
+    """Outright 资金效率检查：每天预期利润 ≥ min_per_day_usdc。
+
+    settlement_days = (market_end_at - now) in days + settlement buffer (~1 day).
+    市场终止时间是赛季/锦标赛结束，比单场 close_time 更准确——但比 series 的
+    expected_games_remaining 计算粗略。这里直接用 end_date 作为保守上限。
+    """
+    if entry_price <= Decimal("0") or entry_price >= Decimal("1"):
+        return True, {}
+    if market_end_at is None:
+        return True, {}
+
+    _now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    _end = market_end_at if market_end_at.tzinfo else market_end_at.replace(tzinfo=timezone.utc)
+    remaining_seconds = (_end - _now).total_seconds()
+    if remaining_seconds <= 0:
+        return True, {}
+
+    # 加 1 天结算缓冲（Polymarket outright 结算通常延迟数小时到 1 天）。
+    settlement_days = remaining_seconds / 86400.0 + 1.0
+    shares = proposed_amount / entry_price
+    expected_profit = shares * (Decimal("1") - entry_price)
+    expected_profit_per_day = expected_profit / Decimal(str(settlement_days))
+    meta: dict[str, object] = {
+        "outright_estimated_settlement_days": round(settlement_days, 2),
+        "outright_expected_profit_usdc": str(expected_profit.quantize(Decimal("0.0001"))),
+        "outright_expected_profit_per_day_usdc": str(expected_profit_per_day.quantize(Decimal("0.0001"))),
+        "outright_min_expected_profit_per_day_usdc": str(min_per_day_usdc),
+    }
+    return expected_profit_per_day >= min_per_day_usdc, meta
