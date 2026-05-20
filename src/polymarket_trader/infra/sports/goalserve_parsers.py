@@ -222,10 +222,10 @@ def _et_to_soccer_period(et: int | None) -> str | None:
 
 
 # 各运动比赛时钟上限（秒）——用于从 et（已打比赛时钟秒数）推算剩余时间。
-# 这些是规则时间（不含加时赛）；额外缓冲由 _estimated_settlement_hold_minutes 的
-# buffer 参数承担，此处不重复叠加。
+# 注意：此处只返回纯比赛时钟剩余秒数，不加停伤停/补时缓冲。
+# 结算等待缓冲已由调用方 _estimated_settlement_hold_minutes 的 buffer 参数处理，
+# 避免双重叠加导致 entry 门禁（seconds_remaining <= 阈值）判断过于保守。
 _SOCCER_REGULATION_SECONDS = 5400       # 90 分钟
-_SOCCER_STOPPAGE_BUFFER_SECONDS = 600   # 停伤停时预估 10 分钟
 _SOCCER_EXTRA_TIME_SECONDS = 1800       # 加时赛 30 分钟（上下半场各 15 分钟）
 _BASKETBALL_REGULATION_SECONDS = 2880   # NBA 48 分钟；欧洲联赛 40 分钟取最大值
 _BASKETBALL_OVERTIME_BUFFER_SECONDS = 300  # 加时赛 5 分钟
@@ -233,24 +233,24 @@ _HOCKEY_REGULATION_SECONDS = 3600       # NHL/冰球 60 分钟
 
 
 def _soccer_seconds_remaining(et: int | None, status: SportsLiveGameStatus) -> int | None:
-    """从已进行比赛时钟秒数估算足球剩余秒数（含停伤停时预估）。
+    """从已进行比赛时钟秒数估算足球剩余秒数（纯比赛时钟，不含补时缓冲）。
 
     et 是比赛时钟已进行秒数，不是挂钟时间。
-    - 规则时间内：剩余 = 5400 - et + 停伤停缓冲
-    - 加时赛中（et >= 5400）：固定估算 30 分钟加时赛 - 已超出规则时间
+    - 规则时间内：剩余 = 5400 - et（entry 门禁校验和持仓时间估算分别用此值）
+    - 加时赛中（et >= 5400）：剩余 = 加时赛总时间 - 已超出规则时间
     """
     if et is None or status != SportsLiveGameStatus.LIVE:
         return None
     if et < _SOCCER_REGULATION_SECONDS:
-        return max(1, _SOCCER_REGULATION_SECONDS - et + _SOCCER_STOPPAGE_BUFFER_SECONDS)
+        return max(0, _SOCCER_REGULATION_SECONDS - et)
     # 加时赛阶段
     extra_elapsed = et - _SOCCER_REGULATION_SECONDS
     remaining = _SOCCER_EXTRA_TIME_SECONDS - extra_elapsed
-    return max(60, remaining)
+    return max(0, remaining)
 
 
 def _basketball_seconds_remaining(et: int | None, status: SportsLiveGameStatus) -> int | None:
-    """从已进行比赛时钟秒数估算篮球剩余秒数。
+    """从已进行比赛时钟秒数估算篮球剩余秒数（纯比赛时钟）。
 
     et 是比赛时钟已进行秒数（NBA 比赛共 2880 秒，欧洲联赛 2400 秒）。
     超出规则时间则说明进入加时赛，保守给 5 分钟。
@@ -258,16 +258,16 @@ def _basketball_seconds_remaining(et: int | None, status: SportsLiveGameStatus) 
     if et is None or status != SportsLiveGameStatus.LIVE:
         return None
     if et < _BASKETBALL_REGULATION_SECONDS:
-        return max(1, _BASKETBALL_REGULATION_SECONDS - et)
+        return max(0, _BASKETBALL_REGULATION_SECONDS - et)
     return _BASKETBALL_OVERTIME_BUFFER_SECONDS
 
 
 def _hockey_seconds_remaining(et: int | None, status: SportsLiveGameStatus) -> int | None:
-    """从已进行比赛时钟秒数估算冰球剩余秒数（含加时赛预估）。"""
+    """从已进行比赛时钟秒数估算冰球剩余秒数（纯比赛时钟）。"""
     if et is None or status != SportsLiveGameStatus.LIVE:
         return None
     if et < _HOCKEY_REGULATION_SECONDS:
-        return max(1, _HOCKEY_REGULATION_SECONDS - et)
+        return max(0, _HOCKEY_REGULATION_SECONDS - et)
     return 300  # 加时赛：NHL 5 分钟 OT
 
 

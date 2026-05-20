@@ -333,15 +333,15 @@ def test_multiple_events_all_parsed() -> None:
 # ---------------------------------------------------------------------------
 
 def test_soccer_live_regulation_has_seconds_remaining() -> None:
-    # et=1800 (30 min played) → remaining = 5400 - 1800 + 600 = 4200 sec
+    # et=1800 (30 min played) → remaining = 5400 - 1800 = 3600 sec (pure game clock, no buffer)
     events = parse_goalserve_ws_events("soccer", _state("ev1", sport="soccer", stp=1, et=1800), observed_at=_OBSERVED)
-    assert events[0].seconds_remaining == 4200
+    assert events[0].seconds_remaining == 3600
 
 
 def test_soccer_live_near_end_has_small_seconds_remaining() -> None:
-    # et=5100 (85 min played) → remaining = 5400 - 5100 + 600 = 900 sec
-    events = parse_goalserve_ws_events("soccer", _state("ev1", sport="soccer", stp=1, et=5100), observed_at=_OBSERVED)
-    assert events[0].seconds_remaining == 900
+    # et=5220 (87 min played) → remaining = 5400 - 5220 = 180 sec (enables moneyline entry gate)
+    events = parse_goalserve_ws_events("soccer", _state("ev1", sport="soccer", stp=1, et=5220), observed_at=_OBSERVED)
+    assert events[0].seconds_remaining == 180
 
 
 def test_soccer_extra_time_has_positive_seconds_remaining() -> None:
