@@ -241,6 +241,12 @@ def _evaluate_nfl_manual_review(
     return _accept(candidate, "nfl_requires_manual_review", ExecutionPermission.MANUAL_CONFIRM)
 
 
+def _has_score_conflict(game: LiveGameState) -> bool:
+    """只有分数字段冲突才真正影响决策；status/period 过渡冲突（如 live↔unknown）忽略。"""
+    _SCORE_FIELDS = frozenset({"home_score", "away_score", "home_goals", "away_goals", "score"})
+    return any(c.get("field") in _SCORE_FIELDS for c in game.source_conflicts)
+
+
 def _common_reject_reason(
     game: LiveGameState,
     market: SportsMarketSnapshot,
@@ -250,7 +256,7 @@ def _common_reject_reason(
 ) -> TailRejectReason | None:
     if game.status != LiveGameStatus.LIVE:
         return TailRejectReason.GAME_NOT_LIVE
-    if game.source_conflicts:
+    if _has_score_conflict(game):
         return TailRejectReason.LIVE_SOURCE_CONFLICT
     if _is_stale(game, policy, now=now):
         return TailRejectReason.STALE_GAME_STATE
@@ -276,7 +282,7 @@ def _market_data_reject_reason(
 ) -> TailRejectReason | None:
     """检查不依赖比赛是否 live 的盘口和来源门槛。"""
 
-    if game.source_conflicts:
+    if _has_score_conflict(game):
         return TailRejectReason.LIVE_SOURCE_CONFLICT
     if market.best_ask is None:
         return TailRejectReason.MISSING_BEST_ASK
