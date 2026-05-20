@@ -644,10 +644,12 @@ def _parse_volleyball(state_dict: dict[str, Any], observed_at: datetime) -> list
         status = _stp_to_status(stp)
         stats = ev.get("stats", {})
         home_sets, away_sets = _score_pair(stats, "g")
+        home_sets_n = home_sets or 0
+        away_sets_n = away_sets or 0
         vball_state = VolleyballGameState(
-            home_sets_won=home_sets or 0,
-            away_sets_won=away_sets or 0,
-            current_set=None,
+            home_sets_won=home_sets_n,
+            away_sets_won=away_sets_n,
+            current_set=home_sets_n + away_sets_n + 1 if status == SportsLiveGameStatus.LIVE else None,
             home_current_set_points=None,
             away_current_set_points=None,
             set_scores=(),

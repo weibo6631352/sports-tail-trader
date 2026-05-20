@@ -6,7 +6,7 @@ import math
 from decimal import Decimal, ROUND_FLOOR
 from typing import Mapping
 
-from polymarket_trader.domain.sports_live import BaseballGameState, TennisGameState
+from polymarket_trader.domain.sports_live import BaseballGameState, TennisGameState, VolleyballGameState
 from polymarket_trader.extension_api import ExtensionContext
 
 from strategies.current.config import CurrentStrategyConfig
@@ -187,7 +187,7 @@ def _series_settlement_hold_minutes_if_active(
 
 
 def _estimate_seconds_remaining_from_state(game: object) -> int | None:
-    """为无游戏时钟的运动（棒球、网球）从赛况状态推算剩余秒数。"""
+    """为无游戏时钟的运动（棒球、网球、排球）从赛况状态推算剩余秒数。"""
     from strategies.sports_framework.types import LiveGameState
 
     if not isinstance(game, LiveGameState):
@@ -196,6 +196,8 @@ def _estimate_seconds_remaining_from_state(game: object) -> int | None:
         return _baseball_seconds_remaining(game.baseball_state)
     if game.tennis_state is not None:
         return _tennis_seconds_remaining(game.tennis_state)
+    if game.volleyball_state is not None:
+        return _volleyball_seconds_remaining(game.volleyball_state)
     return None
 
 
@@ -235,6 +237,22 @@ def _tennis_seconds_remaining(state: TennisGameState) -> int | None:
             0, 6 - max(state.home_current_set_games, state.away_current_set_games)
         )
     estimated = int((avg_sets_remaining * 45 + current_games_remaining * 5) * 60)
+    return max(estimated, 60)
+
+
+# 排球平均每盘约 22 分钟（标准盘 25 分），决胜盘（第5盘）约 15 分钟
+_VOLLEYBALL_MINUTES_PER_SET = 22
+
+
+def _volleyball_seconds_remaining(state: VolleyballGameState) -> int | None:
+    """基于当前盘分估算排球比赛剩余秒数（默认五盘三胜制）。"""
+    if state.current_set is None:
+        return None
+    sets_to_win = 3  # best-of-5 standard format
+    sets_remaining_home = max(0, sets_to_win - state.home_sets_won)
+    sets_remaining_away = max(0, sets_to_win - state.away_sets_won)
+    avg_sets_remaining = (sets_remaining_home + sets_remaining_away) / 2.0
+    estimated = int(avg_sets_remaining * _VOLLEYBALL_MINUTES_PER_SET * 60)
     return max(estimated, 60)
 
 

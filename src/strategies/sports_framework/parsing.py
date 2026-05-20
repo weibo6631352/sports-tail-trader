@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Mapping
 
-from polymarket_trader.domain.sports_live import BaseballGameState
+from polymarket_trader.domain.sports_live import BaseballGameState, VolleyballGameState
 
 from .types import LiveGameState, LiveGameStatus, TennisGameState
 
@@ -48,6 +48,7 @@ def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState 
         source_conflicts=_source_conflicts(raw_game.get("source_conflicts")),
         baseball_state=_baseball_state(raw_game.get("baseball_state")),
         tennis_state=_tennis_state(raw_game.get("tennis_state")),
+        volleyball_state=_volleyball_state(raw_game.get("volleyball_state")),
     )
 
 
@@ -141,6 +142,20 @@ def _tennis_set_scores(value: object) -> tuple[tuple[int, int], ...]:
             continue
         scores.append((home_games, away_games))
     return tuple(scores)
+
+
+def _volleyball_state(value: object) -> VolleyballGameState | None:
+    if isinstance(value, VolleyballGameState):
+        return value
+    if not isinstance(value, Mapping):
+        return None
+    return VolleyballGameState(
+        home_sets_won=_optional_int(value.get("home_sets_won")) or 0,
+        away_sets_won=_optional_int(value.get("away_sets_won")) or 0,
+        current_set=_optional_int(value.get("current_set")),
+        home_current_set_points=_optional_int(value.get("home_current_set_points")),
+        away_current_set_points=_optional_int(value.get("away_current_set_points")),
+    )
 
 
 def _datetime_value(value: object) -> datetime | None:

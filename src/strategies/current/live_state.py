@@ -206,6 +206,13 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
             "required_runs": event.cricket_state.required_runs,
             "required_balls": event.cricket_state.required_balls,
         },
+        "volleyball_state": None if event.volleyball_state is None else {
+            "home_sets_won": event.volleyball_state.home_sets_won,
+            "away_sets_won": event.volleyball_state.away_sets_won,
+            "current_set": event.volleyball_state.current_set,
+            "home_current_set_points": event.volleyball_state.home_current_set_points,
+            "away_current_set_points": event.volleyball_state.away_current_set_points,
+        },
         "race_state": None if event.race_state is None else {
             "leader_driver": event.race_state.leader_driver,
             "leader_team": event.race_state.leader_team,

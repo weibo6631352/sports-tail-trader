@@ -17,6 +17,7 @@ from polymarket_trader.domain.sports_live import (
     SoccerGameState,
     TennisGameState,
     CricketGameState,
+    VolleyballGameState,
 )
 
 
@@ -79,7 +80,7 @@ class LiveGameStatus(StrEnum):
 class LiveGameState:
     """策略评估所需的直播比赛状态。
 
-    所有 sport-specific state（baseball/tennis/soccer/esports/cricket）均复用
+    所有 sport-specific state（baseball/tennis/soccer/esports/cricket/volleyball）均复用
     ``polymarket_trader.domain.sports_live`` 中的单一定义，与 infra 归一化保持
     类型同源。
     """
@@ -99,6 +100,7 @@ class LiveGameState:
     soccer_state: SoccerGameState | None = None
     esports_state: EsportsGameState | None = None
     cricket_state: CricketGameState | None = None
+    volleyball_state: VolleyballGameState | None = None
 
     @property
     def total_score(self) -> int:
