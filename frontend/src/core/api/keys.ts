@@ -55,6 +55,7 @@ export const qk = {
       ['portfolio', 'pnl-breakdown', params] as const,
     riskMetrics: (params: Record<string, unknown>) =>
       ['portfolio', 'risk-metrics', params] as const,
+    exposure: () => ['portfolio', 'exposure'] as const,
   },
 
   candidates: {
@@ -62,6 +63,7 @@ export const qk = {
     liveStates: (params: Record<string, unknown>) => ['candidates', 'live-states', params] as const,
     liveSourceGaps: (params: Record<string, unknown>) =>
       ['candidates', 'live-source-gaps', params] as const,
+    dataFreshness: () => ['candidates', 'data-freshness'] as const,
   },
 
   analytics: {
