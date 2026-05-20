@@ -174,7 +174,7 @@ def _tennis_seconds_remaining(state: TennisGameState) -> int | None:
     """基于盘分和局分粗略估算网球比赛剩余秒数（默认三盘两胜制）。"""
     if state.current_set is None:
         return None
-    sets_to_win = 2
+    sets_to_win = 2  # best-of-3 assumption; five-set Grand Slams will underestimate hold time ~40%
     sets_remaining_home = max(0, sets_to_win - state.home_sets_won)
     sets_remaining_away = max(0, sets_to_win - state.away_sets_won)
     avg_sets_remaining = (sets_remaining_home + sets_remaining_away) / 2.0

@@ -87,16 +87,19 @@ async def get_sports_live_state(
 @router.get("/sports/pregame/snapshot")
 async def get_pregame_snapshot(
     sport: str | None = Query(default=None, min_length=1),
+    limit: int = Query(default=100, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
     """当前 Goalserve 赛前赔率快照（内存状态）。
 
     不传 sport 时返回所有运动的 worker 状态摘要 + 各运动 match 数量。
-    传 sport 时返回该运动的完整快照（含全部 match 和赔率）。
+    传 sport 时返回该运动分页后的 match 列表（含赔率）；每个运动可含数千条记录，
+    默认返回前 100 条，用 limit/offset 翻页。
     worker 未启用时返回 disabled 状态。
     """
 
-    worker = getattr(runtime, "pregame_worker", None)
+    worker = runtime.pregame_worker
     if worker is None:
         return {"enabled": False, "reason": "goalserve_pregame_not_configured"}
 
@@ -105,11 +108,15 @@ async def get_pregame_snapshot(
         snapshot = worker.get_snapshot(sport)
         if snapshot is None:
             raise HTTPException(status_code=404, detail="pregame_snapshot_not_found_for_sport")
+        page = snapshot.matches[offset: offset + limit]
         return {
             "status": status,
             "sport": snapshot.sport,
             "fetched_at": snapshot.fetched_at.isoformat(),
             "ts": snapshot.ts,
+            "total": len(snapshot.matches),
+            "offset": offset,
+            "limit": limit,
             "matches": [
                 {
                     "match_id": m.match_id,
@@ -135,7 +142,7 @@ async def get_pregame_snapshot(
                         for mk in m.markets
                     ],
                 }
-                for m in snapshot.matches
+                for m in page
             ],
         }
     snapshots = worker.get_snapshots()

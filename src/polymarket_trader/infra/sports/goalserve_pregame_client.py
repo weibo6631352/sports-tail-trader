@@ -350,5 +350,5 @@ class GoalservePregameOddsClient:
                 snapshots[sport] = result
         return snapshots
 
-    async def close(self) -> None:
+    async def aclose(self) -> None:
         await self._client.aclose()

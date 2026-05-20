@@ -443,6 +443,9 @@ def _build_game_odds_worker(
 
 def _build_pregame_worker(
     settings: Settings,
+    *,
+    registry: MarketRegistry,
+    entry_metadata_store: EntryMetadataStore,
 ) -> tuple[GoalservePregameWorker, GoalservePregameOddsClient] | tuple[None, None]:
     """按 settings 装配 goalserve_pregame_worker；未启用或无 API key 时返回 (None, None)。"""
 
@@ -460,7 +463,12 @@ def _build_pregame_worker(
         timeout_s=settings.goalserve_pregame_timeout_s,
         proxy=settings.goalserve_proxy,
     )
-    worker = GoalservePregameWorker(client=client, enabled=True)
+    worker = GoalservePregameWorker(
+        client=client,
+        enabled=True,
+        registry=registry,
+        entry_metadata_store=entry_metadata_store,
+    )
     return worker, client
 
 
@@ -807,7 +815,11 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         extension=extension,
         event_bus=event_bus,
     )
-    pregame_worker, pregame_client = _build_pregame_worker(settings)
+    pregame_worker, pregame_client = _build_pregame_worker(
+        settings,
+        registry=registry,
+        entry_metadata_store=entry_metadata_store,
+    )
     scheduler = Scheduler()
     supervisor = Supervisor(
         event_bus=event_bus,
@@ -1008,7 +1020,7 @@ async def shutdown_runtime(runtime: RuntimeComponents) -> None:
             await runtime.game_odds_client.aclose()
     if runtime.pregame_client is not None:
         with suppress(Exception):
-            await runtime.pregame_client.close()
+            await runtime.pregame_client.aclose()
     with suppress(Exception):
         await runtime.db_engine.dispose()
     runtime.trading_thread_pool.shutdown(wait=False, cancel_futures=True)
