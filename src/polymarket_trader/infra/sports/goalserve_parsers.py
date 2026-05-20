@@ -221,6 +221,56 @@ def _et_to_soccer_period(et: int | None) -> str | None:
     return "extra_time"
 
 
+# 各运动比赛时钟上限（秒）——用于从 et（已打比赛时钟秒数）推算剩余时间。
+# 这些是规则时间（不含加时赛）；额外缓冲由 _estimated_settlement_hold_minutes 的
+# buffer 参数承担，此处不重复叠加。
+_SOCCER_REGULATION_SECONDS = 5400       # 90 分钟
+_SOCCER_STOPPAGE_BUFFER_SECONDS = 600   # 停伤停时预估 10 分钟
+_SOCCER_EXTRA_TIME_SECONDS = 1800       # 加时赛 30 分钟（上下半场各 15 分钟）
+_BASKETBALL_REGULATION_SECONDS = 2880   # NBA 48 分钟；欧洲联赛 40 分钟取最大值
+_BASKETBALL_OVERTIME_BUFFER_SECONDS = 300  # 加时赛 5 分钟
+_HOCKEY_REGULATION_SECONDS = 3600       # NHL/冰球 60 分钟
+
+
+def _soccer_seconds_remaining(et: int | None, status: SportsLiveGameStatus) -> int | None:
+    """从已进行比赛时钟秒数估算足球剩余秒数（含停伤停时预估）。
+
+    et 是比赛时钟已进行秒数，不是挂钟时间。
+    - 规则时间内：剩余 = 5400 - et + 停伤停缓冲
+    - 加时赛中（et >= 5400）：固定估算 30 分钟加时赛 - 已超出规则时间
+    """
+    if et is None or status != SportsLiveGameStatus.LIVE:
+        return None
+    if et < _SOCCER_REGULATION_SECONDS:
+        return max(1, _SOCCER_REGULATION_SECONDS - et + _SOCCER_STOPPAGE_BUFFER_SECONDS)
+    # 加时赛阶段
+    extra_elapsed = et - _SOCCER_REGULATION_SECONDS
+    remaining = _SOCCER_EXTRA_TIME_SECONDS - extra_elapsed
+    return max(60, remaining)
+
+
+def _basketball_seconds_remaining(et: int | None, status: SportsLiveGameStatus) -> int | None:
+    """从已进行比赛时钟秒数估算篮球剩余秒数。
+
+    et 是比赛时钟已进行秒数（NBA 比赛共 2880 秒，欧洲联赛 2400 秒）。
+    超出规则时间则说明进入加时赛，保守给 5 分钟。
+    """
+    if et is None or status != SportsLiveGameStatus.LIVE:
+        return None
+    if et < _BASKETBALL_REGULATION_SECONDS:
+        return max(1, _BASKETBALL_REGULATION_SECONDS - et)
+    return _BASKETBALL_OVERTIME_BUFFER_SECONDS
+
+
+def _hockey_seconds_remaining(et: int | None, status: SportsLiveGameStatus) -> int | None:
+    """从已进行比赛时钟秒数估算冰球剩余秒数（含加时赛预估）。"""
+    if et is None or status != SportsLiveGameStatus.LIVE:
+        return None
+    if et < _HOCKEY_REGULATION_SECONDS:
+        return max(1, _HOCKEY_REGULATION_SECONDS - et)
+    return 300  # 加时赛：NHL 5 分钟 OT
+
+
 # ---------------------------------------------------------------------------
 # Basketball
 # ---------------------------------------------------------------------------
@@ -233,6 +283,7 @@ def _parse_basketball(state_dict: dict[str, Any], observed_at: datetime) -> list
         status = _stp_to_status(stp)
         stats = ev.get("stats", {})
         home_score, away_score = _score_pair(stats, "g")
+        et = _int_val(ev.get("et"))
         odds = _parse_odds_ws(ev.get("odds", []), event_id)
         home_name = ev.get("t1", {}).get("n", "")
         away_name = ev.get("t2", {}).get("n", "")
@@ -249,7 +300,7 @@ def _parse_basketball(state_dict: dict[str, Any], observed_at: datetime) -> list
                 ),
                 status=status,
                 period=str(ev.get("sc", "")),
-                seconds_remaining=None,
+                seconds_remaining=_basketball_seconds_remaining(et, status),
                 event_name=f"{home_name} vs {away_name}",
                 event_start_time=_parse_start_time(ev.get("st")),
                 external_ids={"goalserve": event_id},
@@ -300,7 +351,7 @@ def _parse_soccer(state_dict: dict[str, Any], observed_at: datetime) -> list[Liv
                 ),
                 status=status,
                 period=_et_to_soccer_period(et) or "",
-                seconds_remaining=None,
+                seconds_remaining=_soccer_seconds_remaining(et, status),
                 event_name=f"{home_name} vs {away_name}",
                 event_start_time=_parse_start_time(ev.get("st")),
                 external_ids={"goalserve": event_id},
@@ -325,6 +376,7 @@ def _parse_hockey(state_dict: dict[str, Any], observed_at: datetime) -> list[Liv
         status = _stp_to_status(stp)
         stats = ev.get("stats", {})
         home_score, away_score = _score_pair(stats, "g")
+        et = _int_val(ev.get("et"))
         odds = _parse_odds_ws(ev.get("odds", []), event_id)
         home_name = ev.get("t1", {}).get("n", "")
         away_name = ev.get("t2", {}).get("n", "")
@@ -341,7 +393,7 @@ def _parse_hockey(state_dict: dict[str, Any], observed_at: datetime) -> list[Liv
                 ),
                 status=status,
                 period=str(ev.get("sc", "")),
-                seconds_remaining=None,
+                seconds_remaining=_hockey_seconds_remaining(et, status),
                 event_name=f"{home_name} vs {away_name}",
                 event_start_time=_parse_start_time(ev.get("st")),
                 external_ids={"goalserve": event_id},

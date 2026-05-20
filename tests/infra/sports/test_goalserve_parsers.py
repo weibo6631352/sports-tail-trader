@@ -326,3 +326,59 @@ def test_multiple_events_all_parsed() -> None:
     }
     events = parse_goalserve_ws_events("soccer", state, observed_at=_OBSERVED)
     assert len(events) == 3
+
+
+# ---------------------------------------------------------------------------
+# seconds_remaining estimation from elapsed time (et)
+# ---------------------------------------------------------------------------
+
+def test_soccer_live_regulation_has_seconds_remaining() -> None:
+    # et=1800 (30 min played) → remaining = 5400 - 1800 + 600 = 4200 sec
+    events = parse_goalserve_ws_events("soccer", _state("ev1", sport="soccer", stp=1, et=1800), observed_at=_OBSERVED)
+    assert events[0].seconds_remaining == 4200
+
+
+def test_soccer_live_near_end_has_small_seconds_remaining() -> None:
+    # et=5100 (85 min played) → remaining = 5400 - 5100 + 600 = 900 sec
+    events = parse_goalserve_ws_events("soccer", _state("ev1", sport="soccer", stp=1, et=5100), observed_at=_OBSERVED)
+    assert events[0].seconds_remaining == 900
+
+
+def test_soccer_extra_time_has_positive_seconds_remaining() -> None:
+    # et=5700 (95 min, in extra time) → extra_elapsed = 300, remaining = 1800 - 300 = 1500
+    events = parse_goalserve_ws_events("soccer", _state("ev1", sport="soccer", stp=1, et=5700), observed_at=_OBSERVED)
+    assert events[0].seconds_remaining == 1500
+
+
+def test_soccer_not_live_has_no_seconds_remaining() -> None:
+    events = parse_goalserve_ws_events("soccer", _state("ev1", sport="soccer", stp=3, et=5400), observed_at=_OBSERVED)
+    assert events[0].seconds_remaining is None
+
+
+def test_basketball_live_midgame_has_seconds_remaining() -> None:
+    # et=1440 (24 min played, Q2 start) → remaining = 2880 - 1440 = 1440 sec
+    events = parse_goalserve_ws_events("basketball", _state("ev1", sport="basketball", stp=1, et=1440), observed_at=_OBSERVED)
+    assert events[0].seconds_remaining == 1440
+
+
+def test_basketball_live_overtime_has_buffer() -> None:
+    # et=3000 (> 2880 regulation) → remaining = 300 sec (OT buffer)
+    events = parse_goalserve_ws_events("basketball", _state("ev1", sport="basketball", stp=1, et=3000), observed_at=_OBSERVED)
+    assert events[0].seconds_remaining == 300
+
+
+def test_basketball_not_live_has_no_seconds_remaining() -> None:
+    events = parse_goalserve_ws_events("basketball", _state("ev1", sport="basketball", stp=3, et=2880), observed_at=_OBSERVED)
+    assert events[0].seconds_remaining is None
+
+
+def test_hockey_live_has_seconds_remaining() -> None:
+    # et=1800 (30 min played) → remaining = 3600 - 1800 = 1800 sec
+    events = parse_goalserve_ws_events("hockey", _state("ev1", sport="hockey", stp=1, et=1800), observed_at=_OBSERVED)
+    assert events[0].seconds_remaining == 1800
+
+
+def test_hockey_overtime_has_buffer() -> None:
+    # et=3700 (> 3600 regulation) → 300 sec OT buffer
+    events = parse_goalserve_ws_events("hockey", _state("ev1", sport="hockey", stp=1, et=3700), observed_at=_OBSERVED)
+    assert events[0].seconds_remaining == 300

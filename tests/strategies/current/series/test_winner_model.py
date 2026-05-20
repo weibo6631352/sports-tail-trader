@@ -107,18 +107,17 @@ def test_expected_games_zero_zero_best_of_seven_p05() -> None:
 
 
 def test_expected_games_two_one_best_of_seven_p05() -> None:
-    # 2-1, p=0.5, needed_a=2, needed_b=3. min=3, max=4.
-    # g=3: P(A wins) = C(2,1)*0.5^2*0.5^1 = 2*0.125=0.25
-    #       P(B wins) = C(2,2)*0.5^3*0.5^0 = 0.125
-    # g=4: P(A wins) = C(3,1)*0.5^2*0.5^2 = 3*0.0625=0.1875
-    #       P(B wins) = C(3,2)*0.5^3*0.5^1 = 3*0.0625=0.1875
-    # E = 3*(0.25+0.125) + 4*(0.1875+0.1875) = 3*0.375 + 4*0.375 = 1.125+1.5 = 2.625
+    # 2-1, p=0.5, needed_a=2, needed_b=3. min=2, max=4.
+    # g=2: P(A wins) = C(1,1)*0.5^2*0.5^0 = 0.25; P(B wins) = 0
+    # g=3: P(A wins) = C(2,1)*0.5^2*0.5^1 = 0.25; P(B wins) = C(2,2)*0.5^3 = 0.125
+    # g=4: P(A wins) = C(3,1)*0.5^2*0.5^2 = 0.1875; P(B wins) = C(3,2)*0.5^3*0.5 = 0.1875
+    # E = 2*0.25 + 3*0.375 + 4*0.375 = 0.5 + 1.125 + 1.5 = 3.125
     result = expected_games_remaining(_state(2, 1), Decimal("0.5"))
-    assert abs(result - 2.625) < 0.001
+    assert abs(result - 3.125) < 0.001
 
 
 def test_expected_games_best_of_five_one_zero_p05() -> None:
-    # 1-0 in best_of_5, p=0.5. needed_a=2, needed_b=3.
-    # Same as 2-1 test above (symmetric): 2.625
+    # 1-0 in best_of_5, p=0.5. needed_a=2, needed_b=3. Same structure as 2-1 above.
+    # E = 3.125
     result = expected_games_remaining(_state(1, 0, best_of=5), Decimal("0.5"))
-    assert abs(result - 2.625) < 0.001
+    assert abs(result - 3.125) < 0.001

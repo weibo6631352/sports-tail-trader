@@ -72,7 +72,7 @@ def expected_games_remaining(state: SeriesState, p_per_game: Decimal) -> float:
     p = max(0.0, min(1.0, float(p_per_game)))
     q = 1.0 - p
     expected = 0.0
-    for g in range(max(needed_a, needed_b), needed_a + needed_b):
+    for g in range(min(needed_a, needed_b), needed_a + needed_b):
         p_a = 0.0
         if g >= needed_a and (g - needed_a) < needed_b:
             p_a = comb(g - 1, needed_a - 1) * (p ** needed_a) * (q ** (g - needed_a))
