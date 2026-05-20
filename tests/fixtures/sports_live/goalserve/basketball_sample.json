@@ -1,0 +1,1358 @@
+{
+  "bm": "bet365",
+  "updated": "05.19.2026 15:04:13",
+  "updated_ts": 1779203053690,
+  "events": {
+    "194848828": {
+      "core": {
+        "safe": "",
+        "removed": "",
+        "stopped": "1",
+        "blocked": "0",
+        "finished": "0",
+        "nc": "0",
+        "updated": "19.05.2026 15:04:07",
+        "updated_ts": "1779203047837"
+      },
+      "info": {
+        "id": "194848828",
+        "mid": "9522379",
+        "bet365id": "194815532",
+        "name": "Astana vs Barsy Atyrau",
+        "sport": "Basketball",
+        "league": "Kazakhstan National League",
+        "start_time": null,
+        "start_date": null,
+        "start_ts": "",
+        "start_ts_utc": "",
+        "period": "3rd Quarter",
+        "score": "55:43",
+        "ball_pos": null,
+        "state_info": "1:1",
+        "state": "11078",
+        "minute": "7",
+        "seconds": "07:22"
+      },
+      "team_info": {
+        "home": {
+          "name": "Astana",
+          "score": "55",
+          "color": "",
+          "kit_color": "#F0F0F0,#C40010,#C40010,#C40010,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#00FFFF",
+          "Serve": ""
+        },
+        "away": {
+          "name": "Barsy Atyrau",
+          "score": "43",
+          "color": "",
+          "kit_color": "#0A0A0A,#F0F0F0,#316F37,#F0F0F0,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#00FFFF",
+          "Serve": ""
+        }
+      },
+      "bonus": {},
+      "stream": "",
+      "sts": "3 Pts=10:5|2 Pts=8:11|Ft=9:6|Time Outs#T.O=4:3|Fouls=9:13|Free Throws=81.8:85.7|4 Pts=0:0|1 Pts=0:0|BONUS=0:0|INFO=1:1|RD=,|",
+      "stats": {
+        "0": {
+          "name": "ITeam",
+          "home": "Astana",
+          "away": "Barsy Atyrau"
+        },
+        "1": {
+          "name": "1",
+          "home": "30",
+          "away": "18"
+        },
+        "2": {
+          "name": "2",
+          "home": "20",
+          "away": "23"
+        },
+        "3": {
+          "name": "Half",
+          "home": "50",
+          "away": "41"
+        },
+        "4": {
+          "name": "3",
+          "home": "5",
+          "away": "2"
+        },
+        "5": {
+          "name": "4",
+          "home": "0",
+          "away": "0"
+        },
+        "6": {
+          "name": "OT",
+          "home": null,
+          "away": null
+        },
+        "7": {
+          "name": "T",
+          "home": "55",
+          "away": "43"
+        }
+      },
+      "extra": {
+        "0": {
+          "code": "",
+          "minute": "0",
+          "value": "Score After 1st Quarter - 30-18"
+        },
+        "1": {
+          "code": "",
+          "minute": "0",
+          "value": "Score After 2nd Quarter - 50-41"
+        }
+      },
+      "history": {},
+      "odds": {
+        "180654": {
+          "id": 180654,
+          "name": "Point Betting",
+          "short_name": "Point Betting",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "1948488281806540": {
+              "id": "1948488281806540",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.8",
+              "suspend": "0",
+              "handicap": "111"
+            },
+            "1948488281806541": {
+              "id": "1948488281806541",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.869",
+              "suspend": "0",
+              "handicap": "111"
+            },
+            "1948488281806542": {
+              "id": "1948488281806542",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.74",
+              "suspend": "0",
+              "handicap": "106"
+            },
+            "1948488281806543": {
+              "id": "1948488281806543",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.952",
+              "suspend": "0",
+              "handicap": "106"
+            },
+            "1948488281806544": {
+              "id": "1948488281806544",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.74",
+              "suspend": "0",
+              "handicap": "104"
+            },
+            "1948488281806545": {
+              "id": "1948488281806545",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.952",
+              "suspend": "0",
+              "handicap": "104"
+            },
+            "1948488281806546": {
+              "id": "1948488281806546",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.869",
+              "suspend": "1",
+              "handicap": "102"
+            },
+            "1948488281806547": {
+              "id": "1948488281806547",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.8",
+              "suspend": "1",
+              "handicap": "102"
+            },
+            "1948488281806548": {
+              "id": "1948488281806548",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.714",
+              "suspend": "0",
+              "handicap": "110"
+            },
+            "1948488281806549": {
+              "id": "1948488281806549",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "2",
+              "suspend": "0",
+              "handicap": "110"
+            },
+            "19484882818065410": {
+              "id": "19484882818065410",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.714",
+              "suspend": "0",
+              "handicap": "109"
+            },
+            "19484882818065411": {
+              "id": "19484882818065411",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "2",
+              "suspend": "0",
+              "handicap": "109"
+            },
+            "19484882818065412": {
+              "id": "19484882818065412",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.8",
+              "suspend": "0",
+              "handicap": "107"
+            },
+            "19484882818065413": {
+              "id": "19484882818065413",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.869",
+              "suspend": "0",
+              "handicap": "107"
+            },
+            "19484882818065414": {
+              "id": "19484882818065414",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.74",
+              "suspend": "0",
+              "handicap": "105"
+            },
+            "19484882818065415": {
+              "id": "19484882818065415",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.952",
+              "suspend": "0",
+              "handicap": "105"
+            },
+            "19484882818065416": {
+              "id": "19484882818065416",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.8",
+              "suspend": "0",
+              "handicap": "103"
+            },
+            "19484882818065417": {
+              "id": "19484882818065417",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.869",
+              "suspend": "0",
+              "handicap": "103"
+            },
+            "19484882818065418": {
+              "id": "19484882818065418",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.74",
+              "suspend": "0",
+              "handicap": "108"
+            },
+            "19484882818065419": {
+              "id": "19484882818065419",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.952",
+              "suspend": "0",
+              "handicap": "108"
+            }
+          }
+        },
+        "1446": {
+          "id": 1446,
+          "name": "Game Lines Spread",
+          "short_name": "Game Lines Spread",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "19484882814460": {
+              "id": "19484882814460",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.833",
+              "suspend": "0",
+              "handicap": "-15.5"
+            },
+            "19484882814461": {
+              "id": "19484882814461",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.833",
+              "suspend": "0",
+              "handicap": "15.5"
+            }
+          }
+        },
+        "180032": {
+          "id": 180032,
+          "name": "Game Lines Money Line",
+          "short_name": "Game Lines Money Line",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "1948488281800320": {
+              "id": "1948488281800320",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.035",
+              "suspend": "0"
+            },
+            "1948488281800321": {
+              "id": "1948488281800321",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "9.5",
+              "suspend": "0"
+            }
+          }
+        }
+      }
+    },
+    "194868100": {
+      "core": {
+        "safe": "",
+        "removed": "",
+        "stopped": "1",
+        "blocked": "0",
+        "finished": "1",
+        "nc": "0",
+        "updated": "19.05.2026 15:04:09",
+        "updated_ts": "1779203050036"
+      },
+      "info": {
+        "id": "194868100",
+        "mid": null,
+        "bet365id": "194867809",
+        "name": "DAL Mavericks (TD24) vs DEN Nuggets (CHIEF)",
+        "sport": "Basketball",
+        "league": "Ebasketball H2H GG League - 4x5mins",
+        "start_time": null,
+        "start_date": null,
+        "start_ts": "",
+        "start_ts_utc": "",
+        "period": "Finished",
+        "score": "53:61",
+        "ball_pos": null,
+        "state_info": null,
+        "state": "1084",
+        "minute": "0",
+        "seconds": "00:00"
+      },
+      "team_info": {
+        "home": {
+          "name": "DAL Mavericks (TD24)",
+          "score": "53",
+          "color": "",
+          "kit_color": "#F0F0F0,#F0F0F0,#002B87,#002B87,#C40010,#0046A8,#3D4A4E,#022857,#FFFF00,#FF00FF,#0A0A0A",
+          "Serve": ""
+        },
+        "away": {
+          "name": "DEN Nuggets (CHIEF)",
+          "score": "61",
+          "color": "",
+          "kit_color": "#002B87,#F0F0F0,#F0F0F0,#022857,#C40010,#0046A8,#3D4A4E,#022857,#FFFF00,#FF00FF,#0A0A0A",
+          "Serve": ""
+        }
+      },
+      "bonus": {},
+      "stream": "",
+      "sts": "Free Throws=100:100|BONUS=0:0|",
+      "stats": {
+        "0": {
+          "name": "ITeam",
+          "home": "DAL Mavericks (TD24)",
+          "away": "DEN Nuggets (CHIEF)"
+        },
+        "1": {
+          "name": "1",
+          "home": "12",
+          "away": "14"
+        },
+        "2": {
+          "name": "2",
+          "home": "8",
+          "away": "18"
+        },
+        "3": {
+          "name": "Half",
+          "home": "20",
+          "away": "32"
+        },
+        "4": {
+          "name": "3",
+          "home": "17",
+          "away": "15"
+        },
+        "5": {
+          "name": "4",
+          "home": "16",
+          "away": "14"
+        },
+        "6": {
+          "name": "OT",
+          "home": null,
+          "away": null
+        },
+        "7": {
+          "name": "T",
+          "home": "53",
+          "away": "61"
+        }
+      },
+      "extra": {
+        "0": {
+          "code": "",
+          "minute": "0",
+          "value": "Score After 1st Quarter - 12-14"
+        },
+        "1": {
+          "code": "",
+          "minute": "0",
+          "value": "Score After 2nd Quarter - 20-32"
+        },
+        "2": {
+          "code": "",
+          "minute": "0",
+          "value": "Score After 3rd Quarter - 37-47"
+        },
+        "3": {
+          "code": "",
+          "minute": "0",
+          "value": "Score After 4th Quarter - 53-61"
+        }
+      },
+      "history": {},
+      "odds": {}
+    },
+    "194868102": {
+      "core": {
+        "safe": "",
+        "removed": "",
+        "stopped": "0",
+        "blocked": "0",
+        "finished": "0",
+        "nc": "0",
+        "updated": "19.05.2026 15:04:08",
+        "updated_ts": "1779203048845"
+      },
+      "info": {
+        "id": "194868102",
+        "mid": null,
+        "bet365id": "194867816",
+        "name": "CHA Hornets (ARCHER) vs DAL Mavericks (ORDER)",
+        "sport": "Basketball",
+        "league": "Ebasketball H2H GG League - 4x5mins",
+        "start_time": null,
+        "start_date": null,
+        "start_ts": "",
+        "start_ts_utc": "",
+        "period": "4th Quarter",
+        "score": "59:65",
+        "ball_pos": "0.65,0.5",
+        "state_info": null,
+        "state": "11077",
+        "minute": "1",
+        "seconds": "00:45"
+      },
+      "team_info": {
+        "home": {
+          "name": "CHA Hornets (ARCHER)",
+          "score": "59",
+          "color": "",
+          "kit_color": "#F0F0F0,#00C1BA,#0A0A0A,#00C1BA,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#0A0A0A",
+          "Serve": ""
+        },
+        "away": {
+          "name": "DAL Mavericks (ORDER)",
+          "score": "65",
+          "color": "",
+          "kit_color": "#0046A8,#0046A8,#0046A8,#002B87,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#0A0A0A",
+          "Serve": ""
+        }
+      },
+      "bonus": {},
+      "stream": "",
+      "sts": "Free Throws=100:60|BONUS=0:0|RD=,|",
+      "stats": {
+        "0": {
+          "name": "ITeam",
+          "home": "CHA Hornets (ARCHER)",
+          "away": "DAL Mavericks (ORDER)"
+        },
+        "1": {
+          "name": "1",
+          "home": "20",
+          "away": "17"
+        },
+        "2": {
+          "name": "2",
+          "home": "15",
+          "away": "19"
+        },
+        "3": {
+          "name": "Half",
+          "home": "35",
+          "away": "36"
+        },
+        "4": {
+          "name": "3",
+          "home": "13",
+          "away": "13"
+        },
+        "5": {
+          "name": "4",
+          "home": "11",
+          "away": "16"
+        },
+        "6": {
+          "name": "OT",
+          "home": null,
+          "away": null
+        },
+        "7": {
+          "name": "T",
+          "home": "59",
+          "away": "65"
+        }
+      },
+      "extra": {
+        "0": {
+          "code": "",
+          "minute": "0",
+          "value": "Score After 1st Quarter - 20-17"
+        },
+        "1": {
+          "code": "",
+          "minute": "0",
+          "value": "Score After 2nd Quarter - 35-36"
+        },
+        "2": {
+          "code": "",
+          "minute": "0",
+          "value": "Score After 3rd Quarter - 48-49"
+        }
+      },
+      "history": {},
+      "odds": {
+        "1446": {
+          "id": 1446,
+          "name": "Game Lines Spread",
+          "short_name": "Game Lines Spread",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "19486810214460": {
+              "id": "19486810214460",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.8",
+              "suspend": "1",
+              "handicap": "5.5"
+            },
+            "19486810214461": {
+              "id": "19486810214461",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.869",
+              "suspend": "1",
+              "handicap": "-5.5"
+            }
+          }
+        }
+      }
+    },
+    "194859336": {
+      "core": {
+        "safe": "",
+        "removed": "",
+        "stopped": "0",
+        "blocked": "0",
+        "finished": "0",
+        "nc": "0",
+        "updated": "19.05.2026 15:04:09",
+        "updated_ts": "1779203049732"
+      },
+      "info": {
+        "id": "194859336",
+        "mid": null,
+        "bet365id": "194859139",
+        "name": "DEN Nuggets (Ugren) vs DET Pistons (Koja)",
+        "sport": "Basketball",
+        "league": "Ebasketball Battle - 4x5mins",
+        "start_time": null,
+        "start_date": null,
+        "start_ts": "",
+        "start_ts_utc": "",
+        "period": "2nd Quarter",
+        "score": "26:25",
+        "ball_pos": "0.65,0.5",
+        "state_info": null,
+        "state": "11077",
+        "minute": "3",
+        "seconds": "02:46"
+      },
+      "team_info": {
+        "home": {
+          "name": "DEN Nuggets (Ugren)",
+          "score": "26",
+          "color": "",
+          "kit_color": "#F0F0F0,#022857,#022857,#F0F0F0,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#022857",
+          "Serve": ""
+        },
+        "away": {
+          "name": "DET Pistons (Koja)",
+          "score": "25",
+          "color": "",
+          "kit_color": "#0046A8,#C40010,#C40010,#0046A8,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#022857",
+          "Serve": ""
+        }
+      },
+      "bonus": {},
+      "stream": "",
+      "sts": "3 Pts=2:2|2 Pts=10:9|Ft=0:1|Time Outs#T.O=5:4|Fouls=0:0|Free Throws=0:100|4 Pts=0:0|1 Pts=0:0|BONUS=0:0|RD=,|",
+      "stats": {
+        "0": {
+          "name": "ITeam",
+          "home": "DEN Nuggets (Ugren)",
+          "away": "DET Pistons (Koja)"
+        },
+        "1": {
+          "name": "1",
+          "home": "20",
+          "away": "13"
+        },
+        "2": {
+          "name": "2",
+          "home": "6",
+          "away": "12"
+        },
+        "3": {
+          "name": "Half",
+          "home": "26",
+          "away": "25"
+        },
+        "4": {
+          "name": "3",
+          "home": "0",
+          "away": "0"
+        },
+        "5": {
+          "name": "4",
+          "home": "0",
+          "away": "0"
+        },
+        "6": {
+          "name": "OT",
+          "home": null,
+          "away": null
+        },
+        "7": {
+          "name": "T",
+          "home": "26",
+          "away": "25"
+        }
+      },
+      "extra": {
+        "0": {
+          "code": "",
+          "minute": "0",
+          "value": "Score After 1st Quarter - 20 - 13"
+        }
+      },
+      "history": {},
+      "odds": {
+        "1446": {
+          "id": 1446,
+          "name": "Game Lines Spread",
+          "short_name": "Game Lines Spread",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "19485933614460": {
+              "id": "19485933614460",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.8",
+              "suspend": "0",
+              "handicap": "2.5"
+            },
+            "19485933614461": {
+              "id": "19485933614461",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.869",
+              "suspend": "0",
+              "handicap": "-2.5"
+            }
+          }
+        },
+        "2022": {
+          "id": 2022,
+          "name": "Away Team Total (Including OT)",
+          "short_name": "Away Team Total (Including OT)",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "19485933620220": {
+              "id": "19485933620220",
+              "name": "Over",
+              "short_name": "Over",
+              "value_eu": "1.833",
+              "suspend": "0",
+              "handicap": "68.5"
+            },
+            "19485933620221": {
+              "id": "19485933620221",
+              "name": "Under",
+              "short_name": "Under",
+              "value_eu": "1.833",
+              "suspend": "0",
+              "handicap": "68.5"
+            }
+          }
+        },
+        "1450": {
+          "id": 1450,
+          "name": "Game Lines Total",
+          "short_name": "Game Lines Total",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "19485933614500": {
+              "id": "19485933614500",
+              "name": "Over",
+              "short_name": "Over",
+              "value_eu": "1.833",
+              "suspend": "0",
+              "handicap": "134.5"
+            },
+            "19485933614501": {
+              "id": "19485933614501",
+              "name": "Under",
+              "short_name": "Under",
+              "value_eu": "1.833",
+              "suspend": "0",
+              "handicap": "134.5"
+            }
+          }
+        }
+      }
+    },
+    "194859324": {
+      "core": {
+        "safe": "",
+        "removed": "",
+        "stopped": "0",
+        "blocked": "0",
+        "finished": "0",
+        "nc": "0",
+        "updated": "19.05.2026 15:04:06",
+        "updated_ts": "1779203046718"
+      },
+      "info": {
+        "id": "194859324",
+        "mid": null,
+        "bet365id": "194859136",
+        "name": "POR T Blazers (Jovke) vs MIA Heat (Pakapaka)",
+        "sport": "Basketball",
+        "league": "Ebasketball Battle - 4x5mins",
+        "start_time": null,
+        "start_date": null,
+        "start_ts": "",
+        "start_ts_utc": "",
+        "period": "2nd Quarter",
+        "score": "18:28",
+        "ball_pos": "0.65,0.5",
+        "state_info": null,
+        "state": "11077",
+        "minute": "3",
+        "seconds": "02:49"
+      },
+      "team_info": {
+        "home": {
+          "name": "POR T Blazers (Jovke)",
+          "score": "18",
+          "color": "",
+          "kit_color": "#FFFFFF,#FFFF00,#FF00FF,#00FFFF,#FF0000,#0000FF,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#00FFFF",
+          "Serve": ""
+        },
+        "away": {
+          "name": "MIA Heat (Pakapaka)",
+          "score": "28",
+          "color": "",
+          "kit_color": "#262626,#C40010,#F0F0F0,#C40010,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#00FFFF",
+          "Serve": ""
+        }
+      },
+      "bonus": {},
+      "stream": "",
+      "sts": "3 Pts=2:4|2 Pts=5:6|Ft=0:2|Time Outs#T.O=4:5|Fouls=1:0|Free Throws=0:100|4 Pts=0:0|1 Pts=0:0|BONUS=0:0|",
+      "stats": {
+        "0": {
+          "name": "ITeam",
+          "home": "POR T Blazers (Jovke)",
+          "away": "MIA Heat (Pakapaka)"
+        },
+        "1": {
+          "name": "1",
+          "home": "14",
+          "away": "19"
+        },
+        "2": {
+          "name": "2",
+          "home": "4",
+          "away": "9"
+        },
+        "3": {
+          "name": "Half",
+          "home": "18",
+          "away": "28"
+        },
+        "4": {
+          "name": "3",
+          "home": "0",
+          "away": "0"
+        },
+        "5": {
+          "name": "4",
+          "home": "0",
+          "away": "0"
+        },
+        "6": {
+          "name": "OT",
+          "home": null,
+          "away": null
+        },
+        "7": {
+          "name": "T",
+          "home": "18",
+          "away": "28"
+        }
+      },
+      "extra": {
+        "0": {
+          "code": "",
+          "minute": "0",
+          "value": "Score After 1st Quarter - 14 - 19"
+        }
+      },
+      "history": {},
+      "odds": {
+        "2022": {
+          "id": 2022,
+          "name": "Away Team Total (Including OT)",
+          "short_name": "Away Team Total (Including OT)",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "19485932420220": {
+              "id": "19485932420220",
+              "name": "Over",
+              "short_name": "Over",
+              "value_eu": "1.833",
+              "suspend": "0",
+              "handicap": "68.5"
+            },
+            "19485932420221": {
+              "id": "19485932420221",
+              "name": "Under",
+              "short_name": "Under",
+              "value_eu": "1.833",
+              "suspend": "0",
+              "handicap": "68.5"
+            }
+          }
+        },
+        "180032": {
+          "id": 180032,
+          "name": "Game Lines Money Line",
+          "short_name": "Game Lines Money Line",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "1948593241800320": {
+              "id": "1948593241800320",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "3.25",
+              "suspend": "0"
+            },
+            "1948593241800321": {
+              "id": "1948593241800321",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.303",
+              "suspend": "0"
+            }
+          }
+        },
+        "9200401": {
+          "id": 9200401,
+          "name": "Odd/Even (3rd quarter)",
+          "short_name": "Odd/Even (3rd quarter)",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "19485932492004010": {
+              "id": "19485932492004010",
+              "name": "Odd",
+              "short_name": "Odd",
+              "value_eu": "1.833",
+              "suspend": "0"
+            },
+            "19485932492004011": {
+              "id": "19485932492004011",
+              "name": "Even",
+              "short_name": "Even",
+              "value_eu": "1.833",
+              "suspend": "0"
+            }
+          }
+        }
+      }
+    },
+    "194857855": {
+      "core": {
+        "safe": "",
+        "removed": "",
+        "stopped": "0",
+        "blocked": "0",
+        "finished": "0",
+        "nc": "0",
+        "updated": "19.05.2026 15:04:09",
+        "updated_ts": "1779203049740"
+      },
+      "info": {
+        "id": "194857855",
+        "mid": "9521137",
+        "bet365id": "194809171",
+        "name": "Dinamo Bucuresti vs Oradea",
+        "sport": "Basketball",
+        "league": "Romania LNB",
+        "start_time": null,
+        "start_date": null,
+        "start_ts": "",
+        "start_ts_utc": "",
+        "period": "1st Quarter",
+        "score": "0:4",
+        "ball_pos": null,
+        "state_info": null,
+        "state": "1133",
+        "minute": "8",
+        "seconds": "08:01"
+      },
+      "team_info": {
+        "home": {
+          "name": "Dinamo Bucuresti",
+          "score": "0",
+          "color": "",
+          "kit_color": "#C40010,#800000,#800000,#800000,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#00FFFF",
+          "Serve": ""
+        },
+        "away": {
+          "name": "Oradea",
+          "score": "4",
+          "color": "",
+          "kit_color": "#F0F0F0,#F0F0F0,#C40010,#F0F0F0,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#00FFFF",
+          "Serve": ""
+        }
+      },
+      "bonus": {},
+      "stream": "",
+      "sts": "3 Pts=0:0|2 Pts=0:2|Ft=0:0|Time Outs#T.O=5:5|Fouls=0:0|Free Throws=0:0|4 Pts=0:0|1 Pts=0:0|BONUS=0:0|",
+      "stats": {
+        "0": {
+          "name": "ITeam",
+          "home": "Dinamo Bucuresti",
+          "away": "Oradea"
+        },
+        "1": {
+          "name": "1",
+          "home": "0",
+          "away": "4"
+        },
+        "2": {
+          "name": "2",
+          "home": "0",
+          "away": "0"
+        },
+        "3": {
+          "name": "Half",
+          "home": "0",
+          "away": "4"
+        },
+        "4": {
+          "name": "3",
+          "home": "0",
+          "away": "0"
+        },
+        "5": {
+          "name": "4",
+          "home": "0",
+          "away": "0"
+        },
+        "6": {
+          "name": "OT",
+          "home": null,
+          "away": null
+        },
+        "7": {
+          "name": "T",
+          "home": "0",
+          "away": "4"
+        }
+      },
+      "extra": {},
+      "history": {},
+      "odds": {
+        "5300570": {
+          "id": 5300570,
+          "name": "Away Winning Margin (1st Quarter)",
+          "short_name": "Away Winning Margin (1st Quarter)",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "19485785553005700": {
+              "id": "19485785553005700",
+              "name": "1-2",
+              "short_name": "1-2",
+              "value_eu": "7.5",
+              "suspend": "0"
+            },
+            "19485785553005701": {
+              "id": "19485785553005701",
+              "name": "3-4",
+              "short_name": "3-4",
+              "value_eu": "7",
+              "suspend": "0"
+            },
+            "19485785553005702": {
+              "id": "19485785553005702",
+              "name": "5-6",
+              "short_name": "5-6",
+              "value_eu": "7.25",
+              "suspend": "0"
+            },
+            "19485785553005703": {
+              "id": "19485785553005703",
+              "name": "7-8",
+              "short_name": "7-8",
+              "value_eu": "8",
+              "suspend": "0"
+            },
+            "19485785553005704": {
+              "id": "19485785553005704",
+              "name": "9-10",
+              "short_name": "9-10",
+              "value_eu": "9.5",
+              "suspend": "0"
+            },
+            "19485785553005705": {
+              "id": "19485785553005705",
+              "name": "11+",
+              "short_name": "11+",
+              "value_eu": "5",
+              "suspend": "0"
+            },
+            "19485785553005706": {
+              "id": "19485785553005706",
+              "name": "Tie",
+              "short_name": "Tie",
+              "value_eu": "13",
+              "suspend": "0"
+            }
+          }
+        },
+        "572": {
+          "id": 572,
+          "name": "1st Quarter Both Teams To Score",
+          "short_name": "1st Quarter Both Teams To Score",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "1948578555720": {
+              "id": "1948578555720",
+              "name": "Yes",
+              "short_name": "Yes",
+              "value_eu": "2.9",
+              "suspend": "0",
+              "handicap": "18"
+            },
+            "1948578555721": {
+              "id": "1948578555721",
+              "name": "No",
+              "short_name": "No",
+              "value_eu": "1.363",
+              "suspend": "0",
+              "handicap": "18"
+            },
+            "1948578555722": {
+              "id": "1948578555722",
+              "name": "Yes",
+              "short_name": "Yes",
+              "value_eu": "9.75",
+              "suspend": "0",
+              "handicap": "22"
+            },
+            "1948578555723": {
+              "id": "1948578555723",
+              "name": "No",
+              "short_name": "No",
+              "value_eu": "1.033",
+              "suspend": "0",
+              "handicap": "22"
+            }
+          }
+        },
+        "5300588": {
+          "id": 5300588,
+          "name": "Away Winning Margin (1st Half)",
+          "short_name": "Away Winning Margin (1st Half)",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "19485785553005880": {
+              "id": "19485785553005880",
+              "name": "1-3",
+              "short_name": "1-3",
+              "value_eu": "7",
+              "suspend": "0"
+            },
+            "19485785553005881": {
+              "id": "19485785553005881",
+              "name": "4-6",
+              "short_name": "4-6",
+              "value_eu": "6.75",
+              "suspend": "0"
+            },
+            "19485785553005882": {
+              "id": "19485785553005882",
+              "name": "7-9",
+              "short_name": "7-9",
+              "value_eu": "7.25",
+              "suspend": "0"
+            },
+            "19485785553005883": {
+              "id": "19485785553005883",
+              "name": "10-12",
+              "short_name": "10-12",
+              "value_eu": "8.5",
+              "suspend": "0"
+            },
+            "19485785553005884": {
+              "id": "19485785553005884",
+              "name": "13-15",
+              "short_name": "13-15",
+              "value_eu": "11",
+              "suspend": "0"
+            },
+            "19485785553005885": {
+              "id": "19485785553005885",
+              "name": "16+",
+              "short_name": "16+",
+              "value_eu": "6.75",
+              "suspend": "0"
+            },
+            "19485785553005886": {
+              "id": "19485785553005886",
+              "name": "Tie",
+              "short_name": "Tie",
+              "value_eu": "17",
+              "suspend": "0"
+            }
+          }
+        }
+      }
+    },
+    "194868103": {
+      "core": {
+        "safe": "",
+        "removed": "",
+        "stopped": "0",
+        "blocked": "0",
+        "finished": "0",
+        "nc": "0",
+        "updated": "19.05.2026 15:04:10",
+        "updated_ts": "1779203050748"
+      },
+      "info": {
+        "id": "194868103",
+        "mid": null,
+        "bet365id": "194867819",
+        "name": "CHA Hornets (HOLLOW) vs ORL Magic (DIMES)",
+        "sport": "Basketball",
+        "league": "Ebasketball H2H GG League - 4x5mins",
+        "start_time": null,
+        "start_date": null,
+        "start_ts": "",
+        "start_ts_utc": "",
+        "period": "1st Quarter",
+        "score": "2:5",
+        "ball_pos": "0.65,0.5",
+        "state_info": null,
+        "state": "11077",
+        "minute": "4",
+        "seconds": "04:09"
+      },
+      "team_info": {
+        "home": {
+          "name": "CHA Hornets (HOLLOW)",
+          "score": "2",
+          "color": "",
+          "kit_color": "#F0F0F0,#00C1BA,#0A0A0A,#00C1BA,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#0A0A0A",
+          "Serve": ""
+        },
+        "away": {
+          "name": "ORL Magic (DIMES)",
+          "score": "5",
+          "color": "",
+          "kit_color": "#0A0A0A,#002B87,#F0F0F0,#0046A8,#C40010,#0046A8,#F0F0F0,#FFFFFF,#FFFF00,#FF00FF,#0A0A0A",
+          "Serve": ""
+        }
+      },
+      "bonus": {},
+      "stream": "",
+      "sts": "Free Throws=0:0|BONUS=0:0|RD=,|",
+      "stats": {
+        "0": {
+          "name": "ITeam",
+          "home": "CHA Hornets (HOLLOW)",
+          "away": "ORL Magic (DIMES)"
+        },
+        "1": {
+          "name": "1",
+          "home": "2",
+          "away": "5"
+        },
+        "2": {
+          "name": "2",
+          "home": "0",
+          "away": "0"
+        },
+        "3": {
+          "name": "Half",
+          "home": "2",
+          "away": "5"
+        },
+        "4": {
+          "name": "3",
+          "home": "0",
+          "away": "0"
+        },
+        "5": {
+          "name": "4",
+          "home": "0",
+          "away": "0"
+        },
+        "6": {
+          "name": "OT",
+          "home": null,
+          "away": null
+        },
+        "7": {
+          "name": "T",
+          "home": "2",
+          "away": "5"
+        }
+      },
+      "extra": {},
+      "history": {},
+      "odds": {
+        "1446": {
+          "id": 1446,
+          "name": "Game Lines Spread",
+          "short_name": "Game Lines Spread",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "19486810314460": {
+              "id": "19486810314460",
+              "name": "Home",
+              "short_name": "Home",
+              "value_eu": "1.8",
+              "suspend": "0",
+              "handicap": "2.5"
+            },
+            "19486810314461": {
+              "id": "19486810314461",
+              "name": "Away",
+              "short_name": "Away",
+              "value_eu": "1.869",
+              "suspend": "0",
+              "handicap": "-2.5"
+            }
+          }
+        },
+        "2021": {
+          "id": 2021,
+          "name": "Home Team Total (Including OT)",
+          "short_name": "Home Team Total (Including OT)",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "19486810320210": {
+              "id": "19486810320210",
+              "name": "Over",
+              "short_name": "Over",
+              "value_eu": "1.8",
+              "suspend": "0",
+              "handicap": "56.5"
+            },
+            "19486810320211": {
+              "id": "19486810320211",
+              "name": "Under",
+              "short_name": "Under",
+              "value_eu": "1.869",
+              "suspend": "0",
+              "handicap": "56.5"
+            }
+          }
+        },
+        "180080": {
+          "id": 180080,
+          "name": "1st Quarter Lines Total",
+          "short_name": "1st Quarter Lines Total",
+          "suspend": "0",
+          "order": "",
+          "participants": {
+            "1948681031800800": {
+              "id": "1948681031800800",
+              "name": "Over",
+              "short_name": "Over",
+              "value_eu": "1.833",
+              "suspend": "0",
+              "handicap": "30.5"
+            },
+            "1948681031800801": {
+              "id": "1948681031800801",
+              "name": "Under",
+              "short_name": "Under",
+              "value_eu": "1.833",
+              "suspend": "0",
+              "handicap": "30.5"
+            }
+          }
+        }
+      }
+    }
+  }
+}

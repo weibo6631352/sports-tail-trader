@@ -1,10 +1,9 @@
-"""多源体育直播状态聚合器（external-id 优先 + 加权投票融合）。
+"""体育直播状态聚合器（健康检查 + 超时管理 + 指数退避冷却）。
 
 职责：
-- 并行拉取所有源（独立超时 + 指数退避冷却 + 冷却期缓存复用）；
-- 用 ExternalIdIndex 按外部 ID 做跨源合并，文本+开赛时间窗作 fallback；
-- 同 group 多源时按"加权 majority vote (status) + trusted-source 比分 + median 兜底"融合；
-- per-league 源亲和：``league_source_priority`` 注入，league-aware 加权；
+- 并行拉取所有注册 provider（独立超时 + 指数退避冷却 + 冷却期缓存复用）；
+- 单源时直接 pass-through，无需跨源融合；
+- per-league 源亲和：``league_source_priority`` 注入，league-aware 加权（多源场景预留）；
 - 融合证据用 ``LiveEvent.source_conflicts`` 一等字段记录，``contributing_sources`` 暴露所有源。
 """
 
@@ -29,7 +28,6 @@ from polymarket_trader.domain.sports_live import (
     SportsLiveSourceStatus,
 )
 from polymarket_trader.infra.sports.common import utc_now
-from polymarket_trader.infra.sports.external_id_index import ExternalIdIndex
 
 SportsLiveSnapshotProvider = Callable[[], Awaitable[SportsLiveSnapshot]]
 SportsLiveCloser = Callable[[], Awaitable[None]]
@@ -48,24 +46,11 @@ _STATUS_PRIORITY = {
 
 # 全局源优先级表（fallback）。league_source_priority 注入时按 league 覆盖。
 _DEFAULT_SOURCE_PRIORITY: Mapping[str, int] = {
-    "nba": 50,
-    "nhl": 50,
-    "mlb": 50,
-    "pandascore": 50,
-    "espn": 40,
-    "tennis_live_data": 40,
-    "college_football_data": 40,
-    "ncaa_api": 35,
-    "api_football": 35,
-    "sofascore": 30,
-    "fotmob": 25,
-    "thesportsdb": 20,
+    "goalserve": 80,
 }
 
 # 一律视为官方（高可信）的源；冲突时同等 priority 下仍偏向 official。
-_DEFAULT_OFFICIAL_SOURCES: frozenset[str] = frozenset(
-    {"nba", "nhl", "mlb", "espn", "pandascore", "college_football_data", "ncaa_api"}
-)
+_DEFAULT_OFFICIAL_SOURCES: frozenset[str] = frozenset({"goalserve"})
 
 # 加权融合中的时间衰减：observed_at 越久权重越低（半衰期 5 分钟）。
 _FRESHNESS_HALF_LIFE_S = 300.0
@@ -203,43 +188,25 @@ class SportsLiveAggregateClient:
         )
 
     def _fuse(self, events: tuple[LiveEvent, ...]) -> tuple[LiveEvent, ...]:
-        """Two-pass 合并：先按 ExternalIdIndex 分 group，单成员组再走文本+时间桶兜底。"""
+        """单源时 pass-through（标记 contributing_sources）；多源时按权重融合。"""
 
         if not events:
             return ()
 
-        report = ExternalIdIndex.merge(events)
-        # 标记每个 event 当前所属的逻辑组：先按 id-group，单成员组再尝试 text 合并
-        group_of: list[int] = [0] * len(events)
-        for group_id, group in enumerate(report.groups):
-            for idx in group.indices:
-                group_of[idx] = group_id
-
-        # 把单成员组按 (kind, league, sport, team-pair-or-event-name, start-bucket) 文本合并
+        # 按 (kind, league, sport, team-pair/event-name, start-bucket) 分组
         text_keys: dict[tuple[str, str, str, str, str | None], int] = {}
-        merged_indices: dict[int, list[int]] = {}
+        groups: list[list[int]] = []
         for idx, event in enumerate(events):
-            current_group = group_of[idx]
-            members = next(
-                (g.indices for g in report.groups if idx in g.indices),
-                (idx,),
-            )
-            if len(members) > 1:
-                merged_indices.setdefault(current_group, []).append(idx)
-                continue
             key = _text_key(event)
             existing = text_keys.get(key)
             if existing is None:
-                text_keys[key] = current_group
-                merged_indices.setdefault(current_group, []).append(idx)
+                text_keys[key] = len(groups)
+                groups.append([idx])
             else:
-                # 把当前 event 合入既有 text-group
-                group_of[idx] = existing
-                merged_indices.setdefault(existing, []).append(idx)
+                groups[existing].append(idx)
 
-        # 每个最终 group 内做融合
         fused_events: list[LiveEvent] = []
-        for group_id, indices in merged_indices.items():
+        for indices in groups:
             if not indices:
                 continue
             members = tuple(events[i] for i in indices)

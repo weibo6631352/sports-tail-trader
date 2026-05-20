@@ -5,10 +5,9 @@ from decimal import Decimal
 from polymarket_trader.config import Settings
 
 
-def test_settings_accepts_sofascore_live_source_for_supported_league() -> None:
+def test_settings_accepts_goalserve_live_source_when_enabled() -> None:
     settings = _settings(
         sports_live_state_enabled=True,
-        sports_live_state_sources="sofascore",
         sports_live_state_leagues="nba",
     )
 
@@ -21,7 +20,6 @@ def test_settings_accepts_sofascore_live_source_for_supported_league() -> None:
 def test_settings_accepts_sports_live_state_league_for_whole_market_coverage() -> None:
     settings = _settings(
         sports_live_state_enabled=True,
-        sports_live_state_sources="sofascore",
         sports_live_state_leagues="sports",
     )
 
@@ -31,89 +29,54 @@ def test_settings_accepts_sports_live_state_league_for_whole_market_coverage() -
     assert not readiness.blocking_issues
 
 
-def test_settings_accepts_thesportsdb_live_source_for_supported_league() -> None:
+def test_settings_goalserve_proxy_optional() -> None:
+    """goalserve_proxy 留空时不阻断启动（生产用 IP 白名单直连）。"""
     settings = _settings(
         sports_live_state_enabled=True,
-        sports_live_state_sources="thesportsdb",
-        sports_live_state_leagues="mlb",
+        goalserve_proxy=None,
     )
 
     readiness = settings.validate_startup_readiness()
 
     assert readiness.ready_to_trade
-    assert not readiness.blocking_issues
 
 
-def test_settings_rejects_sofascore_without_supported_league_overlap() -> None:
+def test_settings_goalserve_proxy_set_passes_validation() -> None:
+    """goalserve_proxy 设为开发代理地址时启动验证通过。"""
     settings = _settings(
         sports_live_state_enabled=True,
-        sports_live_state_sources="sofascore",
-        sports_live_state_leagues="cricket",
+        goalserve_proxy="http://127.0.0.1:7890",
     )
 
     readiness = settings.validate_startup_readiness()
 
-    assert [(issue.field, issue.code) for issue in readiness.blocking_issues] == [
-        ("sports_live_state_sources", "source_league_mismatch")
-    ]
+    assert readiness.ready_to_trade
 
 
-def test_settings_rejects_thesportsdb_without_verified_league_overlap() -> None:
+def test_settings_goalserve_sport_codes_default() -> None:
+    """goalserve_sport_codes 默认返回包含核心运动代码的元组。"""
+    settings = _settings()
+
+    codes = settings.goalserve_sport_codes
+
+    assert isinstance(codes, tuple)
+    assert "basketball" in codes
+    assert "soccer" in codes
+    assert "hockey" in codes
+    assert "baseball" in codes
+
+
+def test_settings_rejects_blank_goalserve_base_url() -> None:
+    """goalserve_inplay_base_url 被清空时启动验证应报 blocking issue。"""
     settings = _settings(
         sports_live_state_enabled=True,
-        sports_live_state_sources="thesportsdb",
-        sports_live_state_leagues="nba",
+        goalserve_inplay_base_url="",
     )
 
     readiness = settings.validate_startup_readiness()
 
-    assert [(issue.field, issue.code) for issue in readiness.blocking_issues] == [
-        ("sports_live_state_sources", "source_league_mismatch")
-    ]
-
-
-def test_settings_rejects_espn_without_supported_league_overlap() -> None:
-    settings = _settings(
-        sports_live_state_enabled=True,
-        sports_live_state_sources="espn",
-        sports_live_state_leagues="cricket",
-    )
-
-    readiness = settings.validate_startup_readiness()
-
-    assert [(issue.field, issue.code) for issue in readiness.blocking_issues] == [
-        ("sports_live_state_sources", "source_league_mismatch")
-    ]
-
-
-def test_settings_rejects_blank_sofascore_endpoint_when_enabled() -> None:
-    settings = _settings(
-        sports_live_state_enabled=True,
-        sports_live_state_sources="sofascore",
-        sports_live_state_leagues="nba",
-        sports_live_state_sofascore_base_url="",
-    )
-
-    readiness = settings.validate_startup_readiness()
-
-    assert ("sports_live_state_sofascore_base_url", "missing_endpoint") in {
-        (issue.field, issue.code) for issue in readiness.blocking_issues
-    }
-
-
-def test_settings_rejects_blank_thesportsdb_endpoint_when_enabled() -> None:
-    settings = _settings(
-        sports_live_state_enabled=True,
-        sports_live_state_sources="thesportsdb",
-        sports_live_state_leagues="mlb",
-        sports_live_state_thesportsdb_base_url="",
-    )
-
-    readiness = settings.validate_startup_readiness()
-
-    assert ("sports_live_state_thesportsdb_base_url", "missing_endpoint") in {
-        (issue.field, issue.code) for issue in readiness.blocking_issues
-    }
+    assert not readiness.ready_to_trade
+    assert any(issue.field == "goalserve_inplay_base_url" for issue in readiness.blocking_issues)
 
 
 def _settings(**overrides: object) -> Settings:

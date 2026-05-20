@@ -24,7 +24,6 @@ from typing import Any
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import LiveEvent, SportsLiveSnapshot
 from polymarket_trader.infra.sports.aggregate_client import SportsLiveAggregateClient
-from polymarket_trader.infra.sports.external_id_index import ExternalIdIndex
 from polymarket_trader.serialization import jsonable
 
 LiveMatchFunction = Callable[[Market, tuple[LiveEvent, ...]], Any]
@@ -255,8 +254,6 @@ async def run_calibration(
     else:
         id_merge_rate = 0.0
         text_fallback_rate = 0.0
-    # ExternalIdIndex import kept available for future fixture-based callers; mark as used.
-    _ = ExternalIdIndex
 
     # conflict 触发率：含 ConflictRecord 的 event 比例
     if candidate_events:

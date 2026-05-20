@@ -1,11 +1,19 @@
 """体育直播真实样本校验工具。
 
-本模块服务当前体育扫尾策略的离线验收：把采集到的 ESPN scoreboard payload
-和 Polymarket market 样本放在同一个 fixture 中，校验 ESPN 字段归一化结果、
+本模块服务当前体育扫尾策略的离线验收：把采集到的 Goalserve inplay payload
+和 Polymarket market 样本放在同一个 fixture 中，校验 Goalserve 字段归一化结果、
 比赛状态字段以及 market/game 匹配是否符合人工预期。
 
 它不参与交易主链路，不访问外部网络，也不改变运行态状态——属于离线 dev tool，
-CLAUDE.md §6 的运行时分层约束不适用，可直接 import infra/sports 复用 ESPN 解析。
+CLAUDE.md §6 的运行时分层约束不适用，可直接 import infra/sports 复用 Goalserve 解析。
+
+fixture 顶层字段：
+- ``source``：固定为 ``goalserve``。
+- ``sport``：Goalserve 运动代码，例如 ``basketball``、``soccer``。
+- ``inplay_data``：Goalserve inplay feed 原始 JSON（含 events 字典）。
+- ``markets``：Polymarket market 样本。
+- ``expected_games``：人工标注的状态字段期望（可选）。
+- ``expected_matches``：人工标注的 market -> event 匹配期望（可选）。
 """
 
 from __future__ import annotations
@@ -18,7 +26,7 @@ from typing import Any, Mapping, Sequence
 
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.extension_api import load_mapping_file
-from polymarket_trader.infra.sports import parse_espn_scoreboard_payload
+from polymarket_trader.infra.sports import parse_goalserve_sport
 from polymarket_trader.serialization import jsonable
 from strategies.current.live_state import best_live_match, live_event_metadata
 
@@ -47,10 +55,10 @@ class SportsLiveSampleFailure:
 
 @dataclass(frozen=True, slots=True)
 class SportsLiveSampleReport:
-    """ESPN 真实样本和 Polymarket market 匹配校验报告。"""
+    """Goalserve 真实样本和 Polymarket market 匹配校验报告。"""
 
     source: str
-    league: str
+    sport: str
     events_seen: int
     markets_checked: int
     expected_events_checked: int
@@ -70,7 +78,7 @@ class SportsLiveSampleReport:
         return {
             "passed": self.passed,
             "source": self.source,
-            "league": self.league,
+            "sport": self.sport,
             "events_seen": self.events_seen,
             "markets_checked": self.markets_checked,
             "expected_events_checked": self.expected_events_checked,
@@ -81,52 +89,43 @@ class SportsLiveSampleReport:
 
 
 def validate_sports_live_sample(sample: Mapping[str, Any]) -> SportsLiveSampleReport:
-    """校验一份 ESPN/Polymarket 成对样本。
-
-    fixture 顶层字段：
-    - ``source``：当前只支持 ``espn``。
-    - ``league``：ESPN league code，例如 ``nba``、``nhl``。
-    - ``scoreboard``：ESPN scoreboard 原始 JSON。
-    - ``markets``：Polymarket market 样本，字段与 entry replay fixture 对齐。
-    - ``expected_games``：人工标注的状态字段期望。
-    - ``expected_matches``：人工标注的 market -> ESPN event 匹配期望。
-    """
+    """校验一份 Goalserve/Polymarket 成对样本。"""
 
     failures: list[SportsLiveSampleFailure] = []
-    source = str(sample.get("source") or "espn").strip().lower()
-    league = str(sample.get("league") or "").strip().lower()
-    if source != "espn":
+    source = str(sample.get("source") or "goalserve").strip().lower()
+    sport = str(sample.get("sport") or "").strip().lower()
+    if source != "goalserve":
         failures.append(
             SportsLiveSampleFailure(
                 code="unsupported_source",
                 path="source",
-                message="当前真实样本校验只支持 ESPN scoreboard。",
-                expected="espn",
+                message="当前真实样本校验只支持 Goalserve inplay feed。",
+                expected="goalserve",
                 actual=source,
             )
         )
-    if not league:
+    if not sport:
         failures.append(
             SportsLiveSampleFailure(
-                code="missing_league",
-                path="league",
-                message="样本必须声明 ESPN league code。",
+                code="missing_sport",
+                path="sport",
+                message="样本必须声明 Goalserve sport 代码（basketball/soccer 等）。",
             )
         )
 
-    scoreboard = sample.get("scoreboard")
-    if not isinstance(scoreboard, Mapping):
+    inplay_data = sample.get("inplay_data")
+    if not isinstance(inplay_data, Mapping):
         failures.append(
             SportsLiveSampleFailure(
-                code="missing_scoreboard",
-                path="scoreboard",
-                message="样本必须提供 ESPN scoreboard 原始 payload。",
+                code="missing_inplay_data",
+                path="inplay_data",
+                message="样本必须提供 Goalserve inplay feed 原始 payload（含 events 字典）。",
             )
         )
-        scoreboard = {}
+        inplay_data = {}
 
     observed_at = _datetime_value(sample.get("observed_at")) or datetime.now(timezone.utc)
-    events = parse_espn_scoreboard_payload(scoreboard, league=league or "nba", observed_at=observed_at)
+    events = parse_goalserve_sport(sport or "basketball", dict(inplay_data), observed_at=observed_at)
     markets = tuple(_load_market(item) for item in _mapping_list(sample.get("markets")))
     matches = tuple(_match_payload(match) for market in markets if (match := best_live_match(market, events)))
 
@@ -134,7 +133,7 @@ def validate_sports_live_sample(sample: Mapping[str, Any]) -> SportsLiveSampleRe
     failures.extend(_validate_expected_matches(sample, markets=markets, events=events))
     return SportsLiveSampleReport(
         source=source,
-        league=league,
+        sport=sport,
         events_seen=len(events),
         markets_checked=len(markets),
         expected_events_checked=len(_mapping_list(sample.get("expected_events"))),

@@ -19,6 +19,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: '盯盘 Live',
     links: [
       { path: '/live', label: '总览' },
+      { path: '/live/goalserve', label: 'Goalserve 直播', badge: 'P0' },
       { path: '/live/candidates', label: '候选' },
       { path: '/live/positions', label: '实时持仓' },
       { path: '/live/orders', label: '实时挂单' },

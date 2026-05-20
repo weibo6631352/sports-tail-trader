@@ -18,6 +18,7 @@ import type {
   HealthSnapshot,
   LatencyPercentilesSnapshot,
   LiveSourceGapsPage,
+  LiveStateRow,
   LiveStatesPage,
   MarketImpact,
   MarketLiquidity,
@@ -574,6 +575,26 @@ export const sportsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<SportsLiveEventsPage>('/sports/live-events', {
+      params,
+      signal,
+    }),
+  liveStates: (
+    params: { limit?: number; offset?: number },
+    signal?: AbortSignal,
+  ) =>
+    apiClient.get<LiveStatesPage>('/sports/live-states', {
+      params,
+      signal,
+    }),
+  liveStateForMarket: (conditionId: string, signal?: AbortSignal) =>
+    apiClient.get<LiveStateRow>(`/sports/live-states/${encodeURIComponent(conditionId)}`, {
+      signal,
+    }),
+  sourceGaps: (
+    params: { limit?: number; offset?: number; prefix?: string },
+    signal?: AbortSignal,
+  ) =>
+    apiClient.get<LiveSourceGapsPage>('/sports/source-gaps', {
       params,
       signal,
     }),

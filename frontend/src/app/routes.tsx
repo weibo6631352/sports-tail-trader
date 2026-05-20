@@ -12,6 +12,7 @@ const CandidatesPage = lazyNamed(() => import('@features/live/CandidatesPage'), 
 const LivePositionsPage = lazyNamed(() => import('@features/live/LivePositionsPage'), 'LivePositionsPage')
 const LiveOrdersPage = lazyNamed(() => import('@features/live/LiveOrdersPage'), 'LiveOrdersPage')
 const OperationsPage = lazyNamed(() => import('@features/live/OperationsPage'), 'OperationsPage')
+const GoalserveLivePage = lazyNamed(() => import('@features/live/GoalserveLivePage'), 'GoalserveLivePage')
 
 // Investigate
 const TradeTimelinePage = lazyNamed(() => import('@features/investigate/TradeTimelinePage'), 'TradeTimelinePage')
@@ -65,6 +66,7 @@ export const routes: RouteObject[] = [
       { path: 'live/positions', element: <LivePositionsPage /> },
       { path: 'live/orders', element: <LiveOrdersPage /> },
       { path: 'live/operations', element: <OperationsPage /> },
+      { path: 'live/goalserve', element: <GoalserveLivePage /> },
 
       // 复盘
       { path: 'investigate/timeline', element: <TradeTimelinePage /> },

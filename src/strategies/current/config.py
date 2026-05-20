@@ -28,31 +28,30 @@ from strategies.current.tail import (
 def _default_league_source_affinity() -> Mapping[str, tuple[str, ...]]:
     """各 league 偏好的直播源顺序，靠前权重更高（aggregate league-aware priority）。
 
-    第 1 位映射到 priority=100、第 2 位 90、...，aggregate 据此覆盖默认全局表。
-    没列出的 league 仍回退到全局 _DEFAULT_SOURCE_PRIORITY。
+    全部联赛切换到 Goalserve inplay feed（IP 白名单 + 1 秒刷新）。
     """
 
+    _gs = ("goalserve",)
     return {
-        "NBA": ("nba", "espn", "sofascore", "thesportsdb"),
-        "WNBA": ("espn", "sofascore"),
-        "NHL": ("nhl", "espn", "sofascore", "thesportsdb"),
-        "MLB": ("mlb", "espn", "sofascore", "thesportsdb"),
-        "NFL": ("espn", "sofascore"),
-        "NCAAF": ("college_football_data", "espn"),
-        "NCAAMB": ("ncaa_api", "espn"),
-        "NCAAWB": ("espn",),
-        "NCAAB": ("ncaa_api", "espn"),
-        "ATP": ("tennis_live_data", "sofascore", "espn"),
-        "WTA": ("tennis_live_data", "sofascore", "espn"),
-        "EPL": ("api_football", "sofascore"),
-        "PREMIER-LEAGUE": ("api_football", "sofascore"),
-        "F1": ("espn",),
-        "NASCAR": ("espn",),
-        "INDYCAR": ("espn",),
-        "CS2": ("pandascore",),
-        "DOTA2": ("pandascore",),
-        "LOL": ("pandascore",),
-        "VALORANT": ("pandascore",),
+        "NBA": _gs,
+        "WNBA": _gs,
+        "NHL": _gs,
+        "MLB": _gs,
+        "NFL": _gs,
+        "NCAAF": _gs,
+        "NCAAMB": _gs,
+        "NCAAWB": _gs,
+        "NCAAB": _gs,
+        "ATP": _gs,
+        "WTA": _gs,
+        "EPL": _gs,
+        "PREMIER-LEAGUE": _gs,
+        "CS2": _gs,
+        "DOTA2": _gs,
+        "LOL": _gs,
+        "VALORANT": _gs,
+        "UFC": _gs,
+        "MMA": _gs,
     }
 
 
@@ -257,6 +256,36 @@ class CurrentStrategyConfig:
     tail_implied_conf_depth_baseline_usdc: Decimal = Decimal("25")
     # spread 容忍：spread > 此值时 conf 衰减到 25%；spread=0 时不缩。
     tail_implied_conf_spread_widening: Decimal = Decimal("0.05")
+    # Goalserve 盘口交叉验证：当 Goalserve 对目标方向的隐含概率比 Polymarket ask 低超过
+    # 此阈值时，拒绝入场（防止在 Goalserve 认为对手方大幅领先时仍买入我方 YES）。
+    # 设为较宽（0.25）保守起步；操盘手可调高（例如 0.30）收紧 or 调低至 0.0 关闭。
+    goalserve_cross_validation_margin: Decimal = Decimal("0.25")
+    # 关闭 Goalserve 交叉验证（调试用）；True = 启用，False = 只加 metadata 不拒绝。
+    goalserve_cross_validation_enabled: bool = True
+    # Goalserve 强确认：当 Goalserve 对目标方向隐含概率比 Polymarket ask 高出此阈值时，
+    # 视为 Goalserve 强力背书，允许对 price_cap 加成以争取更多成交量。
+    goalserve_strong_edge_threshold: Decimal = Decimal("0.05")
+    # price_cap 加成比例：Goalserve 强确认时将 price_cap 上调此比例（如 0.02 = 多 2¢/dollar）。
+    # 设为 0 则不加成——仅写入 metadata 供审计。
+    goalserve_strong_edge_price_bonus: Decimal = Decimal("0.02")
+    # 是否启用 Goalserve 强确认 price_cap 加成（False 时仍写 metadata 但不改价）。
+    goalserve_strong_edge_enabled: bool = True
+    # Goalserve Spread 方向一致性验证：当 Spread 盘口对目标方向隐含概率与 Moneyline 方向
+    # 矛盾（spread 偏向对手方且差值超阈值）时，额外要求更大领先优势再入场。
+    goalserve_spread_conflict_threshold: Decimal = Decimal("0.15")
+    # Spread 冲突时要求比 min_moneyline_lead 多几分才允许入场（直接修改评估策略）。
+    goalserve_spread_conflict_extra_lead: int = 3
+    # 多信号确认（Moneyline + Spread 均认可我方）时可豁免几分领先要求（放宽评估）。
+    goalserve_multi_confirm_lead_relief: int = 2
+    # 多信号确认时允许在距比赛结束更早的时间入场（扩展买入时窗，秒）。
+    goalserve_multi_confirm_time_bonus_seconds: int = 30
+    # 是否启用 Goalserve 多信号策略调参（False 时跳过策略修改，仅写 metadata）。
+    goalserve_policy_adjustment_enabled: bool = True
+    # Goalserve 半场/第二节 Money Line 否决：若目标方向在半场盘口隐含概率低于此阈值，
+    # 说明书商认为剩余半场目标方依然落后，拒绝入场。
+    goalserve_halftime_veto_min_implied: Decimal = Decimal("0.30")
+    # 是否启用半场 Money Line 否决（False 时仅写 metadata 不拒绝）。
+    goalserve_halftime_veto_enabled: bool = True
     tail_max_consecutive_losses: int = 3
     tail_scale_in_budget_fraction: Decimal = Decimal("0.5")
     tail_scale_in_max_buy_fills: int = 2
@@ -266,6 +295,10 @@ class CurrentStrategyConfig:
     tail_profit_take_hold_minutes: int = 2
     tail_entry_maker_max_resting_seconds: int = 60
     tail_settlement_hold_minutes: int = 180
+    # 比赛结束后等待 Polymarket 权威结算的缓冲时间（分钟）。
+    # 动态结算时间估算：live 时 = ceil(seconds_remaining/60) + buffer；
+    # 已结束时 = buffer；无比赛状态时回退 tail_settlement_hold_minutes。
+    tail_settlement_buffer_minutes: int = 60
     tail_recovery_profit_take_enabled: bool = True
     tail_recovery_profit_take_min_avg_price: Decimal = Decimal("0.90")
 

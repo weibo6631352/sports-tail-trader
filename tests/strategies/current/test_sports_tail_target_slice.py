@@ -3182,8 +3182,8 @@ def test_live_market_more_than_one_hour_from_close_is_not_tail_candidate() -> No
     )
 
     assert decision.action.value == "skip"
-    assert decision.reason == "market_end_too_far"
-    assert decision.metadata["tail_reason"] == "market_end_too_far"
+    assert decision.reason == "game_not_late_enough"
+    assert decision.metadata["tail_reason"] == "game_not_late_enough"
 
 
 def test_live_mlb_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gate() -> None:
@@ -3568,8 +3568,8 @@ def test_allocation_reports_far_close_before_missing_best_ask() -> None:
 
     assert plan.intent is None
     assert plan.allocation is not None
-    assert plan.allocation.reason == "market_end_too_far"
-    assert plan.metadata["tail_reason"] == "market_end_too_far"
+    assert plan.allocation.reason == "missing_best_ask"
+    assert plan.metadata["tail_reason"] == "missing_best_ask"
 
 
 def test_spreads_default_permission_enters_auto_buy_path() -> None:

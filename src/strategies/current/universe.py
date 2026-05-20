@@ -12,6 +12,7 @@ from __future__ import annotations
 from polymarket_trader.domain.market import Market
 from polymarket_trader.extension_api import UniverseDecision
 from strategies.current.tail import SportsMarketFamily, SportsMarketType
+from strategies.sports_framework.slug import is_unsupported_period_total
 
 from strategies.current.config import CurrentStrategyConfig
 
@@ -63,6 +64,12 @@ def select_market(config: CurrentStrategyConfig, market: Market) -> UniverseDeci
                     "target_count": len(descriptor.targets),
                 },
             )
+        # 分节/分局/前N局 totals（如 1st half total、1st quarter total、
+        # 1st inning total）无完整结算模型，提前排除避免浪费 sizing 计算。
+        if descriptor.market_type == SportsMarketType.TOTALS and is_unsupported_period_total(
+            _universe_text(market).lower()
+        ):
+            return UniverseDecision.exclude(reason="unsupported_period_total_record_only")
         if descriptor.market_type not in config.tail_enabled_market_types:
             return UniverseDecision.exclude(reason="market_type_disabled")
     elif family == SportsMarketFamily.OUTRIGHT:

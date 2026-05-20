@@ -656,7 +656,11 @@ export type LiveStateRow = {
   source?: string | null
   signal_allowed?: boolean | null
   signal_reason?: string | null
-  payload: Record<string, unknown>
+  live_state_signal_allowed?: boolean | null
+  live_state_signal_reason?: string | null
+  live_state_phase?: string | null
+  live_state_payload?: Record<string, unknown> | null
+  payload?: Record<string, unknown>
   updated_at?: Iso | null
   [key: string]: unknown
 }

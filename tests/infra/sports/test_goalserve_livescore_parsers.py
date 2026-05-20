@@ -1,0 +1,597 @@
+"""Goalserve livescore parser unit tests: per-sport parsing, status mapping, empty-data safety.
+
+All fixtures use the actual Goalserve API structure (calibrated against real responses):
+  - Top-level wrapper: {"scores": {...}}
+  - Team sports (cricket/handball/rugby/boxing/mma): scores.category[].match[]
+  - Golf: scores.tournament[].player[]  (pos field, may be "T1" for ties)
+  - Horse racing: scores.tournament[].race[]  runners={"horse": [...]}
+  - MotoGP/F1: scores.tournament[].{session_key}.results.driver[]
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import pytest
+
+from polymarket_trader.domain.sports_live import (
+    LiveEventKind,
+    SportsLiveGameStatus,
+)
+from polymarket_trader.infra.sports.goalserve_livescore_parsers import parse_goalserve_livescore_sport
+
+_OBSERVED = datetime(2026, 5, 20, tzinfo=timezone.utc)
+
+
+# ---------------------------------------------------------------------------
+# Helpers — mirrors real Goalserve response structure
+# ---------------------------------------------------------------------------
+
+
+def _scores_team_wrap(*matches: dict) -> dict:
+    """Wrap matches in the real Goalserve category→match structure."""
+    return {"scores": {"category": [{"match": list(matches)}]}}
+
+
+def _team_match(
+    id: str = "m1",
+    status: str = "In Progress",
+    home_name: str = "Home",
+    away_name: str = "Away",
+    home_total: str = "10",
+    away_total: str = "8",
+    home_t1: str = "5",
+    away_t1: str = "4",
+    **extra: object,
+) -> dict:
+    return {
+        "id": id,
+        "status": status,
+        "localteam": {"name": home_name, "totalscore": home_total, "t1": home_t1, "t2": "0"},
+        "awayteam": {"name": away_name, "totalscore": away_total, "t1": away_t1, "t2": "0"},
+        **extra,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Status mapping
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw_status, expected",
+    [
+        ("In Progress", SportsLiveGameStatus.LIVE),
+        ("Inprogress", SportsLiveGameStatus.LIVE),
+        ("Live", SportsLiveGameStatus.LIVE),
+        ("Finished", SportsLiveGameStatus.ENDED),
+        ("Final", SportsLiveGameStatus.ENDED),
+        ("FT", SportsLiveGameStatus.ENDED),
+        ("Not Started", SportsLiveGameStatus.SCHEDULED),
+        ("Postponed", SportsLiveGameStatus.UNKNOWN),
+        ("", SportsLiveGameStatus.UNKNOWN),
+    ],
+)
+def test_text_status_mapping(raw_status: str, expected: SportsLiveGameStatus) -> None:
+    data = _scores_team_wrap(
+        {
+            "id": "1",
+            "status": raw_status,
+            "localteam": {"name": "Home", "totalscore": "0"},
+            "awayteam": {"name": "Away", "totalscore": "0"},
+        }
+    )
+    events = parse_goalserve_livescore_sport("handball", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    assert events[0].status == expected
+
+
+# ---------------------------------------------------------------------------
+# Empty data safety
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("sport", [
+    "cricket", "handball", "rugby", "boxing", "mma",
+    "golf_pga", "golf_dp", "golf_liv", "golf_lpga",
+    "horse_racing_us", "horse_racing_uk", "horse_racing_au", "horse_racing_hk",
+    "f1", "motogp",
+])
+def test_empty_data_returns_empty_list(sport: str) -> None:
+    assert parse_goalserve_livescore_sport(sport, {}, observed_at=_OBSERVED) == []
+
+
+def test_null_scores_returns_empty_list() -> None:
+    # F1 between races has {"scores": null}
+    assert parse_goalserve_livescore_sport("f1", {"scores": None}, observed_at=_OBSERVED) == []
+
+
+def test_unknown_sport_returns_empty_list() -> None:
+    assert parse_goalserve_livescore_sport("unknown_sport", {"scores": {}}, observed_at=_OBSERVED) == []
+
+
+def test_non_dict_data_returns_empty_list() -> None:
+    assert parse_goalserve_livescore_sport("cricket", [], observed_at=_OBSERVED) == []  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Cricket
+# ---------------------------------------------------------------------------
+
+
+def test_cricket_basic_parse() -> None:
+    data = {
+        "scores": {
+            "category": [
+                {
+                    "match": [
+                        {
+                            "id": "cr_001",
+                            "status": "In Progress",
+                            "localteam": {"name": "India", "totalscore": "250"},
+                            "awayteam": {"name": "Australia", "totalscore": "180"},
+                            "time": "45.3",
+                            "competition": "Test Series",
+                            "innings": [
+                                {"number": "1", "batting_team": "1", "runs": "250", "wickets": "6"}
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+    events = parse_goalserve_livescore_sport("cricket", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.sport == "cricket"
+    assert ev.kind == LiveEventKind.TEAM_MATCH
+    assert ev.status == SportsLiveGameStatus.LIVE
+    assert ev.home is not None and ev.home.name == "India"
+    assert ev.away is not None and ev.away.name == "Australia"
+    assert ev.cricket_state is not None
+    assert ev.cricket_state.overs_completed == 45
+    assert ev.cricket_state.balls_in_over == 3
+    assert ev.cricket_state.runs == 250
+    assert ev.cricket_state.wickets == 6
+    assert ev.cricket_state.batting_side == "home"
+    assert ev.source == "goalserve_livescore"
+
+
+def test_cricket_missing_innings_is_safe() -> None:
+    data = _scores_team_wrap(
+        {"id": "c1", "status": "Not Started", "localteam": {"name": "A"}, "awayteam": {"name": "B"}}
+    )
+    events = parse_goalserve_livescore_sport("cricket", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    assert events[0].cricket_state is not None
+    assert events[0].cricket_state.runs is None
+
+
+# ---------------------------------------------------------------------------
+# Handball
+# ---------------------------------------------------------------------------
+
+
+def test_handball_basic_parse() -> None:
+    data = _scores_team_wrap(
+        {
+            "id": "hb_1",
+            "status": "In Progress",
+            "status_str": "1st half",
+            "league": "EHF Champions League",
+            "localteam": {"name": "THW Kiel", "totalscore": "15", "t1": "15", "t2": "0"},
+            "awayteam": {"name": "Barcelona", "totalscore": "13", "t1": "13", "t2": "0"},
+        }
+    )
+    events = parse_goalserve_livescore_sport("handball", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.sport == "handball"
+    assert ev.status == SportsLiveGameStatus.LIVE
+    assert ev.handball_state is not None
+    assert ev.handball_state.period == "first_half"
+    # Goalserve time field is kickoff time (HH:MM), not game clock — always None
+    assert ev.handball_state.clock_minutes is None
+    assert ev.handball_state.home_period1 == 15
+    assert ev.handball_state.away_period1 == 13
+
+
+def test_handball_finished_with_period_scores() -> None:
+    data = _scores_team_wrap(
+        {
+            "id": "hb_2",
+            "status": "Finished",
+            "status_str": "2nd half",
+            "localteam": {"name": "Omsk", "totalscore": "43", "t1": "23", "t2": "20"},
+            "awayteam": {"name": "Saratov", "totalscore": "40", "t1": "17", "t2": "23"},
+        }
+    )
+    events = parse_goalserve_livescore_sport("handball", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.status == SportsLiveGameStatus.ENDED
+    home = next(p for p in ev.participants if p.role == "home")
+    away = next(p for p in ev.participants if p.role == "away")
+    assert home.score == 43
+    assert away.score == 40
+    assert ev.handball_state.home_period1 == 23
+    assert ev.handball_state.away_period1 == 17
+
+
+# ---------------------------------------------------------------------------
+# Rugby
+# ---------------------------------------------------------------------------
+
+
+def test_rugby_basic_parse() -> None:
+    data = _scores_team_wrap(
+        {
+            "id": "rg_1",
+            "status": "In Progress",
+            "status_str": "2nd half",
+            "league": "Premiership",
+            "localteam": {"name": "Saracens", "totalscore": "21", "t1": "14", "t2": "7"},
+            "awayteam": {"name": "Exeter", "totalscore": "18", "t1": "10", "t2": "8"},
+        }
+    )
+    events = parse_goalserve_livescore_sport("rugby", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.sport == "rugby"
+    assert ev.rugby_state is not None
+    assert ev.rugby_state.period == "second_half"
+    assert ev.rugby_state.clock_minutes is None
+    assert ev.rugby_state.home_period1 == 14
+    assert ev.rugby_state.away_period1 == 10
+
+
+# ---------------------------------------------------------------------------
+# Boxing
+# ---------------------------------------------------------------------------
+
+
+def test_boxing_basic_parse() -> None:
+    data = _scores_team_wrap(
+        {
+            "id": "bx_1",
+            "status": "Finished",
+            "league": "WBC",
+            "round": "8",
+            "total_rounds": "12",
+            "localteam": {"name": "Canelo", "totalscore": "0", "winner": "yes"},
+            "awayteam": {"name": "GGG", "totalscore": "0"},
+        }
+    )
+    events = parse_goalserve_livescore_sport("boxing", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.sport == "boxing"
+    assert ev.status == SportsLiveGameStatus.ENDED
+    assert ev.mma_state is not None
+    assert ev.mma_state.current_round == 8
+    assert ev.mma_state.total_rounds == 12
+    assert ev.mma_state.winner_side == "home"
+
+
+# ---------------------------------------------------------------------------
+# MMA
+# ---------------------------------------------------------------------------
+
+
+def test_mma_basic_parse() -> None:
+    # MMA uses the same category→match structure, not tournament
+    data = {
+        "scores": {
+            "category": [
+                {
+                    "match": [
+                        {
+                            "id": "101794",
+                            "status": "Finished",
+                            "localteam": {"id": "100501", "name": "Ivan Erslan", "winner": "True"},
+                            "awayteam": {"id": "98572", "name": "Tuco Tokkos", "winner": "False"},
+                            "win_result": {"won_by": "Decision"},
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+    events = parse_goalserve_livescore_sport("mma", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.sport == "mma"
+    assert ev.status == SportsLiveGameStatus.ENDED
+    assert ev.mma_state is not None
+    assert ev.mma_state.result_method == "Decision"
+    assert ev.mma_state.winner_side == "home"
+
+
+def test_mma_winner_from_team_field() -> None:
+    # winner_side resolved from awayteam.winner="True" when localteam.winner="False"
+    data = _scores_team_wrap(
+        {
+            "id": "mma_2",
+            "status": "Final",
+            "localteam": {"name": "Fighter A", "winner": "False"},
+            "awayteam": {"name": "Fighter B", "winner": "True"},
+        }
+    )
+    events = parse_goalserve_livescore_sport("mma", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    assert events[0].mma_state.winner_side == "away"
+
+
+def test_mma_empty_scores_returns_empty() -> None:
+    events = parse_goalserve_livescore_sport("mma", {"scores": {}}, observed_at=_OBSERVED)
+    assert events == []
+
+
+# ---------------------------------------------------------------------------
+# Golf
+# ---------------------------------------------------------------------------
+
+
+def test_golf_pga_basic_parse() -> None:
+    data = {
+        "scores": {
+            "tournament": [
+                {
+                    "id": "1038",
+                    "name": "PGA Championship",
+                    "status": "In Progress",
+                    "player": [
+                        {"id": "9490", "name": "Aaron Rai", "pos": "1", "country": "ENG"},
+                        {"id": "1234", "name": "Scottie Scheffler", "pos": "T2", "country": "USA"},
+                    ],
+                }
+            ]
+        }
+    }
+    events = parse_goalserve_livescore_sport("golf_pga", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.kind == LiveEventKind.TOURNAMENT_FIELD
+    assert ev.sport == "golf"
+    assert ev.event_name == "PGA Championship"
+    assert len(ev.participants) == 2
+    assert ev.participants[0].role == "player"
+    assert ev.participants[0].position == 1
+    # "T2" tied position strips the "T" prefix → 2
+    assert ev.participants[1].position == 2
+
+
+def test_golf_dp_uses_golf_sport_key() -> None:
+    data = {
+        "scores": {
+            "tournament": [{"id": "dp_1", "name": "BMW PGA", "status": "Finished", "player": []}]
+        }
+    }
+    events = parse_goalserve_livescore_sport("golf_dp", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    assert events[0].sport == "golf"
+
+
+def test_golf_all_variants_parse() -> None:
+    data = {
+        "scores": {"tournament": [{"id": "t1", "name": "Test", "status": "Not Started", "player": []}]}
+    }
+    for sport in ("golf_pga", "golf_dp", "golf_liv", "golf_lpga"):
+        events = parse_goalserve_livescore_sport(sport, data, observed_at=_OBSERVED)
+        assert len(events) == 1
+        assert events[0].sport == "golf"
+
+
+# ---------------------------------------------------------------------------
+# Horse Racing
+# ---------------------------------------------------------------------------
+
+
+def test_horse_racing_basic_parse() -> None:
+    data = {
+        "scores": {
+            "tournament": [
+                {
+                    "name": "Assiniboia Downs",
+                    "race": [
+                        {
+                            "id": "869019",
+                            "name": "Race 1 Maiden Claiming",
+                            "results": None,  # None = SCHEDULED (not yet run)
+                            "runners": {
+                                "horse": [
+                                    {
+                                        "id": "483206",
+                                        "name": "She's So Croatian",
+                                        "number": "1",
+                                        "jockey": "J R Patterson",
+                                    },
+                                    {
+                                        "id": "483207",
+                                        "name": "Good Magic",
+                                        "number": "2",
+                                        "jockey": "M. Smith",
+                                    },
+                                ]
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    events = parse_goalserve_livescore_sport("horse_racing_us", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.kind == LiveEventKind.RACE
+    assert ev.sport == "horse_racing"
+    assert ev.status == SportsLiveGameStatus.SCHEDULED
+    assert ev.league == "Assiniboia Downs"
+    assert len(ev.participants) == 2
+    p = ev.participants[0]
+    assert p.role == "driver"
+    assert p.name == "She's So Croatian"
+    assert p.position == 1  # starting number, not result position
+    assert p.team == "J R Patterson"  # jockey
+
+
+def test_horse_racing_finished_status() -> None:
+    data = {
+        "scores": {
+            "tournament": [
+                {
+                    "name": "Churchill Downs",
+                    "race": [
+                        {
+                            "id": "race_done",
+                            "name": "Kentucky Derby",
+                            "results": {"winner": "Horse A"},  # non-None → ENDED
+                            "runners": {"horse": []},
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    events = parse_goalserve_livescore_sport("horse_racing_us", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    assert events[0].status == SportsLiveGameStatus.ENDED
+
+
+def test_horse_racing_uk_au_hk_all_parse() -> None:
+    data = {
+        "scores": {
+            "tournament": [
+                {"name": "Venue", "race": [{"id": "r1", "name": "Race 1", "results": None, "runners": {"horse": []}}]}
+            ]
+        }
+    }
+    for sport in ("horse_racing_uk", "horse_racing_au", "horse_racing_hk"):
+        events = parse_goalserve_livescore_sport(sport, data, observed_at=_OBSERVED)
+        assert len(events) == 1
+        assert events[0].sport == "horse_racing"
+
+
+# ---------------------------------------------------------------------------
+# F1 / MotoGP
+# ---------------------------------------------------------------------------
+
+
+def test_motogp_basic_parse() -> None:
+    data = {
+        "scores": {
+            "tournament": [
+                {
+                    "id": "1326",
+                    "name": "GP France",
+                    "first_practice": {
+                        "status": "Finished",
+                        "results": {
+                            "driver": [
+                                {"driver_id": "1918", "name": "Luca Marini", "pos": "1", "team": "Honda HRC"},
+                                {"driver_id": "1956", "name": "Pedro Acosta", "pos": "2", "team": "Red Bull KTM"},
+                            ]
+                        },
+                    },
+                }
+            ]
+        }
+    }
+    events = parse_goalserve_livescore_sport("motogp", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.kind == LiveEventKind.RACE
+    assert ev.sport == "motogp"
+    assert ev.status == SportsLiveGameStatus.ENDED
+    assert len(ev.participants) == 2
+    assert ev.participants[0].role == "driver"
+    assert ev.participants[0].name == "Luca Marini"
+    assert ev.participants[0].position == 1
+    assert ev.participants[0].team == "Honda HRC"
+    assert ev.source_event_id == "1326_first_practice"
+
+
+def test_motogp_race_session_parse() -> None:
+    data = {
+        "scores": {
+            "tournament": [
+                {
+                    "id": "1326",
+                    "name": "GP France",
+                    "race": {
+                        "status": "In Progress",
+                        "results": {
+                            "driver": [{"driver_id": "1", "name": "Rider A", "pos": "1", "team": "Team X"}]
+                        },
+                    },
+                }
+            ]
+        }
+    }
+    events = parse_goalserve_livescore_sport("motogp", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    assert events[0].status == SportsLiveGameStatus.LIVE
+    assert events[0].source_event_id == "1326_race"
+
+
+def test_f1_null_scores_returns_empty() -> None:
+    # F1 between race weekends returns {"scores": null}
+    assert parse_goalserve_livescore_sport("f1", {"scores": None}, observed_at=_OBSERVED) == []
+
+
+def test_f1_race_session_parse() -> None:
+    data = {
+        "scores": {
+            "tournament": [
+                {
+                    "id": "f1_100",
+                    "name": "Monaco Grand Prix",
+                    "race": {
+                        "status": "Finished",
+                        "laps_running": "78",
+                        "total_laps": "78",
+                        "results": {
+                            "driver": [
+                                {"driver_id": "d1", "name": "Max Verstappen", "pos": "1", "team": "Red Bull"},
+                                {"driver_id": "d2", "name": "Charles Leclerc", "pos": "2", "team": "Ferrari"},
+                            ]
+                        },
+                    },
+                }
+            ]
+        }
+    }
+    events = parse_goalserve_livescore_sport("f1", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.kind == LiveEventKind.RACE
+    assert ev.sport == "formula1"
+    assert ev.status == SportsLiveGameStatus.ENDED
+    assert ev.race_state is not None
+    assert ev.race_state.laps_completed == 78
+    assert ev.race_state.total_laps == 78
+    assert len(ev.participants) == 2
+    assert ev.participants[0].role == "driver"
+    assert ev.participants[0].position == 1
+    assert ev.source_event_id == "f1_100_race"
+
+
+# ---------------------------------------------------------------------------
+# as_payload() serialization
+# ---------------------------------------------------------------------------
+
+
+def test_as_payload_includes_new_states() -> None:
+    data = _scores_team_wrap(
+        {
+            "id": "hb_p1",
+            "status": "In Progress",
+            "localteam": {"name": "A", "totalscore": "5"},
+            "awayteam": {"name": "B", "totalscore": "3"},
+        }
+    )
+    ev = parse_goalserve_livescore_sport("handball", data, observed_at=_OBSERVED)[0]
+    payload = ev.as_payload()
+    assert "handball_state" in payload
+    assert "rugby_state" in payload
+    assert "mma_state" in payload

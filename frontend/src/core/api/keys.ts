@@ -83,6 +83,9 @@ export const qk = {
 
   sports: {
     liveEvents: (params: Record<string, unknown>) => ['sports', 'live-events', params] as const,
+    liveStates: (params: Record<string, unknown>) => ['sports', 'live-states', params] as const,
+    liveStateForMarket: (conditionId: string) => ['sports', 'live-states', conditionId] as const,
+    sourceGaps: (params: Record<string, unknown>) => ['sports', 'source-gaps', params] as const,
   },
 
   parameters: {

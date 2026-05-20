@@ -99,7 +99,7 @@ def evaluate_tail_opportunity(
             return _reject(candidate, market_reject_reason.value)
         return _evaluate_ended_not_closed(candidate, policy)
 
-    if _market_end_too_far(market, policy, now=now) and not _can_bypass_market_end_window(game, market, policy):
+    if _market_end_too_far(game, market, policy, now=now) and not _can_bypass_market_end_window(game, market, policy):
         return _reject(candidate, TailRejectReason.MARKET_END_TOO_FAR.value)
 
     common_reject_reason = _common_reject_reason(game, market, policy, now=now)
@@ -182,7 +182,7 @@ def evaluate_scale_in_opportunity(
             opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
         )
 
-    if _market_end_too_far(market, policy, now=now) and not _can_bypass_market_end_window(game, market, policy):
+    if _market_end_too_far(game, market, policy, now=now) and not _can_bypass_market_end_window(game, market, policy):
         return _reject(candidate, TailRejectReason.MARKET_END_TOO_FAR.value)
 
     common_reject_reason = _common_reject_reason(game, market, policy, now=now)
@@ -251,6 +251,8 @@ def _common_reject_reason(
         return TailRejectReason.LIVE_SOURCE_CONFLICT
     if _is_stale(game, policy, now=now):
         return TailRejectReason.STALE_GAME_STATE
+    # BINARY_PROP 无传统盘口价格结构，跳过 ask/流动性检查；
+    # 后续由体育专属评估器（目前是 binary_prop_no_tail_model）统一处理。
     if market.market_type == SportsMarketType.BINARY_PROP:
         return None
     if market.best_ask is None:
@@ -328,18 +330,26 @@ def _is_stale(
 
 
 def _market_end_too_far(
+    game: LiveGameState | None,
     market: SportsMarketSnapshot,
     policy: TailPolicy,
     *,
     now: datetime | None,
 ) -> bool:
-    """判断 Polymarket 封盘时间是否仍明显早于扫尾窗口。
+    """判断距离盘口结算是否超出扫尾窗口。
 
-    该规则只用于 live 尾盘候选的粗筛；已结束但未封盘的机会在调用侧提前处理，
-    缺失封盘时间则不在这里拒绝，避免因 Gamma 字段缺失错过真实尾盘。
+    优先用比赛剩余时间估算实际结算窗口：Polymarket end_date 对季后赛/系列赛
+    市场经常是系列结算日期，不等于单场封盘时间。已结束的比赛只等结算缓冲，
+    不受 end_date 限制。无比赛状态时才退回 end_date 兜底。
     """
-
-    if market.market_end_date is None or policy.max_market_end_seconds <= 0:
+    if policy.max_market_end_seconds <= 0:
+        return False
+    if game is not None:
+        if game.status == LiveGameStatus.ENDED:
+            return False
+        if game.status == LiveGameStatus.LIVE and game.seconds_remaining is not None:
+            return game.seconds_remaining > policy.max_market_end_seconds
+    if market.market_end_date is None:
         return False
     current_time = now or datetime.now(timezone.utc)
     market_end = market.market_end_date

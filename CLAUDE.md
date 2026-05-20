@@ -118,7 +118,36 @@ runtime -> domain
 - 不得已留下的中间态（shim、双路径、过渡命名）必须在 commit message 注明"何时清理 + 触发条件"。
 - 任务结束债务清单 = 0；遗留项落独立 PR 计划，不口头交接。
 
-## 9. 实盘策略演化
+## 9. Goalserve 数据接口规则
+
+**`goalserve/full_package_feed.txt` 是我们订阅的 Goalserve 完整接口权威清单，任何涉及体育数据源的改动都必须先查阅它。**
+
+### 接口分类与对应实现
+
+| 类型 | 端点形式 | 认证 | 实现位置 |
+|------|---------|------|---------|
+| Inplay 实时赔率+比分（1秒刷新）| `inplay.goalserve.com/inplay-{sport}.gz` | IP 白名单 | `infra/sports/goalserve_client.py` |
+| Livescore 实时比分（getfeed）| `getfeed/{key}/{sport}/home?json=1` | API key | `infra/sports/goalserve_livescore_client.py` |
+| 赛前赔率（Pregame Odds, GZIP）| `getfeed/{key}/getodds/soccer?cat={sport}_10` | API key | `infra/sports/goalserve_pregame_client.py` |
+
+### 已覆盖的运动
+
+**Inplay feed（`goalserve_sports` 配置）**：basketball、soccer、hockey、baseball、tennis、esports、amfootball、volleyball — Goalserve inplay 覆盖的 8 个运动全部启用。
+
+**Livescore getfeed（`goalserve_livescore_sports` 配置）**：cricket、handball、rugby、boxing、mma、golf\_pga/dp/liv/lpga、horse\_racing\_us/uk/au/hk、f1、motogp。
+
+**Pregame odds（`goalserve_pregame_sports` 配置）**：soccer、basketball、tennis、hockey、baseball、amfootball、esports、mma、cricket、rugby、volleyball、handball、boxing、darts、table\_tennis、futsal、rugbyleague。
+
+### 扩展原则
+
+- Goalserve 支持的运动和接口以 `goalserve/full_package_feed.txt` 为准；发现文件里有但代码里未接入的接口，视为缺口，应补实现或记录明确的跳过原因。
+- Livescore parsers 基于格式推断实现，首次真实调用后需对照实际 response 校准字段——尤其是 golf、horse\_racing、f1 这三类。校准后更新 parser，不保留"推断注释"。
+- 新增运动 parser 必须：① domain 加对应 GameState；② parsers 文件加 sport parser；③ `_SPORT_PARSERS` / `_SPORT_PATHS` 注册；④ config 默认值加入；⑤ 补测试。缺任何一步均为未完成。
+- API key 只存 `.env` 的 `GOALSERVE_API_KEY`，不进代码仓库和文档。
+- Pregame 数据量极大（>100MB），默认关闭（`goalserve_pregame_enabled=false`）；启用时必须用 `ts` 增量拉取，不允许无限循环全量请求。
+- Inplay feed 拉取循环必须在独立 asyncio task 中运行，不占用交易主事件循环；time\_status=99（removed）的赛事立即停止。
+
+## 10. 实盘策略演化
 
 - 实盘策略进化是持续闭环：跑实盘观察 → 定位瓶颈 → 改进策略或链路 → 验证测试 → 重启/继续观察 → 再次思考改进。除非用户明确要求停止/暂停/切换，agent 不应在单轮观察或单次改动后主动结束。
 - 演化目标范围是**整个体育市场**，不是 `single_game`。`single_game` 只表示"可用单场直播比分源评估"的市场家族；系列赛、冠军归属、赛季归属、球员转会/奖项等长期市场也属于目标范围，应逐步补专用数据源、定价模型和风控模型。
@@ -127,7 +156,7 @@ runtime -> domain
 - 改动若扩大交易风险或改变资金暴露模型，必须先说明影响范围与验证方式。
 - 具体落点仍按 §5：实现落策略包或合适分层内，不绕过交易主链路、风控和审计。
 
-## 10. 配置、命名与建模
+## 11. 配置、命名与建模
 
 - `.env` 和 `Settings` 只承载框架运行参数；策略参数不进框架必填环境变量，写在策略包内或策略自己的配置加载方式里。
 - 契约字段命名单义，避免一套对外、一套对内的长期双命名层。
@@ -135,14 +164,14 @@ runtime -> domain
 - 策略常量集中管理，避免散落硬编码。
 - 拒绝原因必须可审计，不能只返回 `False`；跳过、降级、恢复动作必须保留可审计原因，不静默忽略关键失败。
 
-## 11. 测试
+## 12. 测试
 
 - 测试用于验证目标实现，不为让中间阶段通过引入临时补丁、兼容旁路或特殊分支；功能未闭合可在完整开发完成后统一验证。
 - 不为让测试通过编写只覆盖该测试的最小实现。目标边界、主路径接线、长期模型未厘清时，宁可暂停测试和实现，补齐设计后再按目标形态实现。
 - **必须补测试**：自动下单、风控、资金/仓位计算、订单幂等、恢复、reconcile 的行为改动，优先覆盖核心失败场景。
 - **可不补测试**：纯查询、文档、日志、策略参数调整。
 
-## 12. 注释与文档
+## 13. 注释与文档
 
 - 注释只写非显然的 WHY：隐含约束、不变量、绕过特定 bug 的处理、会让读者意外的行为。命名能表达的 WHAT 不另加注释。
 - 涉及风控、状态机、资金计算、并发边界等关键业务步骤的边界条件，应当用中文写明。
@@ -150,14 +179,14 @@ runtime -> domain
 - 改造计划、实施清单、进度日志等过程性文档可以在任务推进期间作为工作工具存在；任务完成后必须主动清理，不长期保留为历史档案。完成态由代码 + `git log` 表达。
 - 规则类约束统一沉到本文件，不散落到其他文档。
 
-## 13. 多 agent 协作
+## 14. 多 agent 协作
 
 - 多模块、可并行或需要不同视角复核的任务，主动考虑用 Explore / Plan / general-purpose 等 subagent 拆分推进。
 - 并行前先明确每个 agent 的职责边界、读写范围和预期输出；写入文件范围尽量不重叠。
 - 总协调 agent 负责拆分、整合、复核关键改动；子 agent 输出不能直接当最终事实，重要结论必须本地验证。
 - 紧耦合、关键路径、需要统一架构判断的工作不强行并行。
 
-## 14. 常见误区
+## 15. 常见误区
 
 - 在 route 里写交易逻辑。
 - 在 worker 里复制 discovery / 扩展业务判断。

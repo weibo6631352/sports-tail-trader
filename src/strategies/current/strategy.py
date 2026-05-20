@@ -17,6 +17,7 @@ from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
 from polymarket_trader.extension_api.live_state import SeriesState
 
 from polymarket_trader.extension_api.lifecycle import LifecycleEnvelope as _LifecycleEnvelope, LifecycleEvent as _LifecycleEvent
+from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.extension_api import (
     AccountSnapshotView,
     BusinessExtension,
@@ -129,6 +130,33 @@ class _FamilyHandler:
     decider: Callable
 
 
+def _esports_sizer(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    ports: ExtensionPorts | None = None,
+) -> EntrySizing:
+    budget = context.portfolio_budget_usdc or Decimal("0")
+    return EntrySizing(
+        allocation_plan=AllocationPlan(
+            trace_id=context.trace_id,
+            total_budget_usdc=budget,
+            reason="esports_not_auto_tradable",
+        ),
+        reason="esports_not_auto_tradable",
+    )
+
+
+def _esports_decider(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+    ports: ExtensionPorts | None = None,
+) -> ExtensionDecision:
+    return ExtensionDecision.skip(
+        reason="esports_not_auto_tradable",
+        metadata={"market_family": SportsMarketFamily.ESPORTS.value},
+    )
+
+
 _FAMILY_HANDLERS: dict[SportsMarketFamily, _FamilyHandler] = {
     SportsMarketFamily.OUTRIGHT: _FamilyHandler(
         sizer=size_outright_entry,
@@ -137,6 +165,10 @@ _FAMILY_HANDLERS: dict[SportsMarketFamily, _FamilyHandler] = {
     SportsMarketFamily.SERIES: _FamilyHandler(
         sizer=size_series_entry,
         decider=decide_series_entry,
+    ),
+    SportsMarketFamily.ESPORTS: _FamilyHandler(
+        sizer=_esports_sizer,
+        decider=_esports_decider,
     ),
 }
 

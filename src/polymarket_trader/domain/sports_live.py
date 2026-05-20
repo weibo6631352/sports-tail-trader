@@ -180,6 +180,49 @@ class SoccerGameState:
 
 
 @dataclass(frozen=True, slots=True)
+class VolleyballGameState:
+    """排球比赛盘分状态（best-of-5，每盘 25 分，决胜盘 15 分）。"""
+
+    home_sets_won: int = 0
+    away_sets_won: int = 0
+    current_set: int | None = None
+    home_current_set_points: int | None = None
+    away_current_set_points: int | None = None
+    set_scores: tuple[tuple[int, int], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class HandballGameState:
+    """手球比赛半场状态。"""
+
+    period: str | None = None
+    clock_minutes: int | None = None
+    home_period1: int | None = None
+    away_period1: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RugbyGameState:
+    """橄榄球比赛半场状态。"""
+
+    period: str | None = None
+    clock_minutes: int | None = None
+    home_period1: int | None = None
+    away_period1: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MMAFightState:
+    """MMA / 拳击格斗当前回合状态。boxing 复用此模型。"""
+
+    current_round: int | None = None
+    total_rounds: int | None = None
+    time_in_round: str | None = None
+    result_method: str | None = None
+    winner_side: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class EsportsGameState:
     """电子竞技 best-of-N 系列赛状态。"""
 
@@ -266,8 +309,12 @@ class LiveEvent:
     tennis_state: TennisGameState | None = None
     soccer_state: SoccerGameState | None = None
     esports_state: EsportsGameState | None = None
+    volleyball_state: VolleyballGameState | None = None
     cricket_state: CricketGameState | None = None
     race_state: RaceState | None = None
+    handball_state: HandballGameState | None = None
+    rugby_state: RugbyGameState | None = None
+    mma_state: MMAFightState | None = None
     source_conflicts: tuple[ConflictRecord, ...] = ()
     contributing_sources: tuple[str, ...] = ()
     source_payload: Mapping[str, Any] = field(default_factory=dict)
@@ -332,8 +379,12 @@ class LiveEvent:
             "tennis_state": None if self.tennis_state is None else jsonable(self.tennis_state),
             "soccer_state": None if self.soccer_state is None else jsonable(self.soccer_state),
             "esports_state": None if self.esports_state is None else jsonable(self.esports_state),
+            "volleyball_state": None if self.volleyball_state is None else jsonable(self.volleyball_state),
             "cricket_state": None if self.cricket_state is None else jsonable(self.cricket_state),
             "race_state": None if self.race_state is None else jsonable(self.race_state),
+            "handball_state": None if self.handball_state is None else jsonable(self.handball_state),
+            "rugby_state": None if self.rugby_state is None else jsonable(self.rugby_state),
+            "mma_state": None if self.mma_state is None else jsonable(self.mma_state),
             "source_conflicts": [jsonable(c) for c in self.source_conflicts],
             "contributing_sources": list(self.contributing_sources),
         }
