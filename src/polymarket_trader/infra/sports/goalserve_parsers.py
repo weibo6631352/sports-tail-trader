@@ -1,16 +1,18 @@
-"""Goalserve inplay feed per-sport parsers。
+"""Goalserve inplay WebSocket per-sport parsers。
 
-每个 sport parser 把 Goalserve JSON events dict 转换成 LiveEvent 列表。
-所有 parser 共用同一套 core flags → SportsLiveGameStatus 映射。
+把 GoalserveClient._state 快照（{event_id: ws_message_dict}）转换成 LiveEvent 列表。
 
-Goalserve inplay feed 状态通过 core flags 判定（非 time_status 整数）：
-  removed="1"  → 跳过，不进结果
-  finished="1" → ENDED
-  stopped="1"  → PAUSED（节间休息）
-  其余         → LIVE
-
-Goalserve inplay feed 用 bet365 的赔率，每场含 14+ 盘口市场，
-供策略层做 Polymarket 价格交叉验证。赔率放在 source_payload["goalserve_odds"]。
+WS 消息关键字段：
+  t1.n / t2.n        主客队名称
+  stp                time_status 整数：0=未开始, 1=进行中, 3=已结束,
+                     4=延期, 5=取消, 7=暂停/中断, 99=已移除（客户端层已过滤）
+  et                 已进行秒数（elapsed seconds）
+  stats.g            [home_score, away_score]（进球/得分/运动类型相关）
+  stats.y/r/c        黄牌/红牌/角球 [home, away]（足球）
+  ctry_name          联赛/赛事名称
+  st                 开赛 epoch 秒（整数，非毫秒）
+  odds               盘口列表（list）
+  sc                 state code（透传为 raw_status）
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Mapping
+from typing import Any
 
 from polymarket_trader.domain.sports_live import (
     BaseballGameState,
@@ -104,15 +106,22 @@ class GoalserveOdds:
 # 核心工具
 # ---------------------------------------------------------------------------
 
+# stp 整数 → SportsLiveGameStatus 映射
+_STP_STATUS: dict[int, SportsLiveGameStatus] = {
+    0: SportsLiveGameStatus.SCHEDULED,
+    1: SportsLiveGameStatus.LIVE,
+    3: SportsLiveGameStatus.ENDED,
+    4: SportsLiveGameStatus.POSTPONED,
+    5: SportsLiveGameStatus.CANCELLED,
+    7: SportsLiveGameStatus.PAUSED,
+}
 
-def _core_to_status(core: Mapping[str, Any]) -> SportsLiveGameStatus:
-    if core.get("removed") == "1":
-        return SportsLiveGameStatus.UNKNOWN  # 调用方应跳过
-    if core.get("finished") == "1":
-        return SportsLiveGameStatus.ENDED
-    if core.get("stopped") == "1":
-        return SportsLiveGameStatus.PAUSED
-    return SportsLiveGameStatus.LIVE
+
+def _stp_to_status(stp: Any) -> SportsLiveGameStatus:
+    try:
+        return _STP_STATUS.get(int(stp), SportsLiveGameStatus.UNKNOWN)
+    except (TypeError, ValueError):
+        return SportsLiveGameStatus.UNKNOWN
 
 
 def _int_val(value: Any) -> int | None:
@@ -133,70 +142,83 @@ def _dec_val(value: Any) -> Decimal | None:
         return None
 
 
-def _parse_start_time(ts_utc: Any) -> datetime | None:
-    """把 Goalserve start_ts_utc（毫秒 epoch）转为 datetime。"""
-    if not ts_utc:
+def _parse_start_time(ts: Any) -> datetime | None:
+    """WS 给出 epoch 秒（整数），老 HTTP feed 给的是毫秒——这里只处理秒。"""
+    if not ts:
         return None
     try:
-        ms = int(str(ts_utc).strip())
-        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
-    except (TypeError, ValueError):
+        s = int(str(ts).strip())
+        return datetime.fromtimestamp(s, tz=timezone.utc)
+    except (TypeError, ValueError, OSError):
         return None
 
 
-def _parse_seconds_remaining(seconds_str: Any) -> int | None:
-    """把 'MM:SS' 格式转成总秒数。"""
-    if not seconds_str:
-        return None
-    try:
-        parts = str(seconds_str).strip().split(":")
-        if len(parts) == 2:
-            return int(parts[0]) * 60 + int(parts[1])
-        return None
-    except (TypeError, ValueError):
-        return None
+def _score_pair(stats: dict[str, Any], key: str) -> tuple[int | None, int | None]:
+    """从 stats 取 [home, away] 对并返回 int 元组。"""
+    pair = stats.get(key)
+    if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+        return None, None
+    return _int_val(pair[0]), _int_val(pair[1])
 
 
-def _stats_by_name(stats: Mapping[str, Any]) -> dict[str, Any]:
-    """把 stats dict（键为 "0","1",...）重新按 name 索引。"""
-    result: dict[str, Any] = {}
-    for entry in stats.values():
-        name = entry.get("name")
-        if name:
-            result[str(name)] = entry
-    return result
+def _parse_odds_ws(odds_raw: Any, event_id: str) -> GoalserveOdds:
+    """解析 WS odds 列表 → GoalserveOdds。
 
+    WS odds 元素短键格式：id, nm（name）, sp（suspended）, o（outcomes list）
+    每个 outcome：nm, v（value_eu）, hc（handicap）, sp（suspended）
+    同时兼容长键格式以防服务端变更。
+    """
+    if not isinstance(odds_raw, list):
+        return GoalserveOdds(event_id=event_id, markets=())
 
-def _parse_odds(odds_raw: Mapping[str, Any], event_id: str) -> GoalserveOdds:
-    """解析 Goalserve odds dict → GoalserveOdds。"""
     markets: list[GoalserveMarket] = []
-    for _mid, market_data in odds_raw.items():
-        participants_raw = market_data.get("participants", {})
+    for item in odds_raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("nm") or item.get("name", ""))
+        mkt_id = _int_val(item.get("id")) or 0
+        mkt_susp_raw = item.get("sp") or item.get("suspend", 0)
+        mkt_susp = bool(_int_val(mkt_susp_raw))
+
         outcomes: list[GoalserveOutcome] = []
-        for outcome_data in participants_raw.values():
-            eu_raw = outcome_data.get("value_eu")
+        for od in item.get("o", []):
+            if not isinstance(od, dict):
+                continue
+            eu_raw = od.get("v") or od.get("value_eu")
             eu = _dec_val(eu_raw)
             if eu is None or eu <= 0:
                 continue
-            implied = Decimal("1") / eu
+            implied = (Decimal("1") / eu).quantize(Decimal("0.0001"))
+            od_susp_raw = od.get("sp") or od.get("suspend", 0)
             outcomes.append(
                 GoalserveOutcome(
-                    name=str(outcome_data.get("name", "")),
+                    name=str(od.get("nm") or od.get("name", "")),
                     value_eu=eu,
-                    implied_prob=implied.quantize(Decimal("0.0001")),
-                    handicap=str(outcome_data.get("handicap", "") or ""),
-                    suspended=outcome_data.get("suspend") == "1",
+                    implied_prob=implied,
+                    handicap=str(od.get("hc") or od.get("handicap", "") or ""),
+                    suspended=bool(_int_val(od_susp_raw)),
                 )
             )
         markets.append(
             GoalserveMarket(
-                market_id=int(market_data.get("id", 0)),
-                name=str(market_data.get("name", "")),
-                suspended=market_data.get("suspend") == "1",
+                market_id=mkt_id,
+                name=name,
+                suspended=mkt_susp,
                 outcomes=tuple(outcomes),
             )
         )
     return GoalserveOdds(event_id=event_id, markets=tuple(markets))
+
+
+def _et_to_soccer_period(et: int | None) -> str | None:
+    """把 elapsed seconds 映射到足球 period 字符串。"""
+    if et is None:
+        return None
+    if et < 2700:
+        return "first_half"
+    if et < 5400:
+        return "second_half"
+    return "extra_time"
 
 
 # ---------------------------------------------------------------------------
@@ -204,65 +226,36 @@ def _parse_odds(odds_raw: Mapping[str, Any], event_id: str) -> GoalserveOdds:
 # ---------------------------------------------------------------------------
 
 
-def _parse_basketball(events_dict: Mapping[str, Any], observed_at: datetime) -> list[LiveEvent]:
+def _parse_basketball(state_dict: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     results: list[LiveEvent] = []
-    for event_id, ev in events_dict.items():
-        core = ev.get("core", {})
-        if core.get("removed") == "1":
-            continue
-        status = _core_to_status(core)
-        info = ev.get("info", {})
-        team = ev.get("team_info", {})
+    for event_id, ev in state_dict.items():
+        stp = ev.get("stp", 0)
+        status = _stp_to_status(stp)
         stats = ev.get("stats", {})
-        by_name = _stats_by_name(stats)
-
-        home_name = team.get("home", {}).get("name", "")
-        away_name = team.get("away", {}).get("name", "")
-        home_score = _int_val(team.get("home", {}).get("score"))
-        away_score = _int_val(team.get("away", {}).get("score"))
-
-        # 分节得分 via stats
-        quarter_stats: dict[str, tuple[int | None, int | None]] = {}
-        for key in ("1", "2", "Half", "3", "4", "OT"):
-            entry = by_name.get(key)
-            if entry:
-                quarter_stats[key] = (_int_val(entry.get("home")), _int_val(entry.get("away")))
-
-        odds = _parse_odds(ev.get("odds", {}), event_id)
-
+        home_score, away_score = _score_pair(stats, "g")
+        odds = _parse_odds_ws(ev.get("odds", []), event_id)
+        home_name = ev.get("t1", {}).get("n", "")
+        away_name = ev.get("t2", {}).get("n", "")
         results.append(
             LiveEvent(
                 source="goalserve",
                 source_event_id=event_id,
                 kind=LiveEventKind.TEAM_MATCH,
-                league=info.get("league", ""),
+                league=ev.get("ctry_name", ""),
                 sport="basketball",
                 participants=(
-                    Participant(
-                        role="home",
-                        name=home_name,
-                        score=home_score,
-                        external_ids={"goalserve": event_id},
-                    ),
-                    Participant(
-                        role="away",
-                        name=away_name,
-                        score=away_score,
-                        external_ids={"goalserve": event_id},
-                    ),
+                    Participant(role="home", name=home_name, score=home_score, external_ids={"goalserve": event_id}),
+                    Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=info.get("period", ""),
-                seconds_remaining=_parse_seconds_remaining(info.get("seconds")),
-                event_name=info.get("name", ""),
-                event_start_time=_parse_start_time(info.get("start_ts_utc")),
-                external_ids={"goalserve": event_id, "mid": info.get("mid", "")},
-                raw_status=info.get("period"),
+                period=str(ev.get("sc", "")),
+                seconds_remaining=None,
+                event_name=f"{home_name} vs {away_name}",
+                event_start_time=_parse_start_time(ev.get("st")),
+                external_ids={"goalserve": event_id},
+                raw_status=str(stp),
                 observed_at=observed_at,
-                source_payload={
-                    "goalserve_odds": odds.as_dict(),
-                    "quarter_stats": {k: {"home": h, "away": a} for k, (h, a) in quarter_stats.items()},
-                },
+                source_payload={"goalserve_odds": odds.as_dict()},
             )
         )
     return results
@@ -272,69 +265,46 @@ def _parse_basketball(events_dict: Mapping[str, Any], observed_at: datetime) -> 
 # Soccer
 # ---------------------------------------------------------------------------
 
-_SOCCER_PERIOD_MAP: dict[str, str] = {
-    "1st half": "first_half",
-    "2nd half": "second_half",
-    "first half": "first_half",
-    "second half": "second_half",
-    "extra time": "extra_time",
-    "half time": "first_half",
-    "halftime": "first_half",
-    "break time": "first_half",
-    "penalties": "penalties",
-}
 
-
-def _parse_soccer(events_dict: Mapping[str, Any], observed_at: datetime) -> list[LiveEvent]:
+def _parse_soccer(state_dict: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     results: list[LiveEvent] = []
-    for event_id, ev in events_dict.items():
-        core = ev.get("core", {})
-        if core.get("removed") == "1":
-            continue
-        status = _core_to_status(core)
-        info = ev.get("info", {})
-        team = ev.get("team_info", {})
+    for event_id, ev in state_dict.items():
+        stp = ev.get("stp", 0)
+        status = _stp_to_status(stp)
         stats = ev.get("stats", {})
-        by_name = _stats_by_name(stats)
-
-        home_name = team.get("home", {}).get("name", "")
-        away_name = team.get("away", {}).get("name", "")
-        _igoal = by_name.get("IGoal") or {}
-        home_score = _int_val(_igoal.get("home")) if _igoal.get("home") is not None else _int_val(team.get("home", {}).get("score"))
-        away_score = _int_val(_igoal.get("away")) if _igoal.get("away") is not None else _int_val(team.get("away", {}).get("score"))
-
-        period_raw = info.get("period", "")
-        soccer_period = _SOCCER_PERIOD_MAP.get(period_raw.lower(), None)
-        clock_minutes = _int_val(info.get("minute"))
-
+        home_score, away_score = _score_pair(stats, "g")
+        home_yellow, away_yellow = _score_pair(stats, "y")
+        home_red, away_red = _score_pair(stats, "r")
+        et = _int_val(ev.get("et"))
         soccer_state = SoccerGameState(
-            period=soccer_period,
-            clock_minutes=clock_minutes,
-            home_red_cards=_int_val(by_name.get("IRedCard", {}).get("home")) or 0,
-            away_red_cards=_int_val(by_name.get("IRedCard", {}).get("away")) or 0,
-            home_yellow_cards=_int_val(by_name.get("IYellowCard", {}).get("home")) or 0,
-            away_yellow_cards=_int_val(by_name.get("IYellowCard", {}).get("away")) or 0,
+            period=_et_to_soccer_period(et),
+            clock_minutes=et // 60 if et is not None else None,
+            home_red_cards=home_red or 0,
+            away_red_cards=away_red or 0,
+            home_yellow_cards=home_yellow or 0,
+            away_yellow_cards=away_yellow or 0,
         )
-        odds = _parse_odds(ev.get("odds", {}), event_id)
-
+        odds = _parse_odds_ws(ev.get("odds", []), event_id)
+        home_name = ev.get("t1", {}).get("n", "")
+        away_name = ev.get("t2", {}).get("n", "")
         results.append(
             LiveEvent(
                 source="goalserve",
                 source_event_id=event_id,
                 kind=LiveEventKind.TEAM_MATCH,
-                league=info.get("league", ""),
+                league=ev.get("ctry_name", ""),
                 sport="soccer",
                 participants=(
                     Participant(role="home", name=home_name, score=home_score, external_ids={"goalserve": event_id}),
                     Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=period_raw,
+                period=_et_to_soccer_period(et) or "",
                 seconds_remaining=None,
-                event_name=info.get("name", ""),
-                event_start_time=_parse_start_time(info.get("start_ts_utc")),
-                external_ids={"goalserve": event_id, "mid": info.get("mid", "")},
-                raw_status=period_raw,
+                event_name=f"{home_name} vs {away_name}",
+                event_start_time=_parse_start_time(ev.get("st")),
+                external_ids={"goalserve": event_id},
+                raw_status=str(ev.get("sc", stp)),
                 observed_at=observed_at,
                 soccer_state=soccer_state,
                 source_payload={"goalserve_odds": odds.as_dict()},
@@ -348,55 +318,36 @@ def _parse_soccer(events_dict: Mapping[str, Any], observed_at: datetime) -> list
 # ---------------------------------------------------------------------------
 
 
-def _parse_hockey(events_dict: Mapping[str, Any], observed_at: datetime) -> list[LiveEvent]:
+def _parse_hockey(state_dict: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     results: list[LiveEvent] = []
-    for event_id, ev in events_dict.items():
-        core = ev.get("core", {})
-        if core.get("removed") == "1":
-            continue
-        status = _core_to_status(core)
-        info = ev.get("info", {})
-        team = ev.get("team_info", {})
+    for event_id, ev in state_dict.items():
+        stp = ev.get("stp", 0)
+        status = _stp_to_status(stp)
         stats = ev.get("stats", {})
-        by_name = _stats_by_name(stats)
-
-        home_name = team.get("home", {}).get("name", "")
-        away_name = team.get("away", {}).get("name", "")
-        home_score = _int_val(team.get("home", {}).get("score"))
-        away_score = _int_val(team.get("away", {}).get("score"))
-
-        # Period scores: P1, P2, P3, T (total/overtime)
-        period_stats: dict[str, tuple[int | None, int | None]] = {}
-        for key in ("P1", "P2", "P3", "T"):
-            entry = by_name.get(key)
-            if entry:
-                period_stats[key] = (_int_val(entry.get("home")), _int_val(entry.get("away")))
-
-        odds = _parse_odds(ev.get("odds", {}), event_id)
-
+        home_score, away_score = _score_pair(stats, "g")
+        odds = _parse_odds_ws(ev.get("odds", []), event_id)
+        home_name = ev.get("t1", {}).get("n", "")
+        away_name = ev.get("t2", {}).get("n", "")
         results.append(
             LiveEvent(
                 source="goalserve",
                 source_event_id=event_id,
                 kind=LiveEventKind.TEAM_MATCH,
-                league=info.get("league", ""),
+                league=ev.get("ctry_name", ""),
                 sport="ice-hockey",
                 participants=(
                     Participant(role="home", name=home_name, score=home_score, external_ids={"goalserve": event_id}),
                     Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=info.get("period", ""),
-                seconds_remaining=_parse_seconds_remaining(info.get("seconds")),
-                event_name=info.get("name", ""),
-                event_start_time=_parse_start_time(info.get("start_ts_utc")),
-                external_ids={"goalserve": event_id, "mid": info.get("mid", "")},
-                raw_status=info.get("period"),
+                period=str(ev.get("sc", "")),
+                seconds_remaining=None,
+                event_name=f"{home_name} vs {away_name}",
+                event_start_time=_parse_start_time(ev.get("st")),
+                external_ids={"goalserve": event_id},
+                raw_status=str(stp),
                 observed_at=observed_at,
-                source_payload={
-                    "goalserve_odds": odds.as_dict(),
-                    "period_stats": {k: {"home": h, "away": a} for k, (h, a) in period_stats.items()},
-                },
+                source_payload={"goalserve_odds": odds.as_dict()},
             )
         )
     return results
@@ -407,74 +358,42 @@ def _parse_hockey(events_dict: Mapping[str, Any], observed_at: datetime) -> list
 # ---------------------------------------------------------------------------
 
 
-def _parse_baseball(events_dict: Mapping[str, Any], observed_at: datetime) -> list[LiveEvent]:
+def _parse_baseball(state_dict: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     results: list[LiveEvent] = []
-    for event_id, ev in events_dict.items():
-        core = ev.get("core", {})
-        if core.get("removed") == "1":
-            continue
-        status = _core_to_status(core)
-        info = ev.get("info", {})
-        team = ev.get("team_info", {})
+    for event_id, ev in state_dict.items():
+        stp = ev.get("stp", 0)
+        status = _stp_to_status(stp)
         stats = ev.get("stats", {})
-        by_name = _stats_by_name(stats)
-
-        home_name = team.get("home", {}).get("name", "")
-        away_name = team.get("away", {}).get("name", "")
-        home_score = _int_val(team.get("home", {}).get("score"))
-        away_score = _int_val(team.get("away", {}).get("score"))
-
-        # 局分：stats name="1".."9"（可能还有 "10","11" 延长局）；不 break 以免遗漏不连续局
-        inning_scores: list[tuple[int | None, int | None]] = []
-        for i in range(1, 15):
-            entry = by_name.get(str(i))
-            if entry is not None:
-                inning_scores.append((_int_val(entry.get("home")), _int_val(entry.get("away"))))
-
-        # 解析 inning 和 half（如 "Inning 5 Top" / "Inning 5 Bottom" / "Inning 5"）
-        period_raw = info.get("period", "")
-        current_inning: int | None = None
-        inning_half: str | None = None
-        parts = period_raw.lower().split()
-        if "inning" in parts:
-            idx = parts.index("inning")
-            if idx + 1 < len(parts):
-                current_inning = _int_val(parts[idx + 1])
-            if "top" in parts:
-                inning_half = "top"
-            elif "bottom" in parts or "bot" in parts:
-                inning_half = "bottom"
-
+        home_score, away_score = _score_pair(stats, "g")
+        # WS 棒球局分不在 stats.g 子键中，仅取总分
         baseball_state = BaseballGameState(
-            current_inning=current_inning,
-            inning_half=inning_half,
+            current_inning=None,
+            inning_half=None,
         )
-        odds = _parse_odds(ev.get("odds", {}), event_id)
-
+        odds = _parse_odds_ws(ev.get("odds", []), event_id)
+        home_name = ev.get("t1", {}).get("n", "")
+        away_name = ev.get("t2", {}).get("n", "")
         results.append(
             LiveEvent(
                 source="goalserve",
                 source_event_id=event_id,
                 kind=LiveEventKind.TEAM_MATCH,
-                league=info.get("league", ""),
+                league=ev.get("ctry_name", ""),
                 sport="baseball",
                 participants=(
                     Participant(role="home", name=home_name, score=home_score, external_ids={"goalserve": event_id}),
                     Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=period_raw,
+                period=str(ev.get("sc", "")),
                 seconds_remaining=None,
-                event_name=info.get("name", ""),
-                event_start_time=_parse_start_time(info.get("start_ts_utc")),
-                external_ids={"goalserve": event_id, "mid": info.get("mid", "")},
-                raw_status=period_raw,
+                event_name=f"{home_name} vs {away_name}",
+                event_start_time=_parse_start_time(ev.get("st")),
+                external_ids={"goalserve": event_id},
+                raw_status=str(stp),
                 observed_at=observed_at,
                 baseball_state=baseball_state,
-                source_payload={
-                    "goalserve_odds": odds.as_dict(),
-                    "inning_scores": [{"home": h, "away": a} for h, a in inning_scores],
-                },
+                source_payload={"goalserve_odds": odds.as_dict()},
             )
         )
     return results
@@ -484,97 +403,50 @@ def _parse_baseball(events_dict: Mapping[str, Any], observed_at: datetime) -> li
 # Tennis
 # ---------------------------------------------------------------------------
 
-def _parse_tennis(events_dict: Mapping[str, Any], observed_at: datetime) -> list[LiveEvent]:
+
+def _parse_tennis(state_dict: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     results: list[LiveEvent] = []
-    for event_id, ev in events_dict.items():
-        core = ev.get("core", {})
-        if core.get("removed") == "1":
-            continue
-        status = _core_to_status(core)
-        info = ev.get("info", {})
-        team = ev.get("team_info", {})
+    for event_id, ev in state_dict.items():
+        stp = ev.get("stp", 0)
+        status = _stp_to_status(stp)
         stats = ev.get("stats", {})
-        by_name = _stats_by_name(stats)
-
-        home_name = team.get("home", {}).get("name", "")
-        away_name = team.get("away", {}).get("name", "")
-
-        # Set scores: S1, S2, S3, (S4, S5 for 5-set)
-        set_scores: list[tuple[int, int]] = []
-        for i in range(1, 6):
-            entry = by_name.get(f"S{i}")
-            if entry is None:
-                break
-            h = _int_val(entry.get("home"))
-            a = _int_val(entry.get("away"))
-            if h is not None and a is not None:
-                set_scores.append((h, a))
-
-        # Serving side: TURN home=1 → home serving
-        turn_entry = by_name.get("TURN", {})
-        home_turn = _int_val(turn_entry.get("home"))
-        serving_side: str | None = None
-        if home_turn == 1:
-            serving_side = "home"
-        elif home_turn == 0:
-            serving_side = "away"
-
-        # Game points: POINTS
-        points_entry = by_name.get("POINTS", {})
-        home_point = str(points_entry.get("home", "")) if points_entry else None
-        away_point = str(points_entry.get("away", "")) if points_entry else None
-
-        # Sets won
-        home_sets = sum(1 for h, a in set_scores if h > a)
-        away_sets = sum(1 for h, a in set_scores if a > h)
-
-        # Current set games
-        period_raw = info.get("period", "")
-        current_set: int | None = None
-        parts = period_raw.lower().split()
-        if "set" in parts:
-            idx = parts.index("set")
-            if idx + 1 < len(parts):
-                current_set = _int_val(parts[idx + 1])
-        home_current = set_scores[-1][0] if set_scores else None
-        away_current = set_scores[-1][1] if set_scores else None
-
+        # WS 网球：stats.g = [home_sets, away_sets]（盘数）
+        home_sets, away_sets = _score_pair(stats, "g")
         tennis_state = TennisGameState(
-            home_sets_won=home_sets,
-            away_sets_won=away_sets,
-            current_set=current_set,
-            home_current_set_games=home_current,
-            away_current_set_games=away_current,
-            set_scores=tuple(set_scores),
-            home_point=home_point,
-            away_point=away_point,
-            serving_side=serving_side,
+            home_sets_won=home_sets or 0,
+            away_sets_won=away_sets or 0,
+            current_set=None,
+            home_current_set_games=None,
+            away_current_set_games=None,
+            set_scores=(),
+            home_point=None,
+            away_point=None,
+            serving_side=None,
         )
-
-        score_str = info.get("score", "")
-        odds = _parse_odds(ev.get("odds", {}), event_id)
-
+        odds = _parse_odds_ws(ev.get("odds", []), event_id)
+        home_name = ev.get("t1", {}).get("n", "")
+        away_name = ev.get("t2", {}).get("n", "")
         results.append(
             LiveEvent(
                 source="goalserve",
                 source_event_id=event_id,
                 kind=LiveEventKind.TEAM_MATCH,
-                league=info.get("league", ""),
+                league=ev.get("ctry_name", ""),
                 sport="tennis",
                 participants=(
                     Participant(role="home", name=home_name, score=home_sets, external_ids={"goalserve": event_id}),
                     Participant(role="away", name=away_name, score=away_sets, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=period_raw,
+                period=str(ev.get("sc", "")),
                 seconds_remaining=None,
-                event_name=info.get("name", ""),
-                event_start_time=_parse_start_time(info.get("start_ts_utc")),
-                external_ids={"goalserve": event_id, "mid": info.get("mid", "")},
-                raw_status=period_raw,
+                event_name=f"{home_name} vs {away_name}",
+                event_start_time=_parse_start_time(ev.get("st")),
+                external_ids={"goalserve": event_id},
+                raw_status=str(stp),
                 observed_at=observed_at,
                 tennis_state=tennis_state,
-                source_payload={"goalserve_odds": odds.as_dict(), "score_str": score_str},
+                source_payload={"goalserve_odds": odds.as_dict()},
             )
         )
     return results
@@ -585,45 +457,38 @@ def _parse_tennis(events_dict: Mapping[str, Any], observed_at: datetime) -> list
 # ---------------------------------------------------------------------------
 
 
-def _parse_esports(events_dict: Mapping[str, Any], observed_at: datetime) -> list[LiveEvent]:
+def _parse_esports(state_dict: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     results: list[LiveEvent] = []
-    for event_id, ev in events_dict.items():
-        core = ev.get("core", {})
-        if core.get("removed") == "1":
-            continue
-        status = _core_to_status(core)
-        info = ev.get("info", {})
-        team = ev.get("team_info", {})
-
-        home_name = team.get("home", {}).get("name", "")
-        away_name = team.get("away", {}).get("name", "")
-        home_score = _int_val(team.get("home", {}).get("score"))
-        away_score = _int_val(team.get("away", {}).get("score"))
-
+    for event_id, ev in state_dict.items():
+        stp = ev.get("stp", 0)
+        status = _stp_to_status(stp)
+        stats = ev.get("stats", {})
+        home_maps, away_maps = _score_pair(stats, "g")
         esports_state = EsportsGameState(
-            home_maps_won=home_score or 0,
-            away_maps_won=away_score or 0,
+            home_maps_won=home_maps or 0,
+            away_maps_won=away_maps or 0,
         )
-        odds = _parse_odds(ev.get("odds", {}), event_id)
-
+        odds = _parse_odds_ws(ev.get("odds", []), event_id)
+        home_name = ev.get("t1", {}).get("n", "")
+        away_name = ev.get("t2", {}).get("n", "")
         results.append(
             LiveEvent(
                 source="goalserve",
                 source_event_id=event_id,
                 kind=LiveEventKind.TEAM_MATCH,
-                league=info.get("league", ""),
+                league=ev.get("ctry_name", ""),
                 sport="esports",
                 participants=(
-                    Participant(role="home", name=home_name, score=home_score, external_ids={"goalserve": event_id}),
-                    Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
+                    Participant(role="home", name=home_name, score=home_maps, external_ids={"goalserve": event_id}),
+                    Participant(role="away", name=away_name, score=away_maps, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=info.get("period", ""),
+                period=str(ev.get("sc", "")),
                 seconds_remaining=None,
-                event_name=info.get("name", ""),
-                event_start_time=_parse_start_time(info.get("start_ts_utc")),
-                external_ids={"goalserve": event_id, "mid": info.get("mid", "")},
-                raw_status=info.get("period"),
+                event_name=f"{home_name} vs {away_name}",
+                event_start_time=_parse_start_time(ev.get("st")),
+                external_ids={"goalserve": event_id},
+                raw_status=str(stp),
                 observed_at=observed_at,
                 esports_state=esports_state,
                 source_payload={"goalserve_odds": odds.as_dict()},
@@ -637,55 +502,36 @@ def _parse_esports(events_dict: Mapping[str, Any], observed_at: datetime) -> lis
 # ---------------------------------------------------------------------------
 
 
-def _parse_amfootball(events_dict: Mapping[str, Any], observed_at: datetime) -> list[LiveEvent]:
-    """美式足球：字段结构与篮球相近（Q1-Q4, OT）。"""
+def _parse_amfootball(state_dict: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     results: list[LiveEvent] = []
-    for event_id, ev in events_dict.items():
-        core = ev.get("core", {})
-        if core.get("removed") == "1":
-            continue
-        status = _core_to_status(core)
-        info = ev.get("info", {})
-        team = ev.get("team_info", {})
+    for event_id, ev in state_dict.items():
+        stp = ev.get("stp", 0)
+        status = _stp_to_status(stp)
         stats = ev.get("stats", {})
-        by_name = _stats_by_name(stats)
-
-        home_name = team.get("home", {}).get("name", "")
-        away_name = team.get("away", {}).get("name", "")
-        home_score = _int_val(team.get("home", {}).get("score"))
-        away_score = _int_val(team.get("away", {}).get("score"))
-
-        quarter_stats: dict[str, tuple[int | None, int | None]] = {}
-        for key in ("1", "2", "Half", "3", "4", "OT"):
-            entry = by_name.get(key)
-            if entry:
-                quarter_stats[key] = (_int_val(entry.get("home")), _int_val(entry.get("away")))
-
-        odds = _parse_odds(ev.get("odds", {}), event_id)
-
+        home_score, away_score = _score_pair(stats, "g")
+        odds = _parse_odds_ws(ev.get("odds", []), event_id)
+        home_name = ev.get("t1", {}).get("n", "")
+        away_name = ev.get("t2", {}).get("n", "")
         results.append(
             LiveEvent(
                 source="goalserve",
                 source_event_id=event_id,
                 kind=LiveEventKind.TEAM_MATCH,
-                league=info.get("league", ""),
+                league=ev.get("ctry_name", ""),
                 sport="american-football",
                 participants=(
                     Participant(role="home", name=home_name, score=home_score, external_ids={"goalserve": event_id}),
                     Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=info.get("period", ""),
-                seconds_remaining=_parse_seconds_remaining(info.get("seconds")),
-                event_name=info.get("name", ""),
-                event_start_time=_parse_start_time(info.get("start_ts_utc")),
-                external_ids={"goalserve": event_id, "mid": info.get("mid", "")},
-                raw_status=info.get("period"),
+                period=str(ev.get("sc", "")),
+                seconds_remaining=None,
+                event_name=f"{home_name} vs {away_name}",
+                event_start_time=_parse_start_time(ev.get("st")),
+                external_ids={"goalserve": event_id},
+                raw_status=str(stp),
                 observed_at=observed_at,
-                source_payload={
-                    "goalserve_odds": odds.as_dict(),
-                    "quarter_stats": {k: {"home": h, "away": a} for k, (h, a) in quarter_stats.items()},
-                },
+                source_payload={"goalserve_odds": odds.as_dict()},
             )
         )
     return results
@@ -696,78 +542,42 @@ def _parse_amfootball(events_dict: Mapping[str, Any], observed_at: datetime) -> 
 # ---------------------------------------------------------------------------
 
 
-def _parse_volleyball(events_dict: Mapping[str, Any], observed_at: datetime) -> list[LiveEvent]:
-    """排球：盘分结构与网球相近，stats 用 S1-S5 记录各盘比分。"""
+def _parse_volleyball(state_dict: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     results: list[LiveEvent] = []
-    for event_id, ev in events_dict.items():
-        core = ev.get("core", {})
-        if core.get("removed") == "1":
-            continue
-        status = _core_to_status(core)
-        info = ev.get("info", {})
-        team = ev.get("team_info", {})
+    for event_id, ev in state_dict.items():
+        stp = ev.get("stp", 0)
+        status = _stp_to_status(stp)
         stats = ev.get("stats", {})
-        by_name = _stats_by_name(stats)
-
-        home_name = team.get("home", {}).get("name", "")
-        away_name = team.get("away", {}).get("name", "")
-        home_score = _int_val(team.get("home", {}).get("score"))
-        away_score = _int_val(team.get("away", {}).get("score"))
-
-        set_scores: list[tuple[int, int]] = []
-        for key in ("S1", "S2", "S3", "S4", "S5"):
-            entry = by_name.get(key)
-            if entry:
-                h = _int_val(entry.get("home"))
-                a = _int_val(entry.get("away"))
-                if h is not None and a is not None:
-                    set_scores.append((h, a))
-
-        # 当前盘号从 period 字段解析（"Set 1"–"Set 5"）
-        period_str = info.get("period", "")
-        current_set: int | None = None
-        if period_str.lower().startswith("set "):
-            try:
-                current_set = int(period_str.split()[-1])
-            except (ValueError, IndexError):
-                pass
-
-        # 当前盘即时分：取最后一条 set_score 对应的得分，或从 POINTS 读
-        home_cur: int | None = None
-        away_cur: int | None = None
-        points_entry = by_name.get("POINTS")
-        if points_entry:
-            home_cur = _int_val(points_entry.get("home"))
-            away_cur = _int_val(points_entry.get("away"))
-
+        home_sets, away_sets = _score_pair(stats, "g")
         vball_state = VolleyballGameState(
-            home_sets_won=home_score or 0,
-            away_sets_won=away_score or 0,
-            current_set=current_set,
-            home_current_set_points=home_cur,
-            away_current_set_points=away_cur,
-            set_scores=tuple(set_scores),
+            home_sets_won=home_sets or 0,
+            away_sets_won=away_sets or 0,
+            current_set=None,
+            home_current_set_points=None,
+            away_current_set_points=None,
+            set_scores=(),
         )
-        odds = _parse_odds(ev.get("odds", {}), event_id)
-
+        odds = _parse_odds_ws(ev.get("odds", []), event_id)
+        home_name = ev.get("t1", {}).get("n", "")
+        away_name = ev.get("t2", {}).get("n", "")
         results.append(
             LiveEvent(
                 source="goalserve",
                 source_event_id=event_id,
                 kind=LiveEventKind.TEAM_MATCH,
-                league=info.get("league", ""),
+                league=ev.get("ctry_name", ""),
                 sport="volleyball",
                 participants=(
-                    Participant(role="home", name=home_name, score=home_score, external_ids={"goalserve": event_id}),
-                    Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
+                    Participant(role="home", name=home_name, score=home_sets, external_ids={"goalserve": event_id}),
+                    Participant(role="away", name=away_name, score=away_sets, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=period_str,
+                period=str(ev.get("sc", "")),
                 seconds_remaining=None,
-                event_name=info.get("name", ""),
-                event_start_time=_parse_start_time(info.get("start_ts_utc")),
-                external_ids={"goalserve": event_id, "mid": info.get("mid", "")},
-                raw_status=period_str or None,
+                event_name=f"{home_name} vs {away_name}",
+                event_start_time=_parse_start_time(ev.get("st")),
+                external_ids={"goalserve": event_id},
+                raw_status=str(stp),
                 observed_at=observed_at,
                 volleyball_state=vball_state,
                 source_payload={"goalserve_odds": odds.as_dict()},
@@ -792,22 +602,19 @@ _SPORT_PARSERS = {
 }
 
 
-def parse_goalserve_sport(
+def parse_goalserve_ws_events(
     sport: str,
-    data: Mapping[str, Any],
+    state_dict: dict[str, Any],
     *,
     observed_at: datetime | None = None,
 ) -> list[LiveEvent]:
-    """顶层分派：按 sport 调对应 parser，返回 LiveEvent 列表。
+    """顶层分派：把 GoalserveClient 内存快照转成 LiveEvent 列表。
 
-    data 为 Goalserve inplay JSON 根节点（含 "events" key）。
-    removed="1" 的事件由各 parser 内部过滤。
+    state_dict = {event_id: ws_message_dict}，由 GoalserveClient._state[sport] 提供。
+    stp=99 的事件已由 GoalserveClient._handle_message 过滤，此处不再检查。
     """
     ts = observed_at or utc_now()
     parser = _SPORT_PARSERS.get(sport.lower())
-    if parser is None:
+    if parser is None or not state_dict:
         return []
-    events_dict = data.get("events", {})
-    if not isinstance(events_dict, dict):
-        return []
-    return parser(events_dict, ts)
+    return parser(state_dict, ts)

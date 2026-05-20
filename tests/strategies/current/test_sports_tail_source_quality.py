@@ -411,4 +411,4 @@ def test_default_discovery_scope_matches_live_source_coverage() -> None:
     assert "soccer" in config.tail_category_tokens
     assert {"table tennis", "table-tennis", "wtt"} <= set(config.tail_category_tokens)
     assert {"tennis", "atp", "wta"} <= set(config.tail_category_tokens)
-    assert "goalserve" in settings.goalserve_inplay_base_url
+    assert "goalserve" in settings.goalserve_livescore_base_url

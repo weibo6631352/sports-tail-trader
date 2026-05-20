@@ -21,7 +21,7 @@ from polymarket_trader.infra.sports.goalserve_parsers import (
     GoalserveMarket,
     GoalserveOdds,
     GoalserveOutcome,
-    parse_goalserve_sport,
+    parse_goalserve_ws_events,
 )
 from polymarket_trader.infra.sports.season_odds_client import (
     SeasonOddsClient,
@@ -48,6 +48,6 @@ __all__ = [
     "SportsDataTimeoutError",
     "SportsDataTransportError",
     "SportsLiveAggregateClient",
-    "parse_goalserve_sport",
+    "parse_goalserve_ws_events",
     "parse_theoddsapi_outrights_payload",
 ]

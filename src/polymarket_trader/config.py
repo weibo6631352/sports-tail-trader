@@ -115,9 +115,8 @@ class Settings(BaseSettings):
     sports_live_state_health_cooldown_base_s: float = Field(default=60.0, ge=1.0)
     sports_live_state_health_eviction_s: float = Field(default=1800.0, ge=60.0)
 
-    # Goalserve inplay feed 配置。认证方式：IP 白名单（无需 API key 在 URL 中）。
-    # proxy 仅用于开发环境（本机 Clash 代理）；生产设为空字符串或不配置。
-    goalserve_inplay_base_url: str = "http://inplay.goalserve.com"
+    # Goalserve inplay WebSocket 配置。认证方式：JWT token（API key 换取）。
+    # proxy 仅用于开发环境（本机 Clash 代理）；生产留空直连。
     goalserve_sports: str = "basketball,soccer,hockey,baseball,tennis,esports,amfootball,volleyball"
     goalserve_proxy: str | None = None
 
@@ -414,12 +413,12 @@ class Settings(BaseSettings):
             )
 
         if self.sports_live_state_enabled:
-            if not self.goalserve_inplay_base_url.strip():
+            if self.goalserve_api_key is None:
                 blocking_issues.append(
                     ConfigIssue(
-                        field="goalserve_inplay_base_url",
-                        code="missing_endpoint",
-                        message="启用体育直播状态源时必须配置 GOALSERVE_INPLAY_BASE_URL",
+                        field="goalserve_api_key",
+                        code="missing_api_key",
+                        message="启用体育直播状态源时必须配置 GOALSERVE_API_KEY（inplay WS 认证）",
                     )
                 )
             if not self.goalserve_sports.strip():

@@ -1,172 +1,74 @@
-"""GoalserveClient unit tests: HTTP mock, multi-sport concurrent, single-sport timeout."""
+"""GoalserveClient unit tests: state snapshot, list_events(), health reporting."""
 from __future__ import annotations
 
 import asyncio
-import json
+import time
 from datetime import datetime, timezone
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
-
+from polymarket_trader.domain.sports_live import SportsLiveGameStatus, SportsLiveSourceHealth
 from polymarket_trader.infra.sports.goalserve_client import GoalserveClient
 
 _OBSERVED = datetime(2026, 5, 19, tzinfo=timezone.utc)
-_FIXTURE_DIR = Path("tests/fixtures/sports_live/goalserve")
 
-
-def _load_fixture_bytes(filename: str) -> bytes:
-    return (_FIXTURE_DIR / filename).read_bytes()
-
-
-def _load_fixture_json(filename: str) -> dict:
-    return json.loads((_FIXTURE_DIR / filename).read_text())
-
-
-# ---------------------------------------------------------------------------
-# Helpers to mock _fetch_sport directly (avoids httpx transport wiring)
-# ---------------------------------------------------------------------------
 
 def _make_client(sports: tuple[str, ...] = ("basketball",)) -> GoalserveClient:
-    with patch("httpx.AsyncClient"):
-        return GoalserveClient(sports=sports)
+    return GoalserveClient(api_key="test-key", sports=sports)
+
+
+def _ws_msg(event_id: str, sport: str = "basketball", stp: int = 1) -> dict:
+    return {
+        "mt": "updt",
+        "sp": sport,
+        "id": event_id,
+        "t1": {"n": "TeamA"},
+        "t2": {"n": "TeamB"},
+        "stp": stp,
+        "et": 1800,
+        "sc": "11001",
+        "ctry_name": "Test League",
+        "st": 1779296400,
+        "stats": {"g": [1, 0]},
+        "odds": [],
+    }
 
 
 # ---------------------------------------------------------------------------
-# Basic pass-through
+# list_events from pre-seeded state
 # ---------------------------------------------------------------------------
 
-def test_list_events_returns_snapshot_with_events() -> None:
-    basket_data = _load_fixture_json("basketball_sample.json")
-
+def test_list_events_from_state() -> None:
     async def run() -> None:
         client = _make_client(sports=("basketball",))
-        with patch.object(client, "_fetch_sport", new_callable=AsyncMock) as mock_fetch:
-            raw_count = len(basket_data.get("events", {}))
-            from polymarket_trader.infra.sports.goalserve_parsers import parse_goalserve_sport
-            events = parse_goalserve_sport("basketball", basket_data, observed_at=_OBSERVED)
-            mock_fetch.return_value = (events, raw_count)
-            snapshot = await client.list_events()
-
+        # Seed state directly (bypasses WS; simulates received messages)
+        async with client._state_lock:
+            client._state["basketball"]["ev1"] = _ws_msg("ev1", "basketball")
+        client._last_msg_time["basketball"] = time.time()
+        snapshot = await client.list_events()
         assert snapshot.source == "goalserve"
-        assert len(snapshot.events) >= 1
-        assert all(e.source == "goalserve" for e in snapshot.events)
+        assert len(snapshot.events) == 1
+        assert snapshot.events[0].sport == "basketball"
+        assert snapshot.events[0].status == SportsLiveGameStatus.LIVE
+        await client.aclose()
 
     asyncio.run(run())
 
 
-def test_source_status_success_reported() -> None:
-    basket_data = _load_fixture_json("basketball_sample.json")
-
+def test_list_events_returns_all_sports() -> None:
     async def run() -> None:
-        client = _make_client(sports=("basketball",))
-        with patch.object(client, "_fetch_sport", new_callable=AsyncMock) as mock_fetch:
-            from polymarket_trader.infra.sports.goalserve_parsers import parse_goalserve_sport
-            events = parse_goalserve_sport("basketball", basket_data, observed_at=_OBSERVED)
-            raw_count = len(basket_data.get("events", {}))
-            mock_fetch.return_value = (events, raw_count)
-            snapshot = await client.list_events()
-
-        statuses = {s.source: s for s in snapshot.source_statuses}
-        assert "goalserve:basketball" in statuses
-        assert statuses["goalserve:basketball"].success is True
-        assert statuses["goalserve:basketball"].events_seen >= 1
-
-    asyncio.run(run())
-
-
-# ---------------------------------------------------------------------------
-# Multi-sport
-# ---------------------------------------------------------------------------
-
-def test_multiple_sports_fetched() -> None:
-    basket_data = _load_fixture_json("basketball_sample.json")
-    hockey_data = _load_fixture_json("hockey_sample.json")
-
-    async def run() -> None:
-        client = _make_client(sports=("basketball", "hockey"))
-        with patch.object(client, "_fetch_sport", new_callable=AsyncMock) as mock_fetch:
-            from polymarket_trader.infra.sports.goalserve_parsers import parse_goalserve_sport
-            basket_events = parse_goalserve_sport("basketball", basket_data, observed_at=_OBSERVED)
-            hockey_events = parse_goalserve_sport("hockey", hockey_data, observed_at=_OBSERVED)
-
-            async def side_effect(sport, observed_at):
-                if sport == "basketball":
-                    return basket_events, len(basket_data.get("events", {}))
-                return hockey_events, len(hockey_data.get("events", {}))
-
-            mock_fetch.side_effect = side_effect
-            snapshot = await client.list_events()
-
-        statuses = {s.source: s for s in snapshot.source_statuses}
-        assert "goalserve:basketball" in statuses
-        assert "goalserve:hockey" in statuses
+        client = _make_client(sports=("basketball", "soccer"))
+        async with client._state_lock:
+            client._state["basketball"]["ev1"] = _ws_msg("ev1", "basketball")
+            client._state["soccer"]["ev2"] = {**_ws_msg("ev2", "soccer"), "stats": {"g": [2, 1], "y": [0, 1], "r": [0, 0], "c": [3, 2]}}
+        client._last_msg_time["basketball"] = time.time()
+        client._last_msg_time["soccer"] = time.time()
+        snapshot = await client.list_events()
+        sports = {e.sport for e in snapshot.events}
+        assert "basketball" in sports
+        assert "soccer" in sports
+        await client.aclose()
 
     asyncio.run(run())
 
-
-def test_single_sport_timeout_does_not_block_others() -> None:
-    """basketball 超时 → hockey 仍正常返回，source_statuses 各自独立。"""
-    hockey_data = _load_fixture_json("hockey_sample.json")
-
-    async def run() -> None:
-        client = _make_client(sports=("basketball", "hockey"))
-        with patch.object(client, "_fetch_sport", new_callable=AsyncMock) as mock_fetch:
-            from polymarket_trader.infra.sports.goalserve_parsers import parse_goalserve_sport
-            hockey_events = parse_goalserve_sport("hockey", hockey_data, observed_at=_OBSERVED)
-
-            async def side_effect(sport, observed_at):
-                if sport == "basketball":
-                    raise httpx.TimeoutException("timeout", request=MagicMock())
-                return hockey_events, len(hockey_data.get("events", {}))
-
-            mock_fetch.side_effect = side_effect
-            snapshot = await client.list_events()
-
-        statuses = {s.source: s for s in snapshot.source_statuses}
-        assert statuses["goalserve:basketball"].success is False
-        assert statuses["goalserve:basketball"].last_error is not None
-        assert statuses["goalserve:hockey"].success is True
-        hockey_events_out = [e for e in snapshot.events if e.sport == "ice-hockey"]
-        assert len(hockey_events_out) >= 1
-
-    asyncio.run(run())
-
-
-# ---------------------------------------------------------------------------
-# Error handling
-# ---------------------------------------------------------------------------
-
-def test_network_error_recorded_in_source_status() -> None:
-    async def run() -> None:
-        client = _make_client(sports=("basketball",))
-        with patch.object(client, "_fetch_sport", new_callable=AsyncMock) as mock_fetch:
-            mock_fetch.side_effect = httpx.ConnectError("refused")
-            snapshot = await client.list_events()
-
-        statuses = {s.source: s for s in snapshot.source_statuses}
-        assert statuses["goalserve:basketball"].success is False
-        assert "refused" in (statuses["goalserve:basketball"].last_error or "")
-
-    asyncio.run(run())
-
-
-def test_all_sports_failed_returns_empty_events() -> None:
-    async def run() -> None:
-        client = _make_client(sports=("basketball", "hockey"))
-        with patch.object(client, "_fetch_sport", new_callable=AsyncMock) as mock_fetch:
-            mock_fetch.side_effect = RuntimeError("network_down")
-            snapshot = await client.list_events()
-
-        assert snapshot.events == ()
-        assert all(not s.success for s in snapshot.source_statuses)
-
-    asyncio.run(run())
-
-
-# ---------------------------------------------------------------------------
-# No sports configured
-# ---------------------------------------------------------------------------
 
 def test_no_sports_returns_empty_snapshot() -> None:
     async def run() -> None:
@@ -180,12 +82,126 @@ def test_no_sports_returns_empty_snapshot() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Constructor accepts proxy parameter
+# Health / source status
 # ---------------------------------------------------------------------------
 
-def test_proxy_parameter_accepted_without_error() -> None:
-    """proxy URL 参数可以传入，不影响构造。"""
-    with patch("httpx.AsyncHTTPTransport"):
-        with patch("httpx.AsyncClient"):
-            client = GoalserveClient(sports=("basketball",), proxy="http://127.0.0.1:7890")
-    assert client is not None
+def test_source_status_success_with_data() -> None:
+    async def run() -> None:
+        client = _make_client(sports=("basketball",))
+        async with client._state_lock:
+            client._state["basketball"]["ev1"] = _ws_msg("ev1")
+        client._last_msg_time["basketball"] = time.time()
+        snapshot = await client.list_events()
+        statuses = {s.source: s for s in snapshot.source_statuses}
+        assert "goalserve:basketball" in statuses
+        assert statuses["goalserve:basketball"].success is True
+        assert statuses["goalserve:basketball"].health == SportsLiveSourceHealth.SUCCESS_WITH_LIVE_DATA
+        await client.aclose()
+
+    asyncio.run(run())
+
+
+def test_source_status_failed_when_too_many_errors() -> None:
+    async def run() -> None:
+        client = _make_client(sports=("basketball",))
+        client._consecutive_errors["basketball"] = 4  # > 3 threshold
+        snapshot = await client.list_events()
+        statuses = {s.source: s for s in snapshot.source_statuses}
+        assert statuses["goalserve:basketball"].success is False
+        assert statuses["goalserve:basketball"].health == SportsLiveSourceHealth.FAILED
+        await client.aclose()
+
+    asyncio.run(run())
+
+
+def test_source_status_failed_when_stale() -> None:
+    async def run() -> None:
+        client = _make_client(sports=("basketball",))
+        # Simulate last message >30s ago
+        client._last_msg_time["basketball"] = time.time() - 60
+        snapshot = await client.list_events()
+        statuses = {s.source: s for s in snapshot.source_statuses}
+        assert statuses["goalserve:basketball"].health == SportsLiveSourceHealth.FAILED
+        await client.aclose()
+
+    asyncio.run(run())
+
+
+def test_source_status_empty_when_no_events() -> None:
+    async def run() -> None:
+        client = _make_client(sports=("basketball",))
+        snapshot = await client.list_events()
+        statuses = {s.source: s for s in snapshot.source_statuses}
+        assert statuses["goalserve:basketball"].health == SportsLiveSourceHealth.SUCCESS_EMPTY
+        await client.aclose()
+
+    asyncio.run(run())
+
+
+def test_all_sports_in_source_statuses() -> None:
+    async def run() -> None:
+        client = _make_client(sports=("basketball", "hockey"))
+        snapshot = await client.list_events()
+        sources = {s.source for s in snapshot.source_statuses}
+        assert "goalserve:basketball" in sources
+        assert "goalserve:hockey" in sources
+        await client.aclose()
+
+    asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# Message handling
+# ---------------------------------------------------------------------------
+
+def test_handle_message_upserts_event() -> None:
+    async def run() -> None:
+        client = _make_client(sports=("soccer",))
+        msg = _ws_msg("ev1", "soccer")
+        await client._handle_message("soccer", msg)
+        async with client._state_lock:
+            assert "ev1" in client._state["soccer"]
+        await client.aclose()
+
+    asyncio.run(run())
+
+
+def test_handle_message_removes_stp99() -> None:
+    async def run() -> None:
+        client = _make_client(sports=("soccer",))
+        async with client._state_lock:
+            client._state["soccer"]["ev1"] = _ws_msg("ev1", "soccer")
+        removal_msg = {**_ws_msg("ev1", "soccer"), "stp": 99}
+        await client._handle_message("soccer", removal_msg)
+        async with client._state_lock:
+            assert "ev1" not in client._state["soccer"]
+        await client.aclose()
+
+    asyncio.run(run())
+
+
+def test_handle_message_ignores_unknown_mt() -> None:
+    async def run() -> None:
+        client = _make_client(sports=("soccer",))
+        await client._handle_message("soccer", {"mt": "ping", "id": "ev1"})
+        async with client._state_lock:
+            assert "ev1" not in client._state["soccer"]
+        await client.aclose()
+
+    asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# aclose cancels tasks
+# ---------------------------------------------------------------------------
+
+def test_aclose_cancels_tasks() -> None:
+    async def run() -> None:
+        client = _make_client(sports=("basketball",))
+        # Start tasks
+        await client._ensure_started()
+        assert len(client._tasks) == 1
+        await client.aclose()
+        assert all(t.cancelled() or t.done() for t in client._tasks)
+
+    asyncio.run(run())

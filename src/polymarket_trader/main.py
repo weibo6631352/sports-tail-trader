@@ -206,22 +206,22 @@ def _build_sports_live_state_client(
 ) -> SportsLiveAggregateClient:
     """构建 Goalserve 直播状态聚合客户端。
 
-    inplay feed：IP 白名单认证（无需 API key），1 秒刷新，覆盖
+    inplay WebSocket：JWT token 认证（GOALSERVE_API_KEY 换取），实时推送，覆盖
       basketball/soccer/hockey/baseball/tennis/esports/amfootball/volleyball。
     livescore getfeed：API key 认证，5 秒刷新，覆盖
       cricket/handball/rugby/boxing/mma/golf/horse_racing/f1/motogp。
     proxy 仅在开发环境配置（GOALSERVE_PROXY=http://127.0.0.1:7890），生产留空直连。
     """
+    api_key_secret = settings.goalserve_api_key
+    api_key = api_key_secret.get_secret_value() if api_key_secret is not None else None
+
     goalserve = GoalserveClient(
+        api_key=api_key or "",
         sports=settings.goalserve_sport_codes,
-        timeout_s=settings.sports_live_state_timeout_s,
-        proxy=settings.goalserve_proxy,
     )
     providers: list[tuple[str, Any]] = [("goalserve", goalserve.list_events)]
     closers: list[Any] = [goalserve.aclose]
 
-    api_key_secret = settings.goalserve_api_key
-    api_key = api_key_secret.get_secret_value() if api_key_secret is not None else None
     if settings.goalserve_livescore_enabled and api_key:
         livescore = GoalserveLivescoreClient(
             api_key=api_key,
