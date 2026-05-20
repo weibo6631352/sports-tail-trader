@@ -20,7 +20,8 @@ from strategies.current.tail import (
 from strategies.current.config import CurrentStrategyConfig
 
 
-def test_tail_rejects_live_source_conflict() -> None:
+def test_tail_rejects_live_source_conflict_on_score_field() -> None:
+    """只有分数字段冲突才触发 live_source_conflict；status/period 转换噪声不应阻断交易。"""
     game = LiveGameState(
         league="NBA",
         home_name="Orlando Magic",
@@ -33,8 +34,9 @@ def test_tail_rejects_live_source_conflict() -> None:
         source_conflicts=(
             {
                 "source": "sofascore",
-                "status": "paused",
-                "raw_status": "Halftime",
+                "field": "home_score",
+                "value": "85",
+                "other_value": "90",
             },
         ),
     )
@@ -51,6 +53,41 @@ def test_tail_rejects_live_source_conflict() -> None:
 
     assert result.accepted is False
     assert result.reason == "live_source_conflict"
+
+
+def test_tail_allows_status_only_conflict() -> None:
+    """status/period 转换冲突（如 live↔unknown）不应阻断有效的分数领先。"""
+    game = LiveGameState(
+        league="NBA",
+        home_name="Orlando Magic",
+        away_name="Detroit Pistons",
+        home_score=90,
+        away_score=82,
+        period="Q4",
+        status=LiveGameStatus.LIVE,
+        seconds_remaining=60,
+        source_conflicts=(
+            {
+                "source": "sofascore",
+                "field": "status",
+                "value": "unknown",
+                "other_value": "live",
+            },
+        ),
+    )
+    market = SportsMarketSnapshot(
+        market_type=SportsMarketType.MONEYLINE,
+        side=SportsMarketSide.HOME,
+        token_id="home",
+        line=None,
+        best_ask=Decimal("0.90"),
+        buyable_liquidity_usdc=Decimal("10"),
+    )
+
+    result = evaluate_tail_opportunity(game, market, policy=TailPolicy())
+
+    # status 冲突不触发 live_source_conflict，交易正常通过
+    assert result.reason != "live_source_conflict"
 
 
 def test_tail_rejects_non_single_game_market_before_score_lock_logic() -> None:

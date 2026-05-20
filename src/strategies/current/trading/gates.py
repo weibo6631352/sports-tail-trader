@@ -362,6 +362,10 @@ def _scale_in_allocation_gate(
     if descriptor.market_family != SportsMarketFamily.SINGLE_GAME:
         return False, {}, None
     game = live_game_state_from_metadata(context.metadata)
+    # ENDED 比赛不走 scale-in 路径，避免比赛结束后持续触发加仓决策循环。
+    # Post-game ended-not-closed 买入由主入场路径（evaluate_tail_opportunity）处理。
+    if game is not None and game.status == LiveGameStatus.ENDED:
+        return False, {}, None
     target, _target_reason = _target_for_live_game(
         snapshot.market,
         snapshot.token_id,

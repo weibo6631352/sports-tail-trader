@@ -40,6 +40,9 @@ def check_tail_entry_risk(
     account_snapshot: object | None = None,
     now: datetime | None = None,
     bankroll_usdc: Decimal = Decimal("0"),
+    # 同轮 allocation pass 中已批准但尚未成交的同事件/联赛预算（防止并发多市场绕过事件上限）。
+    extra_event_planned_usdc: Decimal = Decimal("0"),
+    extra_league_planned_usdc: Decimal = Decimal("0"),
 ) -> SportsRiskDecision:
     """检查体育扫尾业务风险上限（相关性硬上限）。
 
@@ -73,7 +76,7 @@ def check_tail_entry_risk(
         fraction=config.tail_max_event_exposure_fraction,
         min_floor_usdc=config.tail_max_event_exposure_min_floor_usdc,
     )
-    event_exposure = _event_exposure_usdc(market, candidate_snapshots)
+    event_exposure = _event_exposure_usdc(market, candidate_snapshots) + extra_event_planned_usdc
     event_after = event_exposure + buy_budget_usdc
     risk_metadata["event_exposure_usdc"] = str(event_exposure)
     risk_metadata["event_exposure_after_usdc"] = str(event_after)
@@ -88,7 +91,7 @@ def check_tail_entry_risk(
         min_floor_usdc=config.tail_max_league_exposure_min_floor_usdc,
     )
     league = _league_key(market, metadata)
-    league_exposure = _league_exposure_usdc(league, candidate_snapshots)
+    league_exposure = _league_exposure_usdc(league, candidate_snapshots) + extra_league_planned_usdc
     league_after = league_exposure + buy_budget_usdc
     risk_metadata["league"] = league
     risk_metadata["league_exposure_usdc"] = str(league_exposure)
@@ -245,15 +248,23 @@ def _utc_date(value: datetime | None) -> object:
     return value.astimezone(timezone.utc).date()
 
 
-def _event_key(market: Market) -> str:
+def event_key_for_market(market: Market) -> str:
     return market.event_slug or market.event_id or market.condition_id
 
 
-def _league_key(market: Market, metadata: Mapping[str, object]) -> str:
+def _event_key(market: Market) -> str:
+    return event_key_for_market(market)
+
+
+def league_key_for_market(market: Market, metadata: Mapping[str, object]) -> str:
     game_league = _nested_text(metadata, "live_game", "league")
     if game_league:
         return game_league.lower()
     return _market_league_key(market)
+
+
+def _league_key(market: Market, metadata: Mapping[str, object]) -> str:
+    return league_key_for_market(market, metadata)
 
 
 def _market_league_key(market: Market) -> str:

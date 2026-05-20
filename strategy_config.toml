@@ -20,3 +20,9 @@ kelly_drawdown_halt_fraction = "0.4"
 # 领先 6 分以上 + 最后 5 分钟 → win rate ≈ 88-92%，期望值正。
 tail_max_moneyline_seconds_remaining = 300
 tail_max_spreads_seconds_remaining = 180
+
+# 止盈与自动退出
+# auto_exit_enabled = true：每次 BUY 成交后立即挂 GTC SELL @ exit_no_price(0.995)
+# tail_profit_take_multiplier = 1.6：买入价 × 1.6 为止盈目标（高价入场自动收敛到 0.99）
+auto_exit_enabled = true
+tail_profit_take_multiplier = "1.6"

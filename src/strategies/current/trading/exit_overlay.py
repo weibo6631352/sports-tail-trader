@@ -265,7 +265,7 @@ def _profit_take_metadata(
 ) -> dict[str, object] | None:
     """计算一档 profit-take SELL 的审计 metadata。"""
 
-    target_price = _profit_take_target_price(context, entry_price)
+    target_price = _profit_take_target_price(context, entry_price, config.tail_profit_take_multiplier)
     if target_price is None or target_price > Decimal("1"):
         return None
     expected_profit_take_profit = shares * (target_price - entry_price)
@@ -286,12 +286,24 @@ def _profit_take_metadata(
     }
 
 
-def _profit_take_target_price(context: ExtensionContext, entry_price: Decimal) -> Decimal | None:
-    """返回买入价上方一档 tick 的 profit-take 目标价。"""
+def _profit_take_target_price(
+    context: ExtensionContext,
+    entry_price: Decimal,
+    multiplier: Decimal | None = None,
+) -> Decimal | None:
+    """计算 profit-take 目标价。
+
+    multiplier 不为 None 时：target = entry_price × multiplier，超 CLOB 上限收敛到
+    cap（0.99）；适合低价买入预期大幅涨价后止盈。
+    multiplier 为 None 时：target = entry_price + 1 tick（原资金效率模式）。
+    """
 
     tick_size = _effective_tick_size(context)
     if tick_size is None or tick_size <= Decimal("0"):
         tick_size = Decimal("0.01")
+    if multiplier is not None and multiplier > Decimal("1"):
+        raw = entry_price * multiplier
+        return cap_price_to_clob_limit(raw, tick_size=tick_size)
     units = (entry_price / tick_size).to_integral_value(rounding=ROUND_FLOOR)
     target = (units + 1) * tick_size
     if target <= entry_price:

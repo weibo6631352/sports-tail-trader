@@ -295,6 +295,10 @@ class CurrentStrategyConfig:
     tail_min_expected_profit_per_hour_usdc: Decimal = Decimal("0.10")
     tail_profit_take_min_profit_usdc: Decimal = Decimal("0.02")
     tail_profit_take_hold_minutes: int = 2
+    # 止盈目标价倍数：目标卖价 = entry_price × multiplier，超过 1.0 时自动收敛到 0.99。
+    # None（默认）= 只上一档 tick（原有资金效率模式）；
+    # 1.6 = 低价买入时预期 60% 价格涨幅，高价买入自动收敛到近结算价。
+    tail_profit_take_multiplier: Decimal | None = None
     tail_entry_maker_max_resting_seconds: int = 60
     tail_settlement_hold_minutes: int = 180
     # 比赛结束后等待 Polymarket 权威结算的缓冲时间（分钟）。

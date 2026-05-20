@@ -124,7 +124,16 @@ class Settings(BaseSettings):
     # 覆盖 inplay feed 没有的运动：cricket/handball/rugby/boxing/mma/golf/horse_racing/f1/motogp。
     goalserve_api_key: SecretStr | None = None
     goalserve_livescore_enabled: bool = True
-    goalserve_livescore_sports: str = "cricket,handball,rugby,boxing,mma,golf_pga,golf_dp,golf_liv,golf_lpga,horse_racing_us,horse_racing_uk,horse_racing_au,horse_racing_hk,f1,motogp"
+    # 覆盖所有支持 livescore getfeed 的运动。
+    # nba/mlb/nhl/tennis/basketball/baseball/hockey 通过 XML 路径拉取，
+    # 与 inplay feed 互为补充（inplay IP 被封时这些路径作为主要数据源）。
+    goalserve_livescore_sports: str = (
+        "nba,mlb,nhl,wnba,basketball,baseball,hockey,tennis,"
+        "cricket,handball,rugby,boxing,mma,"
+        "golf_pga,golf_dp,golf_liv,golf_lpga,"
+        "horse_racing_us,horse_racing_uk,horse_racing_au,horse_racing_hk,"
+        "f1,motogp"
+    )
     goalserve_livescore_base_url: str = "http://www.goalserve.com/getfeed"
     goalserve_livescore_timeout_s: float = Field(default=10.0, ge=1.0)
 

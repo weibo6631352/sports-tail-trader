@@ -15,7 +15,7 @@ from polymarket_trader.extension_api import ExtensionContext
 
 from strategies.current.allocation import AllocationMarketSnapshot
 from strategies.current.config import CurrentStrategyConfig
-from strategies.current.risk import check_tail_entry_risk
+from strategies.current.risk import check_tail_entry_risk, event_key_for_market, league_key_for_market
 from strategies.current.trading.helpers import fill_notional_usdc
 
 
@@ -37,12 +37,17 @@ def _apply_tail_risk_limits(
     updated_allocations: list[Allocation] = []
     extra_budget_changes: list[MarketBuyBudgetChanged] = []
     focus_metadata: dict[str, object] = {}
+    # 同轮已批准但尚未成交的计划预算：防止同事件多市场并发绕过事件/联赛上限。
+    planned_event_budget: dict[str, Decimal] = {}
+    planned_league_budget: dict[str, Decimal] = {}
     for allocation in plan.allocations:
         key = (allocation.condition_id, allocation.token_id or "")
         snapshot = snapshot_by_key.get(key)
         if snapshot is None or allocation.buy_budget_usdc <= Decimal("0"):
             updated_allocations.append(allocation)
             continue
+        ev_key = event_key_for_market(snapshot.market)
+        lg_key = league_key_for_market(snapshot.market, context.metadata)
         risk_decision = check_tail_entry_risk(
             config,
             market=snapshot.market,
@@ -53,10 +58,19 @@ def _apply_tail_risk_limits(
             account_snapshot=context.account_snapshot,
             now=context.now,
             bankroll_usdc=context.bankroll_usdc or Decimal("0"),
+            extra_event_planned_usdc=planned_event_budget.get(ev_key, Decimal("0")),
+            extra_league_planned_usdc=planned_league_budget.get(lg_key, Decimal("0")),
         )
         if allocation.condition_id == focus_condition_id and allocation.token_id == focus_token_id:
             focus_metadata.update(risk_decision.metadata or {})
         if risk_decision.passed:
+            # 记录已批准预算，后续同轮同事件/联赛市场的风险检查会把它计入敞口。
+            planned_event_budget[ev_key] = (
+                planned_event_budget.get(ev_key, Decimal("0")) + allocation.buy_budget_usdc
+            )
+            planned_league_budget[lg_key] = (
+                planned_league_budget.get(lg_key, Decimal("0")) + allocation.buy_budget_usdc
+            )
             updated_allocations.append(allocation)
             continue
         updated = replace(
