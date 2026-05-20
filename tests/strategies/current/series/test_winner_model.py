@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from strategies.current.series.types import SeriesState
 from strategies.current.series.winner_model import (
+    expected_games_remaining,
     series_win_probability,
     team_b_win_probability,
 )
@@ -81,3 +82,43 @@ def test_extreme_p_zero_returns_zero() -> None:
 def test_extreme_p_one_returns_one() -> None:
     p = series_win_probability(_state(0, 0), Decimal("1"))
     assert p == Decimal(1)
+
+
+# ---------------------------------------------------------------------------
+# expected_games_remaining
+# ---------------------------------------------------------------------------
+
+def test_expected_games_already_over_returns_zero() -> None:
+    # team_a already clinched
+    assert expected_games_remaining(_state(4, 1), Decimal("0.6")) == 0.0
+
+
+def test_expected_games_three_zero_best_of_seven_p06() -> None:
+    # 3-0, p=0.6 for team_a. needed_a=1, needed_b=4.
+    # E = 1*0.6 + 2*0.24 + 3*0.096 + 4*(0.0384+0.0256) = 0.6+0.48+0.288+0.256 = 1.624
+    result = expected_games_remaining(_state(3, 0), Decimal("0.6"))
+    assert abs(result - 1.624) < 0.001
+
+
+def test_expected_games_zero_zero_best_of_seven_p05() -> None:
+    # Equal teams, no games played. Known result = 5.8125
+    result = expected_games_remaining(_state(0, 0), Decimal("0.5"))
+    assert abs(result - 5.8125) < 0.001
+
+
+def test_expected_games_two_one_best_of_seven_p05() -> None:
+    # 2-1, p=0.5, needed_a=2, needed_b=3. min=3, max=4.
+    # g=3: P(A wins) = C(2,1)*0.5^2*0.5^1 = 2*0.125=0.25
+    #       P(B wins) = C(2,2)*0.5^3*0.5^0 = 0.125
+    # g=4: P(A wins) = C(3,1)*0.5^2*0.5^2 = 3*0.0625=0.1875
+    #       P(B wins) = C(3,2)*0.5^3*0.5^1 = 3*0.0625=0.1875
+    # E = 3*(0.25+0.125) + 4*(0.1875+0.1875) = 3*0.375 + 4*0.375 = 1.125+1.5 = 2.625
+    result = expected_games_remaining(_state(2, 1), Decimal("0.5"))
+    assert abs(result - 2.625) < 0.001
+
+
+def test_expected_games_best_of_five_one_zero_p05() -> None:
+    # 1-0 in best_of_5, p=0.5. needed_a=2, needed_b=3.
+    # Same as 2-1 test above (symmetric): 2.625
+    result = expected_games_remaining(_state(1, 0, best_of=5), Decimal("0.5"))
+    assert abs(result - 2.625) < 0.001

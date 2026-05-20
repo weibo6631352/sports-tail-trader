@@ -302,6 +302,13 @@ class CurrentStrategyConfig:
     tail_recovery_profit_take_enabled: bool = True
     tail_recovery_profit_take_min_avg_price: Decimal = Decimal("0.90")
 
+    # Series 结算时间估算：每场比赛间隔（包含主客场轮换/交通/休息日）。
+    # NBA/NHL 季后赛典型约 2-3 天；使用偏保守的 2.5 天作为默认。
+    tail_series_avg_days_per_game: float = 2.5
+    # Series 资金效率门槛（每天最低预期利润，美元）。
+    # 防止持有几周但利润极薄的 series 头寸长期占用资金。
+    tail_series_min_expected_profit_per_day_usdc: Decimal = Decimal("0.02")
+
     # Outright family 配置。默认 budget=0 + RECORD_ONLY；必须两个 flip 才真实下单。
     tail_outright_enabled_market_types: tuple[SportsMarketType, ...] = (
         SportsMarketType.MONEYLINE,

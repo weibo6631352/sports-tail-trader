@@ -104,14 +104,16 @@ def _estimated_settlement_hold_minutes(
     """单场比赛等待结算的资金占用时间估算（分钟）。
 
     估算优先级：
-    1. 单场比赛已结束（ENDED）：仅等待 Polymarket 权威结算缓冲。
-    2. 单场比赛进行中、有时钟（篮球/足球/冰球）：seconds_remaining + 缓冲。
-    3. 无时钟运动（棒球/网球）进行中：基于赛况状态推算剩余时间 + 缓冲。
-    4. 无比赛数据：tail_settlement_hold_minutes 保守值。
+    1. 单场比赛已结束（ENDED）且系列赛未完结：用系列赛剩余场次估算结算时间。
+       封盘时间 ≠ 结算时间：Polymarket 对属于系列赛的市场可能等到系列完结才结算。
+    2. 单场比赛已结束（ENDED）且无系列赛上下文：仅等待 Polymarket 权威结算缓冲。
+    3. 单场比赛进行中、有时钟（篮球/足球/冰球）：seconds_remaining + 缓冲。
+    4. 无时钟运动（棒球/网球）进行中：基于赛况状态推算剩余时间 + 缓冲。
+    5. 无比赛数据：tail_settlement_hold_minutes 保守值。
 
     仅供 SINGLE_GAME 路径调用。Series/Outright 走独立 decide 函数
     （decide_series_entry / decide_outright_entry），有各自的风控预算模型，
-    不经过 _capital_efficiency_gate，此函数不处理那两类市场。
+    不经过 _capital_efficiency_gate。
 
     Polymarket end_date 对体育单场市场 = game_start_time，与封盘时间无关；
     封盘由 Polymarket 在赛事结果确认后自行决定。
@@ -124,6 +126,10 @@ def _estimated_settlement_hold_minutes(
 
     if game is not None:
         if game.status == LiveGameStatus.ENDED:
+            # 如果 metadata 有系列赛热态且系列赛尚未完结，结算时间取决于系列完结
+            series_hold = _series_settlement_hold_minutes_if_active(config, context)
+            if series_hold is not None:
+                return series_hold
             return buffer
         if game.status == LiveGameStatus.LIVE:
             if game.seconds_remaining is not None:
@@ -133,6 +139,51 @@ def _estimated_settlement_hold_minutes(
                 return max(math.ceil(estimated / 60) + buffer, 1)
 
     return max(int(config.tail_settlement_hold_minutes), 1)
+
+
+def _series_settlement_hold_minutes_if_active(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+) -> int | None:
+    """若 metadata 含系列赛热态且系列赛未完结，返回估算到结算的分钟数；否则返回 None。
+
+    适用于 SINGLE_GAME 市场：单场已结束但整个系列赛仍在进行时，Polymarket
+    可能等到系列完结才批量结算所有相关市场，用封盘时间（比赛结束）会严重低估
+    资金占用时间。
+    """
+    from strategies.current.series.match import series_state_from_metadata
+    from strategies.current.series.winner_model import expected_games_remaining
+
+    state = series_state_from_metadata(context.metadata or {})
+    if state is None:
+        return None
+
+    needed_a = max(0, (state.best_of + 1) // 2 - state.wins_a)
+    needed_b = max(0, (state.best_of + 1) // 2 - state.wins_b)
+    if needed_a <= 0 or needed_b <= 0:
+        return None  # 系列赛已有胜者，按常规缓冲结算
+
+    exp_games = expected_games_remaining(state, Decimal("0.5"))
+    avg_days = config.tail_series_avg_days_per_game
+    buffer = max(config.tail_settlement_buffer_minutes, 1)
+    now = context.now
+    if now is None:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+
+    next_game_at = state.next_game_at
+    if next_game_at is not None:
+        tz_now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        tz_next = next_game_at if next_game_at.tzinfo else next_game_at.replace(tzinfo=timezone.utc)
+        from datetime import timezone
+        if tz_next > tz_now:
+            days_to_next = (tz_next - tz_now).total_seconds() / 86400.0
+            remaining_after_first = max(0.0, exp_games - 1.0)
+            total_days = days_to_next + remaining_after_first * avg_days
+            return max(int(total_days * 24 * 60) + buffer, buffer + 1)
+
+    total_days = exp_games * avg_days
+    return max(int(total_days * 24 * 60) + buffer, buffer + 1)
 
 
 def _estimate_seconds_remaining_from_state(game: object) -> int | None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, Mapping
 
 from polymarket_trader.extension_api import DecisionKind, ExtensionContext, ExtensionDecision, ExtensionPorts, MarketTokenView
 
@@ -175,6 +176,33 @@ def decide_series_entry(
             reason="series_missing_best_ask_for_order",
             metadata={"market_family": "series", "series_sub_type": sub_type.value},
         )
+
+    # 资金效率门禁：用系列赛热态估算实际结算天数，排除长周期低效订单。
+    # 封盘时间 ≠ 结算时间：某些市场在单场结束后数天才结算（等待系列完结）。
+    settlement_days = _series_estimated_settlement_days(
+        ctx_meta,
+        dict(evaluation.metadata),
+        now=now,
+        avg_days_per_game=config.tail_series_avg_days_per_game,
+        settlement_buffer_minutes=config.tail_settlement_buffer_minutes,
+    )
+    eff_passed, eff_meta = _series_capital_efficiency_metadata(
+        proposed_amount,
+        order_best_ask,
+        settlement_days,
+        config.tail_series_min_expected_profit_per_day_usdc,
+    )
+    if not eff_passed:
+        return ExtensionDecision.skip(
+            reason="series_capital_efficiency_below_min",
+            metadata={
+                "market_family": "series",
+                "series_sub_type": sub_type.value,
+                "series_metadata": dict(evaluation.metadata),
+                **eff_meta,
+            },
+        )
+
     entry_price_cap = _series_entry_price(evaluation, fallback=settings.max_entry_price)
     return ExtensionDecision.buy(
         reason=f"series_{sub_type.value}_entry_accepted",
@@ -192,8 +220,82 @@ def decide_series_entry(
             "tail_action": "auto_execute",
             "tail_reason": f"series_{sub_type.value}_entry_accepted",
             "execution_permission": permission.value,
+            **eff_meta,
         },
     )
+
+
+def _series_estimated_settlement_days(
+    ctx_meta: Mapping[str, Any],
+    evaluation_metadata: Mapping[str, Any],
+    *,
+    now: datetime,
+    avg_days_per_game: float,
+    settlement_buffer_minutes: int,
+) -> float:
+    """从系列赛热态估算资金占用天数。
+
+    优先用 expected_games_remaining 计算（基于当前比分和单场胜率）；
+    next_game_at 已知时精确计算到首场的等待时间；否则按 avg_days_per_game 估算。
+    仅 WINNER 子类型的 metadata 包含 p_per_game；TOTAL_GAMES / HANDICAP 缺失时
+    用盈亏中性估计（needed_wins 平均值）作为保守回退，避免完全跳过效率检查。
+    """
+    from strategies.current.series.match import series_state_from_metadata
+    from strategies.current.series.winner_model import expected_games_remaining
+
+    state = series_state_from_metadata(ctx_meta)
+    if state is None:
+        return -1.0
+
+    p_raw = evaluation_metadata.get("p_per_game")
+    if p_raw is not None:
+        try:
+            p_per_game = Decimal(str(p_raw))
+        except Exception:
+            p_per_game = Decimal("0.5")
+    else:
+        # 没有 p_per_game 时（TOTAL_GAMES/HANDICAP）用 0.5 作为中性估计
+        p_per_game = Decimal("0.5")
+
+    exp_games = expected_games_remaining(state, p_per_game)
+    buffer_days = settlement_buffer_minutes / 60.0 / 24.0
+
+    next_game_at = state.next_game_at
+    if next_game_at is not None:
+        tz_now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        tz_next = next_game_at if next_game_at.tzinfo else next_game_at.replace(tzinfo=timezone.utc)
+        if tz_next > tz_now:
+            days_to_next = (tz_next - tz_now).total_seconds() / 86400.0
+            remaining_after_first = max(0.0, exp_games - 1.0)
+            return days_to_next + remaining_after_first * avg_days_per_game + buffer_days
+
+    return exp_games * avg_days_per_game + buffer_days
+
+
+def _series_capital_efficiency_metadata(
+    proposed_amount: Decimal,
+    entry_price: Decimal,
+    settlement_days: float,
+    min_per_day_usdc: Decimal,
+) -> tuple[bool, dict[str, object]]:
+    """计算 series 入场的资金效率并返回 (通过, metadata)。
+
+    通过条件：每天预期利润 ≥ min_per_day_usdc。
+    预期利润 = shares × (1 - entry_price)（假设结算时 token 价值 = 1）。
+    """
+    if entry_price <= Decimal("0") or entry_price >= Decimal("1") or settlement_days <= 0:
+        return True, {}
+    shares = proposed_amount / entry_price
+    expected_profit = shares * (Decimal("1") - entry_price)
+    expected_profit_per_day = expected_profit / Decimal(str(settlement_days))
+    meta: dict[str, object] = {
+        "series_estimated_settlement_days": round(settlement_days, 2),
+        "series_expected_profit_usdc": str(expected_profit.quantize(Decimal("0.0001"))),
+        "series_expected_profit_per_day_usdc": str(expected_profit_per_day.quantize(Decimal("0.0001"))),
+        "series_min_expected_profit_per_day_usdc": str(min_per_day_usdc),
+    }
+    passed = expected_profit_per_day >= min_per_day_usdc
+    return passed, meta
 
 
 def resolve_series_sub_type_label(decision: ExtensionDecision) -> str:

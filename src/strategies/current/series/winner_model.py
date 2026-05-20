@@ -20,6 +20,7 @@ i 枚举 "team_a 拿下 needed_a 场前，team_b 输了多少场"。
 from __future__ import annotations
 
 from decimal import Decimal
+from math import comb
 
 from strategies.current.series.types import SeriesState
 
@@ -56,6 +57,30 @@ def series_win_probability(state: SeriesState, p_per_game: Decimal) -> Decimal:
     if probability < Decimal(0):
         return Decimal(0)
     return probability
+
+
+def expected_games_remaining(state: SeriesState, p_per_game: Decimal) -> float:
+    """期望系列赛剩余场数（负二项分布加权均值）。
+
+    给定当前比分 (wins_a, wins_b) 与单场胜率，算出系列赛预计还需要打几场。
+    best-of-7 且 3-0 领先时期望约 1.6 场；0-0 均势时期望约 5.8 场。
+    """
+    needed_a = _needed_wins(state.best_of) - state.wins_a
+    needed_b = _needed_wins(state.best_of) - state.wins_b
+    if needed_a <= 0 or needed_b <= 0:
+        return 0.0
+    p = max(0.0, min(1.0, float(p_per_game)))
+    q = 1.0 - p
+    expected = 0.0
+    for g in range(max(needed_a, needed_b), needed_a + needed_b):
+        p_a = 0.0
+        if g >= needed_a and (g - needed_a) < needed_b:
+            p_a = comb(g - 1, needed_a - 1) * (p ** needed_a) * (q ** (g - needed_a))
+        p_b = 0.0
+        if g >= needed_b and (g - needed_b) < needed_a:
+            p_b = comb(g - 1, needed_b - 1) * (q ** needed_b) * (p ** (g - needed_b))
+        expected += g * (p_a + p_b)
+    return max(expected, 0.0)
 
 
 def team_b_win_probability(state: SeriesState, p_per_game: Decimal) -> Decimal:
@@ -106,4 +131,4 @@ def _binomial(n: int, k: int) -> int:
     return result
 
 
-__all__ = ["series_win_probability", "team_b_win_probability"]
+__all__ = ["expected_games_remaining", "series_win_probability", "team_b_win_probability"]
