@@ -6,16 +6,30 @@ from .types import LiveGameState
 
 
 def is_mlb_game(game: LiveGameState) -> bool:
-    """识别 MLB / KBO 等棒球类联赛。"""
+    """识别棒球类赛事（Goalserve inplay sport=baseball 或联赛名含 mlb/kbo/baseball）。
 
+    livescore 接口返回的 league 是 "USA: MLB" 等复合形式，不能仅靠精确匹配。
+    sport 字段由 goalserve_parsers 注入，是更可靠的分类依据。
+    """
+    sport = game.sport.strip().lower()
+    if sport == "baseball":
+        return True
     league = game.league.strip().lower()
-    return league in {"mlb", "kbo", "baseball", "korean baseball", "korea baseball organization"}
+    return (
+        "mlb" in league
+        or "kbo" in league
+        or league in {"baseball", "korean baseball", "korea baseball organization"}
+    )
 
 
 def is_nfl_game(game: LiveGameState) -> bool:
-    """识别 NFL / 美式橄榄球。"""
+    """识别美式橄榄球（Goalserve sport=american-football 或联赛名含 nfl）。"""
 
-    return game.league.strip().lower() in {"nfl", "american football"}
+    sport = game.sport.strip().lower()
+    if sport == "american-football":
+        return True
+    league = game.league.strip().lower()
+    return "nfl" in league or league == "american football"
 
 
 def is_tennis_game(game: LiveGameState) -> bool:
