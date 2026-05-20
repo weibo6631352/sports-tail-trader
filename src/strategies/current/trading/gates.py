@@ -878,10 +878,10 @@ def _goalserve_moneyline_veto(
     margin = config.goalserve_cross_validation_margin
     if margin <= 0:
         return None
-    # inplay 优先；inplay 缺失（None）时 fallback 到赛前赔率（pregame_moneyline）
+    # 只用 inplay 赔率做否决：赛前赔率已不反映当前比赛进程（比赛尾段 Polymarket ask
+    # 大幅高于赛前赔率是正常的），用 pregame 做否决会产生大量假阳性拒绝。
+    # inplay 赔率不可用（None 或暂停）时放行，不否决。
     gs = context.metadata.get("goalserve_moneyline")
-    if gs is None:
-        gs = context.metadata.get("pregame_moneyline")
     if not isinstance(gs, dict):
         return None
     if gs.get("suspended"):
