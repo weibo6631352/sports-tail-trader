@@ -759,6 +759,26 @@ def _goalserve_halftime_veto(
     }
 
 
+def _sport_base_moneyline_lead(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+) -> int:
+    """返回当前运动对应的 min_moneyline_lead 基准值。
+
+    足球和冰球是低分运动，用各自专属阈值；其余用全局值。
+    """
+    from strategies.sports_framework import is_hockey_game, is_soccer_game
+    from strategies.sports_framework.parsing import live_game_state_from_metadata
+
+    game = live_game_state_from_metadata(context.metadata)
+    if game is not None:
+        if is_soccer_game(game):
+            return config.tail_soccer_min_moneyline_lead
+        if is_hockey_game(game):
+            return config.tail_hockey_min_moneyline_lead
+    return config.tail_min_moneyline_lead
+
+
 def _goalserve_policy_adjustments(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
@@ -839,16 +859,17 @@ def _goalserve_policy_adjustments(
                 pass
 
     adjustments: dict[str, object] = {}
+    base_lead = _sport_base_moneyline_lead(config, context)
 
     if spread_conflict:
         # Spread 冲突：要求更大领先优势以抵消不确定性
         extra = config.goalserve_spread_conflict_extra_lead
-        adjustments["min_moneyline_lead"] = config.tail_min_moneyline_lead + extra
+        adjustments["min_moneyline_lead"] = base_lead + extra
 
     elif ml_confirmed and spread_confirmed:
         # 多信号确认：放宽领先要求，允许更早入场
         relief = config.goalserve_multi_confirm_lead_relief
-        adjustments["min_moneyline_lead"] = max(1, config.tail_min_moneyline_lead - relief)
+        adjustments["min_moneyline_lead"] = max(1, base_lead - relief)
         time_bonus = config.goalserve_multi_confirm_time_bonus_seconds
         adjustments["max_moneyline_seconds_remaining"] = (
             config.tail_max_moneyline_seconds_remaining + time_bonus

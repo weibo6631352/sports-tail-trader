@@ -23,3 +23,15 @@ def is_tennis_game(game: LiveGameState) -> bool:
 
     league = game.league.strip().lower()
     return game.tennis_state is not None or "tennis" in league or league in {"atp", "wta"}
+
+
+def is_soccer_game(game: LiveGameState) -> bool:
+    """识别足球类赛事（sport=soccer 或 soccer_state 存在）。"""
+
+    return game.sport.strip().lower() == "soccer" or game.soccer_state is not None
+
+
+def is_hockey_game(game: LiveGameState) -> bool:
+    """识别冰球类赛事（sport=ice-hockey）。"""
+
+    return game.sport.strip().lower() in {"ice-hockey", "hockey"}

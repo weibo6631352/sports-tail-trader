@@ -81,9 +81,16 @@ def _market_has_live_tail_state(
         away = event.away
         if home is None or away is None:
             return False
+        sport = str(event.sport or "").strip().lower()
+        if sport == "soccer":
+            min_lead = config.tail_soccer_min_moneyline_lead
+        elif sport in {"ice-hockey", "hockey"}:
+            min_lead = config.tail_hockey_min_moneyline_lead
+        else:
+            min_lead = config.tail_min_moneyline_lead
         return (
             seconds_remaining <= config.tail_max_moneyline_seconds_remaining
-            and abs((home.score or 0) - (away.score or 0)) >= config.tail_min_moneyline_lead
+            and abs((home.score or 0) - (away.score or 0)) >= min_lead
         )
     return False
 

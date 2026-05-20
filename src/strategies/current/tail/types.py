@@ -109,6 +109,8 @@ class TailPolicy:
     max_spreads_seconds_remaining: int = 120
     min_under_safety_margin: Decimal = Decimal("2")
     min_moneyline_lead: int = 6
+    soccer_min_moneyline_lead: int = 1
+    hockey_min_moneyline_lead: int = 1
     mlb_eighth_moneyline_min_lead: int = 2
     mlb_ninth_moneyline_min_lead: int = 3
     min_spread_safety_margin: Decimal = Decimal("2")

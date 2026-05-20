@@ -95,6 +95,7 @@ class LiveGameState:
     seconds_remaining: int | None = None
     observed_at: datetime | None = None
     source_conflicts: tuple[Mapping[str, Any], ...] = ()
+    sport: str = ""
     baseball_state: BaseballGameState | None = None
     tennis_state: TennisGameState | None = None
     soccer_state: SoccerGameState | None = None

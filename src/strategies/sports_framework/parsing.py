@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Mapping
 
-from polymarket_trader.domain.sports_live import BaseballGameState, VolleyballGameState
+from polymarket_trader.domain.sports_live import BaseballGameState, SoccerGameState, VolleyballGameState
 
 from .types import LiveGameState, LiveGameStatus, TennisGameState
 
@@ -46,8 +46,10 @@ def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState 
         seconds_remaining=_optional_int(raw_game.get("seconds_remaining")),
         observed_at=observed_at,
         source_conflicts=_source_conflicts(raw_game.get("source_conflicts")),
+        sport=str(raw_game.get("sport") or ""),
         baseball_state=_baseball_state(raw_game.get("baseball_state")),
         tennis_state=_tennis_state(raw_game.get("tennis_state")),
+        soccer_state=_soccer_state(raw_game.get("soccer_state")),
         volleyball_state=_volleyball_state(raw_game.get("volleyball_state")),
     )
 
@@ -142,6 +144,23 @@ def _tennis_set_scores(value: object) -> tuple[tuple[int, int], ...]:
             continue
         scores.append((home_games, away_games))
     return tuple(scores)
+
+
+def _soccer_state(value: object) -> SoccerGameState | None:
+    if isinstance(value, SoccerGameState):
+        return value
+    if not isinstance(value, Mapping):
+        return None
+    return SoccerGameState(
+        period=_opt_str(value, "period"),
+        clock_minutes=_optional_int(value.get("clock_minutes")),
+        added_minutes=_optional_int(value.get("added_minutes")),
+        home_red_cards=_optional_int(value.get("home_red_cards")) or 0,
+        away_red_cards=_optional_int(value.get("away_red_cards")) or 0,
+        home_yellow_cards=_optional_int(value.get("home_yellow_cards")) or 0,
+        away_yellow_cards=_optional_int(value.get("away_yellow_cards")) or 0,
+        last_event_minute=_optional_int(value.get("last_event_minute")),
+    )
 
 
 def _volleyball_state(value: object) -> VolleyballGameState | None:

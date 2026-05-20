@@ -81,6 +81,9 @@ class SeriesStateWorker:
         targets = tuple(m for m in markets if self._is_series_winner_market(m))
         self._last_markets_seen = len(targets)
         refreshed = 0
+        # event_slug → series_state: 每轮只存最新成功拉取的 state，用于事后
+        # 广播给同一事件的 SINGLE_GAME 市场，修正结算时间估算。
+        event_slug_to_state: dict[str, SeriesState] = {}
         for market in targets:
             sport_key = self._sport_key_for(market)
             if not sport_key:
@@ -104,12 +107,34 @@ class SeriesStateWorker:
                 if state is not None:
                     self._upsert(market, state)
                     refreshed += 1
+                    if market.event_slug:
+                        event_slug_to_state[market.event_slug] = state
             # 发信号无论本轮是否重新拉取——系列赛 WS 盘口无比赛时不推新快照，
             # 需由此周期信号驱动 TradingDecisionWorker 重估入场机会。
             if self._has_series_state(market.condition_id):
                 await self._publish_entry_signals(market)
+        # 把系列赛热态广播给同一 event_slug 下的 SINGLE_GAME 市场，使其
+        # 结算时间估算可正确用系列赛剩余场次，而非单场结束缓冲。
+        if event_slug_to_state:
+            self._propagate_to_single_game_markets(markets, event_slug_to_state)
         self._last_markets_refreshed = refreshed
         return refreshed
+
+    def _propagate_to_single_game_markets(
+        self,
+        markets: tuple[Market, ...],
+        event_slug_to_state: dict[str, SeriesState],
+    ) -> None:
+        for market in markets:
+            if self._is_series_winner_market(market):
+                continue
+            event_slug = market.event_slug
+            if not event_slug:
+                continue
+            state = event_slug_to_state.get(event_slug)
+            if state is None:
+                continue
+            self._upsert(market, state)
 
     def _has_series_state(self, condition_id: str) -> bool:
         record = self._entry_metadata_store.find(condition_id=condition_id)

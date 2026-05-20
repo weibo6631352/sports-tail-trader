@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -17,8 +18,10 @@ from strategies.sports_framework import (
     LiveGameStatus,
     SportsMarketSnapshot,
     SportsMarketType,
+    is_hockey_game,
     is_mlb_game,
     is_nfl_game,
+    is_soccer_game,
     is_tennis_game,
 )
 
@@ -133,7 +136,7 @@ def evaluate_tail_opportunity(
     if market.market_type == SportsMarketType.TOTALS:
         return _evaluate_totals(candidate, policy)
     if market.market_type == SportsMarketType.MONEYLINE:
-        return _evaluate_moneyline(candidate, policy)
+        return _evaluate_moneyline(candidate, _sport_moneyline_policy(game, policy))
     if market.market_type == SportsMarketType.SPREADS:
         return _evaluate_spreads(candidate, policy)
     return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
@@ -194,7 +197,7 @@ def evaluate_scale_in_opportunity(
     if market.market_type == SportsMarketType.TOTALS:
         return _evaluate_totals_scale_in(candidate, policy)
     if market.market_type == SportsMarketType.MONEYLINE:
-        return _evaluate_moneyline_scale_in(candidate, policy)
+        return _evaluate_moneyline_scale_in(candidate, _sport_moneyline_policy(game, policy))
     if market.market_type == SportsMarketType.SPREADS:
         return _evaluate_spreads_scale_in(candidate, policy)
     return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
@@ -382,4 +385,14 @@ def _can_bypass_market_end_window(
         if game.baseball_state is not None:
             return True
         return _mlb_tail_state_reached(game, market, policy)
-    return _standard_tail_state_reached(game, market, policy)
+    return _standard_tail_state_reached(game, market, _sport_moneyline_policy(game, policy))
+
+
+def _sport_moneyline_policy(game: LiveGameState, policy: TailPolicy) -> TailPolicy:
+    """为低分运动覆盖 min_moneyline_lead，避免足球/冰球被 6 分 lead 要求完全封住。"""
+
+    if is_soccer_game(game):
+        return dataclasses.replace(policy, min_moneyline_lead=policy.soccer_min_moneyline_lead)
+    if is_hockey_game(game):
+        return dataclasses.replace(policy, min_moneyline_lead=policy.hockey_min_moneyline_lead)
+    return policy

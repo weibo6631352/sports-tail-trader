@@ -20,7 +20,7 @@ from polymarket_trader.domain.sports_live import (
     TennisGameState,
 )
 
-from .leagues import is_mlb_game, is_nfl_game, is_tennis_game
+from .leagues import is_hockey_game, is_mlb_game, is_nfl_game, is_soccer_game, is_tennis_game
 from .parsing import live_game_state_from_metadata
 from .slug import (
     is_tennis_scope_candidate,
@@ -54,8 +54,10 @@ __all__ = [
     "SportsMarketSnapshot",
     "SportsMarketType",
     "TennisGameState",
+    "is_hockey_game",
     "is_mlb_game",
     "is_nfl_game",
+    "is_soccer_game",
     "is_tennis_game",
     "is_tennis_scope_candidate",
     "is_unsupported_period_total",

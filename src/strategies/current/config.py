@@ -222,6 +222,8 @@ class CurrentStrategyConfig:
     tail_max_spreads_seconds_remaining: int = 120
     tail_min_under_safety_margin: Decimal = Decimal("2")
     tail_min_moneyline_lead: int = 6
+    tail_soccer_min_moneyline_lead: int = 1
+    tail_hockey_min_moneyline_lead: int = 1
     tail_mlb_eighth_moneyline_min_lead: int = 2
     tail_mlb_ninth_moneyline_min_lead: int = 3
     tail_min_spread_safety_margin: Decimal = Decimal("2")
@@ -402,6 +404,8 @@ def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
         max_spreads_seconds_remaining=config.tail_max_spreads_seconds_remaining,
         min_under_safety_margin=config.tail_min_under_safety_margin,
         min_moneyline_lead=config.tail_min_moneyline_lead,
+        soccer_min_moneyline_lead=config.tail_soccer_min_moneyline_lead,
+        hockey_min_moneyline_lead=config.tail_hockey_min_moneyline_lead,
         mlb_eighth_moneyline_min_lead=config.tail_mlb_eighth_moneyline_min_lead,
         mlb_ninth_moneyline_min_lead=config.tail_mlb_ninth_moneyline_min_lead,
         min_spread_safety_margin=config.tail_min_spread_safety_margin,
