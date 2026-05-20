@@ -149,7 +149,7 @@ class GoalservePregameWorker:
                 market_slug=market.market_slug,
                 event_slug=market.event_slug,
                 source=record.source,
-                updated_at=record.updated_at,
+                updated_at=_utc_now(),
                 metadata=existing_metadata,
                 live_state_signal_allowed=record.live_state_signal_allowed,
                 live_state_signal_reason=record.live_state_signal_reason or "",
@@ -161,7 +161,11 @@ class GoalservePregameWorker:
         return written
 
     def _build_team_index(self) -> dict[str, PregameMatch]:
-        """构建 {normalized_home|normalized_away: PregameMatch} 双向索引。"""
+        """构建 {normalized_home|normalized_away: PregameMatch} 正向索引。
+
+        反向索引在 _lookup_match 内按需查询，以支持无固定主客场的运动（网球/MMA/拳击）。
+        同名碰撞时保留最新并记录警告。
+        """
 
         index: dict[str, PregameMatch] = {}
         for snapshot in self._snapshots.values():
@@ -170,6 +174,16 @@ class GoalservePregameWorker:
                 away_key = _normalize_team(match.away_team)
                 if home_key and away_key:
                     pair = f"{home_key}|{away_key}"
+                    if pair in index:
+                        logger.warning(
+                            "goalserve_pregame_worker: team index collision key=%s "
+                            "existing=%s/%s new=%s/%s",
+                            pair,
+                            index[pair].home_team,
+                            index[pair].away_team,
+                            match.home_team,
+                            match.away_team,
+                        )
                     index[pair] = match
         return index
 
@@ -202,11 +216,15 @@ def _lookup_match(
     home_name: str,
     away_name: str,
 ) -> PregameMatch | None:
-    """规范化后在双向索引中查找。"""
+    """规范化后查找。先正向（home|away），再反向（away|home）。
+
+    反向查找用于网球、MMA、拳击等无固定主客场运动：Polymarket 与 Goalserve
+    的队伍顺序可能相反。
+    """
 
     home_key = _normalize_team(home_name)
     away_key = _normalize_team(away_name)
-    return index.get(f"{home_key}|{away_key}")
+    return index.get(f"{home_key}|{away_key}") or index.get(f"{away_key}|{home_key}")
 
 
 _ML_OUTCOME_HOME = frozenset({"home", "1", "home team"})

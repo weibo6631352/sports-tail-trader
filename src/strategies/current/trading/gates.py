@@ -629,7 +629,9 @@ def _goalserve_strong_edge_signal(
     bonus = config.goalserve_strong_edge_price_bonus
     if threshold <= 0:
         return {}
-    gs = context.metadata.get("goalserve_moneyline") or context.metadata.get("pregame_moneyline")
+    gs = context.metadata.get("goalserve_moneyline")
+    if gs is None:
+        gs = context.metadata.get("pregame_moneyline")
     if not isinstance(gs, dict) or gs.get("suspended"):
         return {}
     if target_side == SportsMarketSide.HOME:
@@ -774,7 +776,9 @@ def _goalserve_policy_adjustments(
     if not config.goalserve_policy_adjustment_enabled:
         return {}
 
-    gs_ml = context.metadata.get("goalserve_moneyline") or context.metadata.get("pregame_moneyline")
+    gs_ml = context.metadata.get("goalserve_moneyline")
+    if gs_ml is None:
+        gs_ml = context.metadata.get("pregame_moneyline")
     gs_spread = context.metadata.get("goalserve_spread")
     gs_ht = context.metadata.get("goalserve_halftime")
 
@@ -874,8 +878,10 @@ def _goalserve_moneyline_veto(
     margin = config.goalserve_cross_validation_margin
     if margin <= 0:
         return None
-    # inplay 优先；inplay 缺失时 fallback 到赛前赔率（pregame_moneyline）
-    gs = context.metadata.get("goalserve_moneyline") or context.metadata.get("pregame_moneyline")
+    # inplay 优先；inplay 缺失（None）时 fallback 到赛前赔率（pregame_moneyline）
+    gs = context.metadata.get("goalserve_moneyline")
+    if gs is None:
+        gs = context.metadata.get("pregame_moneyline")
     if not isinstance(gs, dict):
         return None
     if gs.get("suspended"):

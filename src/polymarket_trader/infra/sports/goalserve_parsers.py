@@ -299,8 +299,9 @@ def _parse_soccer(events_dict: Mapping[str, Any], observed_at: datetime) -> list
 
         home_name = team.get("home", {}).get("name", "")
         away_name = team.get("away", {}).get("name", "")
-        home_score = _int_val(by_name.get("IGoal", {}).get("home")) if "IGoal" in by_name else _int_val(team.get("home", {}).get("score"))
-        away_score = _int_val(by_name.get("IGoal", {}).get("away")) if "IGoal" in by_name else _int_val(team.get("away", {}).get("score"))
+        _igoal = by_name.get("IGoal") or {}
+        home_score = _int_val(_igoal.get("home")) if _igoal.get("home") is not None else _int_val(team.get("home", {}).get("score"))
+        away_score = _int_val(_igoal.get("away")) if _igoal.get("away") is not None else _int_val(team.get("away", {}).get("score"))
 
         period_raw = info.get("period", "")
         soccer_period = _SOCCER_PERIOD_MAP.get(period_raw.lower(), None)
@@ -423,13 +424,12 @@ def _parse_baseball(events_dict: Mapping[str, Any], observed_at: datetime) -> li
         home_score = _int_val(team.get("home", {}).get("score"))
         away_score = _int_val(team.get("away", {}).get("score"))
 
-        # 局分：stats name="1".."9"（可能还有 "10","11" 延长局）
+        # 局分：stats name="1".."9"（可能还有 "10","11" 延长局）；不 break 以免遗漏不连续局
         inning_scores: list[tuple[int | None, int | None]] = []
         for i in range(1, 15):
             entry = by_name.get(str(i))
-            if entry is None:
-                break
-            inning_scores.append((_int_val(entry.get("home")), _int_val(entry.get("away"))))
+            if entry is not None:
+                inning_scores.append((_int_val(entry.get("home")), _int_val(entry.get("away"))))
 
         # 解析 inning 和 half（如 "Inning 5 Top" / "Inning 5 Bottom" / "Inning 5"）
         period_raw = info.get("period", "")
@@ -483,9 +483,6 @@ def _parse_baseball(events_dict: Mapping[str, Any], observed_at: datetime) -> li
 # ---------------------------------------------------------------------------
 # Tennis
 # ---------------------------------------------------------------------------
-
-_TENNIS_POINTS = {"0": "0", "15": "15", "30": "30", "40": "40", "50": "Ad"}
-
 
 def _parse_tennis(events_dict: Mapping[str, Any], observed_at: datetime) -> list[LiveEvent]:
     results: list[LiveEvent] = []
@@ -554,11 +551,7 @@ def _parse_tennis(events_dict: Mapping[str, Any], observed_at: datetime) -> list
             serving_side=serving_side,
         )
 
-        # Total score string (e.g. "6:2,4:6,4:5")
         score_str = info.get("score", "")
-        home_score_display = score_str.split(",")[-1].split(":")[0] if score_str else None
-        away_score_display = score_str.split(",")[-1].split(":")[-1] if score_str else None
-
         odds = _parse_odds(ev.get("odds", {}), event_id)
 
         results.append(
@@ -569,8 +562,8 @@ def _parse_tennis(events_dict: Mapping[str, Any], observed_at: datetime) -> list
                 league=info.get("league", ""),
                 sport="tennis",
                 participants=(
-                    Participant(role="home", name=home_name, score=_int_val(home_score_display), external_ids={"goalserve": event_id}),
-                    Participant(role="away", name=away_name, score=_int_val(away_score_display), external_ids={"goalserve": event_id}),
+                    Participant(role="home", name=home_name, score=home_sets, external_ids={"goalserve": event_id}),
+                    Participant(role="away", name=away_name, score=away_sets, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
                 period=period_raw,

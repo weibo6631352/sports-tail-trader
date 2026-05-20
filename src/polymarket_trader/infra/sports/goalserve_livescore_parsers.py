@@ -141,6 +141,8 @@ def _parse_cricket(scores: dict[str, Any], observed_at: datetime) -> list[LiveEv
             overs_completed = _int_val(time_raw) if time_raw else None
 
         innings_list = match.get("innings") or []
+        if isinstance(innings_list, dict):
+            innings_list = list(innings_list.values())
         current_innings: int | None = None
         batting_side: str | None = None
         runs: int | None = None
@@ -461,7 +463,7 @@ def _parse_golf(sport_key: str, scores: dict[str, Any], observed_at: datetime) -
 
         players_raw = tournament.get("player") or []
         if isinstance(players_raw, dict):
-            players_raw = list(players_raw.values())
+            players_raw = [players_raw]
 
         participants: list[Participant] = []
         for player in players_raw:
@@ -694,7 +696,7 @@ def _xml_status(raw: Any) -> SportsLiveGameStatus:
         return SportsLiveGameStatus.ENDED
     if s in _XML_SCHED_STATUSES:
         return SportsLiveGameStatus.SCHEDULED
-    if s in _XML_LIVE_STATUSES or any(kw in s for kw in ("quarter", "period", "inning", "set", "half", "bottom", "middle")):
+    if s in _XML_LIVE_STATUSES or any(kw in s for kw in ("quarter", "period", "inning", "set", "bottom")):
         return SportsLiveGameStatus.LIVE
     return SportsLiveGameStatus.UNKNOWN
 
@@ -707,7 +709,7 @@ def _basketball_seconds_remaining(status: str, timer_raw: Any) -> int | None:
     period_minutes = 12
     s = status.lower()
     try:
-        elapsed = int(str(timer_raw or "").strip())
+        elapsed = int(float(str(timer_raw or "").strip()))
     except (ValueError, TypeError):
         elapsed = 0
     remaining_in_period = max(0, period_minutes - elapsed) * 60
@@ -915,7 +917,13 @@ def _baseball_state_from_match(match: dict[str, Any]) -> BaseballGameState:
     inning: int | None = None
     half: str | None = None
     for i in range(1, 13):
-        if str(i) in status_raw or f"{i}th" in status_raw or f"{i}nd" in status_raw or f"{i}st" in status_raw or f"{i}rd" in status_raw:
+        if (
+            f" {i} " in f" {status_raw} "
+            or f"{i}th" in status_raw
+            or f"{i}nd" in status_raw
+            or f"{i}st" in status_raw
+            or f"{i}rd" in status_raw
+        ):
             inning = i
             break
     if "top" in status_raw:
@@ -933,7 +941,13 @@ def _baseball_seconds_remaining(status_raw: str) -> int | None:
     s = status_raw.lower()
     inning: int = 9
     for i in range(1, 13):
-        if str(i) in s or f"{i}th" in s or f"{i}nd" in s or f"{i}st" in s or f"{i}rd" in s:
+        if (
+            f" {i} " in f" {s} "
+            or f"{i}th" in s
+            or f"{i}nd" in s
+            or f"{i}st" in s
+            or f"{i}rd" in s
+        ):
             inning = i
             break
     if "extra" in s or inning > 9:
