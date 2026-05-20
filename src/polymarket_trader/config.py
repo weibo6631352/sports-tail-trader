@@ -108,46 +108,35 @@ class Settings(BaseSettings):
     # 在 candidates 阶段卡死（实测 25k discovered / 0 filtered_in）。所以默认开 +
     # supervisor 启动期对"trading 已就绪但 sports_live_state 关闭"发告警。
     sports_live_state_enabled: bool = True
-    sports_live_state_sources: str = "espn,nba,nhl,mlb,thesportsdb"
-    sports_live_state_espn_base_url: str = "https://site.api.espn.com"
-    sports_live_state_nba_base_url: str = "https://cdn.nba.com"
-    sports_live_state_nhl_base_url: str = "https://api-web.nhle.com"
-    sports_live_state_mlb_base_url: str = "https://statsapi.mlb.com"
-    sports_live_state_sofascore_base_url: str = "https://www.sofascore.com"
-    sports_live_state_sofascore_lookback_days: int = Field(default=1, ge=0, le=3)
-    sports_live_state_sofascore_lookahead_days: int = Field(default=3, ge=0, le=3)
-    sports_live_state_thesportsdb_base_url: str = "https://www.thesportsdb.com/api/v1/json/3"
-    sports_live_state_pandascore_base_url: str = "https://api.pandascore.co"
-    sports_live_state_pandascore_token: SecretStr | None = None
-    sports_live_state_pandascore_videogames: str = ""
-    # Phase 2 新增源 token：未配置时该源静默跳过装配，不阻塞主路径。
-    # tennis_live_data：api-tennis.com 商业 token；api_football：rapidapi key；
-    # college_football_data：CFBD Bearer token（NCAAB 走 ncaa-api 公共实例无需 token）。
-    sports_live_state_tennis_live_data_base_url: str = "https://api.api-tennis.com/tennis"
-    sports_live_state_tennis_live_data_token: SecretStr | None = None
-    sports_live_state_api_football_base_url: str = "https://api-football-v1.p.rapidapi.com/v3"
-    sports_live_state_api_football_token: SecretStr | None = None
-    sports_live_state_college_football_data_base_url: str = "https://api.collegefootballdata.com"
-    sports_live_state_college_football_data_token: SecretStr | None = None
-    sports_live_state_ncaa_api_base_url: str = "https://ncaa-api.henrygd.me"
-    sports_live_state_leagues: str = "nba,nhl,nfl,mlb,tennis,sports"
-    sports_live_state_interval_seconds: int = Field(default=5, ge=5)
-    sports_live_state_timeout_s: float = Field(default=5.0, ge=0.1)
-    # 各直播源独立超时覆盖；None 表示回退到 sports_live_state_timeout_s 全局值。
-    sports_live_state_timeout_s_espn: float | None = None
-    sports_live_state_timeout_s_sofascore: float | None = None
-    sports_live_state_timeout_s_nba: float | None = None
-    sports_live_state_timeout_s_nhl: float | None = None
-    sports_live_state_timeout_s_mlb: float | None = None
-    sports_live_state_timeout_s_thesportsdb: float | None = None
-    sports_live_state_timeout_s_tennis_live_data: float | None = None
-    sports_live_state_timeout_s_api_football: float | None = None
-    sports_live_state_timeout_s_pandascore: float | None = None
-    sports_live_state_timeout_s_college_football_data: float | None = None
-    sports_live_state_timeout_s_ncaa_api: float | None = None
+    sports_live_state_leagues: str = "nba,nhl,nfl,mlb,tennis,sports,atp,wta,itf,bkbbl,bkseriea"
+    sports_live_state_interval_seconds: int = Field(default=3, ge=1)
+    sports_live_state_timeout_s: float = Field(default=8.0, ge=0.1)
     sports_live_state_publish_entry_signals: bool = True
     sports_live_state_health_cooldown_base_s: float = Field(default=60.0, ge=1.0)
     sports_live_state_health_eviction_s: float = Field(default=1800.0, ge=60.0)
+
+    # Goalserve inplay feed 配置。认证方式：IP 白名单（无需 API key 在 URL 中）。
+    # proxy 仅用于开发环境（本机 Clash 代理）；生产设为空字符串或不配置。
+    goalserve_inplay_base_url: str = "http://inplay.goalserve.com"
+    goalserve_sports: str = "basketball,soccer,hockey,baseball,tennis,esports,amfootball,volleyball"
+    goalserve_proxy: str | None = None
+
+    # Goalserve getfeed livescore 配置。认证方式：API key 嵌入 URL。
+    # 覆盖 inplay feed 没有的运动：cricket/handball/rugby/boxing/mma/golf/horse_racing/f1/motogp。
+    goalserve_api_key: SecretStr | None = None
+    goalserve_livescore_enabled: bool = True
+    goalserve_livescore_sports: str = "cricket,handball,rugby,boxing,mma,golf_pga,golf_dp,golf_liv,golf_lpga,horse_racing_us,horse_racing_uk,horse_racing_au,horse_racing_hk,f1,motogp"
+    goalserve_livescore_base_url: str = "http://www.goalserve.com/getfeed"
+    goalserve_livescore_timeout_s: float = Field(default=10.0, ge=1.0)
+
+    # Goalserve 赛前赔率（Pregame Odds）配置。认证方式：API key 嵌入 URL，GZIP 压缩。
+    # 数据量极大（>100MB），默认关闭；按需启用并配置 GOALSERVE_API_KEY。
+    goalserve_pregame_enabled: bool = False
+    goalserve_pregame_sports: str = "soccer,basketball,tennis,hockey,baseball,amfootball,esports,mma,cricket,rugby,volleyball,handball,boxing,darts,table_tennis,futsal,rugbyleague"
+    goalserve_pregame_base_url: str = "http://www.goalserve.com"
+    goalserve_pregame_timeout_s: float = Field(default=30.0, ge=1.0)
+    # ts 增量拉取；每次只拿变化部分，300s 足以在 ts 未超期前更新一次。
+    goalserve_pregame_interval_seconds: int = Field(default=300, ge=60)
 
     # 赛季级状态子系统：服务于 outright 反向定价。cadence 小时级。
     sports_season_state_enabled: bool = False
@@ -230,72 +219,10 @@ class Settings(BaseSettings):
         "signer_private_key",
         "database_password",
         "database_url_override",
+        "goalserve_api_key",
     )
     _STARTUP_REQUIRED_SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
         "wallet_private_key",
-    )
-    _SUPPORTED_SPORTS_LIVE_STATE_SOURCES: ClassVar[tuple[str, ...]] = (
-        "espn",
-        "nba",
-        "nhl",
-        "mlb",
-        "sofascore",
-        "thesportsdb",
-        "pandascore",
-        "tennis_live_data",
-        "api_football",
-        "college_football_data",
-    )
-    _ESPN_SUPPORTED_LEAGUES: ClassVar[tuple[str, ...]] = (
-        "nba",
-        "wnba",
-        "ncaamb",
-        "ncaawb",
-        "nfl",
-        "ncaaf",
-        "nhl",
-        "mlb",
-        "atp",
-        "wta",
-        "ufc",
-        "mma",
-        "rugby",
-        "intl-test",
-        "intl-t20i",
-        "intl-odi",
-        "ipl",
-        "bbl",
-        "f1",
-        "nascar",
-        "indycar",
-    )
-    _SOFASCORE_SUPPORTED_LEAGUES: ClassVar[tuple[str, ...]] = (
-        "sports",
-        "nba",
-        "wnba",
-        "ncaamb",
-        "ncaawb",
-        "basketball",
-        "nhl",
-        "ice-hockey",
-        "hockey",
-        "mlb",
-        "baseball",
-        "nfl",
-        "ncaaf",
-        "american-football",
-        "soccer",
-        "epl",
-        "premier-league",
-        "football",
-        "tennis",
-    )
-    _THESPORTSDB_SUPPORTED_LEAGUES: ClassVar[tuple[str, ...]] = (
-        "nhl",
-        "ice-hockey",
-        "hockey",
-        "mlb",
-        "baseball",
     )
 
     @field_validator(
@@ -309,6 +236,7 @@ class Settings(BaseSettings):
         "database_url_override",
         "extension_module",
         "extension_config_path",
+        "goalserve_api_key",
         mode="before",
     )
     @classmethod
@@ -341,16 +269,22 @@ class Settings(BaseSettings):
         return _csv_codes(self.sports_live_state_leagues)
 
     @property
-    def sports_live_state_source_codes(self) -> tuple[str, ...]:
-        """返回启用的外部体育直播状态源代码。"""
+    def goalserve_sport_codes(self) -> tuple[str, ...]:
+        """返回 Goalserve inplay 启用的运动列表。"""
 
-        return _csv_codes(self.sports_live_state_sources)
+        return _csv_codes(self.goalserve_sports)
 
-    def sports_live_source_timeout(self, source_name: str) -> float:
-        """返回指定直播源的超时秒数；未单独配置时回退到全局值。"""
+    @property
+    def goalserve_livescore_sport_codes(self) -> tuple[str, ...]:
+        """返回 Goalserve livescore getfeed 启用的运动列表。"""
 
-        override = getattr(self, f"sports_live_state_timeout_s_{source_name.lower()}", None)
-        return override if override is not None else self.sports_live_state_timeout_s
+        return _csv_codes(self.goalserve_livescore_sports)
+
+    @property
+    def goalserve_pregame_sport_codes(self) -> tuple[str, ...]:
+        """返回 Goalserve 赛前赔率启用的运动列表。"""
+
+        return _csv_codes(self.goalserve_pregame_sports)
 
     def _compose_database_url(self, *, mask_password: bool) -> str:
         password = self._secret_value(self.database_password)
@@ -480,49 +414,20 @@ class Settings(BaseSettings):
             )
 
         if self.sports_live_state_enabled:
-            source_codes = self.sports_live_state_source_codes
-            unsupported_sources = tuple(
-                source for source in source_codes if source not in self._SUPPORTED_SPORTS_LIVE_STATE_SOURCES
-            )
-            if not source_codes:
+            if not self.goalserve_inplay_base_url.strip():
                 blocking_issues.append(
                     ConfigIssue(
-                        field="sports_live_state_sources",
-                        code="missing_sources",
-                        message="启用体育直播状态源时至少需要配置一个 SPORTS_LIVE_STATE_SOURCES",
-                    )
-                )
-            if unsupported_sources:
-                blocking_issues.append(
-                    ConfigIssue(
-                        field="sports_live_state_sources",
-                        code="unsupported_source",
-                        message="SPORTS_LIVE_STATE_SOURCES 仅支持 espn,nba,nhl,mlb,sofascore,thesportsdb",
-                        value=",".join(unsupported_sources),
-                    )
-                )
-            if "espn" in source_codes and not self.sports_live_state_espn_base_url.strip():
-                blocking_issues.append(
-                    ConfigIssue(
-                        field="sports_live_state_espn_base_url",
+                        field="goalserve_inplay_base_url",
                         code="missing_endpoint",
-                        message="启用 ESPN 体育直播状态源时必须配置 SPORTS_LIVE_STATE_ESPN_BASE_URL",
+                        message="启用体育直播状态源时必须配置 GOALSERVE_INPLAY_BASE_URL",
                     )
                 )
-            if "sofascore" in source_codes and not self.sports_live_state_sofascore_base_url.strip():
+            if not self.goalserve_sports.strip():
                 blocking_issues.append(
                     ConfigIssue(
-                        field="sports_live_state_sofascore_base_url",
-                        code="missing_endpoint",
-                        message="启用 SofaScore 体育直播状态源时必须配置 SPORTS_LIVE_STATE_SOFASCORE_BASE_URL",
-                    )
-                )
-            if "thesportsdb" in source_codes and not self.sports_live_state_thesportsdb_base_url.strip():
-                blocking_issues.append(
-                    ConfigIssue(
-                        field="sports_live_state_thesportsdb_base_url",
-                        code="missing_endpoint",
-                        message="启用 TheSportsDB 体育直播状态源时必须配置 SPORTS_LIVE_STATE_THESPORTSDB_BASE_URL",
+                        field="goalserve_sports",
+                        code="missing_sports",
+                        message="启用体育直播状态源时 GOALSERVE_SPORTS 至少配置一个运动",
                     )
                 )
             if not self.sports_live_state_league_codes:
@@ -531,36 +436,6 @@ class Settings(BaseSettings):
                         field="sports_live_state_leagues",
                         code="missing_leagues",
                         message="启用体育直播状态源时至少需要配置一个联赛代码",
-                    )
-                )
-            league_codes = set(self.sports_live_state_league_codes)
-            has_source_league_overlap = (
-                (
-                    "espn" in source_codes
-                    and any(
-                        league in self._ESPN_SUPPORTED_LEAGUES or league.startswith("soccer:")
-                        for league in league_codes
-                    )
-                )
-                or ("nba" in source_codes and "nba" in league_codes)
-                or ("nhl" in source_codes and "nhl" in league_codes)
-                or ("mlb" in source_codes and "mlb" in league_codes)
-                or (
-                    "sofascore" in source_codes
-                    and bool(league_codes.intersection(self._SOFASCORE_SUPPORTED_LEAGUES))
-                )
-                or (
-                    "thesportsdb" in source_codes
-                    and bool(league_codes.intersection(self._THESPORTSDB_SUPPORTED_LEAGUES))
-                )
-            )
-            if source_codes and league_codes and not has_source_league_overlap:
-                blocking_issues.append(
-                    ConfigIssue(
-                        field="sports_live_state_sources",
-                        code="source_league_mismatch",
-                        message="SPORTS_LIVE_STATE_SOURCES 与 SPORTS_LIVE_STATE_LEAGUES 没有可拉取的交集",
-                        value=f"sources={','.join(source_codes)} leagues={','.join(self.sports_live_state_league_codes)}",
                     )
                 )
 

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Any
 
-from polymarket_trader.api.deps import build_time_range, get_admin_service
+from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
 router = APIRouter(tags=["sports"])
@@ -30,6 +31,125 @@ async def list_sports_live_events_history(
         condition_id=condition_id,
         time_range=build_time_range(since=since, until=until),
     )
+
+
+@router.get("/sports/live-states")
+async def list_sports_live_states(
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """当前 EntryMetadataStore 中所有有直播状态的市场快照。
+
+    每条记录含 ``live_state_payload``（含 ``goalserve_moneyline`` 赔率、比分、
+    时钟等）+ ``condition_id / market_slug``，供前端渲染买入机会详情。
+    """
+
+    return await service.list_sports_live_states(limit=limit, offset=offset)
+
+
+@router.get("/sports/source-gaps")
+async def list_sports_live_source_gaps(
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    prefix: str | None = Query(default=None, min_length=1),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """已跟踪市场中缺少 Goalserve 直播覆盖的缺口诊断。
+
+    ``urgency`` 字段越高表示该市场越接近收盘但仍无直播状态。
+    用于监控 Goalserve 覆盖率。
+    """
+
+    return await service.list_sports_live_source_gaps(limit=limit, offset=offset, prefix=prefix)
+
+
+@router.get("/sports/live-states/{condition_id}")
+async def get_sports_live_state(
+    condition_id: str,
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """获取单个市场的 Goalserve 直播状态快照（含实时赔率）。
+
+    ``live_state_payload.goalserve_moneyline`` 含 home/away 欧赔和隐含概率；
+    ``live_state_payload.live_game`` 含比分、时钟、分节信息。
+    市场无直播状态则 404。
+    """
+
+    result = await service.list_sports_live_states(limit=10000, offset=0)
+    records = result.get("items", [])
+    for record in records:
+        if record.get("condition_id") == condition_id:
+            return record
+    raise HTTPException(status_code=404, detail="no_live_state_for_market")
+
+
+@router.get("/sports/pregame/snapshot")
+async def get_pregame_snapshot(
+    sport: str | None = Query(default=None, min_length=1),
+    runtime: Any = Depends(get_runtime),
+) -> dict[str, object]:
+    """当前 Goalserve 赛前赔率快照（内存状态）。
+
+    不传 sport 时返回所有运动的 worker 状态摘要 + 各运动 match 数量。
+    传 sport 时返回该运动的完整快照（含全部 match 和赔率）。
+    worker 未启用时返回 disabled 状态。
+    """
+
+    worker = getattr(runtime, "pregame_worker", None)
+    if worker is None:
+        return {"enabled": False, "reason": "goalserve_pregame_not_configured"}
+
+    status = worker.status_snapshot()
+    if sport is not None:
+        snapshot = worker.get_snapshot(sport)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="pregame_snapshot_not_found_for_sport")
+        return {
+            "status": status,
+            "sport": snapshot.sport,
+            "fetched_at": snapshot.fetched_at.isoformat(),
+            "ts": snapshot.ts,
+            "matches": [
+                {
+                    "match_id": m.match_id,
+                    "home_team": m.home_team,
+                    "away_team": m.away_team,
+                    "league": m.league,
+                    "start_time": m.start_time.isoformat() if m.start_time else None,
+                    "markets": [
+                        {
+                            "name": mk.name,
+                            "suspended": mk.suspended,
+                            "outcomes": [
+                                {
+                                    "name": o.name,
+                                    "value_eu": str(o.value_eu),
+                                    "implied_prob": str(o.implied_prob),
+                                    "handicap": o.handicap,
+                                    "suspended": o.suspended,
+                                }
+                                for o in mk.outcomes
+                            ],
+                        }
+                        for mk in m.markets
+                    ],
+                }
+                for m in snapshot.matches
+            ],
+        }
+    snapshots = worker.get_snapshots()
+    return {
+        "status": status,
+        "sports": {
+            s: {
+                "fetched_at": snap.fetched_at.isoformat(),
+                "ts": snap.ts,
+                "match_count": len(snap.matches),
+            }
+            for s, snap in snapshots.items()
+        },
+    }
 
 
 @router.get("/admin/series/state")

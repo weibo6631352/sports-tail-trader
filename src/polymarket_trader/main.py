@@ -59,22 +59,12 @@ from polymarket_trader.infra.polymarket.order_executor import (
     PolymarketOrderExecutor,
 )
 from polymarket_trader.infra.sports import (
-    ApiFootballClient,
-    CollegeFootballDataClient,
-    EspnScoreboardClient,
-    EspnStandingsClient,
-    MlbStatsApiClient,
-    NbaLiveScoreboardClient,
-    NhlScoreApiClient,
-    PandascoreLiveClient,
+    GoalserveClient,
+    GoalserveLivescoreClient,
+    GoalservePregameOddsClient,
     SeasonOddsClient,
-    SofaScoreLiveClient,
     SportsLiveAggregateClient,
-    TennisLiveDataClient,
     TheOddsApiClient,
-    TheSportsDbLiveClient,
-    sofascore_sports_for_leagues,
-    thesportsdb_sports_for_leagues,
 )
 from polymarket_trader.storage.season_state_store import SeasonStateStore
 from polymarket_trader.logging import LoggingRuntime, configure_logging
@@ -116,9 +106,11 @@ from polymarket_trader.workers.sports_season_odds_worker import SportsSeasonOdds
 from polymarket_trader.workers.sports_season_state_worker import SportsSeasonStateWorker
 from polymarket_trader.workers.series_state_worker import SeriesStateWorker
 from polymarket_trader.workers.game_odds_worker import GameOddsWorker
+from polymarket_trader.workers.goalserve_pregame_worker import GoalservePregameWorker
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
 from polymarket_trader.extension_api.hooks import MarketClassificationHooks
 from polymarket_trader.workers.user_ws import UserWsWorker
+from polymarket_trader.infra.sports.espn_standings_client import EspnStandingsClient
 from polymarket_trader.infra.sports.series_state_client import (
     EspnSeriesStateClient,
     SeriesStateClient,
@@ -201,6 +193,8 @@ class RuntimeComponents:
     series_state_client: SeriesStateClient | None = None
     game_odds_worker: GameOddsWorker | None = None
     game_odds_client: GameOddsClient | None = None
+    pregame_worker: GoalservePregameWorker | None = None
+    pregame_client: GoalservePregameOddsClient | None = None
     parameter_store: ParameterStore | None = None
 
 
@@ -210,146 +204,42 @@ def _build_sports_live_state_client(
     league_source_priority: Mapping[str, Sequence[str]] | None = None,
     trusted_sources: Sequence[str] | None = None,
 ) -> SportsLiveAggregateClient:
-    """按配置构建多源体育直播状态聚合器。
+    """构建 Goalserve 直播状态聚合客户端。
 
-    ``league_source_priority`` 是策略包提供的 league-aware 源优先级（CLAUDE.md §10
-    禁止策略字段进 framework Settings，所以由策略侧装配处传入）。``trusted_sources``
-    可覆盖 aggregate 内置 _DEFAULT_OFFICIAL_SOURCES，默认 None 走内置表。
+    inplay feed：IP 白名单认证（无需 API key），1 秒刷新，覆盖
+      basketball/soccer/hockey/baseball/tennis/esports/amfootball/volleyball。
+    livescore getfeed：API key 认证，5 秒刷新，覆盖
+      cricket/handball/rugby/boxing/mma/golf/horse_racing/f1/motogp。
+    proxy 仅在开发环境配置（GOALSERVE_PROXY=http://127.0.0.1:7890），生产留空直连。
     """
-
-    source_codes = set(settings.sports_live_state_source_codes)
-    league_codes = set(settings.sports_live_state_league_codes)
-    providers = []
-    closers = []
-    if "espn" in source_codes:
-        espn_leagues = tuple(
-            league
-            for league in settings.sports_live_state_league_codes
-            if league in settings._ESPN_SUPPORTED_LEAGUES or league.startswith("soccer:")
-        )
-        espn_client = EspnScoreboardClient(
-            base_url=settings.sports_live_state_espn_base_url,
-            leagues=espn_leagues,
-            timeout_s=settings.sports_live_source_timeout("espn"),
-        )
-        providers.append(("espn", espn_client.list_events))
-        closers.append(espn_client.aclose)
-    if "nba" in source_codes and "nba" in league_codes:
-        nba_client = NbaLiveScoreboardClient(
-            base_url=settings.sports_live_state_nba_base_url,
-            timeout_s=settings.sports_live_source_timeout("nba"),
-        )
-        providers.append(("nba", nba_client.list_events))
-        closers.append(nba_client.aclose)
-    if "nhl" in source_codes and "nhl" in league_codes:
-        nhl_client = NhlScoreApiClient(
-            base_url=settings.sports_live_state_nhl_base_url,
-            timeout_s=settings.sports_live_source_timeout("nhl"),
-        )
-        providers.append(("nhl", nhl_client.list_events))
-        closers.append(nhl_client.aclose)
-    if "mlb" in source_codes and "mlb" in league_codes:
-        mlb_client = MlbStatsApiClient(
-            base_url=settings.sports_live_state_mlb_base_url,
-            timeout_s=settings.sports_live_source_timeout("mlb"),
-        )
-        providers.append(("mlb", mlb_client.list_events))
-        closers.append(mlb_client.aclose)
-    if "sofascore" in source_codes:
-        sofascore_sports = sofascore_sports_for_leagues(settings.sports_live_state_league_codes)
-        if sofascore_sports:
-            sofascore_client = SofaScoreLiveClient(
-                base_url=settings.sports_live_state_sofascore_base_url,
-                sports=sofascore_sports,
-                league_codes=settings.sports_live_state_league_codes,
-                timeout_s=settings.sports_live_source_timeout("sofascore"),
-                lookback_days=settings.sports_live_state_sofascore_lookback_days,
-                lookahead_days=settings.sports_live_state_sofascore_lookahead_days,
-            )
-            providers.append(("sofascore", sofascore_client.list_events))
-            closers.append(sofascore_client.aclose)
-    if "thesportsdb" in source_codes:
-        thesportsdb_sports = thesportsdb_sports_for_leagues(settings.sports_live_state_league_codes)
-        if thesportsdb_sports:
-            thesportsdb_client = TheSportsDbLiveClient(
-                base_url=settings.sports_live_state_thesportsdb_base_url,
-                sports=thesportsdb_sports,
-                league_codes=settings.sports_live_state_league_codes,
-                timeout_s=settings.sports_live_source_timeout("thesportsdb"),
-            )
-            providers.append(("thesportsdb", thesportsdb_client.list_events))
-            closers.append(thesportsdb_client.aclose)
-    if "pandascore" in source_codes:
-        token_secret = settings.sports_live_state_pandascore_token
-        token_value = token_secret.get_secret_value() if token_secret is not None else None
-        if token_value:
-            videogames = tuple(
-                slug.strip().lower()
-                for slug in settings.sports_live_state_pandascore_videogames.split(",")
-                if slug.strip()
-            )
-            pandascore_client = PandascoreLiveClient(
-                base_url=settings.sports_live_state_pandascore_base_url,
-                api_token=token_value,
-                videogame_slugs=videogames or None,
-                timeout_s=settings.sports_live_source_timeout("pandascore"),
-            )
-            providers.append(("pandascore", pandascore_client.list_events))
-            closers.append(pandascore_client.aclose)
-        # 缺 token 时不注册 provider；启动期校验里会有 warning，避免 source_statuses 每 5 秒重复报错。
-    if "tennis_live_data" in source_codes:
-        token_secret = settings.sports_live_state_tennis_live_data_token
-        token_value = token_secret.get_secret_value() if token_secret is not None else None
-        if token_value:
-            tennis_client = TennisLiveDataClient(
-                base_url=settings.sports_live_state_tennis_live_data_base_url,
-                api_token=token_value,
-                timeout_s=settings.sports_live_source_timeout("tennis_live_data"),
-            )
-            providers.append(("tennis_live_data", tennis_client.list_events))
-            closers.append(tennis_client.aclose)
-    if "api_football" in source_codes:
-        token_secret = settings.sports_live_state_api_football_token
-        token_value = token_secret.get_secret_value() if token_secret is not None else None
-        if token_value:
-            api_football_client = ApiFootballClient(
-                base_url=settings.sports_live_state_api_football_base_url,
-                api_token=token_value,
-                timeout_s=settings.sports_live_source_timeout("api_football"),
-            )
-            providers.append(("api_football", api_football_client.list_events))
-            closers.append(api_football_client.aclose)
-    if "college_football_data" in source_codes:
-        token_secret = settings.sports_live_state_college_football_data_token
-        token_value = token_secret.get_secret_value() if token_secret is not None else None
-        cfbd_sports: list[str] = []
-        if token_value:
-            cfbd_sports.append("football")
-        # NCAAB 走 ncaa-api 公共实例，不需要 token——只要策略 league 列表里有 ncaab 或 basketball。
-        if league_codes & {"ncaab", "ncaa", "basketball", "mens-college-basketball"}:
-            cfbd_sports.append("basketball")
-        if cfbd_sports:
-            cfbd_client = CollegeFootballDataClient(
-                cfbd_base_url=settings.sports_live_state_college_football_data_base_url,
-                ncaa_api_base_url=settings.sports_live_state_ncaa_api_base_url,
-                cfbd_token=token_value,
-                sports=tuple(cfbd_sports),
-                timeout_s=settings.sports_live_source_timeout("college_football_data"),
-            )
-            providers.append(("college_football_data", cfbd_client.list_events))
-            closers.append(cfbd_client.aclose)
-    # 聚合器超时是"单个 provider 完整快照"的预算；像 ESPN/SofaScore 这类 provider
-    # 内部会按多个 sport/league 拉取，预算需要高于单次 HTTP timeout，避免刚拿到部分
-    # 实盘数据时被外层取消。各 provider 已并行隔离，放宽这里不会阻塞交易主链路。
-    # 取各启用源中最大单次超时作为基准，确保 SofaScore 等慢源不被聚合层提前取消。
-    max_source_timeout_s = max(
-        (settings.sports_live_source_timeout(source_name) for source_name, _ in providers),
-        default=settings.sports_live_state_timeout_s,
+    goalserve = GoalserveClient(
+        sports=settings.goalserve_sport_codes,
+        timeout_s=settings.sports_live_state_timeout_s,
+        proxy=settings.goalserve_proxy,
     )
-    provider_timeout_s = max(max_source_timeout_s * _PROVIDER_TIMEOUT_MULTIPLIER, _PROVIDER_TIMEOUT_FLOOR_S)
+    providers: list[tuple[str, Any]] = [("goalserve", goalserve.list_events)]
+    closers: list[Any] = [goalserve.aclose]
+
+    api_key_secret = settings.goalserve_api_key
+    api_key = api_key_secret.get_secret_value() if api_key_secret is not None else None
+    if settings.goalserve_livescore_enabled and api_key:
+        livescore = GoalserveLivescoreClient(
+            api_key=api_key,
+            sports=settings.goalserve_livescore_sport_codes,
+            base_url=settings.goalserve_livescore_base_url,
+            timeout_s=settings.goalserve_livescore_timeout_s,
+            proxy=settings.goalserve_proxy,
+        )
+        providers.append(("goalserve_livescore", livescore.list_events))
+        closers.append(livescore.aclose)
+
+    provider_timeout_s = max(
+        settings.sports_live_state_timeout_s * _PROVIDER_TIMEOUT_MULTIPLIER,
+        _PROVIDER_TIMEOUT_FLOOR_S,
+    )
     return SportsLiveAggregateClient(
-        providers=tuple(providers),
-        closers=tuple(closers),
+        providers=providers,
+        closers=closers,
         provider_timeout_s=provider_timeout_s,
         cooldown_base_s=settings.sports_live_state_health_cooldown_base_s,
         eviction_s=settings.sports_live_state_health_eviction_s,
@@ -548,6 +438,29 @@ def _build_game_odds_worker(
         enabled=True,
         event_bus=event_bus,
     )
+    return worker, client
+
+
+def _build_pregame_worker(
+    settings: Settings,
+) -> tuple[GoalservePregameWorker, GoalservePregameOddsClient] | tuple[None, None]:
+    """按 settings 装配 goalserve_pregame_worker；未启用或无 API key 时返回 (None, None)。"""
+
+    if not settings.goalserve_pregame_enabled:
+        return None, None
+    api_key_secret = settings.goalserve_api_key
+    api_key = api_key_secret.get_secret_value() if api_key_secret is not None else None
+    if not api_key:
+        logger.warning("goalserve_pregame_worker: skipped — GOALSERVE_API_KEY not set")
+        return None, None
+    client = GoalservePregameOddsClient(
+        api_key=api_key,
+        sports=settings.goalserve_pregame_sport_codes,
+        base_url=settings.goalserve_pregame_base_url,
+        timeout_s=settings.goalserve_pregame_timeout_s,
+        proxy=settings.goalserve_proxy,
+    )
+    worker = GoalservePregameWorker(client=client, enabled=True)
     return worker, client
 
 
@@ -894,6 +807,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         extension=extension,
         event_bus=event_bus,
     )
+    pregame_worker, pregame_client = _build_pregame_worker(settings)
     scheduler = Scheduler()
     supervisor = Supervisor(
         event_bus=event_bus,
@@ -953,6 +867,8 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         series_state_client=series_state_client,
         game_odds_worker=game_odds_worker,
         game_odds_client=game_odds_client,
+        pregame_worker=pregame_worker,
+        pregame_client=pregame_client,
         trading_decision_service=trading_decision_service,
         trading_service=trading_service,
         trading_decision_worker=trading_decision_worker,
@@ -1090,6 +1006,9 @@ async def shutdown_runtime(runtime: RuntimeComponents) -> None:
     if runtime.game_odds_client is not None:
         with suppress(Exception):
             await runtime.game_odds_client.aclose()
+    if runtime.pregame_client is not None:
+        with suppress(Exception):
+            await runtime.pregame_client.close()
     with suppress(Exception):
         await runtime.db_engine.dispose()
     runtime.trading_thread_pool.shutdown(wait=False, cancel_futures=True)
@@ -1124,6 +1043,8 @@ def _register_runtime_workers(runtime: RuntimeComponents) -> None:
         runtime.supervisor.register_worker("sports_series_state_sync", priority="P2")
     if runtime.game_odds_worker is not None:
         runtime.supervisor.register_worker("sports_game_odds_sync", priority="P2")
+    if runtime.pregame_worker is not None:
+        runtime.supervisor.register_worker("sports_pregame_odds_sync", priority="P2")
     runtime.supervisor.register_worker("persistence", priority="P3")
     runtime.supervisor.register_worker("audit_retention_purge", priority="P3", state=WorkerLifecycleState.RUNNING, detail="scheduler-driven; first run after interval")
 
@@ -1336,6 +1257,16 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
             priority="P2",
             interval_seconds=float(runtime.settings.sports_game_odds_interval_seconds),
             tags=("sports_game_odds",),
+            start=True,
+            run_immediately=True,
+        )
+    if runtime.pregame_worker is not None:
+        runtime.scheduler.register_job(
+            "sports_pregame_odds_sync",
+            lambda: _run_sports_pregame_odds_sync(runtime),
+            priority="P2",
+            interval_seconds=float(runtime.settings.goalserve_pregame_interval_seconds),
+            tags=("sports_pregame_odds",),
             start=True,
             run_immediately=True,
         )
@@ -1671,6 +1602,26 @@ async def _run_sports_game_odds_sync(runtime: RuntimeComponents) -> None:
     runtime.supervisor.heartbeat_worker(
         "sports_game_odds_sync",
         detail=f"refreshed={refreshed}",
+    )
+
+
+async def _run_sports_pregame_odds_sync(runtime: RuntimeComponents) -> None:
+    worker = runtime.pregame_worker
+    if worker is None:
+        return
+    runtime.supervisor.heartbeat_worker("sports_pregame_odds_sync", detail="syncing")
+    try:
+        matches = await worker.sync_once()
+    except Exception as exc:
+        runtime.supervisor.mark_worker_error(
+            "sports_pregame_odds_sync",
+            detail="sync_failed",
+            last_error=str(exc),
+        )
+        raise
+    runtime.supervisor.heartbeat_worker(
+        "sports_pregame_odds_sync",
+        detail=f"matches={matches}",
     )
 
 

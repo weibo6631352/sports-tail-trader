@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from decimal import Decimal, ROUND_FLOOR
 from typing import Mapping
 
+from polymarket_trader.domain.sports_live import BaseballGameState, TennisGameState
 from polymarket_trader.extension_api import ExtensionContext
 
 from strategies.current.config import CurrentStrategyConfig
@@ -36,7 +38,7 @@ def _capital_efficiency_gate(
 
     shares = amount_usdc / entry_price
     expected_settlement_profit = shares * (Decimal("1") - entry_price)
-    hold_minutes = max(int(config.tail_settlement_hold_minutes), 1)
+    hold_minutes = _estimated_settlement_hold_minutes(config, context)
     expected_profit_per_hour = expected_settlement_profit * Decimal("60") / Decimal(hold_minutes)
     metadata: dict[str, object] = {
         "expected_settlement_profit_usdc": _decimal_metadata_text(expected_settlement_profit),
@@ -93,6 +95,96 @@ def _capital_efficiency_gate(
     if profit_take_profit < config.tail_profit_take_min_profit_usdc:
         metadata["capital_efficiency_reason"] = "profit_take_hourly_efficiency_high"
     return True, "", metadata
+
+
+def _estimated_settlement_hold_minutes(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+) -> int:
+    """单场比赛等待结算的资金占用时间估算（分钟）。
+
+    估算优先级：
+    1. 单场比赛已结束（ENDED）：仅等待 Polymarket 权威结算缓冲。
+    2. 单场比赛进行中、有时钟（篮球/足球/冰球）：seconds_remaining + 缓冲。
+    3. 无时钟运动（棒球/网球）进行中：基于赛况状态推算剩余时间 + 缓冲。
+    4. 无比赛数据：tail_settlement_hold_minutes 保守值。
+
+    仅供 SINGLE_GAME 路径调用。Series/Outright 走独立 decide 函数
+    （decide_series_entry / decide_outright_entry），有各自的风控预算模型，
+    不经过 _capital_efficiency_gate，此函数不处理那两类市场。
+
+    Polymarket end_date 对体育单场市场 = game_start_time，与封盘时间无关；
+    封盘由 Polymarket 在赛事结果确认后自行决定。
+    """
+    from strategies.sports_framework import LiveGameStatus
+    from strategies.sports_framework.parsing import live_game_state_from_metadata
+
+    game = live_game_state_from_metadata(context.metadata)
+    buffer = max(config.tail_settlement_buffer_minutes, 1)
+
+    if game is not None:
+        if game.status == LiveGameStatus.ENDED:
+            return buffer
+        if game.status == LiveGameStatus.LIVE:
+            if game.seconds_remaining is not None:
+                return max(math.ceil(game.seconds_remaining / 60) + buffer, 1)
+            estimated = _estimate_seconds_remaining_from_state(game)
+            if estimated is not None:
+                return max(math.ceil(estimated / 60) + buffer, 1)
+
+    return max(int(config.tail_settlement_hold_minutes), 1)
+
+
+def _estimate_seconds_remaining_from_state(game: object) -> int | None:
+    """为无游戏时钟的运动（棒球、网球）从赛况状态推算剩余秒数。"""
+    from strategies.sports_framework.types import LiveGameState
+
+    if not isinstance(game, LiveGameState):
+        return None
+    if game.baseball_state is not None:
+        return _baseball_seconds_remaining(game.baseball_state)
+    if game.tennis_state is not None:
+        return _tennis_seconds_remaining(game.tennis_state)
+    return None
+
+
+# 棒球平均每半局约 10 分钟，标准比赛 9 局
+_BASEBALL_MINUTES_PER_HALF_INNING = 10
+_BASEBALL_REGULATION_INNINGS = 9
+
+
+def _baseball_seconds_remaining(state: BaseballGameState) -> int | None:
+    """基于当前局数和上下半局估算棒球比赛剩余秒数。"""
+    if state.current_inning is None:
+        return None
+    inning = state.current_inning
+    if inning >= _BASEBALL_REGULATION_INNINGS:
+        # 第9局或加时：剩余半局极少
+        remaining_half_innings = 1 if (state.inning_half or "top") == "bottom" else 2
+    else:
+        after = _BASEBALL_REGULATION_INNINGS - inning
+        if (state.inning_half or "top") == "bottom":
+            remaining_half_innings = 1 + after * 2
+        else:
+            remaining_half_innings = 2 + after * 2
+    return remaining_half_innings * _BASEBALL_MINUTES_PER_HALF_INNING * 60
+
+
+def _tennis_seconds_remaining(state: TennisGameState) -> int | None:
+    """基于盘分和局分粗略估算网球比赛剩余秒数（默认三盘两胜制）。"""
+    if state.current_set is None:
+        return None
+    sets_to_win = 2
+    sets_remaining_home = max(0, sets_to_win - state.home_sets_won)
+    sets_remaining_away = max(0, sets_to_win - state.away_sets_won)
+    avg_sets_remaining = (sets_remaining_home + sets_remaining_away) / 2.0
+    current_games_remaining = 0
+    if state.home_current_set_games is not None and state.away_current_set_games is not None:
+        current_games_remaining = max(
+            0, 6 - max(state.home_current_set_games, state.away_current_set_games)
+        )
+    estimated = int((avg_sets_remaining * 45 + current_games_remaining * 5) * 60)
+    return max(estimated, 60)
 
 
 def _profit_take_metadata(
