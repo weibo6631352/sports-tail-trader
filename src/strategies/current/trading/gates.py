@@ -76,7 +76,8 @@ def _tail_entry_gate(
 
     # 已结束但开赛时间太短 → Goalserve 把另一场（如双赛程午场）的终局比分错配到本场。
     # 任何运动完成一场正式比赛都需要至少 60 分钟；棒球/篮球/足球通常 ≥ 90 分钟。
-    if game is not None and game.status == LiveGameStatus.ENDED and context.market.game_start_time is not None:
+    # 状态冲突时 status 字段可能被解析为 "live"，但 period="Finished" 同样意味着比赛已结束。
+    if game is not None and _is_game_ended(game) and context.market.game_start_time is not None:
         now_dt = (context.now or datetime.now(timezone.utc)).astimezone(timezone.utc)
         market_start = context.market.game_start_time
         if market_start.tzinfo is None:
@@ -571,6 +572,18 @@ def _market_end_too_far_for_strategy(
     return (market_end.astimezone(timezone.utc) - current_time.astimezone(timezone.utc)).total_seconds() > (
         config.tail_market_end_horizon_seconds
     )
+
+
+def _is_game_ended(game: LiveGameState) -> bool:
+    """比赛已结束的综合判断。
+
+    status=ENDED 或 period 文本表示终局均视为结束。
+    源冲突解析可能让 status="live" 优先，但 period="Finished" 同样意味着比赛结束。
+    """
+    if game.status == LiveGameStatus.ENDED:
+        return True
+    period_lower = (game.period or "").strip().lower()
+    return period_lower in ("finished", "ft", "final", "full time", "end", "ap", "aet")
 
 
 def _min_game_duration_seconds(league: str | None) -> int:
