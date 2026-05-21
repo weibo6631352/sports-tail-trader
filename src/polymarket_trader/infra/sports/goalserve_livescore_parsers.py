@@ -63,8 +63,8 @@ def _text_status(raw: Any) -> SportsLiveGameStatus:
     s = str(raw or "").strip().lower()
     if s in ("in progress", "inprogress", "live"):
         return SportsLiveGameStatus.LIVE
-    # Period/set names indicate an in-progress game (tennis "Set 1/2/3", etc.)
-    if any(kw in s for kw in ("set ", "quarter", "period", "inning", "half")):
+    # Period/set names and intermissions indicate an in-progress game
+    if any(kw in s for kw in ("set ", "quarter", "period", "inning", "half", "break time", "intermission")):
         return SportsLiveGameStatus.LIVE
     if s in ("finished", "final", "ft"):
         return SportsLiveGameStatus.ENDED
@@ -696,6 +696,8 @@ _XML_ENDED_STATUSES = frozenset({
     "aet", "pen", "aps",
 })
 _XML_SCHED_STATUSES = frozenset({"not started", "ns", ""})
+# Intermission keywords — the game is ongoing but between periods/halves
+_XML_INTERMISSION_KEYWORDS = ("break time", "half time", "halftime", "intermission", "interval", "ht")
 
 
 def _xml_status(raw: Any) -> SportsLiveGameStatus:
@@ -705,6 +707,9 @@ def _xml_status(raw: Any) -> SportsLiveGameStatus:
     if s in _XML_SCHED_STATUSES:
         return SportsLiveGameStatus.SCHEDULED
     if s in _XML_LIVE_STATUSES or any(kw in s for kw in ("quarter", "period", "inning", "set", "bottom", "top")):
+        return SportsLiveGameStatus.LIVE
+    # Hockey intermissions ("Break Time"), soccer half-time, etc.
+    if any(kw in s for kw in _XML_INTERMISSION_KEYWORDS):
         return SportsLiveGameStatus.LIVE
     return SportsLiveGameStatus.UNKNOWN
 
@@ -734,10 +739,11 @@ def _basketball_seconds_remaining(status: str, timer_raw: Any) -> int | None:
     return None
 
 
-def _hockey_seconds_remaining(status: str, timer_raw: Any) -> int | None:
+def _hockey_seconds_remaining(status: str, timer_raw: Any, periods_played: int = 0) -> int | None:
     """NHL/IIHF 剩余秒数估算（timer = 已打分钟数）。
 
     3×20 min 正常时间；加时赛 5 min (NHL) / 20 min (IIHF)。
+    periods_played: 当 status 为 "Break Time" 时从外部传入已完成局数。
     """
     period_minutes = 20
     s = status.lower()
@@ -754,7 +760,10 @@ def _hockey_seconds_remaining(status: str, timer_raw: Any) -> int | None:
         return remaining_in_period
     if "overtime" in s or " ot" in s:
         return max(0, 5 * 60 - elapsed * 60)
-    # "After Over Time" → 刚结束加时，0秒
+    # 中场休息：根据已完成局数估算剩余时间
+    if "break time" in s or "intermission" in s or "interval" in s:
+        periods_left = max(0, 3 - periods_played)
+        return periods_left * period_minutes * 60
     return None
 
 
@@ -887,7 +896,15 @@ def _parse_hockey_with_cats(scores: dict[str, Any], observed_at: datetime) -> li
             home_loc, home_nick = _split_team_name(home_name)
             away_loc, away_nick = _split_team_name(away_name)
             timer_raw = match.get("timer")
-            seconds_remaining = _hockey_seconds_remaining(status_raw, timer_raw) if status == SportsLiveGameStatus.LIVE else None
+            # Count completed periods from period score data (_children from XML conversion)
+            events_node = match.get("events") or {}
+            period_children = events_node.get("_children") or []
+            period_tags = {"firstperiod", "secondperiod", "thirdperiod"}
+            periods_played = sum(
+                1 for c in period_children
+                if c.get("_tag") in period_tags and c.get("score", "") not in ("", None, " - ")
+            )
+            seconds_remaining = _hockey_seconds_remaining(status_raw, timer_raw, periods_played) if status == SportsLiveGameStatus.LIVE else None
             events.append(
                 LiveEvent(
                     source="goalserve_livescore",
