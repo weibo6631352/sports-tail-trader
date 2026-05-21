@@ -226,6 +226,13 @@ Goalserve 覆盖面极广，任何主要联赛/赛事在 Goalserve 上几乎必�
 - **止损（Stop-loss）**：直播源显示赔率突然大幅下移（持仓反向，价格跌破买入价 × 0.5 或比赛明显逆转）时，应主动卖出止损，宁可只损失部分本金，不可等待结算归零。只持仓等结算的逻辑在输的方向上是 0 回收。
 - **实现路径**：通过 `auto_exit_enabled=True`、`profit_take_overlay_enabled=True`+`profit_take_target_price`、以及 recovery 侧的持仓监控实现自动化；不手动干预
 
+**直播源赔率 vs Polymarket 价格差价**（重要机会，须认真对待）：
+- Goalserve inplay/livescore 提供的实时赔率隐含了博彩市场对事件概率的真实估计；当 Goalserve 隐含概率与 Polymarket 市场价格存在显著差价时，这是一个明确的 edge 信号
+- 实现路径：解析 Goalserve inplay 赔率字段（`goalserve_moneyline`/`goalserve_totals`/`goalserve_spread`），换算成隐含概率，与 Polymarket best_ask 比较；差价超过阈值（如 5 个百分点）时触发候选
+- 优先级：live inplay 赔率 > pregame 赔率；inplay 赔率在比赛中动态更新，是最强信号
+- 与扫尾策略的关系：扫尾策略依赖"结果已接近锁定"的确定性；赔率差价策略可更早入场，依赖"Polymarket 定价落后于博彩市场"的效率差
+- 关键数据：Goalserve `goalserve_moneyline`/`goalserve_totals` 字段已通过 pregame client 拉取；inplay feed 中的 `odd` 字段也有赔率数据，需校验字段名和格式
+
 **策略演化方向**：
 - 赛前赔率（Pregame odds）的统计套利
 - 盘中动量/逆转交易

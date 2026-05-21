@@ -679,9 +679,11 @@ _XML_LIVE_STATUSES = frozenset({
     "top 1st", "bot 1st", "top 2nd", "bot 2nd", "top 3rd", "bot 3rd",
     "top 4th", "bot 4th", "top 5th", "bot 5th", "top 6th", "bot 6th",
     "top 7th", "bot 7th", "top 8th", "bot 8th", "top 9th", "bot 9th",
+    # Between-inning states (Goalserve uses "End Xth" = end of inning X, game still live)
+    "end 1st", "end 2nd", "end 3rd", "end 4th", "end 5th",
+    "end 6th", "end 7th", "end 8th", "end 9th", "end extra innings",
     "1st set", "2nd set", "3rd set", "4th set", "5th set",
     "1st half", "2nd half", "halftime",
-    "delayed",
     # Generic fallback — some Goalserve feeds return "In Progress" without a
     # specific period/quarter string; this catches those cases.
     "in progress", "inprogress", "live",
@@ -699,7 +701,7 @@ def _xml_status(raw: Any) -> SportsLiveGameStatus:
         return SportsLiveGameStatus.ENDED
     if s in _XML_SCHED_STATUSES:
         return SportsLiveGameStatus.SCHEDULED
-    if s in _XML_LIVE_STATUSES or any(kw in s for kw in ("quarter", "period", "inning", "set", "bottom")):
+    if s in _XML_LIVE_STATUSES or any(kw in s for kw in ("quarter", "period", "inning", "set", "bottom", "top")):
         return SportsLiveGameStatus.LIVE
     return SportsLiveGameStatus.UNKNOWN
 
