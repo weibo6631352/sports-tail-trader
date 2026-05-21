@@ -5,6 +5,7 @@ sport-specific lead thresholds (2) instead of the global default (6).
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from strategies.current.tail import (
@@ -55,7 +56,7 @@ def _soccer_game(home: int, away: int, seconds_remaining: int = 120):
         "period": "second_half",
         "status": "live",
         "seconds_remaining": seconds_remaining,
-        "observed_at": "2026-05-21T20:00:00+00:00",
+        "observed_at": datetime.now(timezone.utc).isoformat(),
     })
 
 
@@ -70,7 +71,7 @@ def _hockey_game(home: int, away: int, seconds_remaining: int = 120):
         "period": "3",
         "status": "live",
         "seconds_remaining": seconds_remaining,
-        "observed_at": "2026-05-21T20:00:00+00:00",
+        "observed_at": datetime.now(timezone.utc).isoformat(),
     })
 
 
@@ -85,7 +86,7 @@ def _basketball_game(home: int, away: int, seconds_remaining: int = 120):
         "period": "Q4",
         "status": "live",
         "seconds_remaining": seconds_remaining,
-        "observed_at": "2026-05-21T20:00:00+00:00",
+        "observed_at": datetime.now(timezone.utc).isoformat(),
     })
 
 

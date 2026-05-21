@@ -139,7 +139,8 @@ class GoalserveClient:
                     self._token, self._token_exp = await self._fetch_token()
                     self._save_cached_token(self._token, self._token_exp)
                     logger.info("goalserve: token refreshed, exp=%.0f", self._token_exp)
-            return self._token  # type: ignore[return-value]
+            assert self._token is not None  # invariant: always set by branches above
+            return self._token
 
     async def _ws_loop(self, sport: str) -> None:
         delay = _RECONNECT_BASE_S
