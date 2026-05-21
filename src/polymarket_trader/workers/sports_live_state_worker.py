@@ -356,14 +356,47 @@ class SportsLiveStateWorker:
         markets: tuple[Market, ...],
         events: tuple[LiveEvent, ...],
     ) -> tuple[LiveStateMatch, ...]:
+        # Group by event_slug: find the live event once per game, then reuse for all
+        # markets in that game (signal gate still runs per-market).
+        event_groups: dict[str, list[Market]] = {}
+        no_slug: list[Market] = []
+        for market in markets:
+            slug = market.event_slug
+            if slug:
+                event_groups.setdefault(slug, []).append(market)
+            else:
+                no_slug.append(market)
+
         results: list[LiveStateMatch] = []
-        for index, market in enumerate(markets, start=1):
+        processed = 0
+
+        for group in event_groups.values():
+            # One live-event lookup per game using the first market as representative.
+            first = self._match_live_state(group[0], events)
+            if first is not None:
+                results.append(first)
+            processed += 1
+            if processed % 10 == 0:
+                await asyncio.sleep(0)
+            # Remaining markets in the same game: skip full search, use matched event.
+            for market in group[1:]:
+                if first is not None:
+                    m = self._match_live_state(market, (first.event,))
+                    if m is not None:
+                        results.append(m)
+                processed += 1
+                if processed % 10 == 0:
+                    await asyncio.sleep(0)
+
+        # Markets without event_slug fall back to full search.
+        for market in no_slug:
             match = self._match_live_state(market, events)
             if match is not None:
                 results.append(match)
-            if index % 10 == 0:
-                # 单轮同步可能需要做 markets x events 的文本匹配；P2 任务必须让出事件循环。
+            processed += 1
+            if processed % 10 == 0:
                 await asyncio.sleep(0)
+
         return tuple(results)
 
     def _publish_live_state_lifecycle(self, *, match: LiveStateMatch) -> None:
