@@ -225,7 +225,6 @@ def _build_sports_live_state_client(
     if settings.goalserve_livescore_enabled and api_key:
         livescore = GoalserveLivescoreClient(
             api_key=api_key,
-            sports=settings.goalserve_livescore_sport_codes,
             base_url=settings.goalserve_livescore_base_url,
             timeout_s=settings.goalserve_livescore_timeout_s,
             proxy=settings.goalserve_proxy,

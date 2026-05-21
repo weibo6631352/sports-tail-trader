@@ -124,17 +124,6 @@ class Settings(BaseSettings):
     # 覆盖 inplay feed 没有的运动：cricket/handball/rugby/boxing/mma/golf/horse_racing/f1/motogp。
     goalserve_api_key: SecretStr | None = None
     goalserve_livescore_enabled: bool = True
-    # 覆盖所有支持 livescore getfeed 的运动。
-    # nba/mlb/nhl/tennis/basketball/baseball/hockey 通过 XML 路径拉取，
-    # 与 inplay feed 互为补充（inplay IP 被封时这些路径作为主要数据源）。
-    goalserve_livescore_sports: str = (
-        "soccer,"  # soccernew/home covers all leagues incl Copa Libertadores/Sudamericana
-        "nba,mlb,nhl,wnba,basketball,baseball,hockey,tennis,"
-        "cricket,handball,rugby,boxing,mma,"
-        "golf_pga,golf_dp,golf_liv,golf_lpga,"
-        "horse_racing_us,horse_racing_uk,horse_racing_au,horse_racing_hk,"
-        "f1,motogp"
-    )
     goalserve_livescore_base_url: str = "http://www.goalserve.com/getfeed"
     goalserve_livescore_timeout_s: float = Field(default=10.0, ge=1.0)
 
@@ -282,12 +271,6 @@ class Settings(BaseSettings):
         """返回 Goalserve inplay 启用的运动列表。"""
 
         return _csv_codes(self.goalserve_sports)
-
-    @property
-    def goalserve_livescore_sport_codes(self) -> tuple[str, ...]:
-        """返回 Goalserve livescore getfeed 启用的运动列表。"""
-
-        return _csv_codes(self.goalserve_livescore_sports)
 
     @property
     def goalserve_pregame_sport_codes(self) -> tuple[str, ...]:

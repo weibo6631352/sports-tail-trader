@@ -85,14 +85,15 @@ class GoalserveLivescoreClient:
         self,
         *,
         api_key: str,
-        sports: tuple[str, ...],
+        sports: tuple[str, ...] | None = None,
         base_url: str = _BASE_URL,
         timeout_s: float = 15.0,
         proxy: str | None = None,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self._api_key = api_key
-        self._sports = tuple(s for s in sports if s in _ALL_SPORT_PATHS)
+        # None means all supported sports; explicit tuple filters to known paths only.
+        self._sports = tuple(_ALL_SPORT_PATHS) if sports is None else tuple(s for s in sports if s in _ALL_SPORT_PATHS)
         self._base_url = base_url.rstrip("/")
         self._now_provider = now_provider
         if proxy:
