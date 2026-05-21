@@ -48,6 +48,7 @@ SportsLiveStateMatcher = Callable[
     LiveStateMatch | None,
 ]
 
+
 @runtime_checkable
 class SportsLiveMarketTracker(Protocol):
     """直播状态确认入场后，用于把 market 交给盘口热订阅的最小接口。"""
@@ -124,6 +125,10 @@ class SportsLiveStateWorker:
         self._last_entry_signals_published = 0
         self._last_source_statuses: tuple[SportsLiveSourceStatus, ...] = ()
         self._last_events: tuple[LiveEvent, ...] = ()
+        # 增量匹配缓存：condition_id → source_event_id（稳定匹配后直接按 ID 查 event，
+        # 不再每轮全量文本扫描）。hook 仍每轮调用（signal_allowed 依赖盘口价格等
+        # 非 event 字段，不能按 event 指纹跳过）；audit 去重由 _last_audit_state_hash 承担。
+        self._match_cache: dict[str, str] = {}
         # 上轮各 source 的健康度，用于检测 evicted 状态转换；只在新 EVICTED 时
         # 发出 LIVE_STATE_SOURCE_EVICTED 一次，避免每轮重复刷生命周期。
         self._previous_source_health: dict[str, SportsLiveSourceHealth] = {}
@@ -245,7 +250,9 @@ class SportsLiveStateWorker:
             # 的比分/时钟/赛况"这个目前的最大盲点。
             await self._publish_sports_live_state_recorded(snapshot=snapshot, match=match)
 
-        matched_condition_ids = {m.market.condition_id for m in matches}
+        # Include fast-path cached matches (not in `matches` because their event
+        # state did not change this round) so they are not mistakenly reported as gaps.
+        matched_condition_ids = {m.market.condition_id for m in matches} | set(self._match_cache)
         now = _utc_now()
         now_minute = int(now.timestamp()) // 60
         for market in markets:
@@ -356,43 +363,79 @@ class SportsLiveStateWorker:
         markets: tuple[Market, ...],
         events: tuple[LiveEvent, ...],
     ) -> tuple[LiveStateMatch, ...]:
-        # Group by event_slug: find the live event once per game, then reuse for all
-        # markets in that game (signal gate still runs per-market).
+        # O(N) index built once per sync; cached-market lookups are O(1) with no text scan.
+        events_by_id: dict[str, LiveEvent] = {e.source_event_id: e for e in events}
+
+        # Evict cache entries for markets no longer tracked to bound memory growth.
+        active_ids = {m.condition_id for m in markets}
+        for stale in set(self._match_cache) - active_ids:
+            del self._match_cache[stale]
+
+        results: list[LiveStateMatch] = []
+        needs_text_match: list[Market] = []
+        processed = 0
+
+        for market in markets:
+            cid = market.condition_id
+            cached_event_id = self._match_cache.get(cid)
+
+            if cached_event_id is not None:
+                event = events_by_id.get(cached_event_id)
+                if event is None:
+                    # Live event evicted (game ended / orphan TTL) — drop cache, re-search.
+                    del self._match_cache[cid]
+                    needs_text_match.append(market)
+                else:
+                    # Fast path: known event, no text search. Hook still runs every round
+                    # because signal_allowed depends on orderbook price, not just event state.
+                    match = self._match_live_state(market, (event,))
+                    if match is not None:
+                        results.append(match)
+                    else:
+                        # Hook rejected the cached event (e.g. game moved to ENDED).
+                        del self._match_cache[cid]
+                        needs_text_match.append(market)
+            else:
+                needs_text_match.append(market)
+
+            processed += 1
+            if processed % 10 == 0:
+                await asyncio.sleep(0)
+
+        # Slow path: game-level text matching for unmatched/evicted markets.
+        # Group by event_slug so one text search serves all markets in the same game.
         event_groups: dict[str, list[Market]] = {}
         no_slug: list[Market] = []
-        for market in markets:
+        for market in needs_text_match:
             slug = market.event_slug
             if slug:
                 event_groups.setdefault(slug, []).append(market)
             else:
                 no_slug.append(market)
 
-        results: list[LiveStateMatch] = []
-        processed = 0
-
         for group in event_groups.values():
-            # One live-event lookup per game using the first market as representative.
             first = self._match_live_state(group[0], events)
             if first is not None:
                 results.append(first)
+                self._match_cache[group[0].condition_id] = first.event.source_event_id
             processed += 1
             if processed % 10 == 0:
                 await asyncio.sleep(0)
-            # Remaining markets in the same game: skip full search, use matched event.
             for market in group[1:]:
                 if first is not None:
                     m = self._match_live_state(market, (first.event,))
                     if m is not None:
                         results.append(m)
+                        self._match_cache[market.condition_id] = first.event.source_event_id
                 processed += 1
                 if processed % 10 == 0:
                     await asyncio.sleep(0)
 
-        # Markets without event_slug fall back to full search.
         for market in no_slug:
             match = self._match_live_state(market, events)
             if match is not None:
                 results.append(match)
+                self._match_cache[market.condition_id] = match.event.source_event_id
             processed += 1
             if processed % 10 == 0:
                 await asyncio.sleep(0)
