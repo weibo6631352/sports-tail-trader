@@ -309,6 +309,15 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
     if uncovered_shares <= Decimal("0"):
         return ExtensionDecision.skip(reason="no_uncovered_shares")
 
+    # 跳过已结算/关闭市场中的僵尸仓位：当前值为 0 且盘口不存在，
+    # 说明市场已结束且无流动性，此时挂 SELL 只会被立即拒绝。
+    if (
+        context.position is not None
+        and (context.position.current_value is None or context.position.current_value <= Decimal("0"))
+        and context.orderbook is None
+    ):
+        return ExtensionDecision.skip(reason="position_zero_value_no_orderbook")
+
     token_id = (
         context.token_id
         or (context.position.token_id if context.position is not None else None)

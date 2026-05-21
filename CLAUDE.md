@@ -126,7 +126,7 @@ runtime -> domain
 
 | 类型 | 端点形式 | 认证 | 实现位置 |
 |------|---------|------|---------|
-| Inplay 实时赔率+比分（1秒刷新）| `inplay.goalserve.com/inplay-{sport}.gz` | IP 白名单 | `infra/sports/goalserve_client.py` |
+| Inplay 实时赔率+比分（WebSocket 推送）| `live.goalserve.com/ws/{sport}?tkn={jwt}` | JWT token（`live.goalserve.com/api/v1/auth/gettoken` 换取）| `infra/sports/goalserve_client.py` |
 | Livescore 实时比分（getfeed）| `getfeed/{key}/{sport}/home?json=1` | API key | `infra/sports/goalserve_livescore_client.py` |
 | 赛前赔率（Pregame Odds, GZIP）| `getfeed/{key}/getodds/soccer?cat={sport}_10` | API key | `infra/sports/goalserve_pregame_client.py` |
 
@@ -145,7 +145,8 @@ runtime -> domain
 - 新增运动 parser 必须：① domain 加对应 GameState；② parsers 文件加 sport parser；③ `_SPORT_PARSERS` / `_SPORT_PATHS` 注册；④ config 默认值加入；⑤ 补测试。缺任何一步均为未完成。
 - API key 只存 `.env` 的 `GOALSERVE_API_KEY`，不进代码仓库和文档。
 - Pregame 数据量极大（>100MB），默认关闭（`goalserve_pregame_enabled=false`）；启用时必须用 `ts` 增量拉取，不允许无限循环全量请求。
-- Inplay feed 拉取循环必须在独立 asyncio task 中运行，不占用交易主事件循环；time\_status=99（removed）的赛事立即停止。
+- Inplay WS 每个运动维护独立后台 Task；stp=99（removed）的赛事立即停止；`events_seen=0` 且 `health=success_empty` 表示 WS 连通但无 inplay 数据——此时以 livescore getfeed 为主要比分源，不影响交易。
+- **无效接口处理原则**：发现代码中有 403/无数据接口，查阅 `goalserve/full_package_feed.txt` 和代码确认实际有效替代；有替代则更新接口和文档，无替代则删除死代码并在此注明原因，不保留会误导排查的旧 URL。
 
 ## 10. 实盘策略演化
 
@@ -201,7 +202,7 @@ runtime -> domain
 Goalserve 覆盖面极广，任何主要联赛/赛事在 Goalserve 上几乎必然有数据。如果发现某场比赛在 Goalserve 中找不到对应的实时直播数据（`missing_live_game_state`、源匹配失败等），**首先假定是我们这边的问题**，而不是 Goalserve 没数据，需要排查以下几点：
 
 1. **路由问题**：该运动的 feed 路径是否正确配置（inplay vs livescore vs getfeed）？
-2. **认证/网络**：inplay feed 是否 403（IP 白名单）？livescore API key 是否有效？
+2. **认证/网络**：inplay WS token 是否正常刷新（`live.goalserve.com/api/v1/auth/gettoken`，429 = 系统已占用 token 槽）？livescore API key 是否有效？
 3. **解析问题**：parser 是否正确处理了该运动的 XML/JSON 格式？是否静默丢弃了数据？
 4. **名称匹配**：团队名拼写/格式是否导致市场文本匹配失败？
 5. **时区/日期**：市场 slug 日期是否与事件实际 UTC 日期不一致（如午夜场次）？
@@ -232,6 +233,24 @@ Goalserve 覆盖面极广，任何主要联赛/赛事在 Goalserve 上几乎必�
 - 优先级：live inplay 赔率 > pregame 赔率；inplay 赔率在比赛中动态更新，是最强信号
 - 与扫尾策略的关系：扫尾策略依赖"结果已接近锁定"的确定性；赔率差价策略可更早入场，依赖"Polymarket 定价落后于博彩市场"的效率差
 - 关键数据：Goalserve `goalserve_moneyline`/`goalserve_totals` 字段已通过 pregame client 拉取；inplay feed 中的 `odd` 字段也有赔率数据，需校验字段名和格式
+
+**门禁调参原则**（拼概率，不过度保守）：
+- 门禁（gate）的目的是防止明确错误，不是追求零风险。如果一个门禁在实盘中反复拦截了本应成交的机会，必须复盘并调整，不能因为"有审计"就放着不管。
+- 复盘路径：查 `/audit-events` 和 `/candidates` 的 `rejection_reason`，结合当时的实际比分、赔率和市场结果，判断拒绝是否合理；不合理的拒绝（即如果成交是正期望的）视为门禁参数设定问题，需要调整阈值或逻辑。
+- 能承担合理风险的地方要成交：在有统计优势的情况下，宁可偶尔在边界情况输一笔，也不能因为过于保守在系统性优势场景下全部放弃。
+- 审计日志不是决策权威，而是复盘工具——看到哪些市场、什么价格、什么比赛状态被拒，然后和实际结果对照。
+
+**买入复盘与止损原则**：
+- 每次实盘买入事后必须复盘：查 `audit_events` 里 `order_created`/`fill_recorded` 找到实际成交，结合当时的直播状态（`sports_live_state_recorded`）、门禁决策（`allocation_decision_recorded`）判断买入是否由正确逻辑触发
+- **Bug 买入立即止损**：如果发现某笔买入是由 bug（直播状态解析错误、价格计算误差、配置问题等）触发的，应立即通过 `/positions/force-exit` 或手动市价卖出止损，不要等待结算归零
+- 判断标准：bug 触发 = 如果 bug 不存在，系统不会对这笔市场下单（例如 `"delayed"` 状态被误认为 LIVE 而触发的雨延场买入）
+- 复盘工具：`/positions`（当前持仓）、`/fills`（成交记录）、`/audit-events`（完整审计链）、数据库 `audit_events` 表按 `condition_id` 过滤
+
+**僵尸仓位（orphan position）处理原则**：
+- 系统在 reconcile 时会扫描链上账户，发现系统未追踪的持仓（`account-exposure-*` slug），这些是孤儿仓位
+- 孤儿仓位往往来自旧版本策略或手动操作，市场可能已关闭/结算，当前价值为 0
+- 对于当前值 = 0 且无盘口的仓位，系统已修复（`decide_exit` 中加 `position_zero_value_no_orderbook` 跳过逻辑），不再重复挂无效 SELL 单
+- 如果孤儿仓位对应已结算的胜利方向，使用 `/markets/{condition_id}/settlement` 手动触发结算；否则直接接受损失，无法强制卖出
 
 **策略演化方向**：
 - 赛前赔率（Pregame odds）的统计套利
