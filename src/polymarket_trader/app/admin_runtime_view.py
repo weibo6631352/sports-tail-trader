@@ -327,7 +327,7 @@ class AdminRuntimeView:
             data: DataClient | None = self.runtime.data_client
             for client in (clob, data):
                 if client is not None:
-                    candidate = client.default_wallet_address()
+                    candidate = client.default_wallet_address
                     if candidate:
                         wallet_address = str(candidate)
                         break

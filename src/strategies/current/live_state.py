@@ -932,6 +932,13 @@ def _alias_text_variants(alias: str) -> tuple[str, ...]:
     if not normalized:
         return ()
     variants = [normalized]
+    # Tennis: "M. LastName" → also try "LastName" so Goalserve initial-abbreviated
+    # names match Polymarket slugs that spell out full names in event_title.
+    parts = normalized.split()
+    if len(parts) >= 2 and len(parts[0]) == 1:
+        variants.append(" ".join(parts[1:]))
+        if len(parts) > 2:
+            variants.append(parts[-1])
     replaced = re.sub(r"\bolympique\b", "olympic", normalized)
     if replaced != normalized:
         variants.append(replaced)

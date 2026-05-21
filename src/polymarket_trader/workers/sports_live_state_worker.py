@@ -137,6 +137,9 @@ class SportsLiveStateWorker:
         self._recent_match_sources: deque[dict[str, Any]] = deque(
             maxlen=_RECENT_MATCH_SOURCES_CAPACITY
         )
+        # 匹配失败 gap 去重：只在 market 从"有匹配"→"无匹配"或首次发现时落 audit。
+        # condition_id → 上次 gap 记录的 minute bucket（每分钟最多记一次）。
+        self._last_gap_recorded_minute: dict[str, int] = {}
 
     async def sync_once(self) -> SportsLiveSyncResult | None:
         """执行一次同步；供 scheduler 和测试直接驱动。"""
@@ -241,6 +244,23 @@ class SportsLiveStateWorker:
             # 异步落 audit_events——P3 优先级，失败不阻塞热路径；用于复盘"决策时
             # 的比分/时钟/赛况"这个目前的最大盲点。
             await self._publish_sports_live_state_recorded(snapshot=snapshot, match=match)
+
+        matched_condition_ids = {m.market.condition_id for m in matches}
+        now = _utc_now()
+        now_minute = int(now.timestamp()) // 60
+        for market in markets:
+            if market.condition_id in matched_condition_ids:
+                # 清除 gap 记录——已匹配上，下次失配时重新记录。
+                self._last_gap_recorded_minute.pop(market.condition_id, None)
+                continue
+            # 只对 game_start_time 已过去的市场（比赛应该正在进行）记录 gap。
+            if market.game_start_time is None or market.game_start_time > now:
+                continue
+            last_minute = self._last_gap_recorded_minute.get(market.condition_id)
+            if last_minute is not None and now_minute - last_minute < 5:
+                continue
+            self._last_gap_recorded_minute[market.condition_id] = now_minute
+            await self._publish_live_match_gap(market=market, snapshot=snapshot, now=now)
 
         completed_at = _utc_now()
         self._last_events = snapshot.events
@@ -441,6 +461,40 @@ class SportsLiveStateWorker:
             )
         except Exception:
             # 体育事件落库纯属观测，失败不能反向阻塞 P2 worker。
+            return
+
+    async def _publish_live_match_gap(
+        self,
+        *,
+        market: Market,
+        snapshot: SportsLiveSnapshot,
+        now: datetime,
+    ) -> None:
+        """为"应该有直播数据但匹配失败"的市场落 audit 事件，便于追溯和排查。"""
+        if self._event_bus is None:
+            return
+        try:
+            await self._event_bus.publish(
+                OutboxPriority.P3,
+                DomainEvent(
+                    trace_id=f"sports-live-gap-{uuid4().hex}",
+                    event_type=DomainEventType.SPORTS_LIVE_MATCH_GAP_RECORDED,
+                    event_id=uuid4().hex,
+                    market_slug=market.market_slug,
+                    event_slug=market.event_slug,
+                    condition_id=market.condition_id,
+                    token_id=None,
+                    reason="missing_live_game_state",
+                    payload={
+                        "source": snapshot.source,
+                        "observed_at": jsonable(now),
+                        "game_start_time": jsonable(market.game_start_time),
+                        "events_seen": len(snapshot.events),
+                        "gap_urgency": "started_or_past_due",
+                    },
+                ),
+            )
+        except Exception:
             return
 
     async def _publish_entry_signal_events(self, *, match: LiveStateMatch) -> int:

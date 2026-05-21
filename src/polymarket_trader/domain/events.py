@@ -82,6 +82,7 @@ class DomainEventType(StrEnum):
     TRADE_CONFIRMED = "trade_confirmed"
     DECISION_RECORDED = "decision_recorded"
     SPORTS_LIVE_STATE_RECORDED = "sports_live_state_recorded"
+    SPORTS_LIVE_MATCH_GAP_RECORDED = "sports_live_match_gap_recorded"
     ALLOCATION_DECISION_RECORDED = "allocation_decision_recorded"
     RISK_REJECTION_RECORDED = "risk_rejection_recorded"
     MARKET_SETTLED = "market_settled"
