@@ -68,6 +68,8 @@ _LIVE_DISCOVERY_MAJOR_LEAGUE_TOKENS = (
 _LIVE_DISCOVERY_SECONDARY_LEAGUE_TOKENS = (
     "nfl",
     "challenger",
+    "libertadores",
+    "sudamericana",
 )
 _LIVE_DISCOVERY_LOW_COVERAGE_TOKENS = (
     "itf",

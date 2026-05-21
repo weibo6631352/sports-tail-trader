@@ -128,6 +128,7 @@ class Settings(BaseSettings):
     # nba/mlb/nhl/tennis/basketball/baseball/hockey 通过 XML 路径拉取，
     # 与 inplay feed 互为补充（inplay IP 被封时这些路径作为主要数据源）。
     goalserve_livescore_sports: str = (
+        "soccer,"  # soccernew/home covers all leagues incl Copa Libertadores/Sudamericana
         "nba,mlb,nhl,wnba,basketball,baseball,hockey,tennis,"
         "cricket,handball,rugby,boxing,mma,"
         "golf_pga,golf_dp,golf_liv,golf_lpga,"
