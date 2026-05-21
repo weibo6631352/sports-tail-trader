@@ -73,6 +73,29 @@ def _tail_entry_gate(
 
     token_id = context.token_id or context.orderbook.token_id
     game = live_game_state_from_metadata(context.metadata)
+
+    # 已结束但开赛时间太短 → Goalserve 把另一场（如双赛程午场）的终局比分错配到本场。
+    # 任何运动完成一场正式比赛都需要至少 60 分钟；棒球/篮球/足球通常 ≥ 90 分钟。
+    if game is not None and game.status == LiveGameStatus.ENDED and context.market.game_start_time is not None:
+        now_dt = (context.now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        market_start = context.market.game_start_time
+        if market_start.tzinfo is None:
+            market_start = market_start.replace(tzinfo=timezone.utc)
+        elapsed_seconds = (now_dt - market_start.astimezone(timezone.utc)).total_seconds()
+        min_duration = _min_game_duration_seconds(game.league)
+        if elapsed_seconds < min_duration:
+            meta = {
+                **family_metadata,
+                "impossible_elapsed_seconds": round(elapsed_seconds),
+                "min_game_duration_seconds": min_duration,
+                "game_league": game.league,
+            }
+            return (
+                ExtensionDecision.skip(reason="impossible_game_duration", metadata=meta),
+                config.entry_no_price_max,
+                meta,
+            )
+
     target, target_reason = _target_for_live_game(
         context.market,
         token_id,
@@ -548,6 +571,28 @@ def _market_end_too_far_for_strategy(
     return (market_end.astimezone(timezone.utc) - current_time.astimezone(timezone.utc)).total_seconds() > (
         config.tail_market_end_horizon_seconds
     )
+
+
+def _min_game_duration_seconds(league: str | None) -> int:
+    """返回一场正式比赛所需的最短时间（秒），用于过滤不可能的 ENDED 状态。
+
+    任何运动完成一场正式比赛都需要至少 60 分钟；棒球/篮球/足球通常 ≥ 90 分钟。
+    宁可偏保守（避免误买）——真正在末局的比赛 elapsed_seconds 一定远超这些阈值。
+    """
+    text = (league or "").lower()
+    if any(k in text for k in ("baseball", "mlb", "kbo", "npb")):
+        return 5400  # 90 分钟；MLB 实际平均超过 3 小时
+    if any(k in text for k in ("basketball", "nba", "nbl", "wnba")):
+        return 5400
+    if any(k in text for k in ("hockey", "nhl")):
+        return 5400
+    if any(k in text for k in ("football", "nfl", "ncaa")):
+        return 5400
+    if any(k in text for k in ("soccer", "football")):
+        return 5400
+    if "tennis" in text:
+        return 3600  # 网球最短约 60 分钟
+    return 3600  # 保守兜底
 
 
 def _has_open_order(snapshot: AllocationMarketSnapshot, side: OrderSide) -> bool:
