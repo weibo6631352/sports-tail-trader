@@ -23,6 +23,7 @@ scores 内结构按运动而异：
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -772,10 +773,26 @@ def _hockey_seconds_remaining(status: str, timer_raw: Any, periods_played: int =
 
 
 # ---------------------------------------------------------------------------
-# Soccer（足球 / soccernew/home）
+# Tennis player name helpers
 # ---------------------------------------------------------------------------
 
-import re as _re
+def _tennis_surname(name: str) -> str | None:
+    """提取网球选手姓氏供 Participant.short_name 用于市场文本匹配。
+
+    Goalserve 格式多样：
+      "Djokovic N."  → "Djokovic"
+      "N. Djokovic"  → "Djokovic"
+      "Novak Djokovic" → "Djokovic"
+    规则：去掉首字母缩写词（单字符 + 可选点号），取剩余部分最后一词。
+    """
+    parts = [p.rstrip(".") for p in name.strip().split()]
+    meaningful = [p for p in parts if len(p) > 1]
+    return meaningful[-1] if meaningful else (parts[-1] if parts else None)
+
+
+# ---------------------------------------------------------------------------
+# Soccer（足球 / soccernew/home）
+# ---------------------------------------------------------------------------
 
 
 def _soccer_status(raw: Any) -> SportsLiveGameStatus:
@@ -795,13 +812,13 @@ def _soccer_status(raw: Any) -> SportsLiveGameStatus:
     if s_lower in _SOCCER_ENDED_STATUSES:
         return SportsLiveGameStatus.ENDED
     # Scheduled time pattern: "HH:MM" or "?" or empty
-    if _re.fullmatch(r"\d{1,2}:\d{2}", s) or s == "?":
+    if re.fullmatch(r"\d{1,2}:\d{2}", s) or s == "?":
         return SportsLiveGameStatus.SCHEDULED
     # Halftime (paused between halves) — treated as LIVE for tail purposes
     if s_lower in ("ht", "half time", "halftime"):
         return SportsLiveGameStatus.LIVE
     # Numeric minute (possibly with injury time suffix like "45+2")
-    if _re.fullmatch(r"\d+(\+\d+)?", s):
+    if re.fullmatch(r"\d+(\+\d+)?", s):
         return SportsLiveGameStatus.LIVE
     # Extra time period labels
     if s_lower in ("et", "extra time", "aet pending", "pen pending"):
@@ -825,7 +842,7 @@ def _soccer_seconds_remaining(status_raw: str, timer_raw: Any) -> int | None:
     try:
         elapsed = int(float(str(timer_raw or "").strip()))
     except (ValueError, TypeError):
-        m = _re.match(r"(\d+)", s)
+        m = re.match(r"(\d+)", s)
         elapsed = int(m.group(1)) if m else 0
     if elapsed <= 0:
         return None
@@ -1255,8 +1272,8 @@ def _parse_tennis_with_cats(scores: dict[str, Any], observed_at: datetime) -> li
                     league=cat_name,
                     sport="tennis",
                     participants=(
-                        Participant(role="home", name=home_name, score=home_sets, external_ids={"goalserve": event_id}),
-                        Participant(role="away", name=away_name, score=away_sets, external_ids={"goalserve": event_id}),
+                        Participant(role="home", name=home_name, score=home_sets, short_name=_tennis_surname(home_name), external_ids={"goalserve": event_id}),
+                        Participant(role="away", name=away_name, score=away_sets, short_name=_tennis_surname(away_name), external_ids={"goalserve": event_id}),
                     ),
                     status=status,
                     period=status_raw,

@@ -235,9 +235,9 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
 
 
 def _is_moneyline_market_name(name: str) -> bool:
-    """匹配 Goalserve Money Line 盘口名称，兼容带空格和不带空格两种写法。"""
+    """匹配 Goalserve Money Line 盘口名称，兼容带空格/不带空格及网球 Match Winner 写法。"""
     n = name.lower()
-    return "money line" in n or "moneyline" in n
+    return "money line" in n or "moneyline" in n or "match winner" in n
 
 
 def _goalserve_markets(event: LiveEvent) -> list[dict[str, Any]] | None:
@@ -934,6 +934,8 @@ def _alias_text_variants(alias: str) -> tuple[str, ...]:
     variants = [normalized]
     # Tennis: "M. LastName" → also try "LastName" so Goalserve initial-abbreviated
     # names match Polymarket slugs that spell out full names in event_title.
+    # "LastName N." format is handled at parse time: parsers set Participant.short_name
+    # to the surname so sport-specific logic stays in the parser, not here.
     parts = normalized.split()
     if len(parts) >= 2 and len(parts[0]) == 1:
         variants.append(" ".join(parts[1:]))

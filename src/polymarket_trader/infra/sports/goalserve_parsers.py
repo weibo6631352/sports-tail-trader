@@ -287,6 +287,21 @@ def _amfootball_seconds_remaining(et: int | None, status: SportsLiveGameStatus) 
 
 
 # ---------------------------------------------------------------------------
+# Tennis player name helpers
+# ---------------------------------------------------------------------------
+
+def _tennis_surname(name: str) -> str | None:
+    """提取网球选手姓氏（去除首字母缩写词后的最后一词）。
+
+    Goalserve WS 格式多样："N. Djokovic" / "Djokovic N." / "Novak Djokovic"
+    → 均返回 "Djokovic"，供 Participant.short_name 用于市场文本匹配。
+    """
+    parts = [p.rstrip(".") for p in name.strip().split()]
+    meaningful = [p for p in parts if len(p) > 1]
+    return meaningful[-1] if meaningful else (parts[-1] if parts else None)
+
+
+# ---------------------------------------------------------------------------
 # Basketball
 # ---------------------------------------------------------------------------
 
@@ -528,8 +543,8 @@ def _parse_tennis(state_dict: dict[str, Any], observed_at: datetime) -> list[Liv
                 league=ev.get("ctry_name", ""),
                 sport="tennis",
                 participants=(
-                    Participant(role="home", name=home_name, score=sets_a, external_ids={"goalserve": event_id}),
-                    Participant(role="away", name=away_name, score=sets_b, external_ids={"goalserve": event_id}),
+                    Participant(role="home", name=home_name, score=sets_a, short_name=_tennis_surname(home_name), external_ids={"goalserve": event_id}),
+                    Participant(role="away", name=away_name, score=sets_b, short_name=_tennis_surname(away_name), external_ids={"goalserve": event_id}),
                 ),
                 status=status,
                 period=str(ev.get("sc", "")),
