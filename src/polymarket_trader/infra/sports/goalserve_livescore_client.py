@@ -15,12 +15,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from polymarket_trader.domain.sports_live import (
     SportsLiveSnapshot,
@@ -76,6 +79,7 @@ class GoalserveLivescoreClient:
         sports: tuple[str, ...] | None = None,
         base_url: str = _BASE_URL,
         timeout_s: float = 15.0,
+        poll_interval_s: float = 5.0,
         proxy: str | None = None,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
@@ -84,6 +88,11 @@ class GoalserveLivescoreClient:
         self._sports = tuple(_SPORT_FEEDS) if sports is None else tuple(s for s in sports if s in _SPORT_FEEDS)
         self._base_url = base_url.rstrip("/")
         self._now_provider = now_provider
+        self._poll_interval_s = poll_interval_s
+        # Background polling: _cache holds the last successful snapshot; _poll_task is the
+        # background loop. list_events() returns cached data without blocking on HTTP.
+        self._cache: SportsLiveSnapshot | None = None
+        self._poll_task: asyncio.Task[None] | None = None
         if proxy:
             mounts: dict[str, Any] = {
                 "http://": httpx.AsyncHTTPTransport(proxy=proxy),
@@ -104,9 +113,45 @@ class GoalserveLivescoreClient:
             )
 
     async def aclose(self) -> None:
+        if self._poll_task is not None:
+            self._poll_task.cancel()
+            try:
+                await self._poll_task
+            except (asyncio.CancelledError, Exception):
+                pass
         await self._client.aclose()
 
     async def list_events(self) -> SportsLiveSnapshot:
+        """返回最近一次后台轮询的快照，不阻塞在 HTTP 请求上。
+
+        首次调用（缓存为空）同步拉取一次并启动后台轮询任务；此后每次调用立即
+        返回内存缓存，sync_once 不再被 HTTP 延迟拖慢。
+        """
+        if self._cache is not None:
+            return self._cache
+        # First call: fetch synchronously so the caller has real data immediately.
+        snapshot = await self._fetch_all_sports()
+        self._cache = snapshot
+        # Kick off background loop for all subsequent calls.
+        if self._poll_task is None:
+            self._poll_task = asyncio.create_task(
+                self._poll_loop(), name="goalserve_livescore_poll"
+            )
+        return snapshot
+
+    async def _poll_loop(self) -> None:
+        """后台持续轮询：每次 fetch 完立即更新缓存，再等 poll_interval_s。"""
+        while True:
+            await asyncio.sleep(self._poll_interval_s)
+            try:
+                snapshot = await self._fetch_all_sports()
+                self._cache = snapshot
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                logger.warning("goalserve_livescore: poll error: %s", exc)
+
+    async def _fetch_all_sports(self) -> SportsLiveSnapshot:
         """并发拉取所有运动 livescore feed，合并返回统一快照。单运动失败记入 source_statuses 但不阻断其他。"""
         observed_at = utc_now(self._now_provider)
 

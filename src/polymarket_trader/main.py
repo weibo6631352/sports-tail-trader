@@ -227,6 +227,7 @@ def _build_sports_live_state_client(
             api_key=api_key,
             base_url=settings.goalserve_livescore_base_url,
             timeout_s=settings.goalserve_livescore_timeout_s,
+            poll_interval_s=float(settings.sports_live_state_interval_seconds),
             proxy=settings.goalserve_proxy,
         )
         providers.append(("goalserve_livescore", livescore.list_events))

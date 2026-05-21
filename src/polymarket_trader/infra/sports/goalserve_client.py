@@ -186,13 +186,17 @@ class GoalserveClient:
                 return
             except websockets.exceptions.InvalidStatus as exc:
                 if exc.response.status_code == 401:
+                    # Only clear if we're still holding the token that caused the 401.
+                    # Without this check, all 8 sports handle 401 simultaneously and each
+                    # clears the token after another sport already refreshed it, causing a
+                    # cascade of gettoken calls that triggers 429 and fills the slot quota.
                     async with self._token_lock:
-                        self._token = None
-                    # Invalidate disk cache so next _ensure_token fetches fresh
-                    try:
-                        _TOKEN_CACHE_PATH.unlink(missing_ok=True)
-                    except Exception:
-                        pass
+                        if self._token == token:
+                            self._token = None
+                            try:
+                                _TOKEN_CACHE_PATH.unlink(missing_ok=True)
+                            except Exception:
+                                pass
                     logger.warning("goalserve: WS 401 for %s, forcing token refresh", sport)
                 else:
                     err = self._consecutive_errors.get(sport, 0) + 1
