@@ -21,9 +21,11 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import time
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -46,6 +48,9 @@ _TOKEN_REFRESH_MARGIN_S = 300  # 过期前 5 分钟刷新
 _RECONNECT_BASE_S = 5.0
 _RECONNECT_MAX_S = 60.0
 _STALE_THRESHOLD_S = 30.0  # 超过此时间无消息视为源失活
+
+# Token 持久化路径：避免重启时重新申请占用 token slot 导致 429
+_TOKEN_CACHE_PATH = Path(os.environ.get("GOALSERVE_TOKEN_CACHE", ".dev-runtime/goalserve_token.json"))
 
 _SUPPORTED_SPORTS = frozenset({
     "basketball", "soccer", "hockey", "baseball", "tennis",
@@ -95,22 +100,45 @@ class GoalserveClient:
             )
             self._tasks.append(task)
 
-    async def _fetch_token(self) -> str:
+    async def _fetch_token(self) -> tuple[str, float]:
         async with httpx.AsyncClient(trust_env=False, timeout=15) as client:
             r = await client.post(_TOKEN_URL, json={"apiKey": self._api_key})
             r.raise_for_status()
-            return r.json()["token"]
+            token = r.json()["token"]
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        exp = float(json.loads(base64.urlsafe_b64decode(payload_b64))["exp"])
+        return token, exp
+
+    def _load_cached_token(self) -> tuple[str, float] | None:
+        try:
+            data = json.loads(_TOKEN_CACHE_PATH.read_text())
+            token, exp = data["token"], float(data["exp"])
+            if time.time() < exp - _TOKEN_REFRESH_MARGIN_S:
+                return token, exp
+        except Exception:
+            pass
+        return None
+
+    def _save_cached_token(self, token: str, exp: float) -> None:
+        try:
+            _TOKEN_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _TOKEN_CACHE_PATH.write_text(json.dumps({"token": token, "exp": exp}))
+        except Exception as exc:
+            logger.warning("goalserve: failed to save token cache: %s", exc)
 
     async def _ensure_token(self) -> str:
         async with self._token_lock:
             if self._token is None or time.time() > self._token_exp - _TOKEN_REFRESH_MARGIN_S:
-                token = await self._fetch_token()
-                payload_b64 = token.split(".")[1]
-                payload_b64 += "=" * (4 - len(payload_b64) % 4)
-                exp = float(json.loads(base64.urlsafe_b64decode(payload_b64))["exp"])
-                self._token = token
-                self._token_exp = exp
-                logger.info("goalserve: token refreshed, exp=%.0f", exp)
+                # Try cached token from disk first to avoid consuming a token slot on restart
+                cached = self._load_cached_token()
+                if cached:
+                    self._token, self._token_exp = cached
+                    logger.info("goalserve: token loaded from cache, exp=%.0f", self._token_exp)
+                else:
+                    self._token, self._token_exp = await self._fetch_token()
+                    self._save_cached_token(self._token, self._token_exp)
+                    logger.info("goalserve: token refreshed, exp=%.0f", self._token_exp)
             return self._token  # type: ignore[return-value]
 
     async def _ws_loop(self, sport: str) -> None:
@@ -135,6 +163,11 @@ class GoalserveClient:
                 if exc.response.status_code == 401:
                     async with self._token_lock:
                         self._token = None
+                    # Invalidate disk cache so next _ensure_token fetches fresh
+                    try:
+                        _TOKEN_CACHE_PATH.unlink(missing_ok=True)
+                    except Exception:
+                        pass
                     logger.warning("goalserve: WS 401 for %s, forcing token refresh", sport)
                 else:
                     err = self._consecutive_errors.get(sport, 0) + 1

@@ -63,6 +63,9 @@ def _text_status(raw: Any) -> SportsLiveGameStatus:
     s = str(raw or "").strip().lower()
     if s in ("in progress", "inprogress", "live"):
         return SportsLiveGameStatus.LIVE
+    # Period/set names indicate an in-progress game (tennis "Set 1/2/3", etc.)
+    if any(kw in s for kw in ("set ", "quarter", "period", "inning", "half")):
+        return SportsLiveGameStatus.LIVE
     if s in ("finished", "final", "ft"):
         return SportsLiveGameStatus.ENDED
     if s == "not started":
