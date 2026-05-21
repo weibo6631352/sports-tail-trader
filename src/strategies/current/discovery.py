@@ -8,6 +8,7 @@ universe、盘口解析、直播状态和风控决定。
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 
 from polymarket_trader.domain.sports_live import (
     LiveEvent,
@@ -17,6 +18,33 @@ from polymarket_trader.domain.sports_live import (
 )
 from polymarket_trader.extension_api import DiscoveryQuery
 from strategies.current.config import CurrentStrategyConfig
+
+# IIHF World Championship country name → Polymarket slug abbreviation.
+# Polymarket uses IOC-style 3-letter codes in lowercase for WCH event slugs.
+_WCH_COUNTRY_SLUG: dict[str, str] = {
+    "austria": "aut",
+    "belarus": "blr",
+    "canada": "can",
+    "czech republic": "cze",
+    "czechia": "cze",
+    "denmark": "den",
+    "finland": "fin",
+    "france": "fra",
+    "germany": "ger",
+    "great britain": "gbr",
+    "hungary": "hun",
+    "kazakhstan": "kaz",
+    "latvia": "lat",
+    "norway": "nor",
+    "russia": "rus",
+    "slovakia": "svk",
+    "south korea": "kor",
+    "sweden": "swe",
+    "switzerland": "sui",
+    "ukraine": "ukr",
+    "usa": "usa",
+    "united states": "usa",
+}
 
 _LIVE_DISCOVERY_STATUSES = {
     SportsLiveGameStatus.SCHEDULED,
@@ -100,6 +128,8 @@ def build_live_event_discovery_queries(
     Polymarket 的通用 ``nba/nhl/mlb`` 搜索经常优先返回冠军、选秀、系列赛或
     电竞等长期市场；直播比赛的队名搜索能更快扫到今日单场盘口。这里只生成
     远端粗筛词，不直接把任何 market 放入交易 universe。
+
+    WCH（IIHF 世界锦标赛）等赛事 Gamma title_search 质量差，用 slug 直接查。
     """
 
     tag_slugs = tuple(tag_slug.strip() for tag_slug in config.discovery_tag_slugs if tag_slug.strip())
@@ -111,6 +141,23 @@ def build_live_event_discovery_queries(
     )
     queries: list[DiscoveryQuery] = []
     seen: set[tuple[str, str | None]] = set()
+
+    # Slug-based queries for events where Gamma title_search is unreliable.
+    # These are prepended before title_search queries to get priority budget.
+    slug_seen: set[str] = set()
+    for event in active_events:
+        slug = _event_polymarket_slug(event)
+        if slug and slug not in slug_seen:
+            slug_seen.add(slug)
+            queries.append(
+                DiscoveryQuery(
+                    name=f"slug_lookup:{event.league.lower()}:{event.source_event_id}:{slug}",
+                    params={"slug": slug},
+                )
+            )
+            if len(queries) >= config.tail_live_discovery_max_queries:
+                return tuple(queries)
+
     for event in active_events[: config.tail_live_discovery_max_games]:
         for term in _event_query_terms(event):
             for tag_slug in tag_slugs or (None,):
@@ -280,3 +327,25 @@ def _normalize_query_term(value: str) -> str:
     if len(normalized) < 3:
         return ""
     return normalized
+
+
+def _event_polymarket_slug(event: LiveEvent) -> str | None:
+    """构造直播事件对应的 Polymarket event slug（如能确定）。
+
+    当前支持：IIHF World Championship（league 含 "world championship"）。
+    slug 格式：``wch-{home_abbr}-{away_abbr}-{date}``，日期取 Goalserve 赛事当天 UTC。
+    """
+    if event.kind != LiveEventKind.TEAM_MATCH:
+        return None
+    if event.home is None or event.away is None:
+        return None
+    league_lower = (event.league or "").lower()
+    if "world championship" not in league_lower:
+        return None
+    home_abbr = _WCH_COUNTRY_SLUG.get(event.home.name.lower())
+    away_abbr = _WCH_COUNTRY_SLUG.get(event.away.name.lower())
+    if not home_abbr or not away_abbr:
+        return None
+    # Use today's UTC date; WCH games are same-day events.
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return f"wch-{home_abbr}-{away_abbr}-{date_str}"

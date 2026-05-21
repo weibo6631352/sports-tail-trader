@@ -53,6 +53,8 @@ _JSON_SPORT_PATHS: dict[str, str] = {
 
 # XML-response sports: getfeed returns plain XML <scores sport="...">
 _XML_SPORT_PATHS: dict[str, str] = {
+    # Soccer: soccernew/home covers all leagues (localteam/visitorteam, goals attr)
+    "soccer":     "soccernew/home",
     # International leagues (localteam/awayteam)
     "basketball": "basketball/home",
     "baseball":   "baseball/home",
@@ -218,7 +220,13 @@ def _xml_to_livescore_dict(xml_bytes: bytes) -> dict[str, Any]:
     for cat_el in root.findall("category"):
         cat_dict: dict[str, Any] = dict(cat_el.attrib)
         matches: list[dict[str, Any]] = []
-        for match_el in cat_el.findall("match"):
+        # Soccer XML has an intermediate <matches date="..."> wrapper; other sports put
+        # <match> directly under <category>. Search both levels.
+        match_els = cat_el.findall("match")
+        if not match_els:
+            for matches_wrapper in cat_el.findall("matches"):
+                match_els.extend(matches_wrapper.findall("match"))
+        for match_el in match_els:
             match_dict: dict[str, Any] = dict(match_el.attrib)
             # 按 tag 分组，支持 tennis 的 <player> 多子节点
             tag_counts: dict[str, int] = {}

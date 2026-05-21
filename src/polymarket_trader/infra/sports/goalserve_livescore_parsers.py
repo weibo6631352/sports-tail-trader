@@ -695,6 +695,10 @@ _XML_ENDED_STATUSES = frozenset({
     "finished", "final", "ft", "after over time", "after et", "after pen.",
     "aet", "pen", "aps",
 })
+# Soccer-specific finished statuses (extra time / penalty shootout endings)
+_SOCCER_ENDED_STATUSES = frozenset({
+    "ft", "aet", "pen", "finished", "final", "after over time", "after et", "after pen.", "aps",
+})
 _XML_SCHED_STATUSES = frozenset({"not started", "ns", ""})
 # Intermission keywords — the game is ongoing but between periods/halves
 _XML_INTERMISSION_KEYWORDS = ("break time", "half time", "halftime", "intermission", "interval", "ht")
@@ -765,6 +769,129 @@ def _hockey_seconds_remaining(status: str, timer_raw: Any, periods_played: int =
         periods_left = max(0, 3 - periods_played)
         return periods_left * period_minutes * 60
     return None
+
+
+# ---------------------------------------------------------------------------
+# Soccer（足球 / soccernew/home）
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+def _soccer_status(raw: Any) -> SportsLiveGameStatus:
+    """解析 soccer livescore 的 status 字段。
+
+    Goalserve soccernew/home status 格式：
+      "18:00" / "22:00"  → 未开始（scheduled time）
+      整数字符串 "3", "45" → 已过分钟数（live）
+      "45+2", "90+3"      → 补时（live）
+      "HT"                → 上半场结束/中场休息（live，paused）
+      "FT"                → 比赛结束
+      "AET", "Pen"        → 加时 / 点球后结束
+      "?"                 → 未知（scheduled but no kick-off time data）
+    """
+    s = str(raw or "").strip()
+    s_lower = s.lower()
+    if s_lower in _SOCCER_ENDED_STATUSES:
+        return SportsLiveGameStatus.ENDED
+    # Scheduled time pattern: "HH:MM" or "?" or empty
+    if _re.fullmatch(r"\d{1,2}:\d{2}", s) or s == "?":
+        return SportsLiveGameStatus.SCHEDULED
+    # Halftime (paused between halves) — treated as LIVE for tail purposes
+    if s_lower in ("ht", "half time", "halftime"):
+        return SportsLiveGameStatus.LIVE
+    # Numeric minute (possibly with injury time suffix like "45+2")
+    if _re.fullmatch(r"\d+(\+\d+)?", s):
+        return SportsLiveGameStatus.LIVE
+    # Extra time period labels
+    if s_lower in ("et", "extra time", "aet pending", "pen pending"):
+        return SportsLiveGameStatus.LIVE
+    if not s:
+        return SportsLiveGameStatus.SCHEDULED
+    return SportsLiveGameStatus.UNKNOWN
+
+
+def _soccer_seconds_remaining(status_raw: str, timer_raw: Any) -> int | None:
+    """估算足球剩余秒数。
+
+    全场90分钟（不含加时）。timer 字段 = 已过分钟数。
+    上半场：0-45分钟；下半场：45-90分钟。
+    """
+    s = status_raw.strip()
+    # Halftime: 45 minutes remaining in second half
+    if s.lower() in ("ht", "half time", "halftime"):
+        return 45 * 60
+    # Extract elapsed minutes from timer or status
+    try:
+        elapsed = int(float(str(timer_raw or "").strip()))
+    except (ValueError, TypeError):
+        m = _re.match(r"(\d+)", s)
+        elapsed = int(m.group(1)) if m else 0
+    if elapsed <= 0:
+        return None
+    remaining = max(0, 90 - elapsed) * 60
+    return remaining
+
+
+def _parse_soccer_with_cats(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
+    """解析 soccernew/home 的 category → match 结构。
+
+    每个 category 的 name 作为 league。localteam / visitorteam 分别为主客场。
+    goals 字段在未开始时为 "?"。
+    """
+    events: list[LiveEvent] = []
+    categories = scores.get("category") or []
+    if isinstance(categories, dict):
+        categories = [categories]
+    for cat in categories:
+        if not isinstance(cat, dict):
+            continue
+        cat_name = _str_val(cat.get("name"))
+        raw_matches = cat.get("match") or []
+        if isinstance(raw_matches, dict):
+            raw_matches = [raw_matches]
+        for match in raw_matches:
+            if not isinstance(match, dict):
+                continue
+            event_id = _str_val(match.get("id") or match.get("static_id") or "")
+            if not event_id:
+                continue
+            status_raw = _str_val(match.get("status"))
+            status = _soccer_status(status_raw)
+            home_team = match.get("localteam") or {}
+            away_team = match.get("visitorteam") or {}
+            home_name = _str_val(home_team.get("name"))
+            away_name = _str_val(away_team.get("name"))
+            if not home_name or not away_name:
+                continue
+            goals_home_raw = home_team.get("goals")
+            goals_away_raw = away_team.get("goals")
+            home_score = _int_val(goals_home_raw)
+            away_score = _int_val(goals_away_raw)
+            home_loc, home_nick = _split_team_name(home_name)
+            away_loc, away_nick = _split_team_name(away_name)
+            timer_raw = match.get("timer")
+            seconds_remaining = _soccer_seconds_remaining(status_raw, timer_raw) if status == SportsLiveGameStatus.LIVE else None
+            events.append(
+                LiveEvent(
+                    source="goalserve_livescore",
+                    source_event_id=event_id,
+                    kind=LiveEventKind.TEAM_MATCH,
+                    league=cat_name,
+                    sport="soccer",
+                    participants=(
+                        Participant(role="home", name=home_name, score=home_score, location=home_loc, team=home_nick, external_ids={"goalserve": event_id}),
+                        Participant(role="away", name=away_name, score=away_score, location=away_loc, team=away_nick, external_ids={"goalserve": event_id}),
+                    ),
+                    status=status,
+                    period=status_raw,
+                    seconds_remaining=seconds_remaining,
+                    raw_status=status_raw,
+                    observed_at=observed_at,
+                    external_ids={"goalserve": event_id},
+                )
+            )
+    return events
 
 
 def _parse_basketball(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
@@ -1167,6 +1294,8 @@ def parse_goalserve_livescore_sport(
         return []
 
     match sport:
+        case "soccer":
+            return _parse_soccer_with_cats(scores, ts)
         case "basketball" | "nba" | "wnba":
             return _parse_basketball_with_cats(scores, ts)
         case "hockey" | "nhl":
