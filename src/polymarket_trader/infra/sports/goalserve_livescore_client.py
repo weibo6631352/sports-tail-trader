@@ -1,16 +1,14 @@
 """Goalserve getfeed livescore HTTP 客户端。
 
 认证方式：API key 嵌入 URL（https://www.goalserve.com/getfeed/{api_key}/{sport_path}）。
-与 inplay feed 不同：需要 key，不同响应格式（XML 或 JSON），无 gzip 自动压缩。
+与 inplay feed 不同：需要 key，响应格式因端点而异（XML 或 JSON），无 gzip 自动压缩。
 
-运动分为两类：
-  - JSON 类（cricket/handball/rugby/boxing/mma/golf/horse_racing/f1/motogp）：
-      请求 ?json=1，响应为 {"scores": {...}}
-  - XML 类（basketball/baseball/hockey/tennis）：
-      请求无 ?json=1，响应为 XML；客户端内部转换为统一 dict 后调用 parser。
+所有支持的运动及其端点路径统一在 _SPORT_FEEDS 中定义，字段含义：
+  path   — URL 后缀（跟在 {api_key}/ 后面）
+  xml    — True 表示响应为 XML，False 表示 JSON（加 ?json=1）
 
 并发策略：
-  - 每次 list_events() 并发拉取所有启用运动（asyncio.gather with return_exceptions）
+  - 每次 list_events() 并发拉取所有运动（asyncio.gather with return_exceptions）
   - 单运动失败不阻塞其他
 """
 
@@ -32,43 +30,33 @@ from polymarket_trader.domain.sports_live import (
 from polymarket_trader.infra.sports.common import utc_now
 from polymarket_trader.infra.sports.goalserve_livescore_parsers import parse_goalserve_livescore_sport
 
-# JSON-response sports: getfeed returns {"scores": {...}}
-_JSON_SPORT_PATHS: dict[str, str] = {
-    "cricket":            "cricket/livescore",
-    "handball":           "handball/home",
-    "rugby":              "rugby/home",
-    "boxing":             "boxing/home",
-    "mma":                "mma/live",
-    "golf_pga":           "golf/live",
-    "golf_dp":            "golf/european_live",
-    "golf_liv":           "golf/liv_live",
-    "golf_lpga":          "golf/lpga_live",
-    "horse_racing_us":    "racing/usa",
-    "horse_racing_uk":    "racing/uk",
-    "horse_racing_au":    "racing/australia",
-    "horse_racing_hk":    "racing/hk",
-    "f1":                 "f1/f1-live",
-    "motogp":             "motors/motogp-live",
+# (path, xml) — path is appended after {api_key}/; xml=True → parse as XML, False → ?json=1
+_SPORT_FEEDS: dict[str, tuple[str, bool]] = {
+    "soccer":           ("soccernew/home",        True),   # all leagues incl Copa Libertadores/Sudamericana
+    "basketball":       ("basketball/home",        True),   # international leagues
+    "baseball":         ("baseball/home",          True),
+    "hockey":           ("hockey/home",            True),
+    "nba":              ("bsktbl/nba-scores",      True),
+    "wnba":             ("bsktbl/wnba-scores",     True),
+    "mlb":              ("baseball/mlb-scores",    True),
+    "nhl":              ("hockey/nhl-scores",      True),
+    "tennis":           ("tennis_scores/home",     True),
+    "cricket":          ("cricket/livescore",      False),
+    "handball":         ("handball/home",          False),
+    "rugby":            ("rugby/home",             False),
+    "boxing":           ("boxing/home",            False),
+    "mma":              ("mma/live",               False),
+    "golf_pga":         ("golf/live",              False),
+    "golf_dp":          ("golf/european_live",     False),
+    "golf_liv":         ("golf/liv_live",          False),
+    "golf_lpga":        ("golf/lpga_live",         False),
+    "horse_racing_us":  ("racing/usa",             False),
+    "horse_racing_uk":  ("racing/uk",              False),
+    "horse_racing_au":  ("racing/australia",       False),
+    "horse_racing_hk":  ("racing/hk",             False),
+    "f1":               ("f1/f1-live",             False),
+    "motogp":           ("motors/motogp-live",     False),
 }
-
-# XML-response sports: getfeed returns plain XML <scores sport="...">
-_XML_SPORT_PATHS: dict[str, str] = {
-    # Soccer: soccernew/home covers all leagues (localteam/visitorteam, goals attr)
-    "soccer":     "soccernew/home",
-    # International leagues (localteam/awayteam)
-    "basketball": "basketball/home",
-    "baseball":   "baseball/home",
-    "hockey":     "hockey/home",
-    # US major leagues (hometeam/awayteam)
-    "nba":        "bsktbl/nba-scores",
-    "wnba":       "bsktbl/wnba-scores",
-    "mlb":        "baseball/mlb-scores",
-    "nhl":        "hockey/nhl-scores",
-    # Tennis livescore (player tags, not localteam/awayteam)
-    "tennis":     "tennis_scores/home",
-}
-
-_ALL_SPORT_PATHS: dict[str, str] = {**_JSON_SPORT_PATHS, **_XML_SPORT_PATHS}
 
 _BASE_URL = "https://www.goalserve.com/getfeed"
 
@@ -92,8 +80,8 @@ class GoalserveLivescoreClient:
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self._api_key = api_key
-        # None means all supported sports; explicit tuple filters to known paths only.
-        self._sports = tuple(_ALL_SPORT_PATHS) if sports is None else tuple(s for s in sports if s in _ALL_SPORT_PATHS)
+        # None means all supported sports; explicit tuple filters to known entries only.
+        self._sports = tuple(_SPORT_FEEDS) if sports is None else tuple(s for s in sports if s in _SPORT_FEEDS)
         self._base_url = base_url.rstrip("/")
         self._now_provider = now_provider
         if proxy:
@@ -167,28 +155,17 @@ class GoalserveLivescoreClient:
         )
 
     async def _fetch_sport(self, sport: str, observed_at: datetime) -> tuple[list, int]:
-        """拉取单运动 livescore feed，解析后返回 (events, raw_event_count)。"""
-        if sport in _XML_SPORT_PATHS:
-            return await self._fetch_xml_sport(sport, observed_at)
-        return await self._fetch_json_sport(sport, observed_at)
-
-    async def _fetch_json_sport(self, sport: str, observed_at: datetime) -> tuple[list, int]:
-        path = _JSON_SPORT_PATHS[sport]
-        url = f"{self._base_url}/{self._api_key}/{path}?json=1"
-        response = await self._client.get(url)
-        response.raise_for_status()
-        data = response.json()
-        events = parse_goalserve_livescore_sport(sport, data, observed_at=observed_at)
-        return events, len(events)
-
-    async def _fetch_xml_sport(self, sport: str, observed_at: datetime) -> tuple[list, int]:
-        """拉取 XML 格式 feed（basketball/baseball/hockey/tennis），转换后调用 parser。"""
-        path = _XML_SPORT_PATHS[sport]
-        url = f"{self._base_url}/{self._api_key}/{path}"
-        response = await self._client.get(url)
-        response.raise_for_status()
-        xml_bytes = response.content
-        data = _xml_to_livescore_dict(xml_bytes)
+        path, is_xml = _SPORT_FEEDS[sport]
+        if is_xml:
+            url = f"{self._base_url}/{self._api_key}/{path}"
+            response = await self._client.get(url)
+            response.raise_for_status()
+            data = _xml_to_livescore_dict(response.content)
+        else:
+            url = f"{self._base_url}/{self._api_key}/{path}?json=1"
+            response = await self._client.get(url)
+            response.raise_for_status()
+            data = response.json()
         events = parse_goalserve_livescore_sport(sport, data, observed_at=observed_at)
         return events, len(events)
 
