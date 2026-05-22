@@ -61,6 +61,13 @@ class SportsMarketScopeType(StrEnum):
     TENNIS_SET_GAMES = "tennis_set_games"
     # 篮球上半场盘口（1H total / 1H spread / 1H moneyline）。
     BASKETBALL_FIRST_HALF = "basketball_first_half"
+    # 篮球单节盘口（Q1-Q4），scope_number 标注第几节。
+    BASKETBALL_QUARTER = "basketball_quarter"
+    # 篮球下半场盘口（2H = Q3+Q4）。
+    BASKETBALL_SECOND_HALF = "basketball_second_half"
+    # 其它运动的分段盘口（冰球分节、棒球 F5 等）——已识别为分段但当前无
+    # 干净的分段比分模型，区别于 totals 用的 UNSUPPORTED_PERIOD。
+    UNSUPPORTED_SUBPERIOD = "unsupported_subperiod"
     UNSUPPORTED_PERIOD = "unsupported_period"
 
 

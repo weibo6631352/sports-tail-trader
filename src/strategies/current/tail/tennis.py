@@ -165,6 +165,69 @@ def _evaluate_tennis_set_winner(
     return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
 
 
+def _tennis_sets_to_win(best_of: int) -> int:
+    """best-of-N 赛制下取胜所需盘数（best-of-3 → 2，best-of-5 → 3）。"""
+
+    return best_of // 2 + 1
+
+
+def _evaluate_tennis_set_handicap(
+    candidate: SportsTailCandidate,
+    policy: TailPolicy,
+) -> TailEvaluation:
+    """评估网球盘分让分（set handicap）盘口是否已数学锁定。
+
+    盘分让分按整场盘数差结算：``market.line`` 是带符号的让分（如 -1.5 / +1.5，
+    单位为盘）。设 A 为目标方向、need 为取胜所需盘数、a/b 为双方已胜盘数，
+    在比赛尚未/刚刚分出胜负的范围内，最终盘差的可达区间为：
+
+      - A 还能赢（a < need）→ 上界 = need - b
+      - B 还能赢（b < need）→ 下界 = a - need
+      - 某方已达 need → 该侧盘数定格，盘差取定值
+
+    锁定 YES：最小可达盘差 + line > 0（最坏情况仍覆盖让分）。
+    锁定 NO：最大可达盘差 + line ≤ 0（最好情况也无法覆盖让分）。
+    best-of 未知则无法确定 need，必须显式拒绝而非臆测。
+    """
+
+    market = candidate.market
+    state = candidate.game.tennis_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_TENNIS_STATE.value)
+    if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    if market.line is None:
+        return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+    if state.best_of is None or state.best_of <= 0:
+        return _reject(candidate, TailRejectReason.TENNIS_BEST_OF_UNKNOWN.value)
+
+    need = _tennis_sets_to_win(state.best_of)
+    other_side = SportsMarketSide.AWAY if market.side == SportsMarketSide.HOME else SportsMarketSide.HOME
+    a = state.sets_won_for(market.side)
+    b = state.sets_won_for(other_side)
+    # 让分线必须落在赛制可表达的盘差范围内；超出范围（如 best-of-3 的 -2.5）
+    # 永远不可能结算成立，标记为不支持线而非误判未锁定。
+    if abs(market.line) >= Decimal(need):
+        return _reject(candidate, TailRejectReason.TENNIS_SET_HANDICAP_LINE_UNSUPPORTED.value)
+
+    # 某方已达 need（比赛已分胜负）→ 盘差定格为 a - b；否则按可达区间取边界。
+    if a >= need or b >= need:
+        fixed = Decimal(a - b)
+        max_margin = fixed
+        min_margin = fixed
+    else:
+        max_margin = Decimal(need - b)
+        min_margin = Decimal(a - need)
+
+    line = market.line
+    if min_margin + line > 0:
+        return _accept(candidate, "tennis_set_handicap_locked_yes", policy.spreads_execution_permission)
+    if max_margin + line <= 0:
+        # 已数学锁定为 NO——目标方向不可能覆盖让分，对该 token 不入场。
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+    return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
+
+
 # ---- ended-not-closed 评估 -------------------------------------------
 
 

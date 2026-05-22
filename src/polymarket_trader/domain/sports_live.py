@@ -145,7 +145,12 @@ class BasketballGameState:
 
 @dataclass(frozen=True, slots=True)
 class TennisGameState:
-    """网球比赛盘分、局分和即时分状态。"""
+    """网球比赛盘分、局分和即时分状态。
+
+    best_of：本场赛制总盘数（3 = best-of-3，5 = best-of-5 大满贯男单）。
+    None 表示数据源未给出——盘分让分（set handicap）锁定判定依赖确切的
+    best-of，未知时不能臆测，必须显式拒绝。
+    """
 
     home_sets_won: int = 0
     away_sets_won: int = 0
@@ -159,6 +164,7 @@ class TennisGameState:
     away_point: str | None = None
     first_to_serve: str | None = None
     serving_side: str | None = None
+    best_of: int | None = None
 
     @property
     def total_games(self) -> int:

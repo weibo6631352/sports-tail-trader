@@ -247,6 +247,10 @@ def _evaluate_moneyline_odds_gap(
         return _reject(candidate, TailRejectReason.NO_ODDS_GAP.value)
     if market.best_ask is None:
         return _reject(candidate, TailRejectReason.NO_ODDS_GAP.value)
+    # Goalserve Money Line 赔率是整场范围；分段 ML（单节/半场/分节）结算条件不同，
+    # 概率不可比——分段 scope 直接判定无差价信号，不凭空造 edge。
+    if market_scope(market).scope_type != SportsMarketScopeType.FULL_GAME:
+        return _reject(candidate, TailRejectReason.NO_ODDS_GAP.value)
 
     # 我方一侧被单独暂停 → 该侧赔率不反映真实概率，不可入场。
     if _moneyline_side_suspended(market.metadata, market.side):

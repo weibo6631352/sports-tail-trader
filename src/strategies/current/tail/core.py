@@ -263,6 +263,121 @@ def _evaluate_basketball_first_half(
     return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
 
 
+def _basketball_segment_scores(
+    state, lo_index: int, hi_index: int
+) -> tuple[int, int] | None:
+    """累加 [lo_index, hi_index] 区间内各节得分；任一节缺失则返回 None。
+
+    下标 0 = 第 1 节。区间内任意一节为 None 表示该分段尚未打完或数据缺失，
+    不能据此锁定分段结果。
+    """
+
+    home_q = state.home_quarter_scores
+    away_q = state.away_quarter_scores
+    if len(home_q) <= hi_index or len(away_q) <= hi_index:
+        return None
+    home_total = 0
+    away_total = 0
+    for idx in range(lo_index, hi_index + 1):
+        if home_q[idx] is None or away_q[idx] is None:
+            return None
+        home_total += home_q[idx]
+        away_total += away_q[idx]
+    return home_total, away_total
+
+
+def _basketball_segment_evaluation(
+    candidate: SportsTailCandidate,
+    policy: TailPolicy,
+    home_segment: int,
+    away_segment: int,
+    reason_prefix: str,
+) -> TailEvaluation:
+    """用已锁定的分段比分判定 ML / spread——分段完成后结果 100% 确定。"""
+
+    market = candidate.market
+    if market.market_type == SportsMarketType.MONEYLINE:
+        if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+            return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+        margin = (
+            home_segment - away_segment
+            if market.side == SportsMarketSide.HOME
+            else away_segment - home_segment
+        )
+        if margin > 0:
+            return _accept(candidate, f"{reason_prefix}_moneyline_locked", policy.moneyline_execution_permission)
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+    if market.market_type == SportsMarketType.SPREADS:
+        if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY} or market.line is None:
+            return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+        margin = (
+            home_segment - away_segment
+            if market.side == SportsMarketSide.HOME
+            else away_segment - home_segment
+        )
+        if Decimal(margin) + market.line > 0:
+            return _accept(candidate, f"{reason_prefix}_spread_locked", policy.spreads_execution_permission)
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+    return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+
+
+def _evaluate_basketball_quarter(
+    candidate: SportsTailCandidate,
+    policy: TailPolicy,
+) -> TailEvaluation:
+    """评估篮球单节盘口（Q1-Q4 的 moneyline / spread）。
+
+    某节结果由该节双方得分 100% 决定；该节必须已结束（current_period 已
+    推进到下一节或更后）才视为锁定。节比分由 BasketballGameState 的
+    home_quarter_scores / away_quarter_scores 给出，与 1H 评估同源。
+    """
+
+    game = candidate.game
+    market = candidate.market
+    state = game.basketball_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_BASKETBALL_STATE.value)
+    scope = market_scope(market)
+    quarter = scope.scope_number
+    if quarter is None or quarter < 1 or quarter > 4:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SCOPE.value)
+    # 该节必须已打完：当前节已推进到 quarter 之后。
+    if (state.current_period or 0) <= quarter:
+        return _reject(candidate, TailRejectReason.BASKETBALL_QUARTER_NOT_COMPLETE.value)
+    segment = _basketball_segment_scores(state, quarter - 1, quarter - 1)
+    if segment is None:
+        return _reject(candidate, TailRejectReason.MISSING_BASKETBALL_STATE.value)
+    return _basketball_segment_evaluation(
+        candidate, policy, segment[0], segment[1], f"basketball_q{quarter}"
+    )
+
+
+def _evaluate_basketball_second_half(
+    candidate: SportsTailCandidate,
+    policy: TailPolicy,
+) -> TailEvaluation:
+    """评估篮球下半场盘口（2H = Q3+Q4 的 moneyline / spread）。
+
+    下半场结果由第 3、4 节得分 100% 决定，正赛打完（进入加时 current_period
+    >= 5）后即锁定。常规情况下半场打完意味着整场已结束，会走 ENDED 路径；
+    此处覆盖加时场景下 2H 已定但比赛仍 live 的情形。
+    """
+
+    state = candidate.game.basketball_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_BASKETBALL_STATE.value)
+    if (state.current_period or 0) <= 4:
+        return _reject(candidate, TailRejectReason.BASKETBALL_SECOND_HALF_NOT_COMPLETE.value)
+    segment = _basketball_segment_scores(state, 2, 3)
+    if segment is None:
+        return _reject(candidate, TailRejectReason.MISSING_BASKETBALL_STATE.value)
+    return _basketball_segment_evaluation(
+        candidate, policy, segment[0], segment[1], "basketball_2h"
+    )
+
+
 def _soccer_halftime_result_direction(market: SportsMarketSnapshot) -> str | None:
     """从 slug 提取半场赛果方向：home / draw / away。"""
     slug = (market.market_slug or "").lower()

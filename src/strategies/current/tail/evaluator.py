@@ -30,6 +30,8 @@ from .core import (
     _accept,
     _candidate,
     _evaluate_basketball_first_half,
+    _evaluate_basketball_quarter,
+    _evaluate_basketball_second_half,
     _evaluate_ended_moneyline,
     _evaluate_ended_spreads,
     _evaluate_ended_totals,
@@ -60,11 +62,16 @@ from .mlb import (
 from .odds_gap import evaluate_odds_gap_opportunity
 from .esports import _evaluate_esports_moneyline, is_esports_game
 from .rugby import _evaluate_rugby_moneyline, is_rugby_game
-from .slug import _is_tennis_set_winner_market, _market_scope_reject_reason
+from .slug import (
+    _is_tennis_set_handicap_market,
+    _is_tennis_set_winner_market,
+    _market_scope_reject_reason,
+)
 from .tennis import (
     _evaluate_ended_tennis,
     _evaluate_tennis_moneyline,
     _evaluate_tennis_scale_in,
+    _evaluate_tennis_set_handicap,
     _evaluate_tennis_totals,
     _tennis_set_winner_completed_for_side,
 )
@@ -154,9 +161,24 @@ def _dispatch_tail_lock(
 ) -> TailEvaluation:
     """按运动/盘口分派扫尾锁定评估（赔率差价之外的原确定性入场路径）。"""
 
-    # 篮球上半场盘口：半场结束即由 q1+q2 锁定，独立于整场 sport 评估器。
-    if market_scope(market).scope_type == SportsMarketScopeType.BASKETBALL_FIRST_HALF:
+    # 分段盘口（半场/单节/分节）：先按 scope 分派到分段评估器，避免落到整场
+    # sport 评估器后被误判为缺数据。
+    scope_type = market_scope(market).scope_type
+    if scope_type == SportsMarketScopeType.BASKETBALL_FIRST_HALF:
         return _evaluate_basketball_first_half(candidate, policy)
+    if scope_type == SportsMarketScopeType.BASKETBALL_QUARTER:
+        return _evaluate_basketball_quarter(candidate, policy)
+    if scope_type == SportsMarketScopeType.BASKETBALL_SECOND_HALF:
+        return _evaluate_basketball_second_half(candidate, policy)
+    # 已识别为分段 ML/spread 但该运动无干净分段模型（冰球分节、棒球 F5 等）——
+    # 给出精确可审计拒绝原因，区别于误导性的 missing_*_state 数据缺失原因。
+    if scope_type == SportsMarketScopeType.UNSUPPORTED_SUBPERIOD:
+        reason = (
+            TailRejectReason.UNSUPPORTED_PERIOD_SPREAD
+            if market.market_type == SportsMarketType.SPREADS
+            else TailRejectReason.UNSUPPORTED_PERIOD_MONEYLINE
+        )
+        return _reject(candidate, reason.value)
 
     if is_mlb_game(game):
         if market.market_type == SportsMarketType.TOTALS:
@@ -210,6 +232,10 @@ def _dispatch_tail_lock(
         if market.market_type == SportsMarketType.MONEYLINE:
             return _evaluate_tennis_moneyline(candidate, policy)
         if market.market_type == SportsMarketType.SPREADS:
+            # 网球盘分让分（set handicap）可从盘数差锁定；网球局数让分目前
+            # 仍无干净模型——只有盘分让分进专属评估器。
+            if _is_tennis_set_handicap_market(market):
+                return _evaluate_tennis_set_handicap(candidate, policy)
             return _reject(candidate, TailRejectReason.TENNIS_SPREADS_NOT_SUPPORTED.value)
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
 

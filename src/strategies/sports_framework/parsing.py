@@ -153,6 +153,7 @@ def _tennis_state(value: object) -> TennisGameState | None:
         away_point=_opt_str(value, "away_point"),
         first_to_serve=_opt_str(value, "first_to_serve"),
         serving_side=_opt_str(value, "serving_side"),
+        best_of=_optional_int(value.get("best_of")),
     )
 
 

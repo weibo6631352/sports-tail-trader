@@ -104,13 +104,74 @@ def totals_market_scope(market: SportsMarketSnapshot) -> SportsMarketScope:
     return SportsMarketScope(SportsMarketScopeType.FULL_GAME)
 
 
+def _has_token(text: str, token: str) -> bool:
+    """判断 token 是否作为独立词出现（slug 已把连字符/下划线转成空格）。"""
+
+    return f" {token} " in f" {text} "
+
+
 def is_basketball_first_half(text: str) -> bool:
     """识别篮球上半场盘口（1H total / 1H spread / 1H moneyline）。
 
     text 为 normalized_market_slug 输出（连字符已转空格），故 "1h" 是独立 token。
     """
 
-    return " 1h " in f" {text} " or "first half" in text or "1st half" in text
+    return _has_token(text, "1h") or "first half" in text or "1st half" in text
+
+
+def is_basketball_second_half(text: str) -> bool:
+    """识别篮球下半场盘口（2H = Q3+Q4）。"""
+
+    return _has_token(text, "2h") or "second half" in text or "2nd half" in text
+
+
+_QUARTER_MARKERS: tuple[tuple[int, tuple[str, ...]], ...] = (
+    (1, ("1q", "q1", "first quarter", "1st quarter")),
+    (2, ("2q", "q2", "second quarter", "2nd quarter")),
+    (3, ("3q", "q3", "third quarter", "3rd quarter")),
+    (4, ("4q", "q4", "fourth quarter", "4th quarter")),
+)
+
+
+def basketball_quarter_number(text: str) -> int | None:
+    """从 slug 识别篮球单节盘口的节号（Q1-Q4），否则返回 None。"""
+
+    for quarter, markers in _QUARTER_MARKERS:
+        for marker in markers:
+            if " " in marker:
+                if marker in text:
+                    return quarter
+            elif _has_token(text, marker):
+                return quarter
+    return None
+
+
+def is_subperiod_market(text: str) -> bool:
+    """识别任意运动的分段盘口（节/半场/分节/前 5 局等）。
+
+    用于 MONEYLINE / SPREADS：这些类型此前没有分段 scope 识别，落到
+    FULL_GAME 后被通用评估器拒成误导性的 ``missing_*_state``。
+    """
+
+    if is_basketball_first_half(text) or is_basketball_second_half(text):
+        return True
+    if basketball_quarter_number(text) is not None:
+        return True
+    period_markers = (
+        "first period",
+        "1st period",
+        "second period",
+        "2nd period",
+        "third period",
+        "3rd period",
+        "first 5 innings",
+        "first five innings",
+        "first inning",
+        "1st inning",
+    )
+    if any(marker in text for marker in period_markers):
+        return True
+    return _has_token(text, "1p") or _has_token(text, "2p") or _has_token(text, "3p") or _has_token(text, "f5")
 
 
 def market_scope(market: SportsMarketSnapshot) -> SportsMarketScope:
@@ -118,8 +179,21 @@ def market_scope(market: SportsMarketSnapshot) -> SportsMarketScope:
 
     if market.scope_type != SportsMarketScopeType.FULL_GAME or market.scope_number is not None:
         return SportsMarketScope(market.scope_type, market.scope_number)
-    if is_basketball_first_half(normalized_market_slug(market)):
+    text = normalized_market_slug(market)
+    if is_basketball_first_half(text):
         return SportsMarketScope(SportsMarketScopeType.BASKETBALL_FIRST_HALF)
+    # 篮球下半场 / 单节 ML+spread：从分节得分可干净锁定，需识别出 scope
+    # 让评估器分派到专属评估器，而非误判为 FULL_GAME。
+    if market.market_type in {SportsMarketType.MONEYLINE, SportsMarketType.SPREADS}:
+        if is_basketball_second_half(text):
+            return SportsMarketScope(SportsMarketScopeType.BASKETBALL_SECOND_HALF)
+        quarter = basketball_quarter_number(text)
+        if quarter is not None:
+            return SportsMarketScope(SportsMarketScopeType.BASKETBALL_QUARTER, quarter)
+        # 其它运动的分段 ML/spread（冰球分节、棒球 F5 等）当前无分段模型，
+        # 标记为 UNSUPPORTED_SUBPERIOD，由评估器给出精确可审计拒绝原因。
+        if is_subperiod_market(text):
+            return SportsMarketScope(SportsMarketScopeType.UNSUPPORTED_SUBPERIOD)
     if market.market_type == SportsMarketType.TOTALS:
         return totals_market_scope(market)
     return SportsMarketScope(SportsMarketScopeType.FULL_GAME)

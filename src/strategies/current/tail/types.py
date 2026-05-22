@@ -78,6 +78,13 @@ class TailRejectReason(StrEnum):
     BASEBALL_FIRST_INNING_NOT_COMPLETE = "baseball_first_inning_not_complete"
     MISSING_BASKETBALL_STATE = "missing_basketball_state"
     BASKETBALL_FIRST_HALF_NOT_COMPLETE = "basketball_first_half_not_complete"
+    BASKETBALL_QUARTER_NOT_COMPLETE = "basketball_quarter_not_complete"
+    BASKETBALL_SECOND_HALF_NOT_COMPLETE = "basketball_second_half_not_complete"
+    # 已识别为分段 ML/spread 盘口，但该运动当前没有干净的分段比分模型
+    # （冰球分节、棒球 F5 等）。区别于真正的数据缺失（missing_*_state）：
+    # 数据可能完好，只是该分段类型未建模。
+    UNSUPPORTED_PERIOD_MONEYLINE = "unsupported_period_moneyline"
+    UNSUPPORTED_PERIOD_SPREAD = "unsupported_period_spread"
     SOCCER_HALFTIME_NOT_COMPLETE = "soccer_halftime_not_complete"
     MISSING_TENNIS_STATE = "missing_tennis_state"
     TENNIS_NOT_LATE_ENOUGH = "tennis_not_late_enough"
@@ -85,6 +92,9 @@ class TailRejectReason(StrEnum):
     TENNIS_SET_WINNER_NOT_SUPPORTED = "tennis_set_winner_not_supported"
     TENNIS_TOTAL_SCOPE_UNSUPPORTED = "tennis_total_scope_unsupported"
     TENNIS_SPREADS_NOT_SUPPORTED = "tennis_spreads_not_supported"
+    # 网球盘分让分（set handicap）专属拒绝原因。
+    TENNIS_SET_HANDICAP_LINE_UNSUPPORTED = "tennis_set_handicap_line_unsupported"
+    TENNIS_BEST_OF_UNKNOWN = "tennis_best_of_unknown"
     RUGBY_NOT_LATE_ENOUGH = "rugby_not_late_enough"
     RUGBY_LEAD_NOT_SAFE = "rugby_lead_not_safe"
     RUGBY_DRAW_NOT_SUPPORTED = "rugby_draw_not_supported"

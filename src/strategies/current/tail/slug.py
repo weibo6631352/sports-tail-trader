@@ -40,6 +40,18 @@ def _tennis_set_winner_number(market: SportsMarketSnapshot) -> int | None:
     return None
 
 
+def _is_tennis_set_handicap_market(market: SportsMarketSnapshot) -> bool:
+    """识别网球盘分让分（set handicap / set spread）盘口。
+
+    与网球局数让分（games handicap）区分：盘分让分按盘数结算（如 -1.5 盘 =
+    需 2-0 取胜），局数让分按整场总局数结算，两者锁定模型完全不同。
+    slug 出现 "set handicap" / "set spread" / "sets handicap" 视为盘分让分。
+    """
+
+    text = normalized_market_slug(market)
+    return "set handicap" in text or "set spread" in text or "sets handicap" in text
+
+
 def _tennis_total_scope(market: SportsMarketSnapshot) -> SportsMarketScope:
     """返回网球 totals 的结算范围，缺省按整场总局数处理。"""
 
