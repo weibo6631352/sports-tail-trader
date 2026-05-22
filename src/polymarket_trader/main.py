@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from contextlib import suppress
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -121,6 +121,13 @@ from polymarket_trader.infra.sports.game_odds_client import (
     GameOddsClient,
     TheOddsApiGameOddsClient,
 )
+from polymarket_trader.infra.sports.goalserve_livescore_client import (
+    SPORT_CODE_TO_FEED_KEYS,
+)
+# composition root 直接读策略侧运动分类：livescore demand-driven 轮询需要把
+# tracked market 映射到运动码，再映射到 feed key。strategies.current 是当前装配
+# 的业务扩展实现，main.py 作为 composition root 在此处接线属预期范围。
+from strategies.current.live_state import _market_sport_codes
 
 logger = logging.getLogger(__name__)
 
@@ -204,11 +211,55 @@ class RuntimeComponents:
     parameter_store: ParameterStore | None = None
 
 
+def _build_livescore_active_sports_provider(
+    registry: MarketRegistry,
+) -> Callable[[], frozenset[str]]:
+    """构建 livescore demand-driven 轮询的 active_sports_provider。
+
+    每轮轮询调用一次，遍历 tracked-market registry，返回"有需求"的 _SPORT_FEEDS
+    key 集合：某市场 live（已开赛且未结束）或将在 60 分钟内开赛时，把它的运动码
+    映射出的所有 feed key 纳入。无相关市场的运动整轮跳过 HTTP 抓取。
+
+    必须廉价（每轮都调）：只做一次 registry 快照遍历 + 内存判断，不做任何 I/O。
+    """
+
+    def _provider() -> frozenset[str]:
+        now = datetime.now(timezone.utc)
+        near_start_cutoff = now + timedelta(minutes=60)
+        active: set[str] = set()
+        for market in registry.snapshot().markets:
+            start = market.game_start_time
+            if start is not None and start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            end = market.end_date
+            if end is not None and end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            # live：已开赛且尚未结束。about-to-start：开赛时间落在 [now, now+60min]。
+            is_live = (
+                start is not None
+                and start <= now
+                and (end is None or end > now)
+            )
+            is_near_start = (
+                start is not None and now <= start <= near_start_cutoff
+            )
+            if not (is_live or is_near_start):
+                continue
+            for code in _market_sport_codes(market):
+                feed_keys = SPORT_CODE_TO_FEED_KEYS.get(code)
+                if feed_keys:
+                    active.update(feed_keys)
+        return frozenset(active)
+
+    return _provider
+
+
 def _build_sports_live_state_client(
     settings: Settings,
     *,
     league_source_priority: Mapping[str, Sequence[str]] | None = None,
     trusted_sources: Sequence[str] | None = None,
+    livescore_active_sports_provider: Callable[[], frozenset[str]] | None = None,
 ) -> SportsLiveAggregateClient:
     """构建 Goalserve 直播状态聚合客户端。
 
@@ -217,6 +268,9 @@ def _build_sports_live_state_client(
     livescore getfeed：API key 认证，5 秒刷新，覆盖
       cricket/handball/rugby/boxing/mma/golf/horse_racing/f1/motogp。
     proxy 仅在开发环境配置（GOALSERVE_PROXY=http://127.0.0.1:7890），生产留空直连。
+
+    livescore_active_sports_provider：传入时启用 demand-driven 轮询，只抓取有
+      live/即将开赛 Polymarket 市场的运动 feed；None 则全量轮询。
     """
     api_key_secret = settings.goalserve_api_key
     api_key = api_key_secret.get_secret_value() if api_key_secret is not None else None
@@ -237,6 +291,7 @@ def _build_sports_live_state_client(
             timeout_s=settings.goalserve_livescore_timeout_s,
             poll_interval_s=float(settings.sports_live_state_interval_seconds),
             proxy=settings.goalserve_proxy,
+            active_sports_provider=livescore_active_sports_provider,
         )
         providers.append(("goalserve_livescore", livescore.list_events))
         closers.append(livescore.aclose)
@@ -783,6 +838,9 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 settings,
                 league_source_priority=league_source_priority,
                 trusted_sources=None,  # 默认走 aggregate 内置 _DEFAULT_OFFICIAL_SOURCES
+                livescore_active_sports_provider=(
+                    _build_livescore_active_sports_provider(registry)
+                ),
             )
             sports_live_state_worker = SportsLiveStateWorker(
                 snapshot_provider=sports_live_state_client.list_events,

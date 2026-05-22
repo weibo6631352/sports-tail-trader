@@ -62,6 +62,34 @@ _SPORT_FEEDS: dict[str, tuple[str, bool]] = {
     "motogp":           ("motors/motogp-live",     False),
 }
 
+# 策略侧 _market_sport_codes 输出的规范运动码 → 本文件 _SPORT_FEEDS key 集合。
+# 用于 demand-driven 轮询：只有当某个规范码对应的 feed key 集合里至少有一个
+# 被 active_sports_provider 选中时，才真正发起该 sport 的 HTTP 抓取。
+# 没有 livescore feed 的运动（american-football / table-tennis / volleyball）
+# 映射到空集——它们不会触发任何 livescore 抓取。
+SPORT_CODE_TO_FEED_KEYS: dict[str, frozenset[str]] = {
+    "esports":          frozenset({"esports"}),
+    "football":         frozenset({"soccer"}),
+    "ice-hockey":       frozenset({"hockey", "nhl"}),
+    "baseball":         frozenset({"baseball", "mlb"}),
+    "basketball":       frozenset({"basketball", "nba", "wnba"}),
+    "tennis":           frozenset({"tennis"}),
+    "cricket":          frozenset({"cricket"}),
+    "rugby":            frozenset({"rugby"}),
+    "handball":         frozenset({"handball"}),
+    "mma":              frozenset({"mma"}),
+    "boxing":           frozenset({"boxing"}),
+    "golf":             frozenset({"golf_pga", "golf_dp", "golf_liv", "golf_lpga"}),
+    "horse-racing":     frozenset(
+        {"horse_racing_us", "horse_racing_uk", "horse_racing_au", "horse_racing_hk"}
+    ),
+    "formula1":         frozenset({"f1"}),
+    "motogp":           frozenset({"motogp"}),
+    "american-football": frozenset(),
+    "table-tennis":     frozenset(),
+    "volleyball":       frozenset(),
+}
+
 _BASE_URL = "https://www.goalserve.com/getfeed"
 
 
@@ -83,12 +111,16 @@ class GoalserveLivescoreClient:
         poll_interval_s: float = 5.0,
         proxy: str | None = None,
         now_provider: Callable[[], datetime] | None = None,
+        active_sports_provider: Callable[[], frozenset[str]] | None = None,
     ) -> None:
         self._api_key = api_key
         # None means all supported sports; explicit tuple filters to known entries only.
         self._sports = tuple(_SPORT_FEEDS) if sports is None else tuple(s for s in sports if s in _SPORT_FEEDS)
         self._base_url = base_url.rstrip("/")
         self._now_provider = now_provider
+        # demand-driven 轮询：每轮抓取前调用此回调，只抓回调返回集合中的 sport。
+        # None → 退回到无条件全量轮询（向后兼容）。回调必须廉价（每轮都调）。
+        self._active_sports_provider = active_sports_provider
         self._poll_interval_s = poll_interval_s
         # 整轮抓取硬超时：单 httpx 请求各有 timeout，但代理半死时整轮 gather
         # 仍可能卡死。没有外层超时，后台轮询会永久僵死、缓存永不刷新。
@@ -134,12 +166,26 @@ class GoalserveLivescoreClient:
         result = []
         for sport in self._sports:
             ss = status_by_sport.get(sport)
+            if ss is not None:
+                connected = ss.success
+                events = ss.events_seen
+                last_error = ss.last_error
+                idle = False
+            else:
+                # demand-driven 轮询下，本轮没需求的 sport 不会出现在 source_statuses
+                # 里。这不是错误，而是"按需空闲"——标记 idle，connected=True，避免被
+                # 观测面板误判为断流。仅首次缓存为空且尚未抓取时才算未连接。
+                connected = cache is not None
+                events = 0
+                last_error = None
+                idle = cache is not None
             result.append({
                 "sport": sport,
                 "type": "http",
-                "connected": ss.success if ss is not None else (cache is None),
-                "events": ss.events_seen if ss is not None else 0,
-                "last_error": ss.last_error if ss is not None else None,
+                "connected": connected,
+                "idle": idle,
+                "events": events,
+                "last_error": last_error,
                 "poll_age_s": poll_age_s,
                 "poll_task_running": self._poll_task is not None and not self._poll_task.done(),
             })
@@ -167,11 +213,24 @@ class GoalserveLivescoreClient:
             self._ensure_poll_task_alive()
             return self._cache
         # First call: fetch synchronously so the caller has real data immediately.
+        # provider 本轮返回空集时 _fetch_all_sports 返回 None；首次调用没有任何
+        # 缓存可保留，因此用空快照兜底（后续轮询会在有需求时填充真实数据）。
         snapshot = await self._fetch_all_sports()
+        if snapshot is None:
+            snapshot = self._empty_snapshot()
         self._cache = snapshot
         # Kick off background loop for all subsequent calls.
         self._ensure_poll_task_alive()
         return snapshot
+
+    def _empty_snapshot(self) -> SportsLiveSnapshot:
+        """无 sport 被抓取时的空快照（仅用于首次调用兜底）。"""
+        return SportsLiveSnapshot(
+            source="goalserve_livescore",
+            observed_at=utc_now(self._now_provider),
+            events=(),
+            source_statuses=(),
+        )
 
     def _ensure_poll_task_alive(self) -> None:
         """启动后台轮询任务；任务已退出时记录原因并重启。"""
@@ -189,7 +248,12 @@ class GoalserveLivescoreClient:
         )
 
     async def _poll_loop(self) -> None:
-        """后台持续轮询：每次 fetch 完立即更新缓存，再等 poll_interval_s。"""
+        """后台持续轮询：每次 fetch 完立即更新缓存，再等 poll_interval_s。
+
+        当 active_sports_provider 本轮返回空集时，_fetch_all_sports 返回 None，
+        表示"本轮不抓取任何 sport"——此时必须保留上一份 _cache，不能用空快照
+        覆盖。否则刚上线的市场会在下次 provider 刷新前丢掉 live state。
+        """
         while True:
             await asyncio.sleep(self._poll_interval_s)
             try:
@@ -198,23 +262,45 @@ class GoalserveLivescoreClient:
                 snapshot = await asyncio.wait_for(
                     self._fetch_all_sports(), timeout=self._fetch_round_timeout_s
                 )
-                self._cache = snapshot
+                if snapshot is not None:
+                    self._cache = snapshot
             except asyncio.CancelledError:
                 return
             except Exception as exc:
                 logger.warning("goalserve_livescore: poll error: %s", exc)
 
-    async def _fetch_all_sports(self) -> SportsLiveSnapshot:
-        """并发拉取所有运动 livescore feed，合并返回统一快照。单运动失败记入 source_statuses 但不阻断其他。"""
+    def _sports_to_fetch(self) -> tuple[str, ...]:
+        """本轮要抓取的 sport 集合。
+
+        provider 为 None → 全量轮询（向后兼容旧行为）；
+        provider 存在 → 只抓取「有需求」的 sport（有 live/即将开赛的 Polymarket
+        市场映射到该 feed key）。provider 返回空集时返回空 tuple，调用方据此保留缓存。
+        """
+        if self._active_sports_provider is None:
+            return self._sports
+        active = self._active_sports_provider()
+        return tuple(s for s in self._sports if s in active)
+
+    async def _fetch_all_sports(self) -> SportsLiveSnapshot | None:
+        """并发拉取需求内的运动 livescore feed，合并返回统一快照。
+
+        单运动失败记入 source_statuses 但不阻断其他。
+        本轮无任何 sport 需要抓取（demand-driven provider 返回空集）时返回 None——
+        调用方据此保留上一份缓存，不用空快照覆盖刚上线市场的 live state。
+        """
         observed_at = utc_now(self._now_provider)
 
-        tasks = [self._fetch_sport(sport, observed_at) for sport in self._sports]
+        sports_to_fetch = self._sports_to_fetch()
+        if not sports_to_fetch:
+            return None
+
+        tasks = [self._fetch_sport(sport, observed_at) for sport in sports_to_fetch]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_events = []
         source_statuses: list[SportsLiveSourceStatus] = []
 
-        for sport, result in zip(self._sports, results):
+        for sport, result in zip(sports_to_fetch, results):
             source_key = f"goalserve_livescore:{sport}"
             if isinstance(result, Exception):
                 source_statuses.append(

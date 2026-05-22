@@ -1,0 +1,138 @@
+"""livescore demand-driven 轮询的 active_sports_provider 回归测试。
+
+验证：① 运动码 → feed key 映射覆盖所有策略侧规范码；② 运行时 provider 只把
+有 live/即将开赛 Polymarket 市场的运动 feed 纳入，far-future / 仅结束的市场被排除。
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+from polymarket_trader.domain.market import Market, MarketOutcome
+from polymarket_trader.infra.sports.goalserve_livescore_client import (
+    SPORT_CODE_TO_FEED_KEYS,
+    _SPORT_FEEDS,
+)
+from polymarket_trader.main import _build_livescore_active_sports_provider
+from polymarket_trader.runtime.registry import MarketRegistry
+
+
+def _market(
+    condition_id: str,
+    *,
+    tags: tuple[str, ...] = (),
+    game_start_time: datetime | None = None,
+    end_date: datetime | None = None,
+) -> Market:
+    return Market(
+        condition_id=condition_id,
+        market_slug=condition_id,
+        outcomes=(
+            MarketOutcome(token_id=f"{condition_id}-y", outcome="Yes"),
+            MarketOutcome(token_id=f"{condition_id}-n", outcome="No"),
+        ),
+        tags=tags,
+        game_start_time=game_start_time,
+        end_date=end_date,
+    )
+
+
+def test_feed_key_map_values_are_known_feed_keys() -> None:
+    """映射中所有 feed key 必须是真实的 _SPORT_FEEDS 入口。"""
+    for code, keys in SPORT_CODE_TO_FEED_KEYS.items():
+        for key in keys:
+            assert key in _SPORT_FEEDS, f"{code} 映射到未知 feed key {key}"
+
+
+def test_feed_key_map_no_livescore_sports_map_empty() -> None:
+    """无 livescore feed 的运动映射为空集，不会触发任何抓取。"""
+    for code in ("american-football", "table-tennis", "volleyball"):
+        assert SPORT_CODE_TO_FEED_KEYS[code] == frozenset()
+
+
+def test_provider_includes_live_market_sport() -> None:
+    """正在直播的市场，其运动 feed key 全部被纳入。"""
+    registry = MarketRegistry()
+    now = datetime.now(timezone.utc)
+    registry.upsert(
+        _market(
+            "nba-live",
+            tags=("NBA", "Basketball"),
+            game_start_time=now - timedelta(minutes=30),
+            end_date=now + timedelta(hours=2),
+        )
+    )
+    provider = _build_livescore_active_sports_provider(registry)
+    active = provider()
+    assert active == frozenset({"basketball", "nba", "wnba"})
+
+
+def test_provider_includes_near_start_market_sport() -> None:
+    """60 分钟内即将开赛的市场，其运动 feed key 被纳入。"""
+    registry = MarketRegistry()
+    now = datetime.now(timezone.utc)
+    registry.upsert(
+        _market(
+            "mlb-soon",
+            tags=("MLB", "Baseball"),
+            game_start_time=now + timedelta(minutes=45),
+        )
+    )
+    provider = _build_livescore_active_sports_provider(registry)
+    assert provider() == frozenset({"baseball", "mlb"})
+
+
+def test_provider_excludes_far_future_market() -> None:
+    """开赛时间在 60 分钟以外的市场不纳入。"""
+    registry = MarketRegistry()
+    now = datetime.now(timezone.utc)
+    registry.upsert(
+        _market(
+            "nhl-far",
+            tags=("NHL", "Hockey"),
+            game_start_time=now + timedelta(hours=6),
+        )
+    )
+    provider = _build_livescore_active_sports_provider(registry)
+    assert provider() == frozenset()
+
+
+def test_provider_excludes_ended_market() -> None:
+    """已结束（end_date 过去）的市场不纳入。"""
+    registry = MarketRegistry()
+    now = datetime.now(timezone.utc)
+    registry.upsert(
+        _market(
+            "esports-ended",
+            tags=("Esports", "CS2"),
+            game_start_time=now - timedelta(hours=4),
+            end_date=now - timedelta(hours=1),
+        )
+    )
+    provider = _build_livescore_active_sports_provider(registry)
+    assert provider() == frozenset()
+
+
+def test_provider_empty_registry_returns_empty() -> None:
+    """无 tracked market 时返回空集，整轮跳过 livescore 抓取。"""
+    provider = _build_livescore_active_sports_provider(MarketRegistry())
+    assert provider() == frozenset()
+
+
+def test_provider_excludes_sports_without_livescore_feed() -> None:
+    """american-football 等无 livescore feed 的运动即使 live 也不产生 feed key。
+
+    标签只用 "NFL"——_market_sport_codes 对 "american football" 文本会同时命中
+    "football" 子串，导致额外的 soccer 误分类；这里隔离纯 american-football 场景。
+    """
+    registry = MarketRegistry()
+    now = datetime.now(timezone.utc)
+    registry.upsert(
+        _market(
+            "nfl-live",
+            tags=("NFL",),
+            game_start_time=now - timedelta(minutes=10),
+        )
+    )
+    provider = _build_livescore_active_sports_provider(registry)
+    assert provider() == frozenset()
