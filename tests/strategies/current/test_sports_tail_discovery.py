@@ -157,7 +157,11 @@ def test_live_game_discovery_queries_prioritize_live_games_before_scheduled_game
 
     assert title_searches
     assert "zolotareva" in title_searches[0]
-    assert all("bruins" not in value and "sabres" not in value for value in title_searches)
+    # 直播赛事的查询必须全部排在 scheduled 之前（直播优先、不受 limit 截断）。
+    live_idx = [i for i, v in enumerate(title_searches) if "zolotareva" in v or "papamichail" in v]
+    sched_idx = [i for i, v in enumerate(title_searches) if "bruins" in v or "sabres" in v]
+    assert live_idx
+    assert all(li < si for li in live_idx for si in sched_idx)
 
 
 def test_live_game_discovery_queries_prioritize_polymarket_covered_tennis() -> None:
@@ -191,5 +195,7 @@ def test_live_game_discovery_queries_prioritize_polymarket_covered_tennis() -> N
     title_searches = [str(query.params.get("title_search")) for query in queries]
 
     assert title_searches
+    # WTA 排名更高 → 排在最前；但两场都在直播，limit 不得把 ITF 那场截掉
+    # （CLAUDE.md §17：直播赛事全部覆盖）。
     assert "zolotareva" in title_searches[0]
-    assert all("iutkin" not in value and "ianin" not in value for value in title_searches)
+    assert any("iutkin" in value or "ianin" in value for value in title_searches)

@@ -58,6 +58,8 @@ _LIVE_DISCOVERY_STATUS_PRIORITY = {
     SportsLiveGameStatus.SCHEDULED: 2,
     SportsLiveGameStatus.UNKNOWN: 3,
 }
+# 正在进行中的状态——这些赛事的发现查询不受 max_games / max_queries 截断。
+_LIVE_PLAY_STATUSES = {SportsLiveGameStatus.LIVE, SportsLiveGameStatus.PAUSED}
 _LIVE_DISCOVERY_MAJOR_LEAGUE_TOKENS = (
     "nba",
     "nhl",
@@ -141,13 +143,22 @@ def build_live_event_discovery_queries(
             key=_live_event_rank,
         )
     )
+    # 正在直播/暂停的赛事必须全部生成发现查询——discovery 的 limit 绝不能把
+    # 直播赛事挤出（CLAUDE.md §17：limit/截断不得卡掉直播/入场机会）。
+    # scheduled/unknown 才受 max_games 上限约束。
+    live_events = tuple(e for e in active_events if e.status in _LIVE_PLAY_STATUSES)
+    other_events = tuple(e for e in active_events if e.status not in _LIVE_PLAY_STATUSES)
+    prioritized = live_events + other_events[: config.tail_live_discovery_max_games]
+
     queries: list[DiscoveryQuery] = []
     seen: set[tuple[str, str | None]] = set()
-
-    # Slug-based queries for events where Gamma title_search is unreliable.
-    # These are prepended before title_search queries to get priority budget.
     slug_seen: set[str] = set()
-    for event in active_events:
+
+    # 按 game 交错生成 slug_lookup + title_search：slug 猜测可能错（联赛特定
+    # 前缀如 rusrp/atp/itf），title_search 按队名兜底。此前先跑完所有 slug 再
+    # 跑 title，slug 循环吃光预算导致 title 永不执行、靠队名才能发现的市场全漏。
+    for index, event in enumerate(prioritized):
+        is_live = index < len(live_events)
         slug = _event_polymarket_slug(event)
         if slug and slug not in slug_seen:
             slug_seen.add(slug)
@@ -157,10 +168,6 @@ def build_live_event_discovery_queries(
                     params={"slug": slug},
                 )
             )
-            if len(queries) >= config.tail_live_discovery_max_queries:
-                return tuple(queries)
-
-    for event in active_events[: config.tail_live_discovery_max_games]:
         for term in _event_query_terms(event):
             for tag_slug in tag_slugs or (None,):
                 key = (term, tag_slug)
@@ -178,8 +185,10 @@ def build_live_event_discovery_queries(
                         params=params,
                     )
                 )
-                if len(queries) >= config.tail_live_discovery_max_queries:
-                    return tuple(queries)
+        # 预算兜底只作用于 scheduled 部分——直播赛事排在 prioritized 最前、
+        # 永不被 max_queries 截断。
+        if not is_live and len(queries) >= config.tail_live_discovery_max_queries:
+            break
     return tuple(queries)
 
 
