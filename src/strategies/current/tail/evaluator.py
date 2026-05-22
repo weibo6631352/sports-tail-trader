@@ -35,12 +35,14 @@ from .core import (
     _evaluate_ended_totals,
     _evaluate_moneyline,
     _evaluate_moneyline_scale_in,
+    _evaluate_soccer_halftime_result,
     _evaluate_spreads,
     _evaluate_spreads_scale_in,
     _evaluate_totals,
     _evaluate_totals_scale_in,
     _market_family_reject_reason,
     _reject,
+    is_soccer_halftime_market,
 )
 from .mlb import (
     _evaluate_mlb_moneyline,
@@ -124,6 +126,9 @@ def evaluate_tail_opportunity(
 
     if is_nfl_game(game):
         return _evaluate_nfl_manual_review(candidate, policy)
+
+    if market.market_type == SportsMarketType.BINARY_PROP and is_soccer_halftime_market(market):
+        return _evaluate_soccer_halftime_result(candidate, policy)
 
     if market.market_type == SportsMarketType.BINARY_PROP:
         return _reject(candidate, "binary_prop_no_tail_model")

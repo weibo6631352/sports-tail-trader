@@ -38,6 +38,7 @@ from polymarket_trader.domain.sports_live import (
     Participant,
     RaceState,
     RugbyGameState,
+    SoccerGameState,
     SportsLiveGameStatus,
     TennisGameState,
 )
@@ -851,6 +852,18 @@ def _soccer_seconds_remaining(status_raw: str, timer_raw: Any) -> int | None:
     return remaining
 
 
+def _soccer_halftime_scores(match: dict[str, Any]) -> tuple[int | None, int | None]:
+    """从 <ht score="[H - A]"/> 提取半场比分；未到半场该字段为空 → (None, None)。"""
+    ht = match.get("ht")
+    if not isinstance(ht, dict):
+        return None, None
+    text = str(ht.get("score") or "").strip()
+    m = re.match(r"\[?\s*(\d+)\s*-\s*(\d+)\s*\]?", text)
+    if m is None:
+        return None, None
+    return int(m.group(1)), int(m.group(2))
+
+
 def _parse_soccer_with_cats(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     """解析 soccernew/home 的 category → match 结构。
 
@@ -890,6 +903,12 @@ def _parse_soccer_with_cats(scores: dict[str, Any], observed_at: datetime) -> li
             away_loc, away_nick = _split_team_name(away_name)
             timer_raw = match.get("timer")
             seconds_remaining = _soccer_seconds_remaining(status_raw, timer_raw) if status == SportsLiveGameStatus.LIVE else None
+            ht_home, ht_away = _soccer_halftime_scores(match)
+            soccer_state = (
+                SoccerGameState(home_halftime_score=ht_home, away_halftime_score=ht_away)
+                if ht_home is not None and ht_away is not None
+                else None
+            )
             events.append(
                 LiveEvent(
                     source="goalserve_livescore",
@@ -907,6 +926,7 @@ def _parse_soccer_with_cats(scores: dict[str, Any], observed_at: datetime) -> li
                     raw_status=status_raw,
                     observed_at=observed_at,
                     external_ids={"goalserve": event_id},
+                    soccer_state=soccer_state,
                 )
             )
     return events

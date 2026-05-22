@@ -197,6 +197,8 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
             "home_yellow_cards": event.soccer_state.home_yellow_cards,
             "away_yellow_cards": event.soccer_state.away_yellow_cards,
             "last_event_minute": event.soccer_state.last_event_minute,
+            "home_halftime_score": event.soccer_state.home_halftime_score,
+            "away_halftime_score": event.soccer_state.away_halftime_score,
         },
         "esports_state": None if event.esports_state is None else {
             "best_of": event.esports_state.best_of,

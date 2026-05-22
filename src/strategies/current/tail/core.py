@@ -263,6 +263,62 @@ def _evaluate_basketball_first_half(
     return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
 
 
+def _soccer_halftime_result_direction(market: SportsMarketSnapshot) -> str | None:
+    """从 slug 提取半场赛果方向：home / draw / away。"""
+    slug = (market.market_slug or "").lower()
+    for direction in ("home", "draw", "away"):
+        if slug.endswith(f"halftime-result-{direction}"):
+            return direction
+    return None
+
+
+def is_soccer_halftime_market(market: SportsMarketSnapshot) -> bool:
+    """识别足球半场赛果盘口（halftime-result-home/draw/away）。"""
+    return _soccer_halftime_result_direction(market) is not None
+
+
+def _evaluate_soccer_halftime_result(
+    candidate: SportsTailCandidate,
+    policy: TailPolicy,
+) -> TailEvaluation:
+    """评估足球半场赛果盘口（halftime-result）。
+
+    数据源在半场结束后才给出 <ht> 比分；两侧半场比分齐全即表示半场已锁定，
+    赛果 100% 确定。binary_prop 在通用门禁跳过 ask 检查，这里自查入场价。
+    """
+    game = candidate.game
+    market = candidate.market
+    if market.side not in {SportsMarketSide.YES, SportsMarketSide.NO}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    direction = _soccer_halftime_result_direction(market)
+    if direction is None:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SCOPE.value)
+    state = game.soccer_state
+    if state is None or state.home_halftime_score is None or state.away_halftime_score is None:
+        return _reject(candidate, TailRejectReason.SOCCER_HALFTIME_NOT_COMPLETE.value)
+    if market.best_ask is None:
+        return _reject(candidate, TailRejectReason.MISSING_BEST_ASK.value)
+    if market.best_ask < policy.min_entry_price:
+        return _reject(candidate, TailRejectReason.PRICE_BELOW_MIN.value)
+    if market.best_ask > policy.totals_max_entry_price:
+        return _reject(candidate, TailRejectReason.PRICE_ABOVE_MAX.value)
+    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
+        return _reject(candidate, TailRejectReason.LIQUIDITY_BELOW_MIN.value)
+
+    h = state.home_halftime_score
+    a = state.away_halftime_score
+    actual = "home" if h > a else ("away" if a > h else "draw")
+    won = actual == direction
+    if market.side == SportsMarketSide.YES:
+        if won:
+            return _accept(candidate, "soccer_halftime_result_locked", policy.totals_execution_permission)
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+    # side NO：赛果已确定且不是该方向 → No 锁定。
+    if not won:
+        return _accept(candidate, "soccer_halftime_result_locked", policy.totals_execution_permission)
+    return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+
 # ---- ended-not-closed 通用评估器 --------------------------------------
 
 

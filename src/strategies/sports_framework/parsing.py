@@ -187,6 +187,8 @@ def _soccer_state(value: object) -> SoccerGameState | None:
         home_yellow_cards=_optional_int(value.get("home_yellow_cards")) or 0,
         away_yellow_cards=_optional_int(value.get("away_yellow_cards")) or 0,
         last_event_minute=_optional_int(value.get("last_event_minute")),
+        home_halftime_score=_optional_int(value.get("home_halftime_score")),
+        away_halftime_score=_optional_int(value.get("away_halftime_score")),
     )
 
 

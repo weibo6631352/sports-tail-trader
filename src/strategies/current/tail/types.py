@@ -76,6 +76,7 @@ class TailRejectReason(StrEnum):
     BASEBALL_FIRST_INNING_NOT_COMPLETE = "baseball_first_inning_not_complete"
     MISSING_BASKETBALL_STATE = "missing_basketball_state"
     BASKETBALL_FIRST_HALF_NOT_COMPLETE = "basketball_first_half_not_complete"
+    SOCCER_HALFTIME_NOT_COMPLETE = "soccer_halftime_not_complete"
     MISSING_TENNIS_STATE = "missing_tennis_state"
     TENNIS_NOT_LATE_ENOUGH = "tennis_not_late_enough"
     TENNIS_TOTALS_UNDER_NOT_SUPPORTED = "tennis_totals_under_not_supported"

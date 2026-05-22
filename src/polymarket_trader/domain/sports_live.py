@@ -197,6 +197,9 @@ class SoccerGameState:
     home_yellow_cards: int = 0
     away_yellow_cards: int = 0
     last_event_minute: int | None = None
+    # 半场比分：仅在半场结束后由数据源给出；两者均非 None 即表示半场已锁定。
+    home_halftime_score: int | None = None
+    away_halftime_score: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
