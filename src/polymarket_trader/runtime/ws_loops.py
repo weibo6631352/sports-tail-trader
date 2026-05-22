@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 _SUBSCRIPTION_REFRESH_SECONDS = 5.0
 _MARKET_WS_LIVE_STATUSES = {"live", "ended"}
 _MARKET_WS_TAIL_WINDOW_SECONDS = 3600.0
-# Polymarket 自身 ELIGIBLE 的 sports market 直接放行，不再 100% 依赖外部
-# sports_live_state（SofaScore/ESPN 不覆盖 ATP Challenger/ITF/WTA125 等冷门赛事，
-# 也常被 Cloudflare 屏蔽）。窗口比 _MARKET_WS_TAIL_WINDOW_SECONDS 宽——这里只是
-# 决定"是否值得订阅 WS"，进入入场判定后还会被策略层进一步过滤（tail_window 等）。
-# 21 天覆盖 NHL/NBA 季后赛系列赛（通常 1-3 周）和冠军赛单场；200 订阅上限按
-# end_date 升序截断，确保最近到期市场优先拿到盘口流。
-_MARKET_WS_POLY_ACTIVE_WINDOW_SECONDS = 1_814_400.0  # 21 天：覆盖系列赛 / 季后赛（通常 1-3 周）
+# market WS 盘口订阅的生命周期窗口（基于 end_date≈game_start_time）：
+#   - 开赛前 30 分钟内才开始订阅（PREGAME_LEAD）——不预订几小时/几天后的赛事；
+#   - 开赛后 6h 内保持订阅（INPLAY_GRACE，覆盖各运动比赛全程）；
+#   - 更早 / 更晚都不占订阅名额。
+# 有持仓/挂单的市场在调用侧已提前放行，不受此窗口限制。
+_MARKET_WS_PREGAME_LEAD_SECONDS = 1_800.0   # 开赛前 30 分钟
+_MARKET_WS_INPLAY_GRACE_SECONDS = 21_600.0  # 开赛后 6 小时（覆盖比赛全程）
 # 订阅数上限（按 token 计）——纯安全护栏，防止失控时把全量 registry 压垮
 # Polymarket WS。订阅集已由 market_outside_trade_window（只跟踪开赛 [-6h,+30min]
 # 的近期赛事）+ _market_requires_market_ws（live/敞口/6h 窗口）双重收窄，实际
@@ -184,7 +184,9 @@ def _market_requires_market_ws(
         # （市场重新分类时旧 False 记录会残留）。
         metadata = record.metadata or {}
         if metadata.get("series_state") or metadata.get("game_odds") or metadata.get("season_odds_snapshot"):
-            return _market_active_in_polymarket(market, now=now)
+            # OUTRIGHT/SERIES 是长期市场，没有单场"开赛时刻"——不套单场赛事
+            # 时间窗口，只要仍 ELIGIBLE 就订阅。
+            return _market_eligible_for_ws(market)
         # 以下逻辑针对依赖 live_state 的市场（SINGLE_GAME）：
         # 显式拒（signal_allowed=False）立刻返回，避免 polymarket 兜底误绕过。
         if record.live_state_signal_allowed is False:
@@ -197,21 +199,31 @@ def _market_requires_market_ws(
                 return True
             if _market_end_within_tail_window(market, now=now):
                 return True
-        # record 存在但 phase 不匹配（如 scheduled 未开赛）—— 不订阅。
-        return False
+        # record 存在但仍是 scheduled 等未开赛态：按订阅时间窗口判定——
+        # 开赛前 30 分钟内才订阅，更早不预订。
+        return _market_active_in_polymarket(market, now=now)
     # record 不存在 = 外部 live state 没覆盖（典型：ATP Challenger / WTA 125 / ITF
     # 这些 ESPN 不收录、SofaScore 又被 Cloudflare 403 屏蔽的冷门赛事）。
-    # 用 Polymarket 自身 active+open + endDate 在 6h 窗口作为兜底订阅信号。
+    # 用 Polymarket 自身 ELIGIBLE + 订阅时间窗口作为兜底订阅信号。
     return _market_active_in_polymarket(market, now=now)
 
 
-def _market_active_in_polymarket(market: Any, *, now: datetime) -> bool:
-    """domain ``Market`` 没有 active/closed 字段，权威判 ``trading_status``：
-    只有 ELIGIBLE 才考虑订阅；CANDIDATE / PAUSED / CLOSED / RESOLVED / REJECTED 跳过。"""
+def _market_eligible_for_ws(market: Any) -> bool:
+    """market 是否 ELIGIBLE（可交易）。
+
+    domain ``Market`` 没有 active/closed 字段，权威判 ``trading_status``：
+    只有 ELIGIBLE 才考虑订阅；CANDIDATE / PAUSED / CLOSED / RESOLVED / REJECTED 跳过。
+    """
 
     from polymarket_trader.domain.market import TradingStatus  # 避免循环导入
 
-    if market.trading_status != TradingStatus.ELIGIBLE:
+    return market.trading_status == TradingStatus.ELIGIBLE
+
+
+def _market_active_in_polymarket(market: Any, *, now: datetime) -> bool:
+    """单场赛事市场是否在 WS 订阅时间窗口内（开赛前 30 分钟 ~ 开赛后 6h）。"""
+
+    if not _market_eligible_for_ws(market):
         return False
     end = market.end_date
     if end is None:
@@ -220,8 +232,13 @@ def _market_active_in_polymarket(market: Any, *, now: datetime) -> bool:
     if end.tzinfo is None:
         end = end.replace(tzinfo=timezone.utc)
     seconds_until_end = (end.astimezone(timezone.utc) - now.astimezone(timezone.utc)).total_seconds()
-    # 已过 end_date 但还没 RESOLVED 的市场仍允许订阅（结算可能滞后），不限下边界。
-    return seconds_until_end <= _MARKET_WS_POLY_ACTIVE_WINDOW_SECONDS
+    # 只在"开赛前 30 分钟"到"开赛后 6h"窗口内订阅 WS 盘口（end_date≈game_start_time）：
+    # 远期赛事不预订、早已结束的赛事不续订——这就是订阅的生命周期。
+    return (
+        -_MARKET_WS_INPLAY_GRACE_SECONDS
+        <= seconds_until_end
+        <= _MARKET_WS_PREGAME_LEAD_SECONDS
+    )
 
 
 def _market_end_within_tail_window(market: Any, *, now: datetime) -> bool:
