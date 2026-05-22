@@ -1297,7 +1297,19 @@ def _tennis_state_from_players(players: list[dict[str, Any]]) -> TennisGameState
             set_scores.append((hs, as_))
         else:
             break
-    current_set = len(set_scores) + 1 if set_scores else 1
+    # current_set 判定：s{i} 字段在某盘"进行中"就有值，不只是打完的盘。
+    # 因此不能简单用 len(set_scores)+1（首盘进行中 5-2 会被算成第 2 盘）。
+    # 用 totalscore（已赢盘数之和 = 已完成盘数）与已开始盘数对比：
+    #   已完成 < 已开始 → 最后一盘进行中 → current = 已开始盘数；
+    #   已完成 >= 已开始 → 该开始的盘都打完了 → current = 已开始盘数 + 1。
+    started_sets = len(set_scores)
+    completed_sets = home_sets + away_sets
+    if started_sets == 0:
+        current_set = 1
+    elif completed_sets >= started_sets:
+        current_set = started_sets + 1
+    else:
+        current_set = started_sets
     home_cur = _int_val(p0.get(f"s{current_set}", "").split(".")[0]) if current_set <= 5 else None
     away_cur = _int_val(p1.get(f"s{current_set}", "").split(".")[0]) if current_set <= 5 else None
     return TennisGameState(

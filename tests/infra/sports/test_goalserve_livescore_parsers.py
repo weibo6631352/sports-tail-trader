@@ -595,3 +595,43 @@ def test_as_payload_includes_new_states() -> None:
     assert "handball_state" in payload
     assert "rugby_state" in payload
     assert "mma_state" in payload
+
+
+def test_tennis_current_set_in_progress_first_set() -> None:
+    """首盘进行中（5-2）时 current_set 必须是 1，不是 2。
+
+    历史 bug：current_set = len(set_scores)+1，但 s{i} 字段在某盘进行中就有值，
+    导致首盘进行中被算成第 2 盘 → set-winner 评估误判首盘已决出。
+    """
+    from polymarket_trader.infra.sports.goalserve_livescore_parsers import (
+        _tennis_state_from_players,
+    )
+
+    st = _tennis_state_from_players([
+        {"totalscore": "0", "s1": "5"},
+        {"totalscore": "0", "s1": "2"},
+    ])
+    assert st is not None
+    assert st.current_set == 1
+    assert st.set_scores == ((5, 2),)
+    assert st.home_current_set_games == 5
+
+
+def test_tennis_current_set_advances_after_set_complete() -> None:
+    from polymarket_trader.infra.sports.goalserve_livescore_parsers import (
+        _tennis_state_from_players,
+    )
+
+    # 首盘 6-2 已完成、次盘 3-1 进行中 → current_set=2。
+    st = _tennis_state_from_players([
+        {"totalscore": "1", "s1": "6", "s2": "3"},
+        {"totalscore": "0", "s1": "2", "s2": "1"},
+    ])
+    assert st is not None and st.current_set == 2
+
+    # 首盘已完成、次盘未开始 → current_set=2（下一盘待开始）。
+    st2 = _tennis_state_from_players([
+        {"totalscore": "1", "s1": "6"},
+        {"totalscore": "0", "s1": "2"},
+    ])
+    assert st2 is not None and st2.current_set == 2
