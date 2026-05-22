@@ -136,3 +136,39 @@ def test_provider_excludes_sports_without_livescore_feed() -> None:
     )
     provider = _build_livescore_active_sports_provider(registry)
     assert provider() == frozenset()
+
+
+def test_provider_includes_market_with_no_start_time_via_end_date() -> None:
+    """game_start_time 缺失（如 esports 市场）时用 end_date 兜底：
+
+    end_date 在未来 6h 内 → 视为正在进行/临近 → 纳入轮询。否则整类运动
+    （esports）永不进 active 集合、直播源不被轮询、状态恒 stale。
+    """
+    registry = MarketRegistry()
+    now = datetime.now(timezone.utc)
+    registry.upsert(
+        _market(
+            "cs2-fokus-rbls-2026-05-22",
+            tags=("Esports", "CS2"),
+            game_start_time=None,
+            end_date=now + timedelta(hours=3),
+        )
+    )
+    provider = _build_livescore_active_sports_provider(registry)
+    assert provider() == frozenset({"esports"})
+
+
+def test_provider_excludes_no_start_market_with_far_future_end() -> None:
+    """game_start_time 缺失且 end_date 远在 6h 之外 → 不纳入（轮询范围有界）。"""
+    registry = MarketRegistry()
+    now = datetime.now(timezone.utc)
+    registry.upsert(
+        _market(
+            "cs2-far-future",
+            tags=("Esports", "CS2"),
+            game_start_time=None,
+            end_date=now + timedelta(hours=20),
+        )
+    )
+    provider = _build_livescore_active_sports_provider(registry)
+    assert provider() == frozenset()

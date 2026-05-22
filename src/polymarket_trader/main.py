@@ -243,7 +243,14 @@ def _build_livescore_active_sports_provider(
             is_near_start = (
                 start is not None and now <= start <= near_start_cutoff
             )
-            if not (is_live or is_near_start):
+            # game_start_time 缺失兜底：部分市场（如 esports）未带开赛时间，
+            # 仅靠 start 判断会让整类运动永不进 active 集合、直播源不被轮询。
+            # 此时改用 end_date：结束时间在未来 6h 内 → 视为正在进行/临近，
+            # 纳入轮询。registry 已被 discovery 限定在近端市场，过度轮询有界。
+            start_unknown_active = start is None and (
+                end is None or now < end < now + timedelta(hours=6)
+            )
+            if not (is_live or is_near_start or start_unknown_active):
                 continue
             for code in _market_sport_codes(market):
                 feed_keys = SPORT_CODE_TO_FEED_KEYS.get(code)
