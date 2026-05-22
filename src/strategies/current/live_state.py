@@ -207,6 +207,7 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
             "away_maps_won": event.esports_state.away_maps_won,
             "home_current_map_score": event.esports_state.home_current_map_score,
             "away_current_map_score": event.esports_state.away_current_map_score,
+            "map_winners": list(event.esports_state.map_winners),
         },
         "cricket_state": None if event.cricket_state is None else {
             "current_innings": event.cricket_state.current_innings,

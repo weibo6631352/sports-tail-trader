@@ -87,6 +87,8 @@ class TailRejectReason(StrEnum):
     RUGBY_LEAD_NOT_SAFE = "rugby_lead_not_safe"
     RUGBY_DRAW_NOT_SUPPORTED = "rugby_draw_not_supported"
     RUGBY_MARKET_NOT_SUPPORTED = "rugby_market_not_supported"
+    MISSING_ESPORTS_STATE = "missing_esports_state"
+    ESPORTS_BEST_OF_UNKNOWN = "esports_best_of_unknown"
 
 
 @dataclass(frozen=True, slots=True)

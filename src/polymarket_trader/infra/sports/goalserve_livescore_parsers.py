@@ -31,6 +31,7 @@ from polymarket_trader.domain.sports_live import (
     BaseballGameState,
     BasketballGameState,
     CricketGameState,
+    EsportsGameState,
     HandballGameState,
     LiveEvent,
     LiveEventKind,
@@ -336,6 +337,114 @@ def _parse_rugby(scores: dict[str, Any], observed_at: datetime) -> list[LiveEven
                 observed_at=observed_at,
                 external_ids={"goalserve": event_id},
                 rugby_state=rugby_state,
+            )
+        )
+    return events
+
+
+# ---------------------------------------------------------------------------
+# Esports
+# ---------------------------------------------------------------------------
+
+# esports getfeed 状态文字 → 归一状态。
+# inplay WS 不在套餐内（403），livescore getfeed esports/home 是唯一可用源。
+_ESPORTS_STATUS_MAP: dict[str, SportsLiveGameStatus] = {
+    "not started": SportsLiveGameStatus.SCHEDULED,
+    "started": SportsLiveGameStatus.LIVE,
+    "finished": SportsLiveGameStatus.ENDED,
+    # Awarded = 因对手退赛/违规判定胜负，结果同样已确定。
+    "awarded": SportsLiveGameStatus.ENDED,
+    "cancelled": SportsLiveGameStatus.CANCELLED,
+    "canceled": SportsLiveGameStatus.CANCELLED,
+    "postponed": SportsLiveGameStatus.POSTPONED,
+}
+
+
+def _esports_status(raw: Any) -> SportsLiveGameStatus:
+    """esports getfeed 状态归一。未知状态归 UNKNOWN，不静默当 LIVE。"""
+    return _ESPORTS_STATUS_MAP.get(str(raw or "").strip().lower(), SportsLiveGameStatus.UNKNOWN)
+
+
+def _parse_best_of(round_raw: Any) -> int | None:
+    """从 ``@round`` 解析 best-of 局数：'BO3'→3 / 'BO5'→5 / 'BO1'→1。
+
+    无法解析（空 / 非 BOn 格式）返回 None——esports 评估器据此给可审计拒绝原因。
+    """
+    text = str(round_raw or "").strip().upper()
+    match = re.search(r"BO\s*(\d+)", text)
+    if match is None:
+        return None
+    value = int(match.group(1))
+    return value if value > 0 else None
+
+
+def _iter_esports_matches(scores: dict[str, Any]) -> list[dict[str, Any]]:
+    """esports getfeed 的 match 直接挂在 ``scores.match`` 下（无 category 包装）。
+
+    ``match`` 可能是单个 dict 或 list——两种形态都展开。
+    """
+    raw = scores.get("match") or []
+    if isinstance(raw, dict):
+        raw = [raw]
+    return [m for m in raw if isinstance(m, dict)]
+
+
+def _at(mapping: dict[str, Any], key: str) -> Any:
+    """读取 Goalserve 字段，兼容 ``?json=1`` 保留的 ``@`` 属性前缀与裸 key。
+
+    esports/home 的 ``?json=1`` 响应把 XML 属性序列化为 ``@status``/``@id`` 等，
+    与已校准的 cricket/rugby 裸 key 不同——此 helper 两种形态都接受。
+    """
+    if key in mapping:
+        return mapping[key]
+    return mapping.get(f"@{key}")
+
+
+def _parse_esports(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
+    """解析 esports getfeed（CS2/Dota2/LoL/Valorant）。
+
+    ``localteam.@score`` / ``awayteam.@score`` = 各队已赢局数（maps won），
+    扫尾胜负判定据此与 best-of 阈值比较。score 同时作为 LiveEvent.participants
+    的 score，使已结束比赛走通用 ended-moneyline 评估器。
+    """
+    events: list[LiveEvent] = []
+    for match in _iter_esports_matches(scores):
+        event_id = _str_val(_at(match, "id") or _at(match, "matchid") or "")
+        if not event_id:
+            continue
+        status_raw = _str_val(_at(match, "status"))
+        status = _esports_status(status_raw)
+        home_team = match.get("localteam") or {}
+        away_team = match.get("awayteam") or {}
+        home_name = _str_val(_at(home_team, "name"))
+        away_name = _str_val(_at(away_team, "name"))
+        home_maps = _int_val(_at(home_team, "score")) or 0
+        away_maps = _int_val(_at(away_team, "score")) or 0
+        best_of = _parse_best_of(_at(match, "round"))
+
+        esports_state = EsportsGameState(
+            best_of=best_of,
+            home_maps_won=home_maps,
+            away_maps_won=away_maps,
+        )
+        league = _str_val(_at(match, "league") or _at(match, "competition") or "")
+        events.append(
+            LiveEvent(
+                source="goalserve_livescore",
+                source_event_id=event_id,
+                kind=LiveEventKind.TEAM_MATCH,
+                league=league,
+                sport="esports",
+                participants=(
+                    Participant(role="home", name=home_name, score=home_maps, external_ids={"goalserve": event_id}),
+                    Participant(role="away", name=away_name, score=away_maps, external_ids={"goalserve": event_id}),
+                ),
+                status=status,
+                period=_str_val(_at(match, "round")),
+                raw_status=status_raw,
+                observed_at=observed_at,
+                external_ids={"goalserve": event_id},
+                esports_state=esports_state,
             )
         )
     return events
@@ -1441,6 +1550,8 @@ def parse_goalserve_livescore_sport(
             return _parse_tennis_with_cats(scores, ts)
         case "cricket":
             return _parse_cricket(scores, ts)
+        case "esports":
+            return _parse_esports(scores, ts)
         case "handball":
             return _parse_handball(scores, ts)
         case "rugby":

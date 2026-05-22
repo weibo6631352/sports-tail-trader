@@ -45,6 +45,7 @@ _SPORT_FEEDS: dict[str, tuple[str, bool]] = {
     "nhl":              ("hockey/nhl-scores",      True),
     "tennis":           ("tennis_scores/home",     True),
     "cricket":          ("cricket/livescore",      False),
+    "esports":          ("esports/home",           False),   # inplay WS 不在套餐内（403），livescore getfeed 可用
     "handball":         ("handball/home",          False),
     "rugby":            ("rugby/home",             False),
     "boxing":           ("boxing/home",            False),

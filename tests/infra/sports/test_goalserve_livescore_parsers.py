@@ -91,7 +91,7 @@ def test_text_status_mapping(raw_status: str, expected: SportsLiveGameStatus) ->
 
 
 @pytest.mark.parametrize("sport", [
-    "cricket", "handball", "rugby", "boxing", "mma",
+    "cricket", "esports", "handball", "rugby", "boxing", "mma",
     "golf_pga", "golf_dp", "golf_liv", "golf_lpga",
     "horse_racing_us", "horse_racing_uk", "horse_racing_au", "horse_racing_hk",
     "f1", "motogp",
@@ -264,6 +264,118 @@ def test_rugby_real_format_status_is_period_with_timer() -> None:
     assert ev.rugby_state.period == "second_half"
     # 80 - 62 = 18 分钟剩余。
     assert ev.seconds_remaining == 18 * 60
+
+
+# ---------------------------------------------------------------------------
+# Esports
+# ---------------------------------------------------------------------------
+
+
+def _esports_match(
+    id: str = "394947",
+    status: str = "Finished",
+    round_: str = "BO3",
+    home_name: str = "Team Falcons",
+    away_name: str = "Legacy",
+    home_score: str = "2",
+    away_score: str = "0",
+) -> dict:
+    """真实 esports/home getfeed 单场结构（calibrated 自 live fetch）。"""
+    return {
+        "@status": status,
+        "@id": id,
+        "@league_id": "8784",
+        "@league": "CS Asia Championships Group A",
+        "@round": round_,
+        "@type": "CS GO",
+        "@timer": "",
+        "@date": "22.05.2026",
+        "@time": "03:00",
+        "localteam": {"@name": home_name, "@id": "25464", "@score": home_score},
+        "awayteam": {"@name": away_name, "@id": "6787", "@score": away_score},
+        "scoreboard": None,
+        "maps": None,
+        "streams": None,
+    }
+
+
+def test_esports_single_match_dict() -> None:
+    # esports getfeed 的 match 直接挂 scores.match，可能是单个 dict。
+    data = {"scores": {"@sport": "esports", "match": _esports_match()}}
+    events = parse_goalserve_livescore_sport("esports", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.sport == "esports"
+    assert ev.kind == LiveEventKind.TEAM_MATCH
+    assert ev.source_event_id == "394947"
+    assert ev.status == SportsLiveGameStatus.ENDED
+    assert ev.participants[0].name == "Team Falcons"
+    assert ev.participants[0].score == 2
+    assert ev.participants[1].name == "Legacy"
+    assert ev.participants[1].score == 0
+    assert ev.esports_state is not None
+    assert ev.esports_state.best_of == 3
+    assert ev.esports_state.home_maps_won == 2
+    assert ev.esports_state.away_maps_won == 0
+
+
+def test_esports_match_list() -> None:
+    # match 也可以是 list——两种形态都要展开。
+    data = {
+        "scores": {
+            "match": [
+                _esports_match(id="1", status="Started", home_score="1", away_score="0"),
+                _esports_match(id="2", status="Not Started", home_score="0", away_score="0"),
+            ]
+        }
+    }
+    events = parse_goalserve_livescore_sport("esports", data, observed_at=_OBSERVED)
+    assert len(events) == 2
+    assert events[0].status == SportsLiveGameStatus.LIVE
+    assert events[1].status == SportsLiveGameStatus.SCHEDULED
+
+
+@pytest.mark.parametrize(
+    "raw_status, expected",
+    [
+        ("Not Started", SportsLiveGameStatus.SCHEDULED),
+        ("Started", SportsLiveGameStatus.LIVE),
+        ("Finished", SportsLiveGameStatus.ENDED),
+        ("Awarded", SportsLiveGameStatus.ENDED),
+        ("Cancelled", SportsLiveGameStatus.CANCELLED),
+        ("Postponed", SportsLiveGameStatus.POSTPONED),
+        ("Weird", SportsLiveGameStatus.UNKNOWN),
+    ],
+)
+def test_esports_status_mapping(raw_status: str, expected: SportsLiveGameStatus) -> None:
+    data = {"scores": {"match": _esports_match(status=raw_status)}}
+    events = parse_goalserve_livescore_sport("esports", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    assert events[0].status == expected
+
+
+@pytest.mark.parametrize(
+    "round_raw, expected_best_of",
+    [
+        ("BO1", 1),
+        ("BO3", 3),
+        ("BO5", 5),
+        ("bo3", 3),
+        ("", None),
+        ("BEST OF 3", None),
+    ],
+)
+def test_esports_best_of_parse(round_raw: str, expected_best_of: int | None) -> None:
+    data = {"scores": {"match": _esports_match(round_=round_raw)}}
+    events = parse_goalserve_livescore_sport("esports", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    assert events[0].esports_state is not None
+    assert events[0].esports_state.best_of == expected_best_of
+
+
+def test_esports_match_without_id_skipped() -> None:
+    data = {"scores": {"match": {"@status": "Started", "@round": "BO3"}}}
+    assert parse_goalserve_livescore_sport("esports", data, observed_at=_OBSERVED) == []
 
 
 # ---------------------------------------------------------------------------

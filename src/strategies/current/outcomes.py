@@ -193,6 +193,13 @@ def _market_family(market: Market, text: str) -> SportsMarketFamily:
             "bo5",
         ),
     ):
+        # esports 双方对阵胜负盘走 single_game MONEYLINE：有 livescore 直播源 +
+        # best-of 锁定模型，可自动扫尾。判定条件——含 vs/at 对阵标记、恰 2 个
+        # outcome 且 outcome 是战队名（非 Yes/No、非 Over/Under）。其余 esports
+        # 盘口（total games、odd/even kills、rampage、penta kill 等 prop）无定价
+        # 模型，仍归 ESPORTS family 做可审计 record-only（§9 不静默丢弃）。
+        if _is_esports_moneyline_market(market, combined_text):
+            return SportsMarketFamily.SINGLE_GAME
         return SportsMarketFamily.ESPORTS
     # tennis "total games" 是单场 totals 盘口，不是系列赛——先排除再进 classifier。
     # series 关键词单一来源在 ``series.classifier``；本函数不再硬编码列表，避免双口径。
@@ -419,6 +426,26 @@ def _is_tennis_text(text: str) -> bool:
 def _is_binary_yes_no_market(market: Market) -> bool:
     outcome_tokens = {_normalize_text(outcome.outcome) for outcome in market.outcomes}
     return {"yes", "no"} <= outcome_tokens
+
+
+def _is_esports_moneyline_market(market: Market, combined_text: str) -> bool:
+    """识别 esports 双方对阵胜负盘（best-of-N 系列赛由哪支战队胜出）。
+
+    只在已确认含 esports 关键词后调用。判据：恰 2 个 outcome，且 outcome 既非
+    Yes/No 也非 Over/Under（即两个战队名）；并要求文本含 vs/at 对阵标记，排除
+    赛季归属型 esports 盘口。total games / props 等不满足"2 个战队名 outcome"，
+    自然落到 ESPORTS family。
+    """
+    if len(market.outcomes) != 2:
+        return False
+    outcome_tokens = {_normalize_text(o.outcome) for o in market.outcomes}
+    if {"yes", "no"} & outcome_tokens:
+        return False
+    if {"over", "under"} & outcome_tokens or any(
+        t.startswith("over ") or t.startswith("under ") for t in outcome_tokens
+    ):
+        return False
+    return _has_matchup_marker(combined_text)
 
 
 def _is_season_or_competition_prop(text: str) -> bool:

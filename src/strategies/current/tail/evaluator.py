@@ -57,6 +57,7 @@ from .mlb import (
     _evaluate_mlb_totals,
     is_nrfi_market,
 )
+from .esports import _evaluate_esports_moneyline, is_esports_game
 from .rugby import _evaluate_rugby_moneyline, is_rugby_game
 from .slug import _is_tennis_set_winner_market, _market_scope_reject_reason
 from .tennis import (
@@ -159,6 +160,13 @@ def evaluate_tail_opportunity(
     if market.market_type == SportsMarketType.BINARY_PROP:
         return _reject(candidate, "binary_prop_no_tail_model")
 
+    # esports 胜负盘是 2-way MONEYLINE，但锁定模型是 best-of 局数而非比分/剩余时间——
+    # 必须在通用 _evaluate_moneyline 之前路由到 esports 专属评估器。
+    if is_esports_game(game):
+        if market.market_type == SportsMarketType.MONEYLINE:
+            return _evaluate_esports_moneyline(candidate, policy)
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+
     if is_tennis_game(game):
         if market.market_type == SportsMarketType.TOTALS:
             return _evaluate_tennis_totals(candidate, policy)
@@ -226,6 +234,9 @@ def evaluate_scale_in_opportunity(
 
     if is_tennis_game(game):
         return _evaluate_tennis_scale_in(candidate, policy)
+    # esports 胜负盘只在系列赛锁定后入场，无渐进加仓窗口——不支持 scale-in。
+    if is_esports_game(game):
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
     if market.market_type == SportsMarketType.TOTALS:
         return _evaluate_totals_scale_in(candidate, policy)
     if market.market_type == SportsMarketType.MONEYLINE:

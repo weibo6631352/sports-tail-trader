@@ -226,6 +226,15 @@ class CurrentStrategyConfig:
         "ipl",
         "bbl",
         "rugby",
+        "esports",
+        "cs2",
+        "csgo",
+        "counter-strike",
+        "dota2",
+        "dota",
+        "lol",
+        "league-of-legends",
+        "valorant",
     )
     tail_enabled_market_types: tuple[SportsMarketType, ...] = (
         SportsMarketType.TOTALS,

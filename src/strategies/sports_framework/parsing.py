@@ -12,6 +12,7 @@ from typing import Any, Mapping
 from polymarket_trader.domain.sports_live import (
     BaseballGameState,
     BasketballGameState,
+    EsportsGameState,
     SoccerGameState,
     VolleyballGameState,
 )
@@ -56,6 +57,7 @@ def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState 
         basketball_state=_basketball_state(raw_game.get("basketball_state")),
         tennis_state=_tennis_state(raw_game.get("tennis_state")),
         soccer_state=_soccer_state(raw_game.get("soccer_state")),
+        esports_state=_esports_state(raw_game.get("esports_state")),
         volleyball_state=_volleyball_state(raw_game.get("volleyball_state")),
     )
 
@@ -189,6 +191,28 @@ def _soccer_state(value: object) -> SoccerGameState | None:
         last_event_minute=_optional_int(value.get("last_event_minute")),
         home_halftime_score=_optional_int(value.get("home_halftime_score")),
         away_halftime_score=_optional_int(value.get("away_halftime_score")),
+    )
+
+
+def _esports_state(value: object) -> EsportsGameState | None:
+    if isinstance(value, EsportsGameState):
+        return value
+    if not isinstance(value, Mapping):
+        return None
+    map_winners_raw = value.get("map_winners")
+    map_winners = (
+        tuple(str(w) for w in map_winners_raw)
+        if isinstance(map_winners_raw, (tuple, list))
+        else ()
+    )
+    return EsportsGameState(
+        best_of=_optional_int(value.get("best_of")),
+        current_map_index=_optional_int(value.get("current_map_index")),
+        home_maps_won=_optional_int(value.get("home_maps_won")) or 0,
+        away_maps_won=_optional_int(value.get("away_maps_won")) or 0,
+        home_current_map_score=_optional_int(value.get("home_current_map_score")),
+        away_current_map_score=_optional_int(value.get("away_current_map_score")),
+        map_winners=map_winners,
     )
 
 
