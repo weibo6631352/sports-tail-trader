@@ -245,6 +245,27 @@ def test_rugby_basic_parse() -> None:
     assert ev.rugby_state.away_period1 == 10
 
 
+def test_rugby_real_format_status_is_period_with_timer() -> None:
+    # 真实 rugby/home feed：status 字段即赛段，timer = 已过分钟数（全场 80 分钟）。
+    data = _scores_team_wrap(
+        {
+            "id": "rg_2",
+            "status": "2nd Half",
+            "timer": "62",
+            "localteam": {"name": "Waratahs", "totalscore": "7"},
+            "awayteam": {"name": "Brumbies", "totalscore": "14"},
+        }
+    )
+    events = parse_goalserve_livescore_sport("rugby", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.status == SportsLiveGameStatus.LIVE
+    assert ev.rugby_state is not None
+    assert ev.rugby_state.period == "second_half"
+    # 80 - 62 = 18 分钟剩余。
+    assert ev.seconds_remaining == 18 * 60
+
+
 # ---------------------------------------------------------------------------
 # Boxing
 # ---------------------------------------------------------------------------

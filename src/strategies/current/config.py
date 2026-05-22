@@ -189,6 +189,7 @@ class CurrentStrategyConfig:
         "cricket",
         "ipl",
         "bbl",
+        "rugby",
     )
     tail_enabled_market_types: tuple[SportsMarketType, ...] = (
         SportsMarketType.TOTALS,

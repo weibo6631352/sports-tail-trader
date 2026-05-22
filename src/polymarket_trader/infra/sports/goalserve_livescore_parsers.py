@@ -267,13 +267,31 @@ def _parse_handball(scores: dict[str, Any], observed_at: datetime) -> list[LiveE
 # ---------------------------------------------------------------------------
 
 
+def _rugby_seconds_remaining(status_raw: str, timer_raw: Any) -> int | None:
+    """估算橄榄球剩余秒数。全场 80 分钟（不含加时）。timer = 已过分钟数。
+
+    上半场 0-40 分钟；下半场 40-80 分钟；半场休息时剩 40 分钟。
+    """
+    s = status_raw.strip().lower()
+    if s in ("half time", "halftime", "ht"):
+        return 40 * 60
+    try:
+        elapsed = int(float(str(timer_raw or "").strip()))
+    except (ValueError, TypeError):
+        return None
+    if elapsed <= 0:
+        return None
+    return max(0, 80 - elapsed) * 60
+
+
 def _parse_rugby(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     events: list[LiveEvent] = []
     for match in _iter_matches(scores):
         event_id = _str_val(match.get("id") or match.get("matchid") or "")
         if not event_id:
             continue
-        status = _text_status(match.get("status"))
+        status_raw = _str_val(match.get("status"))
+        status = _text_status(status_raw)
         home_team = match.get("localteam") or {}
         away_team = match.get("awayteam") or {}
         home_name = _str_val(home_team.get("name"))
@@ -283,8 +301,15 @@ def _parse_rugby(scores: dict[str, Any], observed_at: datetime) -> list[LiveEven
         home_p1 = _int_val(home_team.get("t1"))
         away_p1 = _int_val(away_team.get("t1"))
 
-        period_raw = _str_val(match.get("status_str") or match.get("period") or "")
-        rugby_period = _HALF_PERIOD_MAP.get(period_raw.lower())
+        # 赛段：真实 rugby/home feed 用 status 字段表示赛段（"2nd Half" 等），
+        # 部分响应另带独立 status_str——优先后者，回退 status。
+        period_source = _str_val(match.get("status_str")) or status_raw
+        rugby_period = _HALF_PERIOD_MAP.get(period_source.lower())
+        seconds_remaining = (
+            _rugby_seconds_remaining(period_source, match.get("timer"))
+            if status == SportsLiveGameStatus.LIVE
+            else None
+        )
 
         rugby_state = RugbyGameState(
             period=rugby_period,
@@ -305,8 +330,9 @@ def _parse_rugby(scores: dict[str, Any], observed_at: datetime) -> list[LiveEven
                     Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=period_raw,
-                raw_status=_str_val(match.get("status")),
+                period=period_source,
+                seconds_remaining=seconds_remaining,
+                raw_status=status_raw,
                 observed_at=observed_at,
                 external_ids={"goalserve": event_id},
                 rugby_state=rugby_state,

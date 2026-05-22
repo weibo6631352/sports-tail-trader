@@ -51,6 +51,7 @@ from .mlb import (
     _evaluate_mlb_totals,
     is_nrfi_market,
 )
+from .rugby import _evaluate_rugby_moneyline, is_rugby_game
 from .slug import _is_tennis_set_winner_market, _market_scope_reject_reason
 from .tennis import (
     _evaluate_ended_tennis,
@@ -129,6 +130,10 @@ def evaluate_tail_opportunity(
 
     if market.market_type == SportsMarketType.BINARY_PROP and is_soccer_halftime_market(market):
         return _evaluate_soccer_halftime_result(candidate, policy)
+
+    # 橄榄球胜负盘是 3-way 拆成的 binary_prop——路由到橄榄球评估器。
+    if market.market_type == SportsMarketType.BINARY_PROP and is_rugby_game(game):
+        return _evaluate_rugby_moneyline(candidate, policy)
 
     if market.market_type == SportsMarketType.BINARY_PROP:
         return _reject(candidate, "binary_prop_no_tail_model")
