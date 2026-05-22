@@ -112,6 +112,21 @@ def _evaluate_tennis_moneyline(
     return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
 
 
+def _tennis_set_is_complete(home_games: int, away_games: int) -> bool:
+    """判断一盘局分是否已打完。
+
+    标准盘：先到 6 局且净胜 ≥2（6-0..6-4、7-5、8-6 等）；或抢七 7-6。
+    未打完的局分（如 5-2、6-5）不算完成——set winner 不能据此判定锁定。
+    """
+    hi = max(home_games, away_games)
+    lo = min(home_games, away_games)
+    if hi >= 6 and hi - lo >= 2:
+        return True
+    if hi >= 7 and hi - lo == 1:
+        return True
+    return False
+
+
 def _evaluate_tennis_set_winner(
     candidate: SportsTailCandidate,
     policy: TailPolicy,
@@ -139,6 +154,10 @@ def _evaluate_tennis_set_winner(
         return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
 
     home_games, away_games = state.set_scores[set_number - 1]
+    # 必须确认该盘真的打完——set_scores 里可能是进行中的局分（如 5-2），
+    # 据此判定 set winner 锁定会在未决出的盘上误下单。
+    if not _tennis_set_is_complete(home_games, away_games):
+        return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
     side_games = home_games if market.side == SportsMarketSide.HOME else away_games
     other_games = away_games if market.side == SportsMarketSide.HOME else home_games
     if side_games > other_games:
@@ -244,6 +263,8 @@ def _evaluate_ended_tennis_set_winner(
     if set_number is None or len(state.set_scores) < set_number:
         return _reject(candidate, TailRejectReason.TENNIS_SET_WINNER_NOT_SUPPORTED.value)
     home_games, away_games = state.set_scores[set_number - 1]
+    if not _tennis_set_is_complete(home_games, away_games):
+        return _reject(candidate, TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value)
     side_games = home_games if market.side == SportsMarketSide.HOME else away_games
     other_games = away_games if market.side == SportsMarketSide.HOME else home_games
     if side_games > other_games:
