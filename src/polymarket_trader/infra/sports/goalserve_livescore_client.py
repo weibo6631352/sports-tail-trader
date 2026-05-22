@@ -310,6 +310,9 @@ class GoalserveLivescoreClient:
         for sport, result in zip(sports_to_fetch, results):
             source_key = f"goalserve_livescore:{sport}"
             if isinstance(result, Exception):
+                # 某些异常 str() 为空(无 args 抛出),直接写会成 last_error="";
+                # 观测面板和排查都会被误导。用 类名+repr 兜底保证永不为空。
+                err_msg = str(result) or f"{type(result).__name__}: {result!r}"
                 source_statuses.append(
                     SportsLiveSourceStatus(
                         source=source_key,
@@ -317,7 +320,7 @@ class GoalserveLivescoreClient:
                         health=SportsLiveSourceHealth.FAILED,
                         events_seen=0,
                         observed_at=observed_at,
-                        last_error=str(result),
+                        last_error=err_msg,
                     )
                 )
                 continue
