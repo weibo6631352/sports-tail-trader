@@ -35,7 +35,9 @@ async def list_sports_live_events_history(
 
 @router.get("/sports/live-states")
 async def list_sports_live_states(
-    limit: int = Query(default=100, ge=1, le=1000),
+    # 默认上限放大：直播状态条数可能上千，过小的 limit 会把正在直播的赛事
+    # 截掉。服务层已把 phase=live 排到最前，limit 再大也不漏直播。
+    limit: int = Query(default=5000, ge=1, le=20000),
     offset: int = Query(default=0, ge=0),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
@@ -50,7 +52,8 @@ async def list_sports_live_states(
 
 @router.get("/sports/source-gaps")
 async def list_sports_live_source_gaps(
-    limit: int = Query(default=100, ge=1, le=1000),
+    # 上限放大：覆盖缺口可能上千，过小的 limit 会漏看缺口。
+    limit: int = Query(default=5000, ge=1, le=20000),
     offset: int = Query(default=0, ge=0),
     prefix: str | None = Query(default=None, min_length=1),
     service: AdminService = Depends(get_admin_service),
