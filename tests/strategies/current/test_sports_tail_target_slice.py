@@ -44,7 +44,10 @@ from strategies.current.tail import (
 )
 from strategies.current.strategy import CurrentStrategy
 from strategies.current.trading import decide_entry
-from strategies.current.trading.exit_overlay import reset_dynamic_exit_peaks
+from strategies.current.trading.exit_overlay import (
+    _depth_walked_exit,
+    reset_dynamic_exit_peaks,
+)
 from strategies.current.universe import select_market
 
 
@@ -3756,8 +3759,14 @@ def _dynamic_exit_orderbook(
     *,
     best_bid: Decimal,
     best_ask: Decimal,
+    bids: tuple[PriceLevel, ...] | None = None,
+    asks: tuple[PriceLevel, ...] | None = None,
 ) -> OrderbookSnapshot:
-    """构造动态退出测试用的盘口快照（over token，单档 bid/ask）。"""
+    """构造动态退出测试用的盘口快照（over token）。
+
+    默认 bid 簿在 best_bid 顶档放 50 股深度——足以吃完 10 股测试持仓且无滑点，
+    realized_avg 等于 best_bid。测试薄簿场景时显式传入 ``bids``。
+    """
 
     return OrderbookSnapshot(
         token_id="over",
@@ -3765,8 +3774,8 @@ def _dynamic_exit_orderbook(
         market_slug=market.market_slug,
         best_bid=best_bid,
         best_ask=best_ask,
-        bids=(PriceLevel(price=best_bid, size=Decimal("50")),),
-        asks=(PriceLevel(price=best_ask, size=Decimal("50")),),
+        bids=bids if bids is not None else (PriceLevel(price=best_bid, size=Decimal("50")),),
+        asks=asks if asks is not None else (PriceLevel(price=best_ask, size=Decimal("50")),),
         received_at=datetime(2026, 5, 22, tzinfo=timezone.utc),
         tick_size=Decimal("0.01"),
     )
@@ -4079,6 +4088,215 @@ def test_dynamic_exit_uses_goalserve_implied_prob_as_fair_value() -> None:
     assert decision.metadata["dynamic_exit_fair_value"] == "0.55"
     assert decision.metadata["dynamic_exit_trigger"] == "trailing_reversal"
     assert decision.price == Decimal("0.58")
+
+
+def test_depth_walked_exit_partial_and_full_coverage() -> None:
+    """_depth_walked_exit 单元：逐档撮合，覆盖足够/不足两种情形。"""
+
+    # bid 簿：5@0.90, 8@0.85, 20@0.70。
+    bids = (
+        PriceLevel(price=Decimal("0.90"), size=Decimal("5")),
+        PriceLevel(price=Decimal("0.85"), size=Decimal("8")),
+        PriceLevel(price=Decimal("0.70"), size=Decimal("20")),
+    )
+
+    # 卖 10 股：5@0.90 + 5@0.85 = 触达最深档 0.85，全部覆盖。
+    clearing, covered, realized = _depth_walked_exit(bids, Decimal("10"))
+    assert clearing == Decimal("0.85")
+    assert covered is True
+    # 加权均价 = (5×0.90 + 5×0.85) / 10 = 8.75 / 10 = 0.875。
+    assert realized == Decimal("0.875")
+
+    # 卖 50 股：簿总深度仅 33 股，吃不完 → fully_covered=False。
+    clearing, covered, realized = _depth_walked_exit(bids, Decimal("50"))
+    assert clearing == Decimal("0.70")  # 触达最深档
+    assert covered is False
+    # 已覆盖部分加权均价 = (5×0.90 + 8×0.85 + 20×0.70)/33 = 25.3/33。
+    assert realized == (Decimal("25.3") / Decimal("33"))
+
+    # 空簿 → (None, False, 0)。
+    clearing, covered, realized = _depth_walked_exit((), Decimal("10"))
+    assert clearing is None
+    assert covered is False
+    assert realized == Decimal("0")
+
+
+def test_dynamic_exit_take_profit_fires_on_deep_book() -> None:
+    """深簿止盈：bid 簿足够厚 → realized_avg ≈ best_bid → 止盈正常触发。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+
+    # 第一周期：深簿 best bid 0.90 创新高 → HOLD，峰值锁 0.90。
+    strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(market, best_bid=Decimal("0.90"), best_ask=Decimal("0.92")),
+            trace_id="trace-dynamic-deep-1",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    # 第二周期：深簿 best bid 0.85（顶档 50 股，吃 10 股无滑点 → realized_avg=0.85）；
+    # 非新高、从峰值回撤 5.5% ≥ 4% 且在止盈区 → trailing_reversal 正常止盈。
+    decision = strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(market, best_bid=Decimal("0.85"), best_ask=Decimal("0.87")),
+            trace_id="trace-dynamic-deep-2",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    assert decision.action.value == "sell"
+    assert decision.reason == "dynamic_exit_take_profit"
+    assert decision.metadata["dynamic_exit_trigger"] == "trailing_reversal"
+    assert decision.price == Decimal("0.85")
+    assert decision.metadata["dynamic_exit_realized_avg"] == "0.85"
+
+
+def test_dynamic_exit_take_profit_holds_for_depth_on_thin_book() -> None:
+    """薄簿止盈 HOLD：bid 簿太薄、滑点超限 → 非紧急止盈改为 awaiting_bid_depth。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+
+    # 第一周期：深簿 best bid 0.90 创新高 → HOLD，峰值锁 0.90。
+    strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(market, best_bid=Decimal("0.90"), best_ask=Decimal("0.92")),
+            trace_id="trace-dynamic-thin-1",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    # 第二周期：薄簿 best bid 0.85——顶档仅 3 股，其余 7 股要吃到 0.78。
+    # realized_avg = (3×0.85 + 7×0.78)/10 = 8.01/10 = 0.801；
+    # 滑点 = (0.85-0.801)/0.85 ≈ 5.8% > 3% → 簿太薄。realized_avg 0.801 仍
+    # ≥ entry×1.5=0.765 在止盈区、非新高、回撤 ≥4% → 本应 trailing_reversal，
+    # 但薄簿门禁改为 awaiting_bid_depth HOLD。
+    thin_bids = (
+        PriceLevel(price=Decimal("0.85"), size=Decimal("3")),
+        PriceLevel(price=Decimal("0.78"), size=Decimal("10")),
+    )
+    decision = strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(
+                market,
+                best_bid=Decimal("0.85"),
+                best_ask=Decimal("0.87"),
+                bids=thin_bids,
+            ),
+            trace_id="trace-dynamic-thin-2",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    assert decision.action.value == "skip"
+    assert decision.reason == "dynamic_exit_hold"
+    assert decision.metadata["dynamic_exit_decision"] == "hold"
+    assert decision.metadata["dynamic_exit_trigger"] == "awaiting_bid_depth"
+    assert decision.metadata["dynamic_exit_blocked_trigger"] == "trailing_reversal"
+
+
+def test_dynamic_exit_stop_loss_still_exits_on_thin_book() -> None:
+    """薄簿止损：簿薄、滑点大也照样止损——割肉优先于滑点。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+    # 买入均价 0.80；市场逆转，best ask 0.22 → mid 0.21 < 0.80×0.5=0.40 止损。
+    # bid 簿很薄：顶档 2 股@0.20，其余吃到 0.12 → clearing_price=0.12。
+    thin_bids = (
+        PriceLevel(price=Decimal("0.20"), size=Decimal("2")),
+        PriceLevel(price=Decimal("0.12"), size=Decimal("20")),
+    )
+    orderbook = OrderbookSnapshot(
+        token_id="over",
+        condition_id=market.condition_id,
+        market_slug=market.market_slug,
+        best_bid=Decimal("0.20"),
+        best_ask=Decimal("0.22"),
+        bids=thin_bids,
+        asks=(PriceLevel(price=Decimal("0.22"), size=Decimal("50")),),
+        received_at=datetime(2026, 5, 22, tzinfo=timezone.utc),
+        tick_size=Decimal("0.01"),
+    )
+
+    decision = strategy.decide_exit(
+        ExtensionContext(
+            strategy_id="sports_tail",
+            trace_id="trace-dynamic-thin-stop-loss",
+            market=market,
+            token_id="over",
+            orderbook=orderbook,
+            position=Position(
+                strategy_id="sports_tail",
+                condition_id=market.condition_id,
+                token_id="over",
+                shares=Decimal("10"),
+                cost_usdc=Decimal("8.00"),
+                market_slug=market.market_slug,
+            ),
+        )
+    )
+
+    assert decision.action.value == "sell"
+    assert decision.reason == "dynamic_exit_stop_loss"
+    assert decision.metadata["dynamic_exit_decision"] == "stop_loss"
+    # 止损按逐档撮合价 clearing_price 卖出（触达最深档 0.12）。
+    assert decision.price == Decimal("0.12")
+
+
+def test_dynamic_exit_takes_profit_when_bid_depth_collapses() -> None:
+    """深度坍缩止盈：浮盈中 bid depth 跌破峰值一半 → 抢在 bid 枯竭前兑现。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+
+    # 第一周期：best bid 0.85，顶档 100 股 → bid depth ≈ 85（峰值）。创新高 HOLD。
+    strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(
+                market,
+                best_bid=Decimal("0.85"),
+                best_ask=Decimal("0.87"),
+                bids=(PriceLevel(price=Decimal("0.85"), size=Decimal("100")),),
+            ),
+            trace_id="trace-dynamic-depth-1",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    # 第二周期：best bid 0.84，顶档仅 20 股（吃 10 股无滑点，簿不薄）→
+    # bid depth = 0.84×20 = 16.8 < 峰值 85×0.5 = 42.5 → 买方撤离。
+    # 0.84 非新高、回撤 (0.85-0.84) 仅 1.2% < 4% 不触 trailing_reversal、
+    # 浮盈中 → depth_thinning 止盈。
+    decision = strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(
+                market,
+                best_bid=Decimal("0.84"),
+                best_ask=Decimal("0.86"),
+                bids=(PriceLevel(price=Decimal("0.84"), size=Decimal("20")),),
+            ),
+            trace_id="trace-dynamic-depth-2",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    assert decision.action.value == "sell"
+    assert decision.reason == "dynamic_exit_take_profit"
+    assert decision.metadata["dynamic_exit_decision"] == "take_profit"
+    assert decision.metadata["dynamic_exit_trigger"] == "depth_thinning"
+    assert decision.price == Decimal("0.84")
 
 
 def test_recovery_keeps_ended_single_game_open_for_ended_not_closed_scan() -> None:

@@ -87,6 +87,20 @@ class CurrentStrategyConfig:
         tail_dynamic_exit_min_hold_return_per_hour:
             动态止盈资金占用效率门槛。持有到结算的每小时收益率低于此值时
             主动卖出腾资金重新部署。默认 0.03（每小时 < 3% 视为低效）。
+        tail_dynamic_exit_max_slippage_fraction:
+            动态止盈滑点容忍上限。退出按 bid 深度逐档撮合算出真实成交均价；
+            若 (best_bid - realized_avg) / best_bid 超过此比例（或 bid 簿深度
+            不足以吃完全部份额），说明 bid 簿太薄、止盈卖单会吃大滑点——
+            此时非紧急止盈分支改为 HOLD 等深度回补，不把仓位砸进薄簿。
+            止损紧急分支不受此约束（割肉优先于滑点）。默认 0.03。
+        tail_dynamic_exit_depth_band_fraction:
+            bid 深度统计带宽。bid depth = best_bid 下方此比例区间内所有
+            bid 档位的 USDC 名义额之和，用作"买方力量"代理。默认 0.05
+            （统计 best_bid 下方 5% 价格区间内的 bid 名义额）。
+        tail_dynamic_exit_depth_thinning_fraction:
+            bid 深度坍缩阈值。持仓浮盈时，若当前 bid depth 跌到历史峰值的
+            此比例以下（买方在撤离），主动按逐档撮合价兑现浮盈，抢在 bid
+            进一步枯竭前锁定收益。默认 0.5（深度跌破峰值一半即兑现）。
         min_liquidity_usdc:
             允许入场前要求达到的最小盘口深度，单位是 USDC。
         max_spread:
@@ -342,6 +356,16 @@ class CurrentStrategyConfig:
     # 动态止盈资金占用效率门槛：持有到结算的每小时收益率低于此值时主动卖出
     # 腾出资金重新部署。0.03 = 每小时 < 3% 即认为占用资金太低效（CLAUDE.md §17）。
     tail_dynamic_exit_min_hold_return_per_hour: Decimal = Decimal("0.03")
+    # 动态止盈滑点容忍上限：退出价基于 bid 深度逐档撮合算真实成交均价，若
+    # (best_bid - realized_avg)/best_bid 超过此值或 bid 簿吃不完全部份额，
+    # 非紧急止盈分支 HOLD 等深度回补，不把仓位砸进薄簿吃滑点（CLAUDE.md §17）。
+    tail_dynamic_exit_max_slippage_fraction: Decimal = Decimal("0.03")
+    # bid 深度统计带宽：bid depth = best_bid 下方此比例区间内 bid 档位的 USDC
+    # 名义额之和，作为买方力量代理。0.05 = 统计 best_bid 下方 5% 价格区间。
+    tail_dynamic_exit_depth_band_fraction: Decimal = Decimal("0.05")
+    # bid 深度坍缩阈值：持仓浮盈时 bid depth 跌破历史峰值的此比例即判定买方
+    # 撤离，主动按逐档撮合价兑现浮盈。0.5 = 深度跌破峰值一半即兑现。
+    tail_dynamic_exit_depth_thinning_fraction: Decimal = Decimal("0.5")
     tail_entry_maker_max_resting_seconds: int = 60
     tail_settlement_hold_minutes: int = 180
     # 比赛结束后等待 Polymarket 权威结算的缓冲时间（分钟）。

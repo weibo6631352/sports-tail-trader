@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_FLOOR
 from typing import Mapping
 
-from polymarket_trader.domain.orderbook import OrderbookSnapshot
+from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.sports_live import BaseballGameState, TennisGameState, VolleyballGameState
 from polymarket_trader.extension_api import ExtensionContext
 
@@ -31,11 +31,18 @@ _MIN_HOLD_HOURS = Decimal("0.05")  # 3 分钟
 # 模块级状态：进程内跨决策周期累积；测试用 reset_dynamic_exit_peaks() 清空。
 _dynamic_exit_peaks: dict[tuple[str, str], Decimal] = {}
 
+# 每个持仓的 bid 深度峰值跟踪：键 (condition_id, token_id) → 历史最高 bid depth。
+# bid depth = best_bid 下方一个带宽区间内所有 bid 档位的 USDC 名义额之和，
+# 代表买方力量。当前深度从峰值显著坍缩 → 买方撤离 → 触发提前止盈。
+# 模块级状态：进程内跨决策周期累积；测试用 reset_dynamic_exit_peaks() 清空。
+_dynamic_exit_depth_peaks: dict[tuple[str, str], Decimal] = {}
+
 
 def reset_dynamic_exit_peaks() -> None:
-    """清空 best bid 峰值跟踪表。仅供测试隔离用——峰值是模块级累积状态。"""
+    """清空 best bid 与 bid 深度峰值跟踪表。仅供测试隔离用——均为模块级累积状态。"""
 
     _dynamic_exit_peaks.clear()
+    _dynamic_exit_depth_peaks.clear()
 
 
 def previous_peak(key: tuple[str, str]) -> Decimal | None:
@@ -53,12 +60,82 @@ def observe_peak(key: tuple[str, str], bid: Decimal) -> Decimal:
     return peak
 
 
+def previous_depth_peak(key: tuple[str, str]) -> Decimal | None:
+    """读取该持仓此前观察到的 bid 深度峰值；从未观察过返回 None。"""
+
+    return _dynamic_exit_depth_peaks.get(key)
+
+
+def observe_depth_peak(key: tuple[str, str], depth: Decimal) -> Decimal:
+    """记录一次 bid 深度观察，返回更新后的峰值 = max(此前峰值, 本次 depth)。"""
+
+    prev = _dynamic_exit_depth_peaks.get(key)
+    peak = depth if prev is None or depth > prev else prev
+    _dynamic_exit_depth_peaks[key] = peak
+    return peak
+
+
+def _depth_walked_exit(
+    bids: tuple[PriceLevel, ...],
+    shares: Decimal,
+) -> tuple[Decimal | None, bool, Decimal]:
+    """沿 bid 簿从最优档（最高价）逐档向下撮合，算出卖出 ``shares`` 的真实成交结果。
+
+    返回 ``(clearing_price, fully_covered, realized_avg_price)``：
+    - ``clearing_price``：吃完 ``shares`` 所触达的最深档位价（最差价）。在该价位
+      挂 SELL 限价单会一路撮合掉我方全部份额。bid 簿为空时为 None。
+    - ``fully_covered``：bid 簿累计深度是否足够吃完全部 ``shares``。
+    - ``realized_avg_price``：已撮合份额上的 size 加权平均价——我方实际能拿到的均价。
+
+    bid 簿不足以吃完时：clearing_price 取最深一档，realized_avg 仅对已覆盖部分
+    加权（不虚构未撮合份额的价格）。
+    """
+
+    if not bids:
+        return None, False, Decimal("0")
+
+    remaining = shares
+    notional = Decimal("0")
+    filled = Decimal("0")
+    clearing_price = bids[0].price
+    for level in bids:
+        clearing_price = level.price
+        take = level.size if level.size <= remaining else remaining
+        notional += take * level.price
+        filled += take
+        remaining -= take
+        if remaining <= Decimal("0"):
+            break
+
+    fully_covered = remaining <= Decimal("0")
+    realized_avg = notional / filled if filled > Decimal("0") else Decimal("0")
+    return clearing_price, fully_covered, realized_avg
+
+
+def _bid_depth_within_band(
+    bids: tuple[PriceLevel, ...],
+    best_bid: Decimal,
+    band_fraction: Decimal,
+) -> Decimal:
+    """统计 best_bid 下方 ``band_fraction`` 价格区间内所有 bid 档位的 USDC 名义额。
+
+    名义额 = Σ price × size，作为"买方力量"代理：区间内挂单越多，买方越厚。
+    """
+
+    floor_price = best_bid * (Decimal("1") - band_fraction)
+    return sum(
+        (level.price * level.size for level in bids if level.price >= floor_price),
+        Decimal("0"),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class DynamicExitDecision:
     """动态退出评估结果：是否退出、退出挂卖价、可审计原因和审计 metadata。
 
     ``should_exit=False`` 表示本周期 HOLD（不挂 SELL）；``should_exit=True``
-    时 ``exit_price`` 必为当前 best bid，调用侧据此重新定价退出 SELL。
+    时 ``exit_price`` 必为逐档撮合价 clearing_price——在该价挂 SELL 限价单
+    会一路吃掉我方全部份额，调用侧据此定价退出 SELL。
     """
 
     should_exit: bool
@@ -74,24 +151,34 @@ def evaluate_dynamic_exit(
     token_id: str | None,
     entry_price: Decimal,
 ) -> DynamicExitDecision | None:
-    """每个决策周期基于实时盘口 + 直播状态 + Goalserve 赔率动态重估退出。
+    """每个决策周期基于实时盘口深度 + 直播状态 + Goalserve 赔率动态重估退出。
 
-    多因子动态退出决策引擎，决策顺序首个命中即返回（CLAUDE.md §17 买卖原则）：
-    1. 止损：fair value ≤ entry × stop_loss_fraction → 立即离场，永不在亏损上 trail。
+    多因子动态退出决策引擎，决策顺序首个命中即返回（CLAUDE.md §17 买卖原则）。
+    关键：定价不看 best_bid 单档，而看沿 bid 簿逐档撮合掉我方全部份额后的真实
+    成交均价 realized_avg——薄簿里 best_bid 之下的份额会以更差价成交。
+
+    1. 止损：fair value ≤ entry × stop_loss_fraction → 立即离场（紧急，吃滑点
+       也要割）；exit_price = 逐档撮合价 clearing_price。永不在亏损上 trail。
     2. 水下 HOLD：best bid ≤ 买入价但未触止损 → HOLD，等待回到买入价之上。
     3. 已结算：best bid ≥ lock_in_price 且 ≥ 0.99（盘口几乎结算）→ 吃掉 bid。
-    4. 顺势上行 HOLD：best bid 创新高 → 趋势仍向我方发展，不退，骑住动量。
+    4. 顺势上行 HOLD：realized_avg 创新高 → 趋势仍向我方发展，骑住动量。
        这是核心规则，必须排在止盈 / 回撤判据之前。
-    5. 止盈区判定：bid ≥ entry × take_profit_multiple，或（Goalserve 赔率公允价
-       且 bid ≥ fair value），或 bid ≥ lock_in_price。
-    6. 回撤反转：在止盈区且 best bid 从峰值回撤 ≥ retreat_fraction → 趋势反转，
+    5. 止盈区判定：realized_avg ≥ entry × take_profit_multiple，或（Goalserve
+       赔率公允价且 realized_avg ≥ fair value），或 realized_avg ≥ lock_in_price。
+    6. 回撤反转：在止盈区且 realized_avg 从峰值回撤 ≥ retreat_fraction → 反转，
        在接近峰值处兑现。
-    7. 资金占用效率：持有到结算的每小时收益率 < min_hold_return_per_hour →
-       剩余 bid→1.0 的路程相对占用资金太慢，卖出腾资金重新部署。
-    8. 否则 HOLD。
+    7. bid 深度坍缩：浮盈中且当前 bid depth 跌破峰值的 thinning_fraction →
+       买方撤离，抢在 bid 进一步枯竭前兑现。
+    8. 资金占用效率：持有到结算的每小时收益率 < min_hold_return_per_hour →
+       剩余路程相对占用资金太慢，卖出腾资金重新部署。
+    9. 否则 HOLD。
+
+    滑点门禁：若 bid 簿吃不完全部份额，或 (best_bid-realized_avg)/best_bid 超过
+    max_slippage，非紧急止盈分支（4/5/6/7/8 中的止盈）改为 HOLD 等深度回补，
+    不把仓位砸进薄簿；止损（紧急）与已结算分支不受此约束。
 
     无盘口 / 无 best bid 时返回 None，让既有静态/结算退出行为继续生效——
-    不破坏 no-orderbook 路径。退出挂卖价始终取当前 best bid（每周期重新定价）。
+    不破坏 no-orderbook 路径。退出挂卖价取逐档撮合价（每周期重新定价）。
     """
 
     orderbook = _exit_orderbook(context, token_id)
@@ -99,6 +186,30 @@ def evaluate_dynamic_exit(
         return None  # 无实时盘口：交回静态/结算退出路径，不产出动态决策。
 
     best_bid = orderbook.best_bid
+
+    # 持仓份额：优先 position.shares，回退 size_shares——退出路径不同入口填不同字段。
+    position_shares = _resolve_position_shares(context)
+
+    # 逐档撮合：沿 bid 簿吃掉全部份额，得到真实退出价与成交均价。
+    clearing_price, fully_covered, realized_avg = _depth_walked_exit(
+        orderbook.bids, position_shares
+    )
+    if clearing_price is None:
+        # bids 元组为空但 best_bid 存在：退回单档撮合假设，避免破坏 no-depth 路径。
+        clearing_price = best_bid
+        realized_avg = best_bid
+        fully_covered = True
+
+    # 滑点：薄簿里 best_bid 之下份额成交更差，realized_avg 低于 best_bid。
+    slippage_fraction = Decimal("0")
+    if best_bid > Decimal("0") and realized_avg < best_bid:
+        slippage_fraction = (best_bid - realized_avg) / best_bid
+    # 簿太薄判定：吃不完全部份额，或滑点超容忍上限。
+    book_too_thin = (
+        not fully_covered
+        or slippage_fraction > config.tail_dynamic_exit_max_slippage_fraction
+    )
+
     fair_value, fair_value_source = _estimate_fair_value(
         context,
         token_id=token_id,
@@ -106,16 +217,30 @@ def evaluate_dynamic_exit(
         best_ask=orderbook.best_ask,
     )
 
-    # 峰值跟踪：先读此前峰值再观察，据此判断 best bid 是否创新高。
+    # best bid 峰值跟踪改为跟踪 realized_avg：用真实可实现价判断"是否创新高"。
     condition_id = _resolve_condition_id(context, orderbook)
     peak_key = (condition_id or "", token_id or "")
     prev_peak = previous_peak(peak_key)
-    is_new_high = prev_peak is None or best_bid >= prev_peak
-    peak = observe_peak(peak_key, best_bid)
+    is_new_high = prev_peak is None or realized_avg >= prev_peak
+    peak = observe_peak(peak_key, realized_avg)
+
+    # bid 深度跟踪：统计 best_bid 下方带宽内 bid 名义额，记录其峰值。
+    bid_depth = _bid_depth_within_band(
+        orderbook.bids, best_bid, config.tail_dynamic_exit_depth_band_fraction
+    )
+    prev_depth_peak = previous_depth_peak(peak_key)
+    depth_peak = observe_depth_peak(peak_key, bid_depth)
 
     stop_loss_threshold = entry_price * config.tail_dynamic_exit_stop_loss_fraction
     metadata: dict[str, object] = {
         "dynamic_exit_best_bid": str(best_bid),
+        "dynamic_exit_clearing_price": str(clearing_price),
+        "dynamic_exit_realized_avg": str(realized_avg),
+        "dynamic_exit_fully_covered": fully_covered,
+        "dynamic_exit_slippage_fraction": _decimal_metadata_text(slippage_fraction),
+        "dynamic_exit_position_shares": str(position_shares),
+        "dynamic_exit_bid_depth_usdc": _decimal_metadata_text(bid_depth),
+        "dynamic_exit_bid_depth_peak_usdc": _decimal_metadata_text(depth_peak),
         "dynamic_exit_fair_value": str(fair_value),
         "dynamic_exit_fair_value_source": fair_value_source,
         "dynamic_exit_entry_price": str(entry_price),
@@ -125,11 +250,11 @@ def evaluate_dynamic_exit(
     }
 
     # 1. 止损：公允价值跌破买入价 × stop_loss_fraction → 比赛/赔率逆转，立即离场。
-    #    亏损方向永不 trail——继续等只会输掉更多本金。
+    #    紧急：割肉优先于滑点，即使簿薄也按逐档撮合价 clearing_price 卖出。
     if fair_value <= stop_loss_threshold:
         return DynamicExitDecision(
             should_exit=True,
-            exit_price=best_bid,
+            exit_price=clearing_price,
             reason="dynamic_exit_stop_loss",
             metadata={**metadata, "dynamic_exit_decision": "stop_loss"},
         )
@@ -144,10 +269,11 @@ def evaluate_dynamic_exit(
         )
 
     # 3. 已结算：best bid ≥ lock_in_price 且 ≥ 0.99（盘口几乎结算到 1）→ 直接吃掉。
+    #    近确定结算，不受滑点门禁约束。
     if best_bid >= config.tail_dynamic_exit_lock_in_price and best_bid >= _SETTLED_BID:
         return DynamicExitDecision(
             should_exit=True,
-            exit_price=best_bid,
+            exit_price=clearing_price,
             reason="dynamic_exit_take_profit",
             metadata={
                 **metadata,
@@ -156,7 +282,21 @@ def evaluate_dynamic_exit(
             },
         )
 
-    # 4. 顺势上行：best bid 创新高 → 盘口仍向我方发展，骑住动量，不在涨势中离场。
+    # 非紧急止盈分支共用的薄簿 HOLD：簿太薄时不砸单，等深度回补。
+    def _await_depth_decision(intended_trigger: str) -> DynamicExitDecision:
+        return DynamicExitDecision(
+            should_exit=False,
+            exit_price=None,
+            reason="dynamic_exit_hold",
+            metadata={
+                **metadata,
+                "dynamic_exit_decision": "hold",
+                "dynamic_exit_trigger": "awaiting_bid_depth",
+                "dynamic_exit_blocked_trigger": intended_trigger,
+            },
+        )
+
+    # 4. 顺势上行：realized_avg 创新高 → 盘口仍向我方发展，骑住动量，不在涨势中离场。
     #    必须排在止盈 / 回撤判据之前——趋势未反转时不提前兑现。
     if is_new_high:
         return DynamicExitDecision(
@@ -171,24 +311,27 @@ def evaluate_dynamic_exit(
         )
 
     # 5. 止盈区判定：以下任一满足即视为已进入可兑现的浮盈区间。
+    #    用 realized_avg（真实可实现价）而非 best_bid 单档判定。
     take_profit_multiple_hit = (
-        best_bid >= entry_price * config.tail_dynamic_exit_take_profit_multiple
+        realized_avg >= entry_price * config.tail_dynamic_exit_take_profit_multiple
     )
     odds_fair_value_hit = (
-        fair_value_source == "goalserve_implied_prob" and best_bid >= fair_value
+        fair_value_source == "goalserve_implied_prob" and realized_avg >= fair_value
     )
-    lock_in_hit = best_bid >= config.tail_dynamic_exit_lock_in_price
+    lock_in_hit = realized_avg >= config.tail_dynamic_exit_lock_in_price
     in_take_profit_zone = take_profit_multiple_hit or odds_fair_value_hit or lock_in_hit
     metadata["dynamic_exit_in_take_profit_zone"] = in_take_profit_zone
 
-    # 6. 回撤反转：在止盈区且 best bid 从峰值回撤 ≥ retreat_fraction → 顺势趋势
+    # 6. 回撤反转：在止盈区且 realized_avg 从峰值回撤 ≥ retreat_fraction → 顺势趋势
     #    已反转，在接近峰值处兑现，不让浮盈继续吐回去。
-    retreat = peak - best_bid
+    retreat = peak - realized_avg
     retreat_threshold = peak * config.tail_dynamic_exit_trailing_retreat_fraction
     if in_take_profit_zone and retreat >= retreat_threshold:
+        if book_too_thin:
+            return _await_depth_decision("trailing_reversal")
         return DynamicExitDecision(
             should_exit=True,
-            exit_price=best_bid,
+            exit_price=clearing_price,
             reason="dynamic_exit_take_profit",
             metadata={
                 **metadata,
@@ -198,7 +341,33 @@ def evaluate_dynamic_exit(
             },
         )
 
-    # 7. 资金占用效率：估算继续持有到结算的每小时收益率。剩余 bid→1.0 的收益
+    # 7. bid 深度坍缩：浮盈中且当前 bid depth 跌破峰值的 thinning_fraction →
+    #    买方正在撤离，抢在 bid 簿进一步枯竭前兑现浮盈。
+    in_profit = realized_avg > entry_price
+    depth_thinning_threshold = (
+        depth_peak * config.tail_dynamic_exit_depth_thinning_fraction
+        if prev_depth_peak is not None
+        else None
+    )
+    if (
+        in_profit
+        and depth_thinning_threshold is not None
+        and bid_depth < depth_thinning_threshold
+    ):
+        if book_too_thin:
+            return _await_depth_decision("depth_thinning")
+        return DynamicExitDecision(
+            should_exit=True,
+            exit_price=clearing_price,
+            reason="dynamic_exit_take_profit",
+            metadata={
+                **metadata,
+                "dynamic_exit_decision": "take_profit",
+                "dynamic_exit_trigger": "depth_thinning",
+            },
+        )
+
+    # 8. 资金占用效率：估算继续持有到结算的每小时收益率。剩余 bid→1.0 的收益
     #    被占用资金时长摊薄后若低于门槛，说明这笔钱卡在低效持仓里，卖出腾资金。
     hold_minutes = _estimated_settlement_hold_minutes(config, context)
     hold_hours = Decimal(hold_minutes) / Decimal("60")
@@ -207,9 +376,11 @@ def evaluate_dynamic_exit(
     hold_return_per_hour = (Decimal("1") - best_bid) / best_bid / hold_hours
     metadata["dynamic_exit_hold_return_per_hour"] = _decimal_metadata_text(hold_return_per_hour)
     if hold_return_per_hour < config.tail_dynamic_exit_min_hold_return_per_hour:
+        if book_too_thin:
+            return _await_depth_decision("capital_efficiency")
         return DynamicExitDecision(
             should_exit=True,
-            exit_price=best_bid,
+            exit_price=clearing_price,
             reason="dynamic_exit_take_profit",
             metadata={
                 **metadata,
@@ -218,13 +389,29 @@ def evaluate_dynamic_exit(
             },
         )
 
-    # 8. 既未触止损、未结算、未创新高、未回撤反转、资金效率达标 → HOLD。
+    # 9. 既未触止损、未结算、未创新高、未回撤反转、深度未坍缩、资金效率达标 → HOLD。
     return DynamicExitDecision(
         should_exit=False,
         exit_price=None,
         reason="dynamic_exit_hold",
         metadata={**metadata, "dynamic_exit_decision": "hold", "dynamic_exit_trigger": "holding"},
     )
+
+
+def _resolve_position_shares(context: ExtensionContext) -> Decimal:
+    """解析当前退出仓位的份额，用于沿 bid 簿逐档撮合定价。
+
+    优先 position.shares（权威持仓快照），回退 size_shares（reconcile 退出路径
+    填的目标份额）。两者皆缺时回退 0——调用侧 _depth_walked_exit 会得到
+    realized_avg=0 触发水下/止损分支，不会误判为可止盈。
+    """
+
+    position = context.position
+    if position is not None and position.shares > Decimal("0"):
+        return position.shares
+    if context.size_shares is not None and context.size_shares > Decimal("0"):
+        return context.size_shares
+    return Decimal("0")
 
 
 def _resolve_condition_id(
