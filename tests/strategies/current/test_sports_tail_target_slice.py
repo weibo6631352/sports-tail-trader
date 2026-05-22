@@ -44,6 +44,7 @@ from strategies.current.tail import (
 )
 from strategies.current.strategy import CurrentStrategy
 from strategies.current.trading import decide_entry
+from strategies.current.trading.matching import _target_for_live_game
 from strategies.current.trading.exit_overlay import (
     _depth_walked_exit,
     reset_dynamic_exit_peaks,
@@ -4932,6 +4933,236 @@ def _unknown_legacy_market() -> Market:
         outcomes=(MarketOutcome(token_id="legacy", outcome=""),),
         trading_status=TradingStatus.ELIGIBLE,
     )
+
+
+def _yes_no_single_game_moneyline_market() -> Market:
+    """Polymarket 把单场胜负盘编码成单个 Yes/No 市场的真实形态。"""
+    return Market(
+        condition_id="yes-no-moneyline-condition",
+        market_slug="nba-lal-bos-2026-05-23-lakers-win",
+        market_question="Will the Los Angeles Lakers win the game?",
+        event_title="NBA: Los Angeles Lakers vs Boston Celtics",
+        event_slug="nba-lal-bos-2026-05-23",
+        category="Sports",
+        tags=("NBA", "Basketball"),
+        outcomes=(
+            MarketOutcome(token_id="lakers-win-yes", outcome="Yes"),
+            MarketOutcome(token_id="lakers-win-no", outcome="No"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+
+def test_yes_no_single_game_moneyline_is_classified_as_moneyline() -> None:
+    """单个 Yes/No 市场编码的单场胜负盘必须归为 MONEYLINE，而非 BINARY_PROP。"""
+    market = _yes_no_single_game_moneyline_market()
+
+    descriptor = describe_sports_market(market)
+
+    assert descriptor.accepted is True
+    assert descriptor.market_family == SportsMarketFamily.SINGLE_GAME
+    assert descriptor.market_type == SportsMarketType.MONEYLINE
+    # Yes/No token 各持问句点名球队作 label，"No" token 标记 invert_side。
+    targets = {target.token_id: target for target in descriptor.targets}
+    assert targets["lakers-win-yes"].label == "los angeles lakers"
+    assert targets["lakers-win-yes"].invert_side is False
+    assert targets["lakers-win-no"].label == "los angeles lakers"
+    assert targets["lakers-win-no"].invert_side is True
+
+
+def test_yes_no_single_game_moneyline_maps_tokens_to_correct_live_sides() -> None:
+    """Yes token → 点名球队所在 HOME/AWAY；No token → 对手所在 HOME/AWAY。"""
+    market = _yes_no_single_game_moneyline_market()
+    game = live_game_state_from_metadata(
+        {
+            "live_game": {
+                "league": "NBA",
+                "home_name": "Los Angeles Lakers",
+                "away_name": "Boston Celtics",
+                "home_score": 110,
+                "away_score": 95,
+                "period": "Q4",
+                "seconds_remaining": 60,
+                "status": "live",
+                "observed_at": "2026-05-23T00:00:00+00:00",
+            }
+        }
+    )
+
+    yes_target, yes_reason = _target_for_live_game(
+        market, "lakers-win-yes", metadata={}, game=game
+    )
+    no_target, no_reason = _target_for_live_game(
+        market, "lakers-win-no", metadata={}, game=game
+    )
+
+    assert yes_reason == ""
+    assert no_reason == ""
+    # Lakers 是直播源主队 → Yes=HOME；No 结算对手获胜 → AWAY。
+    assert yes_target is not None and yes_target.side == SportsMarketSide.HOME
+    assert no_target is not None and no_target.side == SportsMarketSide.AWAY
+
+
+def test_yes_no_single_game_moneyline_maps_sides_when_named_team_is_away() -> None:
+    """点名球队是直播源客队时，Yes→AWAY、No→HOME，方向不能错配。"""
+    market = Market(
+        condition_id="yes-no-moneyline-away-condition",
+        market_slug="nba-lal-bos-2026-05-23-celtics-win",
+        market_question="Will the Boston Celtics win the game?",
+        event_title="NBA: Los Angeles Lakers vs Boston Celtics",
+        event_slug="nba-lal-bos-2026-05-23",
+        category="Sports",
+        tags=("NBA", "Basketball"),
+        outcomes=(
+            MarketOutcome(token_id="celtics-win-yes", outcome="Yes"),
+            MarketOutcome(token_id="celtics-win-no", outcome="No"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+    game = live_game_state_from_metadata(
+        {
+            "live_game": {
+                "league": "NBA",
+                "home_name": "Los Angeles Lakers",
+                "away_name": "Boston Celtics",
+                "home_score": 95,
+                "away_score": 110,
+                "period": "Q4",
+                "seconds_remaining": 60,
+                "status": "live",
+                "observed_at": "2026-05-23T00:00:00+00:00",
+            }
+        }
+    )
+
+    yes_target, _ = _target_for_live_game(market, "celtics-win-yes", metadata={}, game=game)
+    no_target, _ = _target_for_live_game(market, "celtics-win-no", metadata={}, game=game)
+
+    assert yes_target is not None and yes_target.side == SportsMarketSide.AWAY
+    assert no_target is not None and no_target.side == SportsMarketSide.HOME
+
+
+def test_yes_no_outright_championship_is_not_classified_as_moneyline() -> None:
+    """"Will [team] win the championship?" 是 outright，不能被改判为 MONEYLINE。"""
+    market = Market(
+        condition_id="yes-no-championship-condition",
+        market_slug="2026-nba-champion-los-angeles-lakers",
+        market_question="Will the Los Angeles Lakers win the championship?",
+        event_title="2026 NBA Champion",
+        event_slug="2026-nba-champion",
+        category="Sports",
+        tags=("NBA", "Basketball"),
+        outcomes=(
+            MarketOutcome(token_id="champ-yes", outcome="Yes"),
+            MarketOutcome(token_id="champ-no", outcome="No"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+    descriptor = describe_sports_market(market)
+
+    assert descriptor.accepted is True
+    assert descriptor.market_type == SportsMarketType.BINARY_PROP
+    assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
+
+
+def test_yes_no_series_market_is_not_classified_as_single_game_moneyline() -> None:
+    """系列赛"赢下系列赛"的 Yes/No 市场不归为单场胜负盘。"""
+    market = Market(
+        condition_id="yes-no-series-condition",
+        market_slug="nba-playoffs-will-celtics-win-series-vs-knicks",
+        market_question="Will the Boston Celtics win the series vs the New York Knicks?",
+        event_title="NBA Playoffs: Celtics vs Knicks",
+        event_slug="nba-playoffs-celtics-knicks-series",
+        category="Sports",
+        tags=("NBA", "2026 NBA Playoffs", "Basketball"),
+        outcomes=(
+            MarketOutcome(token_id="series-yes", outcome="Yes"),
+            MarketOutcome(token_id="series-no", outcome="No"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+    descriptor = describe_sports_market(market)
+
+    assert descriptor.market_type != SportsMarketType.MONEYLINE
+    assert descriptor.market_family != SportsMarketFamily.SINGLE_GAME
+
+
+def test_team_name_outcome_moneyline_still_classified_as_moneyline() -> None:
+    """两个球队名 outcome 的传统胜负盘路径不受 Yes/No 改动影响。"""
+    market = _moneyline_market()
+
+    descriptor = describe_sports_market(market)
+
+    assert descriptor.accepted is True
+    assert descriptor.market_type == SportsMarketType.MONEYLINE
+    assert descriptor.market_family == SportsMarketFamily.SINGLE_GAME
+    assert [target.side for target in descriptor.targets] == [
+        SportsMarketSide.HOME,
+        SportsMarketSide.AWAY,
+    ]
+    # team-name-outcome 胜负盘不走 invert_side 翻转逻辑。
+    assert all(target.invert_side is False for target in descriptor.targets)
+
+
+def test_soccer_three_way_binary_prop_classification_unchanged() -> None:
+    """足球 3-way 胜负盘仍是 BINARY_PROP，由 core 独立路径处理，不被改判。"""
+    market = Market(
+        condition_id="soccer-3way-condition",
+        market_slug="soccer-ars-che-2026-04-30-moneyline-home",
+        market_question="Arsenal vs Chelsea: Will Arsenal win?",
+        event_title="Arsenal vs Chelsea",
+        event_slug="soccer-ars-che-2026-04-30",
+        category="Sports",
+        tags=("Sports", "Soccer"),
+        outcomes=(
+            MarketOutcome(token_id="arsenal-win-yes", outcome="Yes"),
+            MarketOutcome(token_id="arsenal-win-no", outcome="No"),
+        ),
+        trading_status=TradingStatus.ELIGIBLE,
+    )
+
+    descriptor = describe_sports_market(market)
+
+    assert descriptor.market_type == SportsMarketType.BINARY_PROP
+
+
+def test_yes_no_single_game_moneyline_creates_buy_with_tail_lock_acceptance() -> None:
+    """端到端：单场 Yes/No 胜负盘 + 大比分领先 → moneyline 扫尾锁定成交。"""
+    market = _yes_no_single_game_moneyline_market()
+    orderbook = _orderbook(token_id="lakers-win-yes", best_ask=Decimal("0.93"))
+
+    decision = decide_entry(
+        CurrentStrategyConfig(),
+        ExtensionContext(
+            strategy_id="sports_tail",
+            trace_id="trace-yes-no-moneyline",
+            market=market,
+            token_id="lakers-win-yes",
+            orderbook=orderbook,
+            amount_usdc=Decimal("10"),
+            now=datetime(2026, 5, 23, 0, 0, 5, tzinfo=timezone.utc),
+            metadata={
+                "live_game": {
+                    "league": "NBA",
+                    "home_name": "Los Angeles Lakers",
+                    "away_name": "Boston Celtics",
+                    "home_score": 110,
+                    "away_score": 95,
+                    "period": "Q4",
+                    "seconds_remaining": 60,
+                    "status": "live",
+                    "observed_at": "2026-05-23T00:00:00+00:00",
+                }
+            },
+        ),
+    )
+
+    assert decision.action.value == "buy"
+    assert decision.token_id == "lakers-win-yes"
+    assert decision.metadata["tail_reason"] == "moneyline_late_lead"
+    assert decision.metadata["execution_permission"] == "auto_execute"
 
 
 def _moneyline_market() -> Market:

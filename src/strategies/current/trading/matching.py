@@ -56,9 +56,17 @@ def _target_for_live_game(
     if game is None:
         return target, ""
 
+    # 单场 Yes/No 胜负盘：两个 token 的 label 都是问句点名的同一支球队，先按它
+    # 解出该球队对应直播源的 HOME/AWAY；"No" token（invert_side=True）结算的是
+    # 对手获胜，需把方向翻转。team-name-outcome 胜负盘 invert_side 恒为 False，
+    # 行为与改动前完全一致。
     live_side = _live_side_for_outcome_label(target.label, game=game, metadata=metadata)
     if live_side is None:
         return None, "token_live_side_mismatch"
+    if target.invert_side:
+        live_side = (
+            SportsMarketSide.AWAY if live_side == SportsMarketSide.HOME else SportsMarketSide.HOME
+        )
     return replace(target, side=live_side), ""
 
 

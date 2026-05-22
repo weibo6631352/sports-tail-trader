@@ -30,6 +30,10 @@ class SportsTokenTarget:
     token_id: str
     side: SportsMarketSide
     label: str
+    # 单场 Yes/No 胜负盘专用：matching 用 ``label``（问句里点名的球队名）解析出
+    # 该球队对应直播源的 HOME/AWAY 后，``invert_side=True`` 的 token（"No" 方向）
+    # 需要再翻转一次，因为它结算的是"点名球队不获胜"即对手获胜。
+    invert_side: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +82,7 @@ def describe_sports_market(market: Market) -> SportsMarketDescriptor:
 
     text = _market_text(market)
     market_family = _market_family(market, text)
-    market_type = _market_type(market, text)
+    market_type = _market_type(market, text, market_family)
     if market_type is None:
         return SportsMarketDescriptor(accepted=False, reason="unsupported_market_type")
 
@@ -111,7 +115,11 @@ def target_for_token(market: Market, token_id: str | None) -> SportsTokenTarget 
     return None
 
 
-def _market_type(market: Market, text: str) -> SportsMarketType | None:
+def _market_type(
+    market: Market,
+    text: str,
+    market_family: SportsMarketFamily,
+) -> SportsMarketType | None:
     outcome_tokens = {_normalize_text(outcome.outcome) for outcome in market.outcomes}
     # outcome_tokens 含纯 "over"/"under" 说明是数值嵌在 slug/question 中的常规 totals；
     # outcome_tokens 含 "over 25.5" 等带数值的标签，"over"/"under" 也出现在 text 中。
@@ -123,6 +131,11 @@ def _market_type(market: Market, text: str) -> SportsMarketType | None:
     if "spread" in text or "handicap" in text or _has_signed_number(text):
         return SportsMarketType.SPREADS
     if _is_binary_yes_no_market(market):
+        # 单场 Yes/No 胜负盘（"Will the Lakers win the game?" + Yes/No）当作
+        # MONEYLINE 处理：路由到现成的扫尾锁定 + 赔率差价 moneyline 评估器。
+        # 其余 Yes/No prop（BTTS、首球、半场赛果、NRFI 等）仍归 BINARY_PROP。
+        if _is_single_game_yes_no_moneyline(market, text, market_family):
+            return SportsMarketType.MONEYLINE
         return SportsMarketType.BINARY_PROP
     if len(market.outcomes) >= 2:
         return SportsMarketType.MONEYLINE
@@ -206,6 +219,10 @@ def _token_targets(
         return _totals_targets(market)
     if market_type == SportsMarketType.BINARY_PROP:
         return _binary_targets(market)
+    # 单场 Yes/No 胜负盘已被 _market_type 判为 MONEYLINE，但 outcome 仍是 Yes/No，
+    # 走专用 target 构造（把问句点名球队塞进 label 供 matching 解析 HOME/AWAY）。
+    if market_type == SportsMarketType.MONEYLINE and _is_binary_yes_no_market(market):
+        return _yes_no_moneyline_targets(market)
     return _side_targets(market)
 
 
@@ -252,6 +269,47 @@ def _side_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
             token_id=non_generic[1].token_id,
             side=SportsMarketSide.AWAY,
             label=non_generic[1].outcome,
+        ),
+    )
+
+
+def _yes_no_moneyline_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
+    """构造单场 Yes/No 胜负盘的方向 target。
+
+    单场 Yes/No 胜负盘的 outcome 文案是 "Yes"/"No"，不含球队名，无法直接交给
+    matching 做 HOME/AWAY 别名匹配。解法：把问句里点名的球队名写进两个 token
+    的 ``label``——"Yes" token 结算的是"点名球队获胜"，"No" token 结算的是
+    "点名球队不获胜"即对手获胜。matching 先用 label 解出点名球队对应直播源的
+    HOME 还是 AWAY，再对 ``invert_side=True`` 的 "No" token 翻转一次方向。
+    side 先填占位 HOME/AWAY，真正方向由 matching 按直播源主客队修正。
+    """
+
+    text = _market_text(market)
+    named_team = _yes_no_moneyline_named_team(text)
+    if named_team is None:
+        return ()
+    yes_outcome = None
+    no_outcome = None
+    for outcome in market.outcomes:
+        normalized = _normalize_text(outcome.outcome)
+        if normalized == "yes":
+            yes_outcome = outcome
+        elif normalized == "no":
+            no_outcome = outcome
+    if yes_outcome is None or no_outcome is None:
+        return ()
+    return (
+        SportsTokenTarget(
+            token_id=yes_outcome.token_id,
+            side=SportsMarketSide.HOME,
+            label=named_team,
+            invert_side=False,
+        ),
+        SportsTokenTarget(
+            token_id=no_outcome.token_id,
+            side=SportsMarketSide.AWAY,
+            label=named_team,
+            invert_side=True,
         ),
     )
 
@@ -380,6 +438,141 @@ def _is_esports_moneyline_market(market: Market, combined_text: str) -> bool:
     ):
         return False
     return _has_matchup_marker(combined_text)
+
+
+# 单场胜负语义词：问句问的是"赢下这一场比赛"。
+_SINGLE_GAME_WIN_PHRASES = (
+    "win the game",
+    "win the match",
+    "win this game",
+    "win this match",
+    "win their game",
+    "win their match",
+    "win game",
+    "win match",
+)
+# outright（冠军/赛季/系列赛归属）语义词：命中即排除，不是单场胜负盘。
+_OUTRIGHT_EXCLUSION_PHRASES = (
+    "championship",
+    "champion",
+    "title",
+    "cup",
+    "final",
+    "finals",
+    "series",
+    "division",
+    "conference",
+    "the season",
+    "trophy",
+    "playoff",
+    "playoffs",
+    "postseason",
+    "pennant",
+    "promotion",
+    "promoted",
+    "relegated",
+    "relegation",
+    "grand slam",
+    "world cup",
+)
+# 单场 Yes/No 胜负盘支持的运动：2-way 无平局胜负语义。足球 3-way 1X2 由
+# ``core._evaluate_soccer_moneyline`` 经独立 slug 路径处理，这里显式排除。
+_YES_NO_MONEYLINE_SPORT_KEYWORDS = (
+    "basketball",
+    "nba",
+    "wnba",
+    "ncaab",
+    "euroleague",
+    "hockey",
+    "nhl",
+    "baseball",
+    "mlb",
+    "kbo",
+    "npb",
+    "tennis",
+    "atp",
+    "wta",
+    "esports",
+    "e sports",
+    "honor of kings",
+    "league of legends",
+    "dota",
+    "counter strike",
+    "valorant",
+    "amfootball",
+    "nfl",
+    "ncaaf",
+    "football",
+)
+_SOCCER_TEXT_KEYWORDS = (
+    "soccer",
+    "premier league",
+    "la liga",
+    "bundesliga",
+    "serie a",
+    "ligue 1",
+    "mls",
+    "eredivisie",
+    "j league",
+    "champions league",
+    "europa league",
+)
+
+
+def _yes_no_moneyline_named_team(text: str) -> str | None:
+    """从 "Will [the] <球队> win/beat ..." 问句里提取被点名的球队名。
+
+    返回归一化后的球队名文本；matching 会用它和直播源主客队别名比对，解析
+    出该球队对应 HOME 还是 AWAY。提取不到（无 "will ... win/beat" 结构）返回
+    None——结构不清的 Yes/No 市场不归为单场胜负盘。
+    """
+
+    # "win the game" 等短语会被一并捕获，随后剥除，只留球队名。
+    match = re.search(r"\bwill\s+(?:the\s+)?(.+?)\s+(win|beat|defeat|defeats|wins|beats)\b", text)
+    if match is None:
+        return None
+    team = match.group(1).strip()
+    # 剥除问句里夹带的对手从句尾缀（"beat the heat" → 取 "beat" 前的球队名即可）。
+    if not team:
+        return None
+    return team
+
+
+def _is_single_game_yes_no_moneyline(
+    market: Market,
+    text: str,
+    market_family: SportsMarketFamily,
+) -> bool:
+    """识别单场 Yes/No 胜负盘（"Will <球队> win the game?" + Yes/No）。
+
+    必须全部满足：① family 为 SINGLE_GAME（非系列赛/冠军归属）；② 恰 2 个
+    Yes/No outcome；③ 问句点名了对阵双方之一并问"赢下这一场"（win the game /
+    beat / win vs 等）；④ 运动属于 2-way 无平局胜负语境，且非足球（足球 3-way
+    1X2 走 core 独立路径，不能被改判）。
+    """
+
+    if market_family != SportsMarketFamily.SINGLE_GAME:
+        return False
+    if not _is_binary_yes_no_market(market):
+        return False
+    # 足球单场胜负是 3-way（含平局），由 core 的 soccer moneyline 路径处理；
+    # 这里一律不接管足球，避免破坏既有 3-way 评估。
+    if _contains_any(text, _SOCCER_TEXT_KEYWORDS):
+        return False
+    if not _contains_any(text, _YES_NO_MONEYLINE_SPORT_KEYWORDS) and not _has_matchup_marker(text):
+        return False
+    # outright 语义词命中即排除——冠军/赛季/系列赛归属不是单场胜负盘。
+    if _contains_any(text, _OUTRIGHT_EXCLUSION_PHRASES):
+        return False
+    named_team = _yes_no_moneyline_named_team(text)
+    if named_team is None:
+        return False
+    # 问句必须明确是"赢下这一场比赛"：含单场胜负短语，或含 beat/defeat（击败
+    # 对手即赢下当场），或含 vs/at 对阵标记。仅 "win" 不足以判定为单场。
+    has_single_game_phrase = _contains_any(text, _SINGLE_GAME_WIN_PHRASES)
+    has_beat_verb = _contains_any(text, ("beat", "beats", "defeat", "defeats"))
+    has_vs_against = _has_matchup_marker(text) or _contains_any(text, ("against",))
+    return has_single_game_phrase or has_beat_verb or has_vs_against
 
 
 def _is_season_or_competition_prop(text: str) -> bool:
