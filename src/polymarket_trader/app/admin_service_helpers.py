@@ -40,7 +40,10 @@ MarketFeeSortField = Literal[
 ]
 SortDirection = Literal["asc", "desc"]
 
-_LIVE_SOURCE_GAP_PAST_WINDOW = timedelta(days=2)
+# 直播源缺口诊断窗口：开赛已超过此时长的市场视为赛事早已结束的陈旧市场，
+# 不再算作"应有直播却没匹配"的缺口。设 6 小时——覆盖几乎所有单场赛事时长
+# （足球/篮球/棒球/网球/橄榄球均 < 5h），避免缺口告警被 1-2 天前的过期市场淹没。
+_LIVE_SOURCE_GAP_PAST_WINDOW = timedelta(hours=6)
 
 
 @dataclass(frozen=True, slots=True)

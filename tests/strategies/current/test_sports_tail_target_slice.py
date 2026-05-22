@@ -4901,7 +4901,7 @@ async def _run_admin_live_source_gap_diagnostics_flow() -> dict[str, object]:
     return await service.list_sports_live_source_gaps(
         limit=10,
         offset=0,
-        now=datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 4, 30, 6, 0, tzinfo=timezone.utc),
     )
 
 
@@ -4951,7 +4951,7 @@ async def _run_admin_live_source_gap_with_market_service_hooks_flow() -> dict[st
     return await service.list_sports_live_source_gaps(
         limit=10,
         offset=0,
-        now=datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc),
+        now=datetime(2026, 4, 30, 6, 0, tzinfo=timezone.utc),
     )
 
 

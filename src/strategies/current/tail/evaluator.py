@@ -36,6 +36,7 @@ from .core import (
     _evaluate_moneyline,
     _evaluate_moneyline_scale_in,
     _evaluate_soccer_btts,
+    _evaluate_soccer_exact_score,
     _evaluate_soccer_halftime_result,
     _evaluate_soccer_moneyline,
     _evaluate_spreads,
@@ -45,6 +46,7 @@ from .core import (
     _market_family_reject_reason,
     _reject,
     is_soccer_btts_market,
+    is_soccer_exact_score_market,
     is_soccer_halftime_market,
     is_soccer_moneyline_market,
 )
@@ -150,6 +152,9 @@ def evaluate_tail_opportunity(
         and is_soccer_moneyline_market(market)
     ):
         return _evaluate_soccer_moneyline(candidate, policy)
+
+    if market.market_type == SportsMarketType.BINARY_PROP and is_soccer_exact_score_market(market):
+        return _evaluate_soccer_exact_score(candidate, policy)
 
     if market.market_type == SportsMarketType.BINARY_PROP:
         return _reject(candidate, "binary_prop_no_tail_model")

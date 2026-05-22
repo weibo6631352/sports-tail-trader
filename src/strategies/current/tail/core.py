@@ -446,6 +446,62 @@ def _evaluate_soccer_moneyline(
     return _reject(candidate, TailRejectReason.INSUFFICIENT_LEAD.value)
 
 
+def _soccer_exact_score_target(market: SportsMarketSnapshot) -> tuple[int, int] | None:
+    """从 slug 解析精确比分目标 (home, away)。slug 形如 ...-exact-score-{h}-{a}。"""
+    slug = (market.market_slug or "").lower()
+    if "exact-score-" not in slug:
+        return None
+    parts = slug.split("-")
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[-2]), int(parts[-1])
+    except ValueError:
+        return None
+
+
+def is_soccer_exact_score_market(market: SportsMarketSnapshot) -> bool:
+    """识别足球精确比分盘口（exact-score-{h}-{a}）。"""
+    return _soccer_exact_score_target(market) is not None
+
+
+def _evaluate_soccer_exact_score(
+    candidate: SportsTailCandidate,
+    policy: TailPolicy,
+) -> TailEvaluation:
+    """足球精确比分盘评估。
+
+    比分只增不减：当前比分一旦在任一方向超过目标 → 该精确比分永不可能成立
+    → NO 100% 锁定。YES 仅在终场比分恰好等于目标时成立，盘中不可锁定（比分
+    仍可能继续变化）。binary_prop 在通用门禁跳过 ask 检查，这里自查入场价。
+    """
+    game = candidate.game
+    market = candidate.market
+    if market.side not in {SportsMarketSide.YES, SportsMarketSide.NO}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    target = _soccer_exact_score_target(market)
+    if target is None:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SCOPE.value)
+    if market.best_ask is None:
+        return _reject(candidate, TailRejectReason.MISSING_BEST_ASK.value)
+    if market.best_ask < policy.min_entry_price:
+        return _reject(candidate, TailRejectReason.PRICE_BELOW_MIN.value)
+    if market.best_ask > policy.totals_max_entry_price:
+        return _reject(candidate, TailRejectReason.PRICE_ABOVE_MAX.value)
+    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
+        return _reject(candidate, TailRejectReason.LIQUIDITY_BELOW_MIN.value)
+
+    target_home, target_away = target
+    # 任一方现有比分已超过目标 → 终场永不可能恰为该精确比分。
+    score_passed_target = game.home_score > target_home or game.away_score > target_away
+    if market.side == SportsMarketSide.NO:
+        if score_passed_target:
+            return _accept(candidate, "soccer_exact_score_no_locked", policy.totals_execution_permission)
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+    # YES：终场前比分仍可变化——盘中不可锁定。
+    return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+
 # ---- ended-not-closed 通用评估器 --------------------------------------
 
 
