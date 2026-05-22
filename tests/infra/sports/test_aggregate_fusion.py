@@ -18,7 +18,7 @@ _OBSERVED = datetime(2026, 5, 11, tzinfo=timezone.utc)
 
 def _goalserve_event(*, status: SportsLiveGameStatus, home_score: int, away_score: int, league: str = "NBA") -> LiveEvent:
     return LiveEvent(
-        source="goalserve",
+        source="goalserve_inplay",
         source_event_id="goalserve-1",
         kind=LiveEventKind.TEAM_MATCH,
         league=league,
@@ -29,7 +29,7 @@ def _goalserve_event(*, status: SportsLiveGameStatus, home_score: int, away_scor
         ),
         status=status,
         observed_at=_OBSERVED,
-        external_ids={"goalserve": "goalserve-1"},
+        external_ids={"goalserve_inplay": "inplay-1"},
     )
 
 
@@ -44,7 +44,7 @@ def test_single_source_goalserve_passthrough() -> None:
     async def run() -> SportsLiveSnapshot:
         client = SportsLiveAggregateClient(
             providers=(
-                ("goalserve", lambda: _wrap(SportsLiveSnapshot(source="goalserve", observed_at=_OBSERVED, events=(event,)))),
+                ("goalserve_inplay", lambda: _wrap(SportsLiveSnapshot(source="goalserve_inplay", observed_at=_OBSERVED, events=(event,)))),
             ),
             now_provider=lambda: _OBSERVED,
         )
@@ -53,11 +53,11 @@ def test_single_source_goalserve_passthrough() -> None:
     snapshot = asyncio.run(run())
     assert len(snapshot.events) == 1
     fused = snapshot.events[0]
-    assert fused.source == "goalserve"
+    assert fused.source == "goalserve_inplay"
     assert fused.status == SportsLiveGameStatus.LIVE
     assert fused.home.score == 80
     assert fused.away.score == 78
-    assert fused.contributing_sources == ("goalserve",)
+    assert fused.contributing_sources == ("goalserve_inplay",)
     assert not fused.source_conflicts
 
 
@@ -68,7 +68,7 @@ def test_source_status_success_reported() -> None:
     async def run() -> SportsLiveSnapshot:
         client = SportsLiveAggregateClient(
             providers=(
-                ("goalserve", lambda: _wrap(SportsLiveSnapshot(source="goalserve", observed_at=_OBSERVED, events=(event,)))),
+                ("goalserve_inplay", lambda: _wrap(SportsLiveSnapshot(source="goalserve_inplay", observed_at=_OBSERVED, events=(event,)))),
             ),
             now_provider=lambda: _OBSERVED,
         )
@@ -77,7 +77,7 @@ def test_source_status_success_reported() -> None:
     snapshot = asyncio.run(run())
     assert len(snapshot.source_statuses) == 1
     status = snapshot.source_statuses[0]
-    assert status.source == "goalserve"
+    assert status.source == "goalserve_inplay"
     assert status.success is True
     assert status.events_seen == 1
     assert status.last_error is None
@@ -91,7 +91,7 @@ def test_provider_failure_returns_empty_with_error_status() -> None:
 
     async def run() -> SportsLiveSnapshot:
         client = SportsLiveAggregateClient(
-            providers=(("goalserve", failing),),
+            providers=(("goalserve_inplay", failing),),
             now_provider=lambda: _OBSERVED,
         )
         return await client.list_events()
@@ -100,7 +100,7 @@ def test_provider_failure_returns_empty_with_error_status() -> None:
     assert snapshot.events == ()
     assert len(snapshot.source_statuses) == 1
     status = snapshot.source_statuses[0]
-    assert status.source == "goalserve"
+    assert status.source == "goalserve_inplay"
     assert status.success is False
     assert status.last_error is not None
 
@@ -108,7 +108,7 @@ def test_provider_failure_returns_empty_with_error_status() -> None:
 def test_multiple_events_all_pass_through() -> None:
     """多场比赛全部透传，event_id 不合并。"""
     e1 = LiveEvent(
-        source="goalserve", source_event_id="gs-1", kind=LiveEventKind.TEAM_MATCH,
+        source="goalserve_inplay", source_event_id="gs-1", kind=LiveEventKind.TEAM_MATCH,
         league="NBA", sport="basketball",
         participants=(
             Participant(role="home", name="Lakers", score=100),
@@ -117,7 +117,7 @@ def test_multiple_events_all_pass_through() -> None:
         status=SportsLiveGameStatus.LIVE, observed_at=_OBSERVED,
     )
     e2 = LiveEvent(
-        source="goalserve", source_event_id="gs-2", kind=LiveEventKind.TEAM_MATCH,
+        source="goalserve_inplay", source_event_id="gs-2", kind=LiveEventKind.TEAM_MATCH,
         league="NBA", sport="basketball",
         participants=(
             Participant(role="home", name="Heat", score=80),
@@ -129,7 +129,7 @@ def test_multiple_events_all_pass_through() -> None:
     async def run() -> SportsLiveSnapshot:
         client = SportsLiveAggregateClient(
             providers=(
-                ("goalserve", lambda: _wrap(SportsLiveSnapshot(source="goalserve", observed_at=_OBSERVED, events=(e1, e2)))),
+                ("goalserve_inplay", lambda: _wrap(SportsLiveSnapshot(source="goalserve_inplay", observed_at=_OBSERVED, events=(e1, e2)))),
             ),
             now_provider=lambda: _OBSERVED,
         )
@@ -196,8 +196,8 @@ async def _run_two_sources(
     client = SportsLiveAggregateClient(
         providers=(
             (
-                "goalserve",
-                lambda: _wrap(SportsLiveSnapshot(source="goalserve", observed_at=_OBSERVED, events=(gs_event,))),
+                "goalserve_inplay",
+                lambda: _wrap(SportsLiveSnapshot(source="goalserve_inplay", observed_at=_OBSERVED, events=(gs_event,))),
             ),
             (
                 "goalserve_livescore",
@@ -215,7 +215,7 @@ async def _run_two_sources(
 
 
 def test_two_source_both_live_fused_status_is_live() -> None:
-    gs = _make_event(source="goalserve", source_event_id="gs-1", status=SportsLiveGameStatus.LIVE, home_score=50, away_score=48)
+    gs = _make_event(source="goalserve_inplay", source_event_id="gs-1", status=SportsLiveGameStatus.LIVE, home_score=50, away_score=48)
     ls = _make_event(source="goalserve_livescore", source_event_id="ls-1", status=SportsLiveGameStatus.LIVE, home_score=50, away_score=48)
 
     snapshot = asyncio.run(_run_two_sources(gs, ls))
@@ -232,7 +232,7 @@ def test_two_source_both_live_fused_status_is_live() -> None:
 
 
 def test_trusted_source_ended_overrides_livescore_live() -> None:
-    gs = _make_event(source="goalserve", source_event_id="gs-1", status=SportsLiveGameStatus.ENDED, home_score=100, away_score=98)
+    gs = _make_event(source="goalserve_inplay", source_event_id="gs-1", status=SportsLiveGameStatus.ENDED, home_score=100, away_score=98)
     ls = _make_event(source="goalserve_livescore", source_event_id="ls-1", status=SportsLiveGameStatus.LIVE, home_score=100, away_score=98)
 
     snapshot = asyncio.run(_run_two_sources(gs, ls))
@@ -244,7 +244,7 @@ def test_trusted_source_ended_overrides_livescore_live() -> None:
     assert len(status_conflicts) == 1
     conflict = status_conflicts[0]
     assert conflict.decided_by == "trusted_source"
-    assert conflict.winner_source == "goalserve"
+    assert conflict.winner_source == "goalserve_inplay"
     assert conflict.loser_source == "goalserve_livescore"
     assert conflict.winner_value == SportsLiveGameStatus.ENDED.value
     assert conflict.loser_value == SportsLiveGameStatus.LIVE.value
@@ -256,7 +256,7 @@ def test_trusted_source_ended_overrides_livescore_live() -> None:
 
 
 def test_two_sources_agree_on_score_no_conflicts() -> None:
-    gs = _make_event(source="goalserve", source_event_id="gs-1", status=SportsLiveGameStatus.LIVE, home_score=60, away_score=55)
+    gs = _make_event(source="goalserve_inplay", source_event_id="gs-1", status=SportsLiveGameStatus.LIVE, home_score=60, away_score=55)
     ls = _make_event(source="goalserve_livescore", source_event_id="ls-1", status=SportsLiveGameStatus.LIVE, home_score=60, away_score=55)
 
     snapshot = asyncio.run(_run_two_sources(gs, ls))
@@ -274,7 +274,7 @@ def test_two_sources_agree_on_score_no_conflicts() -> None:
 
 
 def test_trusted_source_wins_score_conflict() -> None:
-    gs = _make_event(source="goalserve", source_event_id="gs-1", status=SportsLiveGameStatus.LIVE, home_score=72, away_score=68)
+    gs = _make_event(source="goalserve_inplay", source_event_id="gs-1", status=SportsLiveGameStatus.LIVE, home_score=72, away_score=68)
     ls = _make_event(source="goalserve_livescore", source_event_id="ls-1", status=SportsLiveGameStatus.LIVE, home_score=70, away_score=65)
 
     snapshot = asyncio.run(_run_two_sources(gs, ls))
@@ -285,7 +285,7 @@ def test_trusted_source_wins_score_conflict() -> None:
     home_conflicts = [c for c in fused.source_conflicts if c.field == "home_score"]
     assert len(home_conflicts) == 1
     assert home_conflicts[0].decided_by == "trusted_source"
-    assert home_conflicts[0].winner_source == "goalserve"
+    assert home_conflicts[0].winner_source == "goalserve_inplay"
     assert home_conflicts[0].winner_value == 72
 
 
@@ -325,13 +325,13 @@ def test_neither_trusted_score_uses_median_low() -> None:
 
 
 def test_contributing_sources_contains_both_sources() -> None:
-    gs = _make_event(source="goalserve", source_event_id="gs-1", status=SportsLiveGameStatus.LIVE, home_score=30, away_score=25)
+    gs = _make_event(source="goalserve_inplay", source_event_id="gs-1", status=SportsLiveGameStatus.LIVE, home_score=30, away_score=25)
     ls = _make_event(source="goalserve_livescore", source_event_id="ls-1", status=SportsLiveGameStatus.LIVE, home_score=30, away_score=25)
 
     snapshot = asyncio.run(_run_two_sources(gs, ls))
 
     fused = snapshot.events[0]
-    assert set(fused.contributing_sources) == {"goalserve", "goalserve_livescore"}
+    assert set(fused.contributing_sources) == {"goalserve_inplay", "goalserve_livescore"}
 
 
 # ---------------------------------------------------------------------------
@@ -340,7 +340,7 @@ def test_contributing_sources_contains_both_sources() -> None:
 
 
 def test_source_conflicts_recorded_for_trusted_ended_override() -> None:
-    gs = _make_event(source="goalserve", source_event_id="gs-1", status=SportsLiveGameStatus.ENDED, home_score=88, away_score=84)
+    gs = _make_event(source="goalserve_inplay", source_event_id="gs-1", status=SportsLiveGameStatus.ENDED, home_score=88, away_score=84)
     ls = _make_event(source="goalserve_livescore", source_event_id="ls-1", status=SportsLiveGameStatus.LIVE, home_score=88, away_score=84)
 
     snapshot = asyncio.run(_run_two_sources(gs, ls))
@@ -362,7 +362,7 @@ def test_baseball_state_carried_from_secondary_source() -> None:
     bs = BaseballGameState(current_inning=7, inning_half="top", outs=2)
 
     gs = _make_event(
-        source="goalserve",
+        source="goalserve_inplay",
         source_event_id="gs-1",
         status=SportsLiveGameStatus.LIVE,
         home_score=3,
@@ -409,7 +409,7 @@ def test_goalserve_odds_carried_from_inplay_source() -> None:
 
     gs = replace(
         _make_event(
-            source="goalserve",
+            source="goalserve_inplay",
             source_event_id="gs-1",
             status=SportsLiveGameStatus.LIVE,
             home_score=2,

@@ -46,11 +46,11 @@ _STATUS_PRIORITY = {
 
 # 全局源优先级表（fallback）。league_source_priority 注入时按 league 覆盖。
 _DEFAULT_SOURCE_PRIORITY: Mapping[str, int] = {
-    "goalserve": 80,
+    "goalserve_inplay": 80,
 }
 
 # 一律视为官方（高可信）的源；冲突时同等 priority 下仍偏向 official。
-_DEFAULT_OFFICIAL_SOURCES: frozenset[str] = frozenset({"goalserve"})
+_DEFAULT_OFFICIAL_SOURCES: frozenset[str] = frozenset({"goalserve_inplay"})
 
 # 加权融合中的时间衰减：observed_at 越久权重越低（半衰期 5 分钟）。
 _FRESHNESS_HALF_LIFE_S = 300.0
@@ -278,8 +278,8 @@ class SportsLiveAggregateClient:
                     break
 
         # 主源缺少 inplay 赔率（goalserve_odds 在 source_payload）时，从有该字段的
-        # 成员补充。inplay WS 源带赔率，但 livescore 源通常权重更高抢到主源——
-        # 融合时不补充会丢掉盘中赔率，使赔率差价/边际确认拿不到数据。
+        # 成员补充。goalserve_inplay 源带盘中赔率，但 livescore 源通常权重更高抢到
+        # 主源——融合时不补充会丢掉盘中赔率，使赔率差价/边际确认拿不到数据。
         source_payload = primary.source_payload
         if not source_payload.get("goalserve_odds"):
             for member in sorted(members, key=lambda e: self._weight(e, league), reverse=True):

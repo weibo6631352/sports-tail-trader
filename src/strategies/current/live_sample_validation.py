@@ -8,9 +8,10 @@
 CLAUDE.md §6 的运行时分层约束不适用，可直接 import infra/sports 复用 Goalserve 解析。
 
 fixture 顶层字段：
-- ``source``：固定为 ``goalserve``。
-- ``sport``：Goalserve 运动代码，例如 ``basketball``、``soccer``。
-- ``inplay_data``：Goalserve inplay WS state_dict（{event_id: ws_msg}，与 GoalserveClient._state[sport] 格式一致）。
+- ``source``：固定为 ``goalserve_inplay``。
+- ``sport``：Goalserve inplay feed 路径 token，例如 ``basket``、``soccer``。
+- ``inplay_data``：Goalserve inplay GZIP feed 的根节点（gunzip + json.loads 后的
+  ``{bm, updated, updated_ts, events: {...}}``，与 inplay.goalserve.com 抓取一致）。
 - ``markets``：Polymarket market 样本。
 - ``expected_games``：人工标注的状态字段期望（可选）。
 - ``expected_matches``：人工标注的 market -> event 匹配期望（可选）。
@@ -26,7 +27,7 @@ from typing import Any, Mapping, Sequence
 
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.extension_api import load_mapping_file
-from polymarket_trader.infra.sports import parse_goalserve_ws_events
+from polymarket_trader.infra.sports import parse_goalserve_inplay
 from polymarket_trader.serialization import jsonable
 from strategies.current.live_state import best_live_match, live_event_metadata
 
@@ -92,15 +93,15 @@ def validate_sports_live_sample(sample: Mapping[str, Any]) -> SportsLiveSampleRe
     """校验一份 Goalserve/Polymarket 成对样本。"""
 
     failures: list[SportsLiveSampleFailure] = []
-    source = str(sample.get("source") or "goalserve").strip().lower()
+    source = str(sample.get("source") or "goalserve_inplay").strip().lower()
     sport = str(sample.get("sport") or "").strip().lower()
-    if source != "goalserve":
+    if source != "goalserve_inplay":
         failures.append(
             SportsLiveSampleFailure(
                 code="unsupported_source",
                 path="source",
-                message="当前真实样本校验只支持 Goalserve inplay feed。",
-                expected="goalserve",
+                message="当前真实样本校验只支持 Goalserve inplay GZIP feed。",
+                expected="goalserve_inplay",
                 actual=source,
             )
         )
@@ -109,7 +110,7 @@ def validate_sports_live_sample(sample: Mapping[str, Any]) -> SportsLiveSampleRe
             SportsLiveSampleFailure(
                 code="missing_sport",
                 path="sport",
-                message="样本必须声明 Goalserve sport 代码（basketball/soccer 等）。",
+                message="样本必须声明 Goalserve inplay feed 路径 token（basket/soccer 等）。",
             )
         )
 
@@ -119,13 +120,13 @@ def validate_sports_live_sample(sample: Mapping[str, Any]) -> SportsLiveSampleRe
             SportsLiveSampleFailure(
                 code="missing_inplay_data",
                 path="inplay_data",
-                message="样本必须提供 Goalserve inplay feed 原始 payload（含 events 字典）。",
+                message="样本必须提供 Goalserve inplay GZIP feed 根节点（含 events 字典）。",
             )
         )
         inplay_data = {}
 
     observed_at = _datetime_value(sample.get("observed_at")) or datetime.now(timezone.utc)
-    events = parse_goalserve_ws_events(sport or "basketball", dict(inplay_data), observed_at=observed_at)
+    events = parse_goalserve_inplay(sport or "basket", dict(inplay_data), observed_at=observed_at)
     markets = tuple(_load_market(item) for item in _mapping_list(sample.get("markets")))
     matches = tuple(_match_payload(match) for market in markets if (match := best_live_match(market, events)))
 

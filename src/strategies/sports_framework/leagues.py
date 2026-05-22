@@ -9,7 +9,7 @@ def is_mlb_game(game: LiveGameState) -> bool:
     """识别棒球类赛事（Goalserve inplay sport=baseball 或联赛名含 mlb/kbo/baseball）。
 
     livescore 接口返回的 league 是 "USA: MLB" 等复合形式，不能仅靠精确匹配。
-    sport 字段由 goalserve_parsers 注入，是更可靠的分类依据。
+    sport 字段由 Goalserve inplay / livescore parser 注入，是更可靠的分类依据。
     """
     sport = game.sport.strip().lower()
     if sport == "baseball":

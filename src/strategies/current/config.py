@@ -31,7 +31,7 @@ def _default_league_source_affinity() -> Mapping[str, tuple[str, ...]]:
     全部联赛切换到 Goalserve inplay feed（IP 白名单 + 1 秒刷新）。
     """
 
-    _gs = ("goalserve",)
+    _gs = ("goalserve_inplay",)
     return {
         "NBA": _gs,
         "WNBA": _gs,

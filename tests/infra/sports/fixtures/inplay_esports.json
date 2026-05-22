@@ -1,0 +1,2095 @@
+{
+ "bm": "bet365",
+ "events": {
+  "133975049": {
+   "bonus": {},
+   "core": {
+    "blocked": "0",
+    "finished": "0",
+    "nc": "0",
+    "removed": "",
+    "safe": "",
+    "stopped": "1",
+    "updated": "22.05.2026 17:26:23",
+    "updated_ts": "1779470783399"
+   },
+   "extra": {
+    "0": {
+     "code": "2",
+     "minute": "1",
+     "value": "1' - First kill"
+    },
+    "1": {
+     "code": "3",
+     "minute": "1",
+     "value": "1' - Bomb plant (Yes)"
+    },
+    "10": {
+     "code": "3",
+     "minute": "5",
+     "value": "5' - Bomb plant (Yes)"
+    },
+    "11": {
+     "code": "2",
+     "minute": "6",
+     "value": "6' - First kill"
+    },
+    "12": {
+     "code": "3",
+     "minute": "6",
+     "value": "6' - Bomb plant (Yes)"
+    },
+    "13": {
+     "code": "2",
+     "minute": "7",
+     "value": "7' - First kill"
+    },
+    "14": {
+     "code": "3",
+     "minute": "7",
+     "value": "7' - Bomb plant (Yes)"
+    },
+    "15": {
+     "code": "2",
+     "minute": "8",
+     "value": "8' - First kill"
+    },
+    "16": {
+     "code": "4",
+     "minute": "8",
+     "value": "8' - Bomb plant (No)"
+    },
+    "17": {
+     "code": "2",
+     "minute": "9",
+     "value": "9' - First kill"
+    },
+    "18": {
+     "code": "4",
+     "minute": "9",
+     "value": "9' - Bomb plant (No)"
+    },
+    "19": {
+     "code": "2",
+     "minute": "10",
+     "value": "10' - First kill"
+    },
+    "2": {
+     "code": "2",
+     "minute": "2",
+     "value": "2' - First kill"
+    },
+    "20": {
+     "code": "4",
+     "minute": "10",
+     "value": "10' - Bomb plant (No)"
+    },
+    "21": {
+     "code": "1",
+     "minute": "10",
+     "value": "10' - Race to 6 rounds"
+    },
+    "22": {
+     "code": "2",
+     "minute": "11",
+     "value": "11' - First kill"
+    },
+    "23": {
+     "code": "3",
+     "minute": "11",
+     "value": "11' - Bomb plant (Yes)"
+    },
+    "24": {
+     "code": "2",
+     "minute": "12",
+     "value": "12' - First kill"
+    },
+    "25": {
+     "code": "4",
+     "minute": "12",
+     "value": "12' - Bomb plant (No)"
+    },
+    "26": {
+     "code": "10",
+     "minute": "12",
+     "value": "1st Half Winner"
+    },
+    "27": {
+     "code": "11",
+     "minute": "0",
+     "value": "1 - 1st Half Score (4-8)"
+    },
+    "28": {
+     "code": "2",
+     "minute": "13",
+     "value": "13' - First kill"
+    },
+    "29": {
+     "code": "3",
+     "minute": "13",
+     "value": "13' - Bomb plant (Yes)"
+    },
+    "3": {
+     "code": "3",
+     "minute": "2",
+     "value": "2' - Bomb plant (Yes)"
+    },
+    "30": {
+     "code": "1",
+     "minute": "13",
+     "value": "13' - Race to 9 rounds"
+    },
+    "31": {
+     "code": "3",
+     "minute": "14",
+     "value": "14' - Bomb plant (Yes)"
+    },
+    "32": {
+     "code": "2",
+     "minute": "14",
+     "value": "14' - First kill"
+    },
+    "33": {
+     "code": "2",
+     "minute": "15",
+     "value": "15' - First kill"
+    },
+    "34": {
+     "code": "3",
+     "minute": "15",
+     "value": "15' - Bomb plant (Yes)"
+    },
+    "35": {
+     "code": "2",
+     "minute": "16",
+     "value": "16' - First kill"
+    },
+    "36": {
+     "code": "3",
+     "minute": "16",
+     "value": "16' - Bomb plant (Yes)"
+    },
+    "37": {
+     "code": "1",
+     "minute": "16",
+     "value": "16' - Race to 12 rounds"
+    },
+    "38": {
+     "code": "2",
+     "minute": "17",
+     "value": "17' - First kill"
+    },
+    "39": {
+     "code": "3",
+     "minute": "17",
+     "value": "17' - Bomb plant (Yes)"
+    },
+    "4": {
+     "code": "2",
+     "minute": "3",
+     "value": "3' - First kill"
+    },
+    "40": {
+     "code": "9",
+     "minute": "0",
+     "value": "Map 1 Winner"
+    },
+    "41": {
+     "code": "14",
+     "minute": "0",
+     "value": "Map 1 Final score(4-13)"
+    },
+    "42": {
+     "code": "2",
+     "minute": "1",
+     "value": "1' - First kill"
+    },
+    "43": {
+     "code": "3",
+     "minute": "1",
+     "value": "1' - Bomb plant (Yes)"
+    },
+    "44": {
+     "code": "2",
+     "minute": "2",
+     "value": "2' - First kill"
+    },
+    "45": {
+     "code": "3",
+     "minute": "2",
+     "value": "2' - Bomb plant (Yes)"
+    },
+    "46": {
+     "code": "2",
+     "minute": "3",
+     "value": "3' - First kill"
+    },
+    "47": {
+     "code": "3",
+     "minute": "3",
+     "value": "3' - Bomb plant (Yes)"
+    },
+    "5": {
+     "code": "3",
+     "minute": "3",
+     "value": "3' - Bomb plant (Yes)"
+    },
+    "6": {
+     "code": "1",
+     "minute": "3",
+     "value": "3' - Race to 3 rounds"
+    },
+    "7": {
+     "code": "2",
+     "minute": "4",
+     "value": "4' - First kill"
+    },
+    "8": {
+     "code": "4",
+     "minute": "4",
+     "value": "4' - Bomb plant (No)"
+    },
+    "9": {
+     "code": "2",
+     "minute": "5",
+     "value": "5' - First kill"
+    }
+   },
+   "history": {},
+   "info": {
+    "id": "133975049",
+    "league": "CS2 - CCT South America",
+    "minute": "1",
+    "name": "MIBR Academy vs Bounty Hunters",
+    "period": "Started",
+    "seconds": "00:38",
+    "sport": "Esports",
+    "start_date": null,
+    "start_time": null,
+    "start_ts": "",
+    "start_ts_utc": null
+   },
+   "odds": {
+    "1180": {
+     "id": 1180,
+     "name": "Home/Away (map 2)",
+     "order": "",
+     "participants": {
+      "13397504911800": {
+       "id": "13397504911800",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "4.5"
+      },
+      "13397504911801": {
+       "id": "13397504911801",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.166"
+      }
+     },
+     "short_name": "Home/Away (map 2)",
+     "suspend": "0"
+    },
+    "1182895": {
+     "id": 1182895,
+     "name": "Round Winner (map 2)",
+     "order": "",
+     "participants": {
+      "13397504911828950": {
+       "handicap": "5",
+       "id": "13397504911828950",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "1",
+       "value_eu": "1.615"
+      },
+      "13397504911828951": {
+       "handicap": "5",
+       "id": "13397504911828951",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "1",
+       "value_eu": "2.2"
+      },
+      "13397504911828952": {
+       "handicap": "13",
+       "id": "13397504911828952",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "2.1"
+      },
+      "13397504911828953": {
+       "handicap": "13",
+       "id": "13397504911828953",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.666"
+      }
+     },
+     "short_name": "Round Winner (map 2)",
+     "suspend": "0"
+    },
+    "1660": {
+     "id": 1660,
+     "name": "Handicap (map 2)",
+     "order": "",
+     "participants": {
+      "13397504916600": {
+       "handicap": "4.5",
+       "id": "13397504916600",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "1",
+       "value_eu": "2"
+      },
+      "13397504916601": {
+       "handicap": "-4.5",
+       "id": "13397504916601",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "1",
+       "value_eu": "1.727"
+      }
+     },
+     "short_name": "Handicap (map 2)",
+     "suspend": "0"
+    },
+    "1668": {
+     "id": 1668,
+     "name": "Total (map 2)",
+     "order": "",
+     "participants": {
+      "13397504916680": {
+       "handicap": "20.5",
+       "id": "13397504916680",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.833"
+      },
+      "13397504916681": {
+       "handicap": "20.5",
+       "id": "13397504916681",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.833"
+      }
+     },
+     "short_name": "Total (map 2)",
+     "suspend": "0"
+    },
+    "2518": {
+     "id": 2518,
+     "name": "Rounds Handicap  (map 2, 1st  half)",
+     "order": "",
+     "participants": {
+      "13397504925180": {
+       "handicap": "2.5",
+       "id": "13397504925180",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "1",
+       "value_eu": "1.8"
+      },
+      "13397504925181": {
+       "handicap": "-2.5",
+       "id": "13397504925181",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "1",
+       "value_eu": "1.909"
+      }
+     },
+     "short_name": "Rounds Handicap  (map 2, 1st  half)",
+     "suspend": "0"
+    },
+    "410": {
+     "id": 410,
+     "name": "Home/Away",
+     "order": "",
+     "participants": {
+      "1339750494100": {
+       "id": "1339750494100",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "10"
+      },
+      "1339750494101": {
+       "id": "1339750494101",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.03"
+      }
+     },
+     "short_name": "Home/Away",
+     "suspend": "0"
+    },
+    "9209563": {
+     "id": 9209563,
+     "name": "Overtime (2nd map)",
+     "order": "",
+     "participants": {
+      "13397504992095630": {
+       "id": "13397504992095630",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "1",
+       "value_eu": "8"
+      },
+      "13397504992095631": {
+       "id": "13397504992095631",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "1",
+       "value_eu": "1.062"
+      }
+     },
+     "short_name": "Overtime (2nd map)",
+     "suspend": "1"
+    },
+    "9290514": {
+     "id": 9290514,
+     "name": "Odd/Even (1st map)",
+     "order": "",
+     "participants": {
+      "13397504992905140": {
+       "id": "13397504992905140",
+       "name": "Odd",
+       "short_name": "Odd",
+       "suspend": "0",
+       "value_eu": "2"
+      },
+      "13397504992905141": {
+       "id": "13397504992905141",
+       "name": "Even",
+       "short_name": "Even",
+       "suspend": "0",
+       "value_eu": "1.727"
+      }
+     },
+     "short_name": "Odd/Even (1st map)",
+     "suspend": "0"
+    },
+    "9510097": {
+     "id": 9510097,
+     "name": "1st half - winner (map 2)",
+     "order": "",
+     "participants": {
+      "13397504995100970": {
+       "id": "13397504995100970",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "0",
+       "value_eu": "4.333"
+      },
+      "13397504995100971": {
+       "id": "13397504995100971",
+       "name": "X",
+       "short_name": "X",
+       "suspend": "0",
+       "value_eu": "6"
+      },
+      "13397504995100972": {
+       "id": "13397504995100972",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "0",
+       "value_eu": "1.444"
+      }
+     },
+     "short_name": "1st half - winner (map 2)",
+     "suspend": "0"
+    },
+    "9591541": {
+     "id": 9591541,
+     "name": "Total Kills (map 2)",
+     "order": "",
+     "participants": {
+      "13397504995915410": {
+       "handicap": "6.5",
+       "id": "13397504995915410",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "1",
+       "value_eu": "1.833"
+      },
+      "13397504995915411": {
+       "handicap": "6.5",
+       "id": "13397504995915411",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "1.833"
+      },
+      "13397504995915412": {
+       "handicap": "6.5",
+       "id": "13397504995915412",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.533"
+      },
+      "13397504995915413": {
+       "handicap": "6.5",
+       "id": "13397504995915413",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "2.375"
+      }
+     },
+     "short_name": "Total Kills (map 2)",
+     "suspend": "1"
+    },
+    "9591546": {
+     "id": 9591546,
+     "name": "Most Kills (map 2)",
+     "order": "",
+     "participants": {
+      "13397504995915460": {
+       "handicap": "13",
+       "id": "13397504995915460",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "0",
+       "value_eu": "2.25"
+      },
+      "13397504995915461": {
+       "handicap": "13",
+       "id": "13397504995915461",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "0",
+       "value_eu": "1.571"
+      },
+      "13397504995915462": {
+       "handicap": "5",
+       "id": "13397504995915462",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "1",
+       "value_eu": "1.571"
+      },
+      "13397504995915463": {
+       "handicap": "5",
+       "id": "13397504995915463",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "1",
+       "value_eu": "2.25"
+      }
+     },
+     "short_name": "Most Kills (map 2)",
+     "suspend": "0"
+    }
+   },
+   "stats": {
+    "0": {
+     "away": "Bounty Hunters",
+     "home": "MIBR Academy",
+     "name": "ITeam"
+    },
+    "1": {
+     "away": 1,
+     "home": 0,
+     "name": "Res"
+    },
+    "2": {
+     "away": 13,
+     "home": 4,
+     "name": "D2"
+    },
+    "3": {
+     "away": 1,
+     "home": 0,
+     "name": "Total"
+    },
+    "4": {
+     "away": 2,
+     "home": 0,
+     "name": "Ancient"
+    }
+   },
+   "stream": "",
+   "sts": "MAP=Ancient|RND=Round 3|",
+   "team_info": {
+    "away": {
+     "Serve": "",
+     "color": "",
+     "kit_color": null,
+     "name": "Bounty Hunters",
+     "score": null
+    },
+    "home": {
+     "Serve": "",
+     "color": "",
+     "kit_color": null,
+     "name": "MIBR Academy",
+     "score": null
+    }
+   }
+  },
+  "133997247": {
+   "bonus": {},
+   "core": {
+    "blocked": "0",
+    "finished": "0",
+    "nc": "0",
+    "removed": "",
+    "safe": "",
+    "stopped": "1",
+    "updated": "22.05.2026 17:26:39",
+    "updated_ts": "1779470799574"
+   },
+   "extra": {
+    "0": {
+     "code": "2",
+     "minute": "2",
+     "value": "2' - First Blood"
+    },
+    "1": {
+     "code": "1",
+     "minute": "9",
+     "value": "9' - Race to 5 Kills"
+    },
+    "10": {
+     "code": "1",
+     "minute": "20",
+     "value": "20' - Race to 25 Kills"
+    },
+    "11": {
+     "code": "9",
+     "minute": "22",
+     "value": "22' - 4th Tower Destroyed  (Bot T2)"
+    },
+    "12": {
+     "code": "9",
+     "minute": "22",
+     "value": "22' - 5th Tower Destroyed  (Mid T1)"
+    },
+    "13": {
+     "code": "9",
+     "minute": "22",
+     "value": "22' - 6th Tower Destroyed  (Top T1)"
+    },
+    "14": {
+     "code": "9",
+     "minute": "25",
+     "value": "25' - 7th Tower Destroyed  (Top T2)"
+    },
+    "15": {
+     "code": "9",
+     "minute": "25",
+     "value": "25' - 8th Tower Destroyed  (Bot T1)"
+    },
+    "16": {
+     "code": "9",
+     "minute": "26",
+     "value": "26' - 9th Tower Destroyed  (Mid T2)"
+    },
+    "17": {
+     "code": "1",
+     "minute": "30",
+     "value": "30' - Race to 30 Kills"
+    },
+    "18": {
+     "code": "6",
+     "minute": "34",
+     "value": "34' - 2nd Roshan Slain"
+    },
+    "19": {
+     "code": "12",
+     "minute": "34",
+     "value": "34' - Aegis Acquired"
+    },
+    "2": {
+     "code": "1",
+     "minute": "13",
+     "value": "13' - Race to 10 Kills"
+    },
+    "20": {
+     "code": "9",
+     "minute": "35",
+     "value": "35' - 10th Tower Destroyed  (Mid T3)"
+    },
+    "21": {
+     "code": "5",
+     "minute": "35",
+     "value": "35' - First Barracks Destroyed"
+    },
+    "22": {
+     "code": "10",
+     "minute": "35",
+     "value": "35' - 2nd Barracks Destroyed  (Mid Ranged)"
+    },
+    "23": {
+     "code": "9",
+     "minute": "39",
+     "value": "39' - 11th Tower Destroyed  (Top T3)"
+    },
+    "24": {
+     "code": "10",
+     "minute": "39",
+     "value": "39' - 3rd Barracks Destroyed  (Top Ranged)"
+    },
+    "25": {
+     "code": "7",
+     "minute": "39",
+     "value": "39' - Ultra Kill"
+    },
+    "26": {
+     "code": "8",
+     "minute": "39",
+     "value": "39' - Rampage"
+    },
+    "27": {
+     "code": "11",
+     "minute": "39",
+     "value": "39' - 4th Barracks Destroyed  (Top Melee)"
+    },
+    "28": {
+     "code": "2",
+     "minute": "1",
+     "value": "1' - First Blood"
+    },
+    "29": {
+     "code": "1",
+     "minute": "6",
+     "value": "6' - Race to 5 Kills"
+    },
+    "3": {
+     "code": "4",
+     "minute": "13",
+     "value": "13' - First Tower Destroyed"
+    },
+    "30": {
+     "code": "1",
+     "minute": "11",
+     "value": "11' - Race to 10 Kills"
+    },
+    "31": {
+     "code": "4",
+     "minute": "11",
+     "value": "11' - First Tower Destroyed"
+    },
+    "32": {
+     "code": "9",
+     "minute": "12",
+     "value": "12' - 2nd Tower Destroyed  (Bot T1)"
+    },
+    "33": {
+     "code": "9",
+     "minute": "14",
+     "value": "14' - 3rd Tower Destroyed  (Top T1)"
+    },
+    "34": {
+     "code": "1",
+     "minute": "16",
+     "value": "16' - Race to 15 Kills"
+    },
+    "35": {
+     "code": "9",
+     "minute": "19",
+     "value": "19' - 4th Tower Destroyed  (Mid T2)"
+    },
+    "36": {
+     "code": "9",
+     "minute": "20",
+     "value": "20' - 5th Tower Destroyed  (Top T2)"
+    },
+    "37": {
+     "code": "9",
+     "minute": "23",
+     "value": "23' - 6th Tower Destroyed  (Bot T1)"
+    },
+    "38": {
+     "code": "9",
+     "minute": "26",
+     "value": "26' - 7th Tower Destroyed  (Mid T1)"
+    },
+    "39": {
+     "code": "1",
+     "minute": "28",
+     "value": "28' - Race to 20 Kills"
+    },
+    "4": {
+     "code": "9",
+     "minute": "14",
+     "value": "14' - 2nd Tower Destroyed  (Mid T1)"
+    },
+    "40": {
+     "code": "3",
+     "minute": "29",
+     "value": "29' - First Roshan Slain"
+    },
+    "41": {
+     "code": "12",
+     "minute": "29",
+     "value": "29' - Aegis Acquired"
+    },
+    "42": {
+     "code": "9",
+     "minute": "32",
+     "value": "32' - 8th Tower Destroyed  (Mid T3)"
+    },
+    "43": {
+     "code": "9",
+     "minute": "32",
+     "value": "32' - 9th Tower Destroyed  (Top T1)"
+    },
+    "44": {
+     "code": "5",
+     "minute": "32",
+     "value": "32' - First Barracks Destroyed"
+    },
+    "45": {
+     "code": "11",
+     "minute": "32",
+     "value": "32' - 2nd Barracks Destroyed  (Mid Melee)"
+    },
+    "46": {
+     "code": "9",
+     "minute": "33",
+     "value": "33' - 10th Tower Destroyed  (Bot T2)"
+    },
+    "47": {
+     "code": "1",
+     "minute": "43",
+     "value": "43' - Race to 25 Kills"
+    },
+    "48": {
+     "code": "6",
+     "minute": "44",
+     "value": "44' - 2nd Roshan Slain"
+    },
+    "49": {
+     "code": "12",
+     "minute": "44",
+     "value": "44' - Aegis Acquired"
+    },
+    "5": {
+     "code": "1",
+     "minute": "16",
+     "value": "16' - Race to 15 Kills"
+    },
+    "50": {
+     "code": "9",
+     "minute": "47",
+     "value": "47' - 11th Tower Destroyed  (Bot T3)"
+    },
+    "51": {
+     "code": "1",
+     "minute": "55",
+     "value": "55' - Race to 30 Kills"
+    },
+    "52": {
+     "code": "6",
+     "minute": "56",
+     "value": "56' - 3rd Roshan Slain"
+    },
+    "53": {
+     "code": "12",
+     "minute": "56",
+     "value": "56' - Aegis Acquired"
+    },
+    "54": {
+     "code": "10",
+     "minute": "57",
+     "value": "57' - 3rd Barracks Destroyed  (Bot Ranged)"
+    },
+    "55": {
+     "code": "9",
+     "minute": "58",
+     "value": "58' - 12th Tower Destroyed  (Bot T2)"
+    },
+    "56": {
+     "code": "9",
+     "minute": "59",
+     "value": "59' - 13th Tower Destroyed  (Top T2)"
+    },
+    "57": {
+     "code": "11",
+     "minute": "62",
+     "value": "62' - 4th Barracks Destroyed  (Bot Melee)"
+    },
+    "58": {
+     "code": "9",
+     "minute": "63",
+     "value": "63' - 14th Tower Destroyed  (Top T3)"
+    },
+    "59": {
+     "code": "10",
+     "minute": "63",
+     "value": "63' - 5th Barracks Destroyed  (Top Ranged)"
+    },
+    "6": {
+     "code": "9",
+     "minute": "17",
+     "value": "17' - 3rd Tower Destroyed  (Top T1)"
+    },
+    "60": {
+     "code": "9",
+     "minute": "63",
+     "value": "63' - 15th Tower Destroyed  (Top T3)"
+    },
+    "61": {
+     "code": "10",
+     "minute": "64",
+     "value": "64' - 6th Barracks Destroyed  (Top Ranged)"
+    },
+    "62": {
+     "code": "11",
+     "minute": "64",
+     "value": "64' - 7th Barracks Destroyed  (Top Melee)"
+    },
+    "63": {
+     "code": "6",
+     "minute": "67",
+     "value": "67' - 4th Roshan Slain"
+    },
+    "64": {
+     "code": "13",
+     "minute": "67",
+     "value": "67' - Aegis Stolen"
+    },
+    "7": {
+     "code": "3",
+     "minute": "18",
+     "value": "18' - First Roshan Slain"
+    },
+    "8": {
+     "code": "12",
+     "minute": "18",
+     "value": "18' - Aegis Acquired"
+    },
+    "9": {
+     "code": "1",
+     "minute": "18",
+     "value": "18' - Race to 20 Kills"
+    }
+   },
+   "history": {},
+   "info": {
+    "id": "133997247",
+    "league": "DOTA2 - DreamLeague",
+    "minute": "68",
+    "name": "BB Team vs PlayTime",
+    "period": "Started",
+    "seconds": "68:05",
+    "sport": "Esports",
+    "start_date": null,
+    "start_time": null,
+    "start_ts": "",
+    "start_ts_utc": null
+   },
+   "odds": {
+    "1180": {
+     "id": 1180,
+     "name": "Home/Away (map 2)",
+     "order": "",
+     "participants": {
+      "13399724711800": {
+       "id": "13399724711800",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "1",
+       "value_eu": "3.75"
+      },
+      "13399724711801": {
+       "id": "13399724711801",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "1",
+       "value_eu": "1.25"
+      }
+     },
+     "short_name": "Home/Away (map 2)",
+     "suspend": "1"
+    },
+    "410": {
+     "id": 410,
+     "name": "Home/Away",
+     "order": "",
+     "participants": {
+      "1339972474100": {
+       "id": "1339972474100",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "1",
+       "value_eu": "1.333"
+      },
+      "1339972474101": {
+       "id": "1339972474101",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "1",
+       "value_eu": "3.25"
+      }
+     },
+     "short_name": "Home/Away",
+     "suspend": "0"
+    }
+   },
+   "stats": {
+    "0": {
+     "away": "PlayTime",
+     "home": "BB Team",
+     "name": "ITeam"
+    },
+    "1": {
+     "away": 0,
+     "home": 1,
+     "name": "Res"
+    },
+    "2": {
+     "away": 0,
+     "home": 0,
+     "name": "gold_def"
+    },
+    "3": {
+     "away": 34,
+     "home": 34,
+     "name": "kills"
+    },
+    "4": {
+     "away": 9,
+     "home": 6,
+     "name": "towers"
+    },
+    "5": {
+     "away": 2,
+     "home": 2,
+     "name": "roshans"
+    },
+    "6": {
+     "away": 6,
+     "home": 1,
+     "name": "barracks"
+    },
+    "7": {
+     "away": 14941,
+     "home": -14941,
+     "name": "gold"
+    }
+   },
+   "stream": "",
+   "sts": null,
+   "team_info": {
+    "away": {
+     "Serve": "",
+     "color": "",
+     "kit_color": null,
+     "name": "PlayTime",
+     "score": null
+    },
+    "home": {
+     "Serve": "",
+     "color": "",
+     "kit_color": null,
+     "name": "BB Team",
+     "score": null
+    }
+   }
+  },
+  "134011242": {
+   "bonus": {},
+   "core": {
+    "blocked": "0",
+    "finished": "0",
+    "nc": "0",
+    "removed": "",
+    "safe": "",
+    "stopped": "0",
+    "updated": "22.05.2026 17:25:43",
+    "updated_ts": "1779470743970"
+   },
+   "extra": {
+    "0": {
+     "code": "20",
+     "minute": "0",
+     "value": "0' - 1st Dragon Spawned (Cloud)"
+    },
+    "1": {
+     "code": "3",
+     "minute": "2",
+     "value": "3' - First Blood"
+    },
+    "10": {
+     "code": "11",
+     "minute": "17",
+     "value": "18' - 3rd Tower (Top T1)"
+    },
+    "11": {
+     "code": "11",
+     "minute": "17",
+     "value": "18' - 4th Tower (Mid T1)"
+    },
+    "12": {
+     "code": "11",
+     "minute": "19",
+     "value": "20' - 5th Tower (Mid T1)"
+    },
+    "13": {
+     "code": "2",
+     "minute": "20",
+     "value": "20' - Race to 10 Kills"
+    },
+    "14": {
+     "code": "21",
+     "minute": "20",
+     "value": "21' - 1st Baron Spawned"
+    },
+    "15": {
+     "code": "13",
+     "minute": "21",
+     "value": "21' - 3rd Dragon (Ocean)"
+    },
+    "16": {
+     "code": "20",
+     "minute": "21",
+     "value": "21' - 3rd Dragon Spawned (Ocean)"
+    },
+    "17": {
+     "code": "20",
+     "minute": "26",
+     "value": "26' - 4th Dragon Spawned (Ocean)"
+    },
+    "18": {
+     "code": "13",
+     "minute": "26",
+     "value": "26' - 4th Dragon (Ocean)"
+    },
+    "19": {
+     "code": "2",
+     "minute": "27",
+     "value": "27' - Race to 15 Kills"
+    },
+    "2": {
+     "code": "13",
+     "minute": "9",
+     "value": "10' - 1st Dragon (Cloud)"
+    },
+    "20": {
+     "code": "7",
+     "minute": "27",
+     "value": "28' - 1st Baron0"
+    },
+    "21": {
+     "code": "11",
+     "minute": "28",
+     "value": "28' - 6th Tower (Bot T1)"
+    },
+    "22": {
+     "code": "11",
+     "minute": "28",
+     "value": "29' - 7th Tower (Bot T2)"
+    },
+    "23": {
+     "code": "11",
+     "minute": "28",
+     "value": "29' - 8th Tower (Bot T3)"
+    },
+    "24": {
+     "code": "5",
+     "minute": "28",
+     "value": "29' - 1st Inhibitor (Bot)"
+    },
+    "25": {
+     "code": "11",
+     "minute": "28",
+     "value": "29' - 9th Tower (Mid T2)"
+    },
+    "26": {
+     "code": "11",
+     "minute": "28",
+     "value": "29' - 10th Tower (Top T2)"
+    },
+    "27": {
+     "code": "11",
+     "minute": "29",
+     "value": "29' - 11th Tower (Bot Nexus)"
+    },
+    "28": {
+     "code": "2",
+     "minute": "29",
+     "value": "29' - Race to 20 Kills"
+    },
+    "29": {
+     "code": "11",
+     "minute": "29",
+     "value": "29' - 12th Tower (Top Nexus)"
+    },
+    "3": {
+     "code": "20",
+     "minute": "9",
+     "value": "10' - 2nd Dragon Spawned (HexTech)"
+    },
+    "30": {
+     "code": "15",
+     "minute": "29",
+     "value": "Map 1 Winner"
+    },
+    "31": {
+     "code": "20",
+     "minute": "0",
+     "value": "0' - 1st Dragon Spawned (HexTech)"
+    },
+    "32": {
+     "code": "3",
+     "minute": "4",
+     "value": "4' - First Blood"
+    },
+    "33": {
+     "code": "20",
+     "minute": "6",
+     "value": "7' - 1st Dragon Spawned (Mountain)"
+    },
+    "34": {
+     "code": "13",
+     "minute": "6",
+     "value": "7' - 1st Dragon (HexTech)"
+    },
+    "35": {
+     "code": "2",
+     "minute": "11",
+     "value": "11' - Race to 5 Kills"
+    },
+    "36": {
+     "code": "13",
+     "minute": "12",
+     "value": "12' - 2nd Dragon (Mountain)"
+    },
+    "37": {
+     "code": "20",
+     "minute": "12",
+     "value": "12' - 3rd Dragon Spawned (Cloud)"
+    },
+    "38": {
+     "code": "9",
+     "minute": "16",
+     "value": "16' - 1st Rift Herald"
+    },
+    "39": {
+     "code": "11",
+     "minute": "18",
+     "value": "18' - 1st Tower (Top T1)"
+    },
+    "4": {
+     "code": "2",
+     "minute": "14",
+     "value": "15' - Race to 5 Kills"
+    },
+    "40": {
+     "code": "20",
+     "minute": "18",
+     "value": "18' - 3rd Dragon Spawned (Cloud)"
+    },
+    "41": {
+     "code": "13",
+     "minute": "18",
+     "value": "18' - 3rd Dragon (Cloud)"
+    },
+    "42": {
+     "code": "2",
+     "minute": "18",
+     "value": "19' - Race to 10 Kills"
+    },
+    "43": {
+     "code": "11",
+     "minute": "19",
+     "value": "19' - 2nd Tower (Mid T1)"
+    },
+    "44": {
+     "code": "11",
+     "minute": "19",
+     "value": "19' - 3rd Tower (Bot T1)"
+    },
+    "45": {
+     "code": "11",
+     "minute": "20",
+     "value": "21' - 4th Tower (Mid T1)"
+    },
+    "46": {
+     "code": "21",
+     "minute": "20",
+     "value": "21' - 1st Baron Spawned"
+    },
+    "47": {
+     "code": "7",
+     "minute": "21",
+     "value": "21' - 1st Baron0"
+    },
+    "48": {
+     "code": "11",
+     "minute": "21",
+     "value": "22' - 5th Tower (Bot T1)"
+    },
+    "49": {
+     "code": "2",
+     "minute": "22",
+     "value": "22' - Race to 15 Kills"
+    },
+    "5": {
+     "code": "11",
+     "minute": "14",
+     "value": "15' - 1st Tower (Top T1)"
+    },
+    "50": {
+     "code": "11",
+     "minute": "22",
+     "value": "22' - 6th Tower (Mid T2)"
+    },
+    "51": {
+     "code": "11",
+     "minute": "23",
+     "value": "23' - 7th Tower (Bot T2)"
+    },
+    "52": {
+     "code": "11",
+     "minute": "23",
+     "value": "24' - 8th Tower (Mid T3)"
+    },
+    "53": {
+     "code": "5",
+     "minute": "24",
+     "value": "24' - 1st Inhibitor (Mid)"
+    },
+    "54": {
+     "code": "13",
+     "minute": "24",
+     "value": "25' - 4th Dragon (Cloud)"
+    },
+    "55": {
+     "code": "20",
+     "minute": "24",
+     "value": "25' - 4th Dragon Spawned (Cloud)"
+    },
+    "56": {
+     "code": "11",
+     "minute": "25",
+     "value": "26' - 9th Tower (Top T2)"
+    },
+    "57": {
+     "code": "21",
+     "minute": "27",
+     "value": "27' - 2nd Baron Spawned"
+    },
+    "58": {
+     "code": "7",
+     "minute": "27",
+     "value": "28' - 2nd Baron0"
+    },
+    "59": {
+     "code": "2",
+     "minute": "27",
+     "value": "28' - Race to 20 Kills"
+    },
+    "6": {
+     "code": "13",
+     "minute": "15",
+     "value": "15' - 2nd Dragon (HexTech)"
+    },
+    "60": {
+     "code": "11",
+     "minute": "28",
+     "value": "29' - 10th Tower (Top Nexus)"
+    },
+    "61": {
+     "code": "11",
+     "minute": "28",
+     "value": "29' - 11th Tower (Bot Nexus)"
+    },
+    "62": {
+     "code": "15",
+     "minute": "28",
+     "value": "Map 2 Winner"
+    },
+    "63": {
+     "code": "20",
+     "minute": "0",
+     "value": "0' - 1st Dragon Spawned (ChemTech)"
+    },
+    "64": {
+     "code": "3",
+     "minute": "3",
+     "value": "4' - First Blood"
+    },
+    "65": {
+     "code": "20",
+     "minute": "9",
+     "value": "10' - 1st Dragon Spawned (Mountain)"
+    },
+    "66": {
+     "code": "13",
+     "minute": "9",
+     "value": "10' - 1st Dragon (Chemtech)"
+    },
+    "67": {
+     "code": "2",
+     "minute": "12",
+     "value": "12' - Race to 5 Kills"
+    },
+    "68": {
+     "code": "11",
+     "minute": "12",
+     "value": "13' - 1st Tower (Bot T1)"
+    },
+    "69": {
+     "code": "2",
+     "minute": "14",
+     "value": "14' - Race to 10 Kills"
+    },
+    "7": {
+     "code": "20",
+     "minute": "15",
+     "value": "15' - 3rd Dragon Spawned (Ocean)"
+    },
+    "70": {
+     "code": "11",
+     "minute": "16",
+     "value": "16' - 2nd Tower (Mid T1)"
+    },
+    "71": {
+     "code": "13",
+     "minute": "16",
+     "value": "17' - 2nd Dragon (Mountain)"
+    },
+    "72": {
+     "code": "20",
+     "minute": "16",
+     "value": "17' - 3rd Dragon Spawned (HexTech)"
+    },
+    "73": {
+     "code": "9",
+     "minute": "17",
+     "value": "17' - 1st Rift Herald"
+    },
+    "74": {
+     "code": "11",
+     "minute": "17",
+     "value": "18' - 3rd Tower (Top T1)"
+    },
+    "75": {
+     "code": "2",
+     "minute": "18",
+     "value": "18' - Race to 15 Kills"
+    },
+    "76": {
+     "code": "11",
+     "minute": "19",
+     "value": "19' - 4th Tower (Bot T2)"
+    },
+    "77": {
+     "code": "11",
+     "minute": "19",
+     "value": "19' - 5th Tower (Mid T2)"
+    },
+    "78": {
+     "code": "2",
+     "minute": "20",
+     "value": "20' - Race to 20 Kills"
+    },
+    "79": {
+     "code": "21",
+     "minute": "20",
+     "value": "20' - 1st Baron Spawned"
+    },
+    "8": {
+     "code": "9",
+     "minute": "16",
+     "value": "16' - 1st Rift Herald"
+    },
+    "80": {
+     "code": "7",
+     "minute": "21",
+     "value": "21' - 1st Baron0"
+    },
+    "81": {
+     "code": "13",
+     "minute": "22",
+     "value": "22' - 3rd Dragon (HexTech)"
+    },
+    "82": {
+     "code": "20",
+     "minute": "22",
+     "value": "22' - 3rd Dragon Spawned (HexTech)"
+    },
+    "83": {
+     "code": "11",
+     "minute": "22",
+     "value": "22' - 6th Tower (Top T2)"
+    },
+    "84": {
+     "code": "11",
+     "minute": "22",
+     "value": "22' - 7th Tower (Mid T3)"
+    },
+    "85": {
+     "code": "5",
+     "minute": "22",
+     "value": "23' - 1st Inhibitor (Mid)"
+    },
+    "86": {
+     "code": "11",
+     "minute": "22",
+     "value": "23' - 8th Tower (Top T3)"
+    },
+    "87": {
+     "code": "11",
+     "minute": "22",
+     "value": "23' - 9th Tower (Bot Nexus)"
+    },
+    "88": {
+     "code": "5",
+     "minute": "23",
+     "value": "23' - 2nd Inhibitor (Top)"
+    },
+    "89": {
+     "code": "11",
+     "minute": "23",
+     "value": "23' - 10th Tower (Top Nexus)"
+    },
+    "9": {
+     "code": "11",
+     "minute": "16",
+     "value": "17' - 2nd Tower (Bot T1)"
+    },
+    "90": {
+     "code": "15",
+     "minute": "23",
+     "value": "Map 3 Winner"
+    }
+   },
+   "history": {},
+   "info": {
+    "id": "134011242",
+    "league": "LOL - TCL Spring Playoffs",
+    "minute": "0",
+    "name": "SU Esports vs PCIFIC Esports",
+    "period": "Started",
+    "seconds": "00:00",
+    "sport": "Esports",
+    "start_date": null,
+    "start_time": null,
+    "start_ts": "",
+    "start_ts_utc": null
+   },
+   "odds": {
+    "1182095": {
+     "id": 1182095,
+     "name": "Home/Away (map 4)",
+     "order": "",
+     "participants": {
+      "13401124211820950": {
+       "id": "13401124211820950",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "1",
+       "value_eu": "1.727"
+      },
+      "13401124211820951": {
+       "id": "13401124211820951",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "1",
+       "value_eu": "2"
+      }
+     },
+     "short_name": "Home/Away (map 4)",
+     "suspend": "1"
+    },
+    "410": {
+     "id": 410,
+     "name": "Home/Away",
+     "order": "",
+     "participants": {
+      "1340112424100": {
+       "id": "1340112424100",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "3"
+      },
+      "1340112424101": {
+       "id": "1340112424101",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.363"
+      }
+     },
+     "short_name": "Home/Away",
+     "suspend": "0"
+    },
+    "9291516": {
+     "id": 9291516,
+     "name": "Odd/Even (1st map)",
+     "order": "",
+     "participants": {
+      "13401124292915160": {
+       "id": "13401124292915160",
+       "name": "Odd",
+       "short_name": "Odd",
+       "suspend": "0",
+       "value_eu": "1.833"
+      },
+      "13401124292915161": {
+       "id": "13401124292915161",
+       "name": "Even",
+       "short_name": "Even",
+       "suspend": "0",
+       "value_eu": "1.833"
+      }
+     },
+     "short_name": "Odd/Even (1st map)",
+     "suspend": "0"
+    },
+    "9510041": {
+     "id": 9510041,
+     "name": "Total Kills (map 4)",
+     "order": "",
+     "participants": {
+      "13401124295100410": {
+       "handicap": "30.5",
+       "id": "13401124295100410",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "1",
+       "value_eu": "1.833"
+      },
+      "13401124295100411": {
+       "handicap": "30.5",
+       "id": "13401124295100411",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "1.833"
+      }
+     },
+     "short_name": "Total Kills (map 4)",
+     "suspend": "0"
+    },
+    "9510042": {
+     "id": 9510042,
+     "name": "Kill Handicap (map 4)",
+     "order": "",
+     "participants": {
+      "13401124295100420": {
+       "handicap": "-3.5",
+       "id": "13401124295100420",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "1",
+       "value_eu": "1.833"
+      },
+      "13401124295100421": {
+       "handicap": "3.5",
+       "id": "13401124295100421",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "1",
+       "value_eu": "1.833"
+      }
+     },
+     "short_name": "Kill Handicap (map 4)",
+     "suspend": "1"
+    },
+    "9510043": {
+     "id": 9510043,
+     "name": "First Barons(map 4)",
+     "order": "",
+     "participants": {
+      "13401124295100430": {
+       "id": "13401124295100430",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "0",
+       "value_eu": "1.727"
+      },
+      "13401124295100431": {
+       "id": "13401124295100431",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "0",
+       "value_eu": "2"
+      }
+     },
+     "short_name": "First Barons(map 4)",
+     "suspend": "0"
+    },
+    "9510044": {
+     "id": 9510044,
+     "name": "Total Barons(map 4)",
+     "order": "",
+     "participants": {
+      "13401124295100440": {
+       "handicap": "1.5",
+       "id": "13401124295100440",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "1",
+       "value_eu": "2.375"
+      },
+      "13401124295100441": {
+       "handicap": "1.5",
+       "id": "13401124295100441",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "1.533"
+      }
+     },
+     "short_name": "Total Barons(map 4)",
+     "suspend": "0"
+    },
+    "9510046": {
+     "id": 9510046,
+     "name": "Total Dragons (map 4)",
+     "order": "",
+     "participants": {
+      "13401124295100460": {
+       "handicap": "4.5",
+       "id": "13401124295100460",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "1",
+       "value_eu": "1.833"
+      },
+      "13401124295100461": {
+       "handicap": "4.5",
+       "id": "13401124295100461",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "1.833"
+      }
+     },
+     "short_name": "Total Dragons (map 4)",
+     "suspend": "0"
+    },
+    "9510047": {
+     "id": 9510047,
+     "name": "First Inhibitors(map 4)",
+     "order": "",
+     "participants": {
+      "13401124295100470": {
+       "id": "13401124295100470",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "0",
+       "value_eu": "1.727"
+      },
+      "13401124295100471": {
+       "id": "13401124295100471",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "0",
+       "value_eu": "2"
+      }
+     },
+     "short_name": "First Inhibitors(map 4)",
+     "suspend": "0"
+    },
+    "9510048": {
+     "id": 9510048,
+     "name": "Total Inhibitors(map 4)",
+     "order": "",
+     "participants": {
+      "13401124295100480": {
+       "handicap": "1.5",
+       "id": "13401124295100480",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "1",
+       "value_eu": "1.727"
+      },
+      "13401124295100481": {
+       "handicap": "1.5",
+       "id": "13401124295100481",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "2"
+      }
+     },
+     "short_name": "Total Inhibitors(map 4)",
+     "suspend": "0"
+    },
+    "9510050": {
+     "id": 9510050,
+     "name": "Total Tower (map 4)",
+     "order": "",
+     "participants": {
+      "13401124295100500": {
+       "handicap": "11.5",
+       "id": "13401124295100500",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "1",
+       "value_eu": "1.615"
+      },
+      "13401124295100501": {
+       "handicap": "11.5",
+       "id": "13401124295100501",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "2.2"
+      }
+     },
+     "short_name": "Total Tower (map 4)",
+     "suspend": "0"
+    },
+    "9510141": {
+     "id": 9510141,
+     "name": "Race To 5 Kills (map 4)",
+     "order": "",
+     "participants": {
+      "13401124295101410": {
+       "handicap": "5",
+       "id": "13401124295101410",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "1",
+       "value_eu": "1.8"
+      },
+      "13401124295101411": {
+       "handicap": "5",
+       "id": "13401124295101411",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "1",
+       "value_eu": "1.909"
+      },
+      "134011242951014110": {
+       "handicap": "30",
+       "id": "134011242951014110",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "1",
+       "value_eu": "1.727"
+      },
+      "134011242951014111": {
+       "handicap": "30",
+       "id": "134011242951014111",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "1",
+       "value_eu": "2"
+      },
+      "13401124295101412": {
+       "handicap": "15",
+       "id": "13401124295101412",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "1",
+       "value_eu": "1.727"
+      },
+      "13401124295101413": {
+       "handicap": "15",
+       "id": "13401124295101413",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "1",
+       "value_eu": "2"
+      },
+      "13401124295101414": {
+       "handicap": "25",
+       "id": "13401124295101414",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "1",
+       "value_eu": "1.727"
+      },
+      "13401124295101415": {
+       "handicap": "25",
+       "id": "13401124295101415",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "1",
+       "value_eu": "2"
+      },
+      "13401124295101416": {
+       "handicap": "10",
+       "id": "13401124295101416",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "1",
+       "value_eu": "1.727"
+      },
+      "13401124295101417": {
+       "handicap": "10",
+       "id": "13401124295101417",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "1",
+       "value_eu": "2"
+      },
+      "13401124295101418": {
+       "handicap": "20",
+       "id": "13401124295101418",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "1",
+       "value_eu": "1.727"
+      },
+      "13401124295101419": {
+       "handicap": "20",
+       "id": "13401124295101419",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "1",
+       "value_eu": "2"
+      }
+     },
+     "short_name": "Race To 5 Kills (map 4)",
+     "suspend": "1"
+    },
+    "9591475": {
+     "id": 9591475,
+     "name": "Total Duration (map 3)",
+     "order": "",
+     "participants": {
+      "13401124295914750": {
+       "id": "13401124295914750",
+       "name": "Over or Exactly",
+       "short_name": "Over or Exactly",
+       "suspend": "1",
+       "value_eu": "1.833"
+      },
+      "13401124295914751": {
+       "id": "13401124295914751",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "1.833"
+      }
+     },
+     "short_name": "Total Duration (map 3)",
+     "suspend": "1"
+    },
+    "9591492": {
+     "id": 9591492,
+     "name": "GoodLike (1th map)",
+     "order": "",
+     "participants": {
+      "13401124295914920": {
+       "id": "13401124295914920",
+       "name": "Cloud",
+       "short_name": "Cloud",
+       "suspend": "1",
+       "value_eu": "5.5"
+      },
+      "13401124295914921": {
+       "id": "13401124295914921",
+       "name": "Infernal",
+       "short_name": "Infernal",
+       "suspend": "1",
+       "value_eu": "5.5"
+      },
+      "13401124295914922": {
+       "id": "13401124295914922",
+       "name": "Mountain",
+       "short_name": "Mountain",
+       "suspend": "1",
+       "value_eu": "5.5"
+      },
+      "13401124295914923": {
+       "id": "13401124295914923",
+       "name": "Ocean",
+       "short_name": "Ocean",
+       "suspend": "1",
+       "value_eu": "5.5"
+      },
+      "13401124295914924": {
+       "id": "13401124295914924",
+       "name": "Chemtech",
+       "short_name": "Chemtech",
+       "suspend": "1",
+       "value_eu": "5.5"
+      },
+      "13401124295914925": {
+       "id": "13401124295914925",
+       "name": "Hextech",
+       "short_name": "Hextech",
+       "suspend": "1",
+       "value_eu": "5.5"
+      }
+     },
+     "short_name": "GoodLike (1th map)",
+     "suspend": "1"
+    }
+   },
+   "stats": {
+    "0": {
+     "away": "PCIFIC Esports",
+     "home": "SU Esports",
+     "name": "ITeam"
+    },
+    "1": {
+     "away": 2,
+     "home": 1,
+     "name": "Res"
+    },
+    "2": {
+     "away": 0,
+     "home": 0,
+     "name": "gold"
+    },
+    "3": {
+     "away": 0,
+     "home": 0,
+     "name": "kills"
+    },
+    "4": {
+     "away": 0,
+     "home": 0,
+     "name": "towers"
+    },
+    "5": {
+     "away": 0,
+     "home": 0,
+     "name": "dragons"
+    },
+    "6": {
+     "away": 0,
+     "home": 0,
+     "name": "barons"
+    },
+    "7": {
+     "away": 0,
+     "home": 0,
+     "name": "inhibitors"
+    }
+   },
+   "stream": "",
+   "sts": "RND=Map 4|",
+   "team_info": {
+    "away": {
+     "Serve": "",
+     "color": "",
+     "kit_color": null,
+     "name": "PCIFIC Esports",
+     "score": null
+    },
+    "home": {
+     "Serve": "",
+     "color": "",
+     "kit_color": null,
+     "name": "SU Esports",
+     "score": null
+    }
+   }
+  }
+ },
+ "updated": "05.22.2026 17:26:40",
+ "updated_ts": 1779470800037
+}

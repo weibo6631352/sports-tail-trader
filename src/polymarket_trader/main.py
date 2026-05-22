@@ -61,7 +61,7 @@ from polymarket_trader.infra.polymarket.order_executor import (
     PolymarketOrderExecutor,
 )
 from polymarket_trader.infra.sports import (
-    GoalserveClient,
+    GoalserveInplayClient,
     GoalserveLivescoreClient,
     GoalservePregameOddsClient,
     SeasonOddsClient,
@@ -261,35 +261,82 @@ def _build_livescore_active_sports_provider(
     return _provider
 
 
+def _build_inplay_active_sports_provider(
+    registry: MarketRegistry,
+) -> Callable[[], frozenset[str]]:
+    """构建 inplay GZIP feed demand-driven 轮询的 active_sports_provider。
+
+    与 _build_livescore_active_sports_provider 同样遍历 tracked-market registry，
+    但返回的是 _market_sport_codes 输出的**规范运动码**集合（football / basketball /
+    ice-hockey 等）——GoalserveInplayClient 自己用 SPORT_CODE_TO_INPLAY_KEYS 把
+    规范码映射到 feed 路径 token，因此这里不做 feed-key 映射。
+
+    必须廉价（每轮都调）：只做一次 registry 快照遍历 + 内存判断，不做任何 I/O。
+    """
+
+    def _provider() -> frozenset[str]:
+        now = datetime.now(timezone.utc)
+        near_start_cutoff = now + timedelta(minutes=60)
+        active: set[str] = set()
+        for market in registry.snapshot().markets:
+            start = market.game_start_time
+            if start is not None and start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            end = market.end_date
+            if end is not None and end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            is_live = (
+                start is not None
+                and start <= now
+                and (end is None or end > now)
+            )
+            is_near_start = (
+                start is not None and now <= start <= near_start_cutoff
+            )
+            # game_start_time 缺失兜底：与 livescore provider 同理（部分 esports
+            # 市场无开赛时间），改用 end_date 在未来 6h 内判定为正在进行/临近。
+            start_unknown_active = start is None and (
+                end is None or now < end < now + timedelta(hours=6)
+            )
+            if not (is_live or is_near_start or start_unknown_active):
+                continue
+            active.update(_market_sport_codes(market))
+        return frozenset(active)
+
+    return _provider
+
+
 def _build_sports_live_state_client(
     settings: Settings,
     *,
     league_source_priority: Mapping[str, Sequence[str]] | None = None,
     trusted_sources: Sequence[str] | None = None,
     livescore_active_sports_provider: Callable[[], frozenset[str]] | None = None,
+    inplay_active_sports_provider: Callable[[], frozenset[str]] | None = None,
 ) -> SportsLiveAggregateClient:
     """构建 Goalserve 直播状态聚合客户端。
 
-    inplay WebSocket：JWT token 认证（GOALSERVE_API_KEY 换取），实时推送，覆盖
-      basketball/soccer/hockey/baseball/tennis/esports/amfootball/volleyball。
+    inplay GZIP feed：keyless（IP 白名单），每 sport ~1s 刷新，demand-driven 轮询，
+      覆盖 soccer/basket/tennis/volleyball/amfootball/esports/hockey/baseball。
     livescore getfeed：API key 认证，5 秒刷新，覆盖
       cricket/handball/rugby/boxing/mma/golf/horse_racing/f1/motogp。
     proxy 仅在开发环境配置（GOALSERVE_PROXY=http://127.0.0.1:7890），生产留空直连。
 
-    livescore_active_sports_provider：传入时启用 demand-driven 轮询，只抓取有
+    *_active_sports_provider：传入时启用 demand-driven 轮询，只抓取有
       live/即将开赛 Polymarket 市场的运动 feed；None 则全量轮询。
     """
     api_key_secret = settings.goalserve_api_key
     api_key = api_key_secret.get_secret_value() if api_key_secret is not None else None
 
-    goalserve = GoalserveClient(
-        api_key=api_key or "",
-        sports=settings.goalserve_sport_codes,
+    inplay = GoalserveInplayClient(
         proxy=settings.goalserve_proxy,
+        active_sports_provider=inplay_active_sports_provider,
     )
-    providers: list[tuple[str, Any]] = [("goalserve", goalserve.list_events)]
-    closers: list[Any] = [goalserve.aclose]
-    status_providers: list[tuple[str, Any]] = [("goalserve_ws", goalserve.ws_per_sport_status)]
+    providers: list[tuple[str, Any]] = [("goalserve_inplay", inplay.list_events)]
+    closers: list[Any] = [inplay.aclose]
+    status_providers: list[tuple[str, Any]] = [
+        ("goalserve_inplay", inplay.inplay_per_sport_status)
+    ]
 
     if settings.goalserve_livescore_enabled and api_key:
         livescore = GoalserveLivescoreClient(
@@ -847,6 +894,9 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 trusted_sources=None,  # 默认走 aggregate 内置 _DEFAULT_OFFICIAL_SOURCES
                 livescore_active_sports_provider=(
                     _build_livescore_active_sports_provider(registry)
+                ),
+                inplay_active_sports_provider=(
+                    _build_inplay_active_sports_provider(registry)
                 ),
             )
             sports_live_state_worker = SportsLiveStateWorker(

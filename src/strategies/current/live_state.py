@@ -611,20 +611,14 @@ def best_live_match(
     ]
     if not matches:
         return None
-    # inplay WS（source="goalserve"）的 per-sport 比分/赛段解析从未对真实格式
-    # 校准——stats 键因运动而异（网球是 POINTS/S1，无 g）、period 字段实为状态码，
-    # 产出的恒是 0-0 + 垃圾赛段。因此纯 inplay WS 事件绝不作为 live state 基底，
-    # 它只是 odds 来源。某场比赛只有 inplay 匹配（无任何权威比分源）时返回 None
-    # （无 live state、跳过该场），好过用 inplay 垃圾比分误导策略。
-    usable = [m for m in matches if not _is_inplay_only_event(m.event)]
-    if not usable:
-        return None
     # 按 confidence 排序：team-pair 优先，但高 confidence 的 race 也能击败低 confidence team。
-    best = max(usable, key=lambda item: (item.confidence, item.score))
-    # 胜出事件常来自 livescore（无盘中赔率）。inplay WS 事件带 goalserve_odds，但
-    # 两源名字格式不同（全名 vs 缩写名）在 aggregate 融合时分不到一组。这里用
-    # "同样匹配到该 market" 这一事实把 inplay 赔率接到胜出事件上——不放松任何
-    # 匹配门槛，只复用已匹配同一 market 的 inplay 事件的赔率。
+    # goalserve_inplay（HTTP GZIP feed）的 per-sport 比分/赛段解析已对真实抓取
+    # 数据校准，可信，可直接作为 live state 基底——无需再做源排除。
+    best = max(matches, key=lambda item: (item.confidence, item.score))
+    # 胜出事件可能来自 livescore（无盘中赔率）。goalserve_inplay 事件带
+    # goalserve_odds，但两源名字格式不同（全名 vs 缩写名）在 aggregate 融合时
+    # 分不到一组。这里用"同样匹配到该 market"这一事实把 inplay 赔率接到胜出
+    # 事件上——不放松任何匹配门槛，只复用已匹配同一 market 的 inplay 事件的赔率。
     if not best.event.source_payload.get("goalserve_odds"):
         for candidate in matches:
             odds = candidate.event.source_payload.get("goalserve_odds")
@@ -638,25 +632,6 @@ def best_live_match(
                 )
                 break
     return best
-
-
-# inplay WS 解析器已对真实消息校准、比分/赛段可信的运动——这些运动的 inplay
-# WS 事件可作为 live state 基底（inplay WS 每秒刷新、比 livescore 轮询更快）。
-# 其余运动的 inplay 解析器尚未校准，仍只取 livescore 作 state、inplay 仅供 odds。
-_INPLAY_CALIBRATED_SPORTS = frozenset({"tennis", "volleyball", "soccer"})
-
-
-def _is_inplay_only_event(event: LiveEvent) -> bool:
-    """事件是否为"比分不可信的纯 inplay WS 事件"，不可作 live state 基底。
-
-    inplay WS 源标签为 ``goalserve``。已校准运动（_INPLAY_CALIBRATED_SPORTS）
-    的 inplay 比分可信，不算不可用；若 livescore 也参与融合也不算。
-    """
-    if event.source != "goalserve":
-        return False
-    if "goalserve_livescore" in (event.contributing_sources or ()):
-        return False
-    return (event.sport or "").strip().lower() not in _INPLAY_CALIBRATED_SPORTS
 
 
 def build_live_state_match(

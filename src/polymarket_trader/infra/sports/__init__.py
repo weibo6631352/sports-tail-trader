@@ -8,20 +8,20 @@ from polymarket_trader.infra.sports.common import (
     SportsDataTimeoutError,
     SportsDataTransportError,
 )
-from polymarket_trader.infra.sports.goalserve_client import GoalserveClient
+from polymarket_trader.infra.sports.goalserve_inplay_client import GoalserveInplayClient
+from polymarket_trader.infra.sports.goalserve_inplay_parsers import (
+    GoalserveMarket,
+    GoalserveOdds,
+    GoalserveOutcome,
+    parse_goalserve_inplay,
+)
 from polymarket_trader.infra.sports.goalserve_livescore_client import GoalserveLivescoreClient
 from polymarket_trader.infra.sports.goalserve_pregame_client import (
     GoalservePregameOddsClient,
     GoalservePregameSnapshot,
-    PregameMatch,
     PregameMarket,
+    PregameMatch,
     PregameOutcome,
-)
-from polymarket_trader.infra.sports.goalserve_parsers import (
-    GoalserveMarket,
-    GoalserveOdds,
-    GoalserveOutcome,
-    parse_goalserve_ws_events,
 )
 from polymarket_trader.infra.sports.season_odds_client import (
     SeasonOddsClient,
@@ -30,7 +30,7 @@ from polymarket_trader.infra.sports.season_odds_client import (
 )
 
 __all__ = [
-    "GoalserveClient",
+    "GoalserveInplayClient",
     "GoalserveLivescoreClient",
     "GoalservePregameOddsClient",
     "GoalservePregameSnapshot",
@@ -48,6 +48,6 @@ __all__ = [
     "SportsDataTimeoutError",
     "SportsDataTransportError",
     "SportsLiveAggregateClient",
-    "parse_goalserve_ws_events",
+    "parse_goalserve_inplay",
     "parse_theoddsapi_outrights_payload",
 ]

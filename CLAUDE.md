@@ -126,13 +126,13 @@ runtime -> domain
 
 | 类型 | 端点形式 | 认证 | 实现位置 |
 |------|---------|------|---------|
-| Inplay 实时赔率+比分（WebSocket 推送）| `live.goalserve.com/ws/{sport}?tkn={jwt}` | JWT token（`live.goalserve.com/api/v1/auth/gettoken` 换取）| `infra/sports/goalserve_client.py` |
+| Inplay 实时赔率+比分（HTTP GZIP feed）| `inplay.goalserve.com/inplay-{sport}.gz` | keyless（IP 白名单，经 `GOALSERVE_PROXY` 出口）| `infra/sports/goalserve_inplay_client.py` |
 | Livescore 实时比分（getfeed）| `getfeed/{key}/{sport}/home?json=1` | API key | `infra/sports/goalserve_livescore_client.py` |
 | 赛前赔率（Pregame Odds, GZIP）| `getfeed/{key}/getodds/soccer?cat={sport}_10` | API key | `infra/sports/goalserve_pregame_client.py` |
 
 ### 已覆盖的运动
 
-**Inplay feed（`goalserve_sports` 配置）**：basketball、soccer、hockey、baseball、tennis、esports、amfootball、volleyball — Goalserve inplay 覆盖的 8 个运动全部启用。
+**Inplay feed**：soccer、basket、tennis、volleyball、amfootball、esports、hockey、baseball — Goalserve inplay 覆盖的 8 个运动全部启用，由 `GoalserveInplayClient` demand-driven 轮询（无独立配置项，按 tracked market 需求自动决定轮询哪些 sport）。
 
 **Livescore getfeed（`goalserve_livescore_sports` 配置）**：cricket、handball、rugby、boxing、mma、golf\_pga/dp/liv/lpga、horse\_racing\_us/uk/au/hk、f1、motogp。
 
@@ -145,7 +145,7 @@ runtime -> domain
 - 新增运动 parser 必须：① domain 加对应 GameState；② parsers 文件加 sport parser；③ `_SPORT_PARSERS` / `_SPORT_PATHS` 注册；④ config 默认值加入；⑤ 补测试。缺任何一步均为未完成。
 - API key 只存 `.env` 的 `GOALSERVE_API_KEY`，不进代码仓库和文档。
 - Pregame 数据量极大（>100MB），默认关闭（`goalserve_pregame_enabled=false`）；启用时必须用 `ts` 增量拉取，不允许无限循环全量请求。
-- Inplay WS 每个运动维护独立后台 Task；stp=99（removed）的赛事立即停止；`events_seen=0` 且 `health=success_empty` 表示 WS 连通但无 inplay 数据——此时以 livescore getfeed 为主要比分源，不影响交易。
+- Inplay GZIP feed 每个运动维护独立后台轮询 Task（同 sport ~1 请求/秒硬限流，超速 HTTP 429 → 该 sport 单独退避）；feed 完整结构与字段以 `goalserve/inplay-feed-new.txt` 为准；`core.removed="1"` 的赛事立即标记 CANCELLED；`events_seen=0` 且 `health=success_empty` 表示 feed 连通但无 inplay 数据——此时以 livescore getfeed 为主要比分源，不影响交易。
 - **无效接口处理原则**：发现代码中有 403/无数据接口，查阅 `goalserve/full_package_feed.txt` 和代码确认实际有效替代；有替代则更新接口和文档，无替代则删除死代码并在此注明原因，不保留会误导排查的旧 URL。
 
 ## 10. 实盘策略演化
@@ -202,7 +202,7 @@ runtime -> domain
 Goalserve 覆盖面极广，任何主要联赛/赛事在 Goalserve 上几乎必然有数据。如果发现某场比赛在 Goalserve 中找不到对应的实时直播数据（`missing_live_game_state`、源匹配失败等），**首先假定是我们这边的问题**，而不是 Goalserve 没数据，需要排查以下几点：
 
 1. **路由问题**：该运动的 feed 路径是否正确配置（inplay vs livescore vs getfeed）？
-2. **认证/网络**：inplay WS token 是否正常刷新（`live.goalserve.com/api/v1/auth/gettoken`，429 = 系统已占用 token 槽）？livescore API key 是否有效？
+2. **认证/网络**：inplay GZIP feed 出口 IP 是否在白名单（`GOALSERVE_PROXY` 是否可达，HTTP 429 = 同 sport 轮询超速、属正常退避不是故障）？livescore API key 是否有效？
 3. **解析问题**：parser 是否正确处理了该运动的 XML/JSON 格式？是否静默丢弃了数据？
 4. **名称匹配**：团队名拼写/格式是否导致市场文本匹配失败？
 5. **时区/日期**：市场 slug 日期是否与事件实际 UTC 日期不一致（如午夜场次）？

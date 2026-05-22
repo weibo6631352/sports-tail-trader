@@ -1,0 +1,2131 @@
+{
+ "bm": "bet365",
+ "events": {
+  "133961356": {
+   "bonus": {},
+   "core": {
+    "blocked": "1",
+    "finished": "1",
+    "nc": "0",
+    "removed": "",
+    "safe": "",
+    "stopped": "1",
+    "updated": "22.05.2026 17:26:07",
+    "updated_ts": "1779470767035"
+   },
+   "extra": {
+    "0": {
+     "code": "252",
+     "minute": "2",
+     "value": "2' - 1st Corner - (JaPS II)"
+    },
+    "1": {
+     "code": "252",
+     "minute": "7",
+     "value": "7' - 2nd Corner - (JaPS II)"
+    },
+    "10": {
+     "code": "10",
+     "minute": "0",
+     "value": "30:00-39:59"
+    },
+    "11": {
+     "code": "12",
+     "minute": "42",
+     "value": "42' - Race to 5 Corners - (JaPS II)"
+    },
+    "12": {
+     "code": "252",
+     "minute": "42",
+     "value": "42' - 5th Corner - (JaPS II)"
+    },
+    "13": {
+     "code": "255",
+     "minute": "42",
+     "value": "42' - 3rd Goal - (JaPS II)"
+    },
+    "14": {
+     "code": "253",
+     "minute": "43",
+     "value": "43' - 1st Yellow Card - (JaPS II)"
+    },
+    "15": {
+     "code": "1",
+     "minute": "45",
+     "value": "Score After First Half - 1-2"
+    },
+    "16": {
+     "code": "10",
+     "minute": "0",
+     "value": "40:00-49:59"
+    },
+    "17": {
+     "code": "253",
+     "minute": "53",
+     "value": "53' - 2nd Yellow Card - (JaPS II)"
+    },
+    "18": {
+     "code": "252",
+     "minute": "56",
+     "value": "56' - 6th Corner - (JaPS II)"
+    },
+    "19": {
+     "code": "12",
+     "minute": "58",
+     "value": "58' - Race to 7 Corners - (JaPS II)"
+    },
+    "2": {
+     "code": "255",
+     "minute": "7",
+     "value": "7' - 1st Goal - (JaPS II)"
+    },
+    "20": {
+     "code": "252",
+     "minute": "58",
+     "value": "58' - 7th Corner - (JaPS II)"
+    },
+    "21": {
+     "code": "10",
+     "minute": "0",
+     "value": "50:00-59:59"
+    },
+    "22": {
+     "code": "255",
+     "minute": "62",
+     "value": "62' - 4th Goal - (RiPS)"
+    },
+    "23": {
+     "code": "255",
+     "minute": "68",
+     "value": "68' - 5th Goal - (RiPS)"
+    },
+    "24": {
+     "code": "10",
+     "minute": "0",
+     "value": "60:00-69:59"
+    },
+    "25": {
+     "code": "252",
+     "minute": "76",
+     "value": "76' - 8th Corner - (RiPS)"
+    },
+    "26": {
+     "code": "252",
+     "minute": "77",
+     "value": "77' - 9th Corner - (RiPS)"
+    },
+    "27": {
+     "code": "252",
+     "minute": "79",
+     "value": "79' - 10th Corner - (RiPS)"
+    },
+    "28": {
+     "code": "253",
+     "minute": "80",
+     "value": "80' - 3rd Yellow Card - (RiPS)"
+    },
+    "29": {
+     "code": "10",
+     "minute": "0",
+     "value": "70:00-79:59"
+    },
+    "3": {
+     "code": "10",
+     "minute": "0",
+     "value": "00:00-09:59"
+    },
+    "30": {
+     "code": "252",
+     "minute": "81",
+     "value": "81' - 11th Corner - (JaPS II)"
+    },
+    "31": {
+     "code": "252",
+     "minute": "85",
+     "value": "85' - 12th Corner - (RiPS)"
+    },
+    "32": {
+     "code": "255",
+     "minute": "93",
+     "value": "90+3' - 6th Goal - (RiPS)"
+    },
+    "33": {
+     "code": "2",
+     "minute": "90",
+     "value": "Score After Full Time - 4-2"
+    },
+    "34": {
+     "code": "10",
+     "minute": "0",
+     "value": "80:00-End"
+    },
+    "4": {
+     "code": "255",
+     "minute": "17",
+     "value": "17' - 2nd Goal - (RiPS)"
+    },
+    "5": {
+     "code": "10",
+     "minute": "0",
+     "value": "10:00-19:59"
+    },
+    "6": {
+     "code": "12",
+     "minute": "23",
+     "value": "23' - Race to 3 Corners - (JaPS II)"
+    },
+    "7": {
+     "code": "252",
+     "minute": "23",
+     "value": "23' - 3rd Corner - (JaPS II)"
+    },
+    "8": {
+     "code": "252",
+     "minute": "23",
+     "value": "23' - 4th Corner - (JaPS II)"
+    },
+    "9": {
+     "code": "10",
+     "minute": "0",
+     "value": "20:00-29:59"
+    }
+   },
+   "history": {},
+   "info": {
+    "ball_pos": null,
+    "bet365id": "194886335",
+    "id": "133961356",
+    "league": "Finland Kolmonen",
+    "league_id": "16309",
+    "mid": "9529345",
+    "minute": "90",
+    "name": "RiPS vs JaPS II",
+    "period": "Finished",
+    "score": "4:2",
+    "seconds": "90:00",
+    "sport": "soccer",
+    "start_date": "22.05.2026",
+    "start_time": "15:30",
+    "start_ts": "1779463800",
+    "start_ts_utc": "1779463800",
+    "state": "1017",
+    "state_info": null
+   },
+   "odds": {},
+   "stats": {
+    "0": {
+     "away": "JaPS II",
+     "home": "RiPS",
+     "name": "ITeam"
+    },
+    "1": {
+     "away": "2",
+     "home": "4",
+     "name": "IGoal"
+    },
+    "10": {
+     "away": "136",
+     "home": "116",
+     "name": "IAttacks"
+    },
+    "11": {
+     "away": "51",
+     "home": "49",
+     "name": "IDangerousAttacks"
+    },
+    "12": {
+     "away": "10",
+     "home": "8",
+     "name": "IOnTarget"
+    },
+    "13": {
+     "away": "5",
+     "home": "4",
+     "name": "IOffTarget"
+    },
+    "14": {
+     "away": "",
+     "home": "",
+     "name": "IPosession"
+    },
+    "15": {
+     "away": "2",
+     "home": "1",
+     "name": "IFirstHalfScore"
+    },
+    "16": {
+     "away": "2",
+     "home": "4",
+     "name": "IRegTimeScore"
+    },
+    "2": {
+     "away": "8",
+     "home": "4",
+     "name": "ICorner"
+    },
+    "3": {
+     "away": "2",
+     "home": "1",
+     "name": "IYellowCard"
+    },
+    "4": {
+     "away": "0",
+     "home": "0",
+     "name": "IRedCard"
+    },
+    "5": {
+     "away": "0",
+     "home": "0",
+     "name": "IThrowIn"
+    },
+    "6": {
+     "away": "0",
+     "home": "0",
+     "name": "IFreeKick"
+    },
+    "7": {
+     "away": "0",
+     "home": "0",
+     "name": "IGoalKick"
+    },
+    "8": {
+     "away": "0",
+     "home": "0",
+     "name": "IPenalty"
+    },
+    "9": {
+     "away": "2",
+     "home": "1",
+     "name": "ISubstitution"
+    }
+   },
+   "stream": "",
+   "sts": "On Target=8:10|Off Target=4:5|Attacks=116:136|Dangerous Attacks=49:51|16:30#-1=:|##-1=:|Possession %=:|20260522163000=:|CORNER=4:8|YELLOW_CARD=1:2|RED_CARD=0:0|",
+   "team_info": {
+    "away": {
+     "Serve": "",
+     "color": "",
+     "kit_color": "#0A0A0A,#C40010,#D446BA,#00C1BA,#C40010,#0046A8,#F0F0F0,#0A0A0A,#0A0A0A,#0A0A0A,#0A0A0A",
+     "name": "JaPS II",
+     "score": "2"
+    },
+    "home": {
+     "Serve": "",
+     "color": "",
+     "kit_color": "#0046A8,#0046A8,#0046A8,#00C1BA,#C40010,#0046A8,#0A0A0A,#0046A8,#0046A8,#0046A8,#0046A8",
+     "name": "RiPS",
+     "score": "4"
+    }
+   }
+  },
+  "133961409": {
+   "bonus": {},
+   "core": {
+    "blocked": "1",
+    "finished": "1",
+    "nc": "0",
+    "removed": "",
+    "safe": "",
+    "stopped": "1",
+    "updated": "22.05.2026 17:26:07",
+    "updated_ts": "1779470767136"
+   },
+   "extra": {
+    "0": {
+     "code": "252",
+     "minute": "4",
+     "value": "4' - 1st Corner - (HJK II (W)"
+    },
+    "1": {
+     "code": "10",
+     "minute": "0",
+     "value": "00:00-09:59"
+    },
+    "10": {
+     "code": "10",
+     "minute": "0",
+     "value": "30:00-39:59"
+    },
+    "11": {
+     "code": "252",
+     "minute": "46",
+     "value": "45+1' - 5th Corner - (FC Lahti (W)"
+    },
+    "12": {
+     "code": "1",
+     "minute": "45",
+     "value": "Score After First Half - 1-1"
+    },
+    "13": {
+     "code": "12",
+     "minute": "48",
+     "value": "48' - Race to 5 Corners - (HJK II (W)"
+    },
+    "14": {
+     "code": "252",
+     "minute": "48",
+     "value": "48' - 6th Corner - (HJK II (W)"
+    },
+    "15": {
+     "code": "10",
+     "minute": "0",
+     "value": "40:00-49:59"
+    },
+    "16": {
+     "code": "252",
+     "minute": "57",
+     "value": "57' - 7th Corner - (HJK II (W)"
+    },
+    "17": {
+     "code": "255",
+     "minute": "59",
+     "value": "59' - 3rd Goal - (HJK II (W))"
+    },
+    "18": {
+     "code": "10",
+     "minute": "0",
+     "value": "50:00-59:59"
+    },
+    "19": {
+     "code": "255",
+     "minute": "61",
+     "value": "61' - 4th Goal - (HJK II (W))"
+    },
+    "2": {
+     "code": "252",
+     "minute": "14",
+     "value": "14' - 2nd Corner - (HJK II (W)"
+    },
+    "20": {
+     "code": "12",
+     "minute": "63",
+     "value": "63' - Race to 7 Corners - (HJK II (W)"
+    },
+    "21": {
+     "code": "252",
+     "minute": "63",
+     "value": "63' - 8th Corner - (HJK II (W)"
+    },
+    "22": {
+     "code": "252",
+     "minute": "69",
+     "value": "69' - 9th Corner - (HJK II (W)"
+    },
+    "23": {
+     "code": "10",
+     "minute": "0",
+     "value": "60:00-69:59"
+    },
+    "24": {
+     "code": "255",
+     "minute": "72",
+     "value": "72' - 5th Goal - (HJK II (W))"
+    },
+    "25": {
+     "code": "10",
+     "minute": "0",
+     "value": "70:00-79:59"
+    },
+    "26": {
+     "code": "2",
+     "minute": "90",
+     "value": "Score After Full Time - 4-1"
+    },
+    "27": {
+     "code": "10",
+     "minute": "0",
+     "value": "80:00-End"
+    },
+    "3": {
+     "code": "10",
+     "minute": "0",
+     "value": "10:00-19:59"
+    },
+    "4": {
+     "code": "10",
+     "minute": "0",
+     "value": "20:00-29:59"
+    },
+    "5": {
+     "code": "255",
+     "minute": "31",
+     "value": "31' - 1st Goal - (FC Lahti (W))"
+    },
+    "6": {
+     "code": "12",
+     "minute": "35",
+     "value": "35' - Race to 3 Corners - (HJK II (W)"
+    },
+    "7": {
+     "code": "252",
+     "minute": "35",
+     "value": "35' - 3rd Corner - (HJK II (W)"
+    },
+    "8": {
+     "code": "255",
+     "minute": "35",
+     "value": "35' - 2nd Goal - (HJK II (W))"
+    },
+    "9": {
+     "code": "252",
+     "minute": "38",
+     "value": "38' - 4th Corner - (HJK II (W)"
+    }
+   },
+   "history": {},
+   "info": {
+    "ball_pos": null,
+    "bet365id": "194949596",
+    "id": "133961409",
+    "league": "Finland Ykkonen Women",
+    "league_id": "6382",
+    "mid": "9528942",
+    "minute": "90",
+    "name": "HJK II (W) vs FC Lahti (W)",
+    "period": "Finished",
+    "score": "4:1",
+    "seconds": "90:00",
+    "sport": "soccer",
+    "start_date": "22.05.2026",
+    "start_time": "15:30",
+    "start_ts": "1779463800",
+    "start_ts_utc": "1779463800",
+    "state": "1017",
+    "state_info": null
+   },
+   "odds": {},
+   "stats": {
+    "0": {
+     "away": "FC Lahti (W)",
+     "home": "HJK II (W)",
+     "name": "ITeam"
+    },
+    "1": {
+     "away": "1",
+     "home": "4",
+     "name": "IGoal"
+    },
+    "10": {
+     "away": "95",
+     "home": "102",
+     "name": "IAttacks"
+    },
+    "11": {
+     "away": "73",
+     "home": "78",
+     "name": "IDangerousAttacks"
+    },
+    "12": {
+     "away": "1",
+     "home": "4",
+     "name": "IOnTarget"
+    },
+    "13": {
+     "away": "3",
+     "home": "6",
+     "name": "IOffTarget"
+    },
+    "14": {
+     "away": "",
+     "home": "",
+     "name": "IPosession"
+    },
+    "15": {
+     "away": "1",
+     "home": "1",
+     "name": "IFirstHalfScore"
+    },
+    "16": {
+     "away": "1",
+     "home": "4",
+     "name": "IRegTimeScore"
+    },
+    "2": {
+     "away": "1",
+     "home": "8",
+     "name": "ICorner"
+    },
+    "3": {
+     "away": "0",
+     "home": "0",
+     "name": "IYellowCard"
+    },
+    "4": {
+     "away": "0",
+     "home": "0",
+     "name": "IRedCard"
+    },
+    "5": {
+     "away": "0",
+     "home": "0",
+     "name": "IThrowIn"
+    },
+    "6": {
+     "away": "0",
+     "home": "0",
+     "name": "IFreeKick"
+    },
+    "7": {
+     "away": "0",
+     "home": "0",
+     "name": "IGoalKick"
+    },
+    "8": {
+     "away": "0",
+     "home": "1",
+     "name": "IPenalty"
+    },
+    "9": {
+     "away": "2",
+     "home": "5",
+     "name": "ISubstitution"
+    }
+   },
+   "stream": "",
+   "sts": "On Target=4:1|Off Target=6:3|Attacks=102:95|Dangerous Attacks=78:73|16:30#-1=:|##-1=:|Possession %=:|20260522163000=:|CORNER=8:1|YELLOW_CARD=0:0|RED_CARD=0:0|",
+   "team_info": {
+    "away": {
+     "Serve": "",
+     "color": "",
+     "kit_color": "#0A0A0A,#0A0A0A,#0A0A0A,#0A0A0A,#C40010,#0046A8,#F0F0F0,#2B72DE,#679FEA,#2B72DE,#2B72DE",
+     "name": "FC Lahti (W)",
+     "score": "1"
+    },
+    "home": {
+     "Serve": "",
+     "color": "",
+     "kit_color": "#F0F0F0,#1515EA,#D446BA,#00C1BA,#C40010,#0046A8,#0046A8,#0A0A0A,#0A0A0A,#0A0A0A,#0A0A0A",
+     "name": "HJK II (W)",
+     "score": "4"
+    }
+   }
+  },
+  "133998191": {
+   "bonus": {},
+   "core": {
+    "blocked": "0",
+    "finished": "0",
+    "nc": "0",
+    "removed": "",
+    "safe": "",
+    "stopped": "0",
+    "updated": "22.05.2026 17:26:26",
+    "updated_ts": "1779470786446"
+   },
+   "extra": {
+    "0": {
+     "code": "252",
+     "minute": "8",
+     "value": "8' - 1st Corner - (Al Ain SCC)"
+    },
+    "1": {
+     "code": "255",
+     "minute": "11",
+     "value": "11' - 1st Goal - (Al Jazira SC)"
+    },
+    "10": {
+     "code": "12",
+     "minute": "39",
+     "value": "39' - Race to 3 Corners - (Al Ain SCC)"
+    },
+    "11": {
+     "code": "10",
+     "minute": "0",
+     "value": "30:00-39:59"
+    },
+    "12": {
+     "code": "255",
+     "minute": "44",
+     "value": "44' - 4th Goal - (Al Ain SCC)"
+    },
+    "13": {
+     "code": "1",
+     "minute": "45",
+     "value": "Score After First Half - 1-3"
+    },
+    "14": {
+     "code": "10",
+     "minute": "0",
+     "value": "40:00-49:59"
+    },
+    "15": {
+     "code": "253",
+     "minute": "55",
+     "value": "55' - 1st Yellow Card - (Al Jazira SC)"
+    },
+    "16": {
+     "code": "253",
+     "minute": "56",
+     "value": "56' - 2nd Yellow Card - (Al Ain SCC)"
+    },
+    "17": {
+     "code": "10",
+     "minute": "0",
+     "value": "50:00-59:59"
+    },
+    "18": {
+     "code": "10",
+     "minute": "0",
+     "value": "60:00-69:59"
+    },
+    "19": {
+     "code": "253",
+     "minute": "72",
+     "value": "72' - 3rd Yellow Card - (Al Jazira SC)"
+    },
+    "2": {
+     "code": "10",
+     "minute": "0",
+     "value": "00:00-09:59"
+    },
+    "20": {
+     "code": "10",
+     "minute": "0",
+     "value": "70:00-79:59"
+    },
+    "21": {
+     "code": "252",
+     "minute": "82",
+     "value": "82' - 5th Corner - (Al Jazira SC)"
+    },
+    "3": {
+     "code": "255",
+     "minute": "15",
+     "value": "15' - 2nd Goal - (Al Ain SCC)"
+    },
+    "4": {
+     "code": "252",
+     "minute": "20",
+     "value": "20' - 2nd Corner - (Al Jazira SC)"
+    },
+    "5": {
+     "code": "255",
+     "minute": "20",
+     "value": "20' - 3rd Goal - (Al Ain SCC)"
+    },
+    "6": {
+     "code": "10",
+     "minute": "0",
+     "value": "10:00-19:59"
+    },
+    "7": {
+     "code": "10",
+     "minute": "0",
+     "value": "20:00-29:59"
+    },
+    "8": {
+     "code": "252",
+     "minute": "35",
+     "value": "35' - 3rd Corner - (Al Ain SCC)"
+    },
+    "9": {
+     "code": "252",
+     "minute": "39",
+     "value": "39' - 4th Corner - (Al Ain SCC)"
+    }
+   },
+   "history": {},
+   "info": {
+    "ball_pos": "0.9,0.71",
+    "bet365id": "194865950",
+    "id": "133998191",
+    "league": "UAE Cup",
+    "league_id": "3059",
+    "mid": "9529786",
+    "minute": "82",
+    "name": "Al Jazira SC vs Al Ain SCC",
+    "period": "2nd Half",
+    "score": "1:3",
+    "seconds": "81:35",
+    "sport": "soccer",
+    "start_date": "22.05.2026",
+    "start_time": "15:40",
+    "start_ts": "1779464400",
+    "start_ts_utc": "1779464400",
+    "state": "21002",
+    "state_info": "Y Ben Khaleq"
+   },
+   "odds": {
+    "1": {
+     "id": 1,
+     "name": "Home Team Goals",
+     "order": "",
+     "participants": {
+      "13399819110": {
+       "handicap": "1.5",
+       "id": "13399819110",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "3.75"
+      },
+      "13399819111": {
+       "handicap": "1.5",
+       "id": "13399819111",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.25"
+      },
+      "13399819112": {
+       "handicap": "2.5",
+       "id": "13399819112",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "13"
+      },
+      "13399819113": {
+       "handicap": "2.5",
+       "id": "13399819113",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.012"
+      }
+     },
+     "short_name": "Home Team Goals",
+     "suspend": "0"
+    },
+    "10001": {
+     "id": 10001,
+     "name": "Final Score",
+     "order": "",
+     "participants": {
+      "133998191100010": {
+       "id": "133998191100010",
+       "name": "1-0",
+       "short_name": "1-0",
+       "suspend": "1",
+       "value_eu": "10"
+      },
+      "133998191100011": {
+       "id": "133998191100011",
+       "name": "2-0",
+       "short_name": "2-0",
+       "suspend": "1",
+       "value_eu": "11"
+      },
+      "1339981911000110": {
+       "id": "1339981911000110",
+       "name": "5-0",
+       "short_name": "5-0",
+       "suspend": "1",
+       "value_eu": "81"
+      },
+      "1339981911000111": {
+       "id": "1339981911000111",
+       "name": "5-1",
+       "short_name": "5-1",
+       "suspend": "1",
+       "value_eu": "81"
+      },
+      "1339981911000112": {
+       "id": "1339981911000112",
+       "name": "5-2",
+       "short_name": "5-2",
+       "suspend": "1",
+       "value_eu": "81"
+      },
+      "1339981911000113": {
+       "id": "1339981911000113",
+       "name": "0-0",
+       "short_name": "0-0",
+       "suspend": "1",
+       "value_eu": "11"
+      },
+      "1339981911000114": {
+       "id": "1339981911000114",
+       "name": "1-1",
+       "short_name": "1-1",
+       "suspend": "1",
+       "value_eu": "8.5"
+      },
+      "1339981911000115": {
+       "id": "1339981911000115",
+       "name": "2-2",
+       "short_name": "2-2",
+       "suspend": "1",
+       "value_eu": "7"
+      },
+      "1339981911000116": {
+       "id": "1339981911000116",
+       "name": "3-3",
+       "short_name": "3-3",
+       "suspend": "0",
+       "value_eu": "29"
+      },
+      "1339981911000117": {
+       "id": "1339981911000117",
+       "name": "0-1",
+       "short_name": "0-1",
+       "suspend": "1",
+       "value_eu": "8"
+      },
+      "1339981911000118": {
+       "id": "1339981911000118",
+       "name": "0-2",
+       "short_name": "0-2",
+       "suspend": "1",
+       "value_eu": "10"
+      },
+      "1339981911000119": {
+       "id": "1339981911000119",
+       "name": "1-2",
+       "short_name": "1-2",
+       "suspend": "1",
+       "value_eu": "6.5"
+      },
+      "133998191100012": {
+       "id": "133998191100012",
+       "name": "2-1",
+       "short_name": "2-1",
+       "suspend": "1",
+       "value_eu": "9"
+      },
+      "1339981911000120": {
+       "id": "1339981911000120",
+       "name": "0-3",
+       "short_name": "0-3",
+       "suspend": "1",
+       "value_eu": "19"
+      },
+      "1339981911000121": {
+       "id": "1339981911000121",
+       "name": "1-3",
+       "short_name": "1-3",
+       "suspend": "0",
+       "value_eu": "1.727"
+      },
+      "1339981911000122": {
+       "id": "1339981911000122",
+       "name": "2-3",
+       "short_name": "2-3",
+       "suspend": "0",
+       "value_eu": "5"
+      },
+      "1339981911000123": {
+       "id": "1339981911000123",
+       "name": "0-4",
+       "short_name": "0-4",
+       "suspend": "1",
+       "value_eu": "41"
+      },
+      "1339981911000124": {
+       "id": "1339981911000124",
+       "name": "1-4",
+       "short_name": "1-4",
+       "suspend": "0",
+       "value_eu": "4"
+      },
+      "1339981911000125": {
+       "id": "1339981911000125",
+       "name": "2-4",
+       "short_name": "2-4",
+       "suspend": "0",
+       "value_eu": "15"
+      },
+      "1339981911000126": {
+       "id": "1339981911000126",
+       "name": "3-4",
+       "short_name": "3-4",
+       "suspend": "0",
+       "value_eu": "51"
+      },
+      "1339981911000127": {
+       "id": "1339981911000127",
+       "name": "0-5",
+       "short_name": "0-5",
+       "suspend": "1",
+       "value_eu": "67"
+      },
+      "1339981911000128": {
+       "id": "1339981911000128",
+       "name": "1-5",
+       "short_name": "1-5",
+       "suspend": "0",
+       "value_eu": "21"
+      },
+      "1339981911000129": {
+       "id": "1339981911000129",
+       "name": "2-5",
+       "short_name": "2-5",
+       "suspend": "0",
+       "value_eu": "51"
+      },
+      "133998191100013": {
+       "id": "133998191100013",
+       "name": "3-0",
+       "short_name": "3-0",
+       "suspend": "1",
+       "value_eu": "19"
+      },
+      "1339981911000130": {
+       "id": "1339981911000130",
+       "name": "1-6",
+       "short_name": "1-6",
+       "suspend": "0",
+       "value_eu": "67"
+      },
+      "1339981911000131": {
+       "id": "1339981911000131",
+       "name": "4-4",
+       "short_name": "4-4",
+       "suspend": "1",
+       "value_eu": "101"
+      },
+      "1339981911000132": {
+       "id": "1339981911000132",
+       "name": "5-3",
+       "short_name": "5-3",
+       "suspend": "1",
+       "value_eu": "126"
+      },
+      "1339981911000133": {
+       "id": "1339981911000133",
+       "name": "6-1",
+       "short_name": "6-1",
+       "suspend": "1",
+       "value_eu": "126"
+      },
+      "1339981911000134": {
+       "id": "1339981911000134",
+       "name": "3-5",
+       "short_name": "3-5",
+       "suspend": "1",
+       "value_eu": "101"
+      },
+      "1339981911000135": {
+       "id": "1339981911000135",
+       "name": "2-6",
+       "short_name": "2-6",
+       "suspend": "1",
+       "value_eu": "101"
+      },
+      "1339981911000136": {
+       "id": "1339981911000136",
+       "name": "5-4",
+       "short_name": "5-4",
+       "suspend": "1",
+       "value_eu": "126"
+      },
+      "1339981911000137": {
+       "id": "1339981911000137",
+       "name": "4-5",
+       "short_name": "4-5",
+       "suspend": "1",
+       "value_eu": "101"
+      },
+      "1339981911000138": {
+       "id": "1339981911000138",
+       "name": "3-6",
+       "short_name": "3-6",
+       "suspend": "1",
+       "value_eu": "126"
+      },
+      "1339981911000139": {
+       "id": "1339981911000139",
+       "name": "1-7",
+       "short_name": "1-7",
+       "suspend": "1",
+       "value_eu": "101"
+      },
+      "133998191100014": {
+       "id": "133998191100014",
+       "name": "3-1",
+       "short_name": "3-1",
+       "suspend": "1",
+       "value_eu": "17"
+      },
+      "1339981911000140": {
+       "id": "1339981911000140",
+       "name": "2-7",
+       "short_name": "2-7",
+       "suspend": "1",
+       "value_eu": "126"
+      },
+      "1339981911000141": {
+       "id": "1339981911000141",
+       "name": "4-6",
+       "short_name": "4-6",
+       "suspend": "1",
+       "value_eu": "126"
+      },
+      "1339981911000142": {
+       "id": "1339981911000142",
+       "name": "3-7",
+       "short_name": "3-7",
+       "suspend": "1",
+       "value_eu": "126"
+      },
+      "1339981911000143": {
+       "id": "1339981911000143",
+       "name": "5-5",
+       "short_name": "5-5",
+       "suspend": "1",
+       "value_eu": "51"
+      },
+      "1339981911000144": {
+       "id": "1339981911000144",
+       "name": "1-8",
+       "short_name": "1-8",
+       "suspend": "1",
+       "value_eu": "126"
+      },
+      "1339981911000145": {
+       "id": "1339981911000145",
+       "name": "2-8",
+       "short_name": "2-8",
+       "suspend": "1",
+       "value_eu": "126"
+      },
+      "1339981911000146": {
+       "id": "1339981911000146",
+       "name": "6-3",
+       "short_name": "6-3",
+       "suspend": "1",
+       "value_eu": "81"
+      },
+      "1339981911000147": {
+       "id": "1339981911000147",
+       "name": "6-4",
+       "short_name": "6-4",
+       "suspend": "1",
+       "value_eu": "81"
+      },
+      "1339981911000148": {
+       "id": "1339981911000148",
+       "name": "6-5",
+       "short_name": "6-5",
+       "suspend": "1",
+       "value_eu": "126"
+      },
+      "1339981911000149": {
+       "id": "1339981911000149",
+       "name": "5-6",
+       "short_name": "5-6",
+       "suspend": "1",
+       "value_eu": "101"
+      },
+      "133998191100015": {
+       "id": "133998191100015",
+       "name": "3-2",
+       "short_name": "3-2",
+       "suspend": "1",
+       "value_eu": "15"
+      },
+      "1339981911000150": {
+       "id": "1339981911000150",
+       "name": "4-7",
+       "short_name": "4-7",
+       "suspend": "1",
+       "value_eu": "101"
+      },
+      "1339981911000151": {
+       "id": "1339981911000151",
+       "name": "3-8",
+       "short_name": "3-8",
+       "suspend": "1",
+       "value_eu": "126"
+      },
+      "133998191100016": {
+       "id": "133998191100016",
+       "name": "4-0",
+       "short_name": "4-0",
+       "suspend": "1",
+       "value_eu": "41"
+      },
+      "133998191100017": {
+       "id": "133998191100017",
+       "name": "4-1",
+       "short_name": "4-1",
+       "suspend": "1",
+       "value_eu": "41"
+      },
+      "133998191100018": {
+       "id": "133998191100018",
+       "name": "4-2",
+       "short_name": "4-2",
+       "suspend": "1",
+       "value_eu": "34"
+      },
+      "133998191100019": {
+       "id": "133998191100019",
+       "name": "4-3",
+       "short_name": "4-3",
+       "suspend": "1",
+       "value_eu": "101"
+      }
+     },
+     "short_name": "Final Score",
+     "suspend": "0"
+    },
+    "1001": {
+     "id": 1001,
+     "name": "How many goals will Home Team score?",
+     "order": "",
+     "participants": {
+      "13399819110010": {
+       "id": "13399819110010",
+       "name": "No goal",
+       "short_name": "No goal",
+       "suspend": "1",
+       "value_eu": "3"
+      },
+      "13399819110011": {
+       "id": "13399819110011",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "0",
+       "value_eu": "1.25"
+      },
+      "13399819110012": {
+       "id": "13399819110012",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "0",
+       "value_eu": "4"
+      },
+      "13399819110013": {
+       "id": "13399819110013",
+       "name": "3 or more",
+       "short_name": "3 or more",
+       "suspend": "0",
+       "value_eu": "13"
+      }
+     },
+     "short_name": "How many goals will Home Team score?",
+     "suspend": "0"
+    },
+    "1017": {
+     "id": 1017,
+     "name": "Which team will score the 5th goal?",
+     "order": "",
+     "participants": {
+      "13399819110170": {
+       "id": "13399819110170",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "0",
+       "value_eu": "4.333"
+      },
+      "13399819110171": {
+       "id": "13399819110171",
+       "name": "No goal",
+       "short_name": "No goal",
+       "suspend": "0",
+       "value_eu": "1.727"
+      },
+      "13399819110172": {
+       "id": "13399819110172",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "0",
+       "value_eu": "3.4"
+      }
+     },
+     "short_name": "Which team will score the 5th goal?",
+     "suspend": "0"
+    },
+    "10562": {
+     "id": 10562,
+     "name": "Goals Odd/Even",
+     "order": "",
+     "participants": {
+      "133998191105620": {
+       "id": "133998191105620",
+       "name": "Odd",
+       "short_name": "Odd",
+       "suspend": "0",
+       "value_eu": "2.5"
+      },
+      "133998191105621": {
+       "id": "133998191105621",
+       "name": "Even",
+       "short_name": "Even",
+       "suspend": "0",
+       "value_eu": "1.5"
+      }
+     },
+     "short_name": "Goals Odd/Even",
+     "suspend": "0"
+    },
+    "11": {
+     "id": 11,
+     "name": "3-Way Handicap",
+     "order": "",
+     "participants": {
+      "133998191110": {
+       "handicap": "3",
+       "id": "133998191110",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.222"
+      },
+      "133998191111": {
+       "handicap": "-3",
+       "id": "133998191111",
+       "is_main": "0",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "0",
+       "value_eu": "4"
+      },
+      "1339981911110": {
+       "handicap": "-2",
+       "id": "1339981911110",
+       "is_main": "1",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "0",
+       "value_eu": "1.571"
+      },
+      "1339981911111": {
+       "handicap": "-2",
+       "id": "1339981911111",
+       "is_main": "1",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "3.6"
+      },
+      "133998191112": {
+       "handicap": "-3",
+       "id": "133998191112",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "21"
+      },
+      "133998191113": {
+       "handicap": "1",
+       "id": "133998191113",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "23"
+      },
+      "133998191114": {
+       "handicap": "-1",
+       "id": "133998191114",
+       "is_main": "0",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "0",
+       "value_eu": "5"
+      },
+      "133998191115": {
+       "handicap": "-1",
+       "id": "133998191115",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.166"
+      },
+      "133998191116": {
+       "handicap": "4",
+       "id": "133998191116",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.02"
+      },
+      "133998191117": {
+       "handicap": "-4",
+       "id": "133998191117",
+       "is_main": "0",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "0",
+       "value_eu": "21"
+      },
+      "133998191118": {
+       "handicap": "-4",
+       "id": "133998191118",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "67"
+      },
+      "133998191119": {
+       "handicap": "2",
+       "id": "133998191119",
+       "is_main": "1",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "4.75"
+      }
+     },
+     "short_name": "3-Way Handicap",
+     "suspend": "0"
+    },
+    "12": {
+     "id": 12,
+     "name": "Asian Handicap",
+     "order": "",
+     "participants": {
+      "133998191120": {
+       "handicap": "1.5",
+       "id": "133998191120",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "4.8"
+      },
+      "133998191121": {
+       "handicap": "-1.5",
+       "id": "133998191121",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.175"
+      },
+      "133998191122": {
+       "handicap": "2.25",
+       "id": "133998191122",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.425"
+      },
+      "133998191123": {
+       "handicap": "-2.25",
+       "id": "133998191123",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "2.75"
+      },
+      "133998191124": {
+       "handicap": "2",
+       "id": "133998191124",
+       "is_main": "1",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "2.15"
+      },
+      "133998191125": {
+       "handicap": "-2",
+       "id": "133998191125",
+       "is_main": "1",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.675"
+      },
+      "133998191126": {
+       "handicap": "2.5",
+       "id": "133998191126",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.25"
+      },
+      "133998191127": {
+       "handicap": "-2.5",
+       "id": "133998191127",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "3.8"
+      },
+      "133998191128": {
+       "handicap": "1.75",
+       "id": "133998191128",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "3.55"
+      },
+      "133998191129": {
+       "handicap": "-1.75",
+       "id": "133998191129",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.275"
+      }
+     },
+     "short_name": "Asian Handicap",
+     "suspend": "0"
+    },
+    "16": {
+     "id": 16,
+     "name": "Match Corners",
+     "order": "",
+     "participants": {
+      "133998191160": {
+       "handicap": "8",
+       "id": "133998191160",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "1",
+       "value_eu": "13"
+      },
+      "133998191161": {
+       "handicap": "8",
+       "id": "133998191161",
+       "name": "Exactly",
+       "short_name": "Exactly",
+       "suspend": "1",
+       "value_eu": "6.5"
+      },
+      "133998191162": {
+       "handicap": "8",
+       "id": "133998191162",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "1.166"
+      },
+      "133998191163": {
+       "handicap": "7",
+       "id": "133998191163",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "1",
+       "value_eu": "5"
+      },
+      "133998191164": {
+       "handicap": "7",
+       "id": "133998191164",
+       "name": "Exactly",
+       "short_name": "Exactly",
+       "suspend": "1",
+       "value_eu": "3.6"
+      },
+      "133998191165": {
+       "handicap": "7",
+       "id": "133998191165",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "1.615"
+      },
+      "133998191166": {
+       "handicap": "6",
+       "id": "133998191166",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "1",
+       "value_eu": "2.2"
+      },
+      "133998191167": {
+       "handicap": "6",
+       "id": "133998191167",
+       "name": "Exactly",
+       "short_name": "Exactly",
+       "suspend": "1",
+       "value_eu": "2.75"
+      },
+      "133998191168": {
+       "handicap": "6",
+       "id": "133998191168",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "3.75"
+      }
+     },
+     "short_name": "Match Corners",
+     "suspend": "1"
+    },
+    "1777": {
+     "id": 1777,
+     "name": "Fulltime Result",
+     "order": "",
+     "participants": {
+      "13399819117770": {
+       "id": "13399819117770",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "41"
+      },
+      "13399819117771": {
+       "id": "13399819117771",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "0",
+       "value_eu": "23"
+      },
+      "13399819117772": {
+       "id": "13399819117772",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.012"
+      }
+     },
+     "short_name": "Fulltime Result",
+     "suspend": "0"
+    },
+    "2": {
+     "id": 2,
+     "name": "Away Team Goals",
+     "order": "",
+     "participants": {
+      "13399819120": {
+       "handicap": "4.5",
+       "id": "13399819120",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "10.5"
+      },
+      "13399819121": {
+       "handicap": "4.5",
+       "id": "13399819121",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.025"
+      },
+      "13399819122": {
+       "handicap": "3.5",
+       "id": "13399819122",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "3.25"
+      },
+      "13399819123": {
+       "handicap": "3.5",
+       "id": "13399819123",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.333"
+      }
+     },
+     "short_name": "Away Team Goals",
+     "suspend": "0"
+    },
+    "318": {
+     "id": 318,
+     "name": "Both Teams To Score (2nd Half)",
+     "order": "",
+     "participants": {
+      "1339981913180": {
+       "id": "1339981913180",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "9"
+      },
+      "1339981913181": {
+       "id": "1339981913181",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.04"
+      }
+     },
+     "short_name": "Both Teams To Score (2nd Half)",
+     "suspend": "0"
+    },
+    "421": {
+     "id": 421,
+     "name": "Match Goals",
+     "order": "",
+     "participants": {
+      "1339981914210": {
+       "handicap": "6.5",
+       "id": "1339981914210",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "15"
+      },
+      "1339981914211": {
+       "handicap": "6.5",
+       "id": "1339981914211",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.01"
+      },
+      "1339981914212": {
+       "handicap": "5.5",
+       "id": "1339981914212",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "7"
+      },
+      "1339981914213": {
+       "handicap": "5.5",
+       "id": "1339981914213",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.083"
+      },
+      "1339981914214": {
+       "handicap": "4.5",
+       "id": "1339981914214",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "2"
+      },
+      "1339981914215": {
+       "handicap": "4.5",
+       "id": "1339981914215",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.727"
+      }
+     },
+     "short_name": "Match Goals",
+     "suspend": "0"
+    },
+    "44": {
+     "id": 44,
+     "name": "Last Team to Score (3 way)",
+     "order": "",
+     "participants": {
+      "133998191440": {
+       "id": "133998191440",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "0",
+       "value_eu": "4.333"
+      },
+      "133998191441": {
+       "id": "133998191441",
+       "name": "No goal",
+       "short_name": "No goal",
+       "suspend": "1",
+       "value_eu": "11"
+      },
+      "133998191442": {
+       "id": "133998191442",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "0",
+       "value_eu": "1.2"
+      }
+     },
+     "short_name": "Last Team to Score (3 way)",
+     "suspend": "0"
+    },
+    "50246": {
+     "id": 50246,
+     "name": "To Win 2nd Half",
+     "order": "",
+     "participants": {
+      "133998191502460": {
+       "id": "133998191502460",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "4.75"
+      },
+      "133998191502461": {
+       "id": "133998191502461",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "0",
+       "value_eu": "1.571"
+      },
+      "133998191502462": {
+       "id": "133998191502462",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "3.6"
+      }
+     },
+     "short_name": "To Win 2nd Half",
+     "suspend": "0"
+    },
+    "520": {
+     "id": 520,
+     "name": "Total Corners",
+     "order": "",
+     "participants": {
+      "1339981915200": {
+       "handicap": "6.5",
+       "id": "1339981915200",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "1",
+       "value_eu": "2.2"
+      },
+      "1339981915201": {
+       "handicap": "6.5",
+       "id": "1339981915201",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "1.615"
+      }
+     },
+     "short_name": "Total Corners",
+     "suspend": "1"
+    },
+    "90006": {
+     "id": 90006,
+     "name": "Asian Corners",
+     "order": "",
+     "participants": {
+      "133998191900060": {
+       "handicap": "6.5",
+       "id": "133998191900060",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "1",
+       "value_eu": "2.25"
+      },
+      "133998191900061": {
+       "handicap": "6.5",
+       "id": "133998191900061",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "1",
+       "value_eu": "1.625"
+      }
+     },
+     "short_name": "Asian Corners",
+     "suspend": "1"
+    },
+    "90008": {
+     "id": 90008,
+     "name": "Over/Under Line",
+     "order": "",
+     "participants": {
+      "133998191900080": {
+       "handicap": "4.5",
+       "id": "133998191900080",
+       "is_main": "1",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "2.05"
+      },
+      "133998191900081": {
+       "handicap": "4.5",
+       "id": "133998191900081",
+       "is_main": "1",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.75"
+      },
+      "133998191900082": {
+       "handicap": "5",
+       "id": "133998191900082",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "5"
+      },
+      "133998191900083": {
+       "handicap": "5",
+       "id": "133998191900083",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.17"
+      },
+      "133998191900084": {
+       "handicap": "4.75",
+       "id": "133998191900084",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "2.675"
+      },
+      "133998191900085": {
+       "handicap": "4.75",
+       "id": "133998191900085",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.45"
+      }
+     },
+     "short_name": "Over/Under Line",
+     "suspend": "0"
+    },
+    "90307": {
+     "id": 90307,
+     "name": "Home Team Score a Goal (2nd Half)",
+     "order": "",
+     "participants": {
+      "133998191903070": {
+       "id": "133998191903070",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "3.75"
+      },
+      "133998191903071": {
+       "id": "133998191903071",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.25"
+      }
+     },
+     "short_name": "Home Team Score a Goal (2nd Half)",
+     "suspend": "0"
+    },
+    "90308": {
+     "id": 90308,
+     "name": "Away Team Score a Goal (2nd Half)",
+     "order": "",
+     "participants": {
+      "133998191903080": {
+       "id": "133998191903080",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "3.25"
+      },
+      "133998191903081": {
+       "id": "133998191903081",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.333"
+      }
+     },
+     "short_name": "Away Team Score a Goal (2nd Half)",
+     "suspend": "0"
+    },
+    "91001": {
+     "id": 91001,
+     "name": "Last Corner",
+     "order": "",
+     "participants": {
+      "133998191910010": {
+       "id": "133998191910010",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "1",
+       "value_eu": "1.333"
+      },
+      "133998191910011": {
+       "id": "133998191910011",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "1",
+       "value_eu": "3.25"
+      }
+     },
+     "short_name": "Last Corner",
+     "suspend": "0"
+    },
+    "9200426": {
+     "id": 9200426,
+     "name": "Which team will score the 7th corner? (2 Way)",
+     "order": "",
+     "participants": {
+      "13399819192004260": {
+       "id": "13399819192004260",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "1",
+       "value_eu": "1.533"
+      },
+      "13399819192004261": {
+       "id": "13399819192004261",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "1",
+       "value_eu": "2.375"
+      }
+     },
+     "short_name": "Which team will score the 7th corner? (2 Way)",
+     "suspend": "0"
+    },
+    "9200439": {
+     "id": 9200439,
+     "name": "Race to the 5th corner?",
+     "order": "",
+     "participants": {
+      "13399819192004390": {
+       "id": "13399819192004390",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "1",
+       "value_eu": "10"
+      },
+      "13399819192004391": {
+       "id": "13399819192004391",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "1",
+       "value_eu": "6.5"
+      },
+      "13399819192004392": {
+       "id": "13399819192004392",
+       "name": "Neither",
+       "short_name": "Neither",
+       "suspend": "1",
+       "value_eu": "1.166"
+      }
+     },
+     "short_name": "Race to the 5th corner?",
+     "suspend": "0"
+    },
+    "9200441": {
+     "id": 9200441,
+     "name": "Race to the 7th corner?",
+     "order": "",
+     "participants": {
+      "13399819192004410": {
+       "id": "13399819192004410",
+       "name": "1",
+       "short_name": "1",
+       "suspend": "1",
+       "value_eu": "26"
+      },
+      "13399819192004411": {
+       "id": "13399819192004411",
+       "name": "2",
+       "short_name": "2",
+       "suspend": "1",
+       "value_eu": "26"
+      },
+      "13399819192004412": {
+       "id": "13399819192004412",
+       "name": "Neither",
+       "short_name": "Neither",
+       "suspend": "1",
+       "value_eu": "1.008"
+      }
+     },
+     "short_name": "Race to the 7th corner?",
+     "suspend": "0"
+    }
+   },
+   "stats": {
+    "0": {
+     "away": "Al Ain SCC",
+     "home": "Al Jazira SC",
+     "name": "ITeam"
+    },
+    "1": {
+     "away": "3",
+     "home": "1",
+     "name": "IGoal"
+    },
+    "10": {
+     "away": "58",
+     "home": "76",
+     "name": "IAttacks"
+    },
+    "11": {
+     "away": "36",
+     "home": "28",
+     "name": "IDangerousAttacks"
+    },
+    "12": {
+     "away": "10",
+     "home": "2",
+     "name": "IOnTarget"
+    },
+    "13": {
+     "away": "6",
+     "home": "3",
+     "name": "IOffTarget"
+    },
+    "14": {
+     "away": "50",
+     "home": "50",
+     "name": "IPosession"
+    },
+    "15": {
+     "away": "3",
+     "home": "1",
+     "name": "IFirstHalfScore"
+    },
+    "2": {
+     "away": "3",
+     "home": "2",
+     "name": "ICorner"
+    },
+    "3": {
+     "away": "1",
+     "home": "2",
+     "name": "IYellowCard"
+    },
+    "4": {
+     "away": "0",
+     "home": "0",
+     "name": "IRedCard"
+    },
+    "5": {
+     "away": "0",
+     "home": "0",
+     "name": "IThrowIn"
+    },
+    "6": {
+     "away": "0",
+     "home": "0",
+     "name": "IFreeKick"
+    },
+    "7": {
+     "away": "0",
+     "home": "0",
+     "name": "IGoalKick"
+    },
+    "8": {
+     "away": "0",
+     "home": "0",
+     "name": "IPenalty"
+    },
+    "9": {
+     "away": "2",
+     "home": "5",
+     "name": "ISubstitution"
+    }
+   },
+   "stream": "",
+   "sts": "On Target=2:10|Off Target=3:6|Attacks=76:58|Dangerous Attacks=28:36|16:40#-1=:|##-1=:|Possession %=50:50|20260522164000=:|INFO=Y Ben Khaleq|CORNER=2:3|YELLOW_CARD=2:1|RED_CARD=0:0|",
+   "team_info": {
+    "away": {
+     "Serve": "",
+     "color": "",
+     "kit_color": "#F0F0F0,#F0F0F0,#013D38,#013D38,#C40010,#0046A8,#0A0A0A,#7C45CA,#7C45CA,#7C45CA,#7C45CA",
+     "name": "Al Ain SCC",
+     "score": "3"
+    },
+    "home": {
+     "Serve": "",
+     "color": "",
+     "kit_color": "#F0F0F0,#940014,#F0F0F0,#F0F0F0,#316F37,#0046A8,#F0F0F0,#F0F0F0,#0A0A0A,#0A0A0A,#F0F0F0",
+     "name": "Al Jazira SC",
+     "score": "1"
+    }
+   }
+  }
+ },
+ "updated": "05.22.2026 17:26:33",
+ "updated_ts": 1779470793001
+}

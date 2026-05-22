@@ -115,9 +115,9 @@ class Settings(BaseSettings):
     sports_live_state_health_cooldown_base_s: float = Field(default=60.0, ge=1.0)
     sports_live_state_health_eviction_s: float = Field(default=1800.0, ge=60.0)
 
-    # Goalserve inplay WebSocket 配置。认证方式：JWT token（API key 换取）。
-    # proxy 仅用于开发环境（本机 Clash 代理）；生产留空直连。
-    goalserve_sports: str = "basketball,soccer,hockey,baseball,tennis,esports,amfootball,volleyball"
+    # Goalserve inplay GZIP feed（http://inplay.goalserve.com/inplay-{sport}.gz）配置。
+    # keyless（IP 白名单），demand-driven 轮询 8 个运动；proxy 仅用于开发环境
+    # （本机 Clash 代理）出口白名单 IP，生产留空直连。
     goalserve_proxy: str | None = None
 
     # Goalserve getfeed livescore 配置。认证方式：API key 嵌入 URL。
@@ -267,12 +267,6 @@ class Settings(BaseSettings):
         return _csv_codes(self.sports_live_state_leagues)
 
     @property
-    def goalserve_sport_codes(self) -> tuple[str, ...]:
-        """返回 Goalserve inplay 启用的运动列表。"""
-
-        return _csv_codes(self.goalserve_sports)
-
-    @property
     def goalserve_pregame_sport_codes(self) -> tuple[str, ...]:
         """返回 Goalserve 赛前赔率启用的运动列表。"""
 
@@ -411,15 +405,7 @@ class Settings(BaseSettings):
                     ConfigIssue(
                         field="goalserve_api_key",
                         code="missing_api_key",
-                        message="启用体育直播状态源时必须配置 GOALSERVE_API_KEY（inplay WS 认证）",
-                    )
-                )
-            if not self.goalserve_sports.strip():
-                blocking_issues.append(
-                    ConfigIssue(
-                        field="goalserve_sports",
-                        code="missing_sports",
-                        message="启用体育直播状态源时 GOALSERVE_SPORTS 至少配置一个运动",
+                        message="启用体育直播状态源时必须配置 GOALSERVE_API_KEY（livescore getfeed 认证）",
                     )
                 )
             if not self.sports_live_state_league_codes:

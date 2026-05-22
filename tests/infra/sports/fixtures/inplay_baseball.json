@@ -1,0 +1,3633 @@
+{
+ "bm": "bet365",
+ "events": {
+  "206": {
+   "bonus": {},
+   "core": {
+    "blocked": "0",
+    "finished": "0",
+    "nc": "0",
+    "removed": "",
+    "safe": "",
+    "stopped": "0",
+    "updated": "22.05.2026 17:26:12",
+    "updated_ts": "1779470772816"
+   },
+   "extra": {
+    "0": {
+     "code": "",
+     "minute": "0",
+     "value": "End of Virginia Tech 1st, 0 hits, 0 runs, Game tied 0-0"
+    },
+    "1": {
+     "code": "",
+     "minute": "0",
+     "value": "End of North Carolina 1st, 0 hits, 0 runs, Game tied 0-0"
+    },
+    "10": {
+     "code": "",
+     "minute": "0",
+     "value": "Solo HR by  (Virginia Tech)"
+    },
+    "11": {
+     "code": "",
+     "minute": "0",
+     "value": "End of Virginia Tech 5th, 1 hit, 1 Run, North Carolina lead 4-5"
+    },
+    "12": {
+     "code": "",
+     "minute": "0",
+     "value": "End of North Carolina 5th, 0 hits, 0 runs, North Carolina lead 4-5"
+    },
+    "13": {
+     "code": "",
+     "minute": "0",
+     "value": "End of Virginia Tech 6th, 1 hit, 0 runs, North Carolina lead 4-5"
+    },
+    "14": {
+     "code": "",
+     "minute": "0",
+     "value": "End of North Carolina 6th, 1 hit, 1 Run, North Carolina lead 4-6"
+    },
+    "15": {
+     "code": "",
+     "minute": "0",
+     "value": "End of Virginia Tech 7th, 1 hit, 0 runs, North Carolina lead 4-6"
+    },
+    "2": {
+     "code": "",
+     "minute": "0",
+     "value": "End of Virginia Tech 2nd, 0 hits, 0 runs, Game tied 0-0"
+    },
+    "3": {
+     "code": "",
+     "minute": "0",
+     "value": "End of North Carolina 2nd, 2 hits, 2 runs, North Carolina lead 0-2"
+    },
+    "4": {
+     "code": "",
+     "minute": "0",
+     "value": "Solo HR by  (Virginia Tech)"
+    },
+    "5": {
+     "code": "",
+     "minute": "0",
+     "value": "Solo HR by  (Virginia Tech)"
+    },
+    "6": {
+     "code": "",
+     "minute": "0",
+     "value": "End of Virginia Tech 3rd, 6 hits, 3 runs, Virginia Tech lead 3-2"
+    },
+    "7": {
+     "code": "",
+     "minute": "0",
+     "value": "End of North Carolina 3rd, 0 hits, 0 runs, Virginia Tech lead 3-2"
+    },
+    "8": {
+     "code": "",
+     "minute": "0",
+     "value": "End of Virginia Tech 4th, 1 hit, 0 runs, Virginia Tech lead 3-2"
+    },
+    "9": {
+     "code": "",
+     "minute": "0",
+     "value": "End of North Carolina 4th, 3 hits, 3 runs, North Carolina lead 3-5"
+    }
+   },
+   "history": {},
+   "info": {
+    "ball_pos": null,
+    "bet365id": "195035554",
+    "id": "206",
+    "league": "NCAA Baseball",
+    "mid": "9532114",
+    "minute": "0",
+    "name": "Virginia Tech vs North Carolina",
+    "period": "Inning 7",
+    "score": "4:6",
+    "seconds": "00:00",
+    "sport": "Baseball",
+    "start_date": null,
+    "start_time": null,
+    "start_ts": "",
+    "start_ts_utc": "",
+    "state": "1240",
+    "state_info": null
+   },
+   "odds": {
+    "160030": {
+     "id": 160030,
+     "name": "Home/Away",
+     "order": "",
+     "participants": {
+      "2061600300": {
+       "id": "2061600300",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "9.25"
+      },
+      "2061600301": {
+       "id": "2061600301",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.05"
+      }
+     },
+     "short_name": "Home/Away",
+     "suspend": "0"
+    },
+    "160031": {
+     "id": 160031,
+     "name": "Run Lines (Asian Handicap)",
+     "order": "",
+     "participants": {
+      "2061600310": {
+       "handicap": "4.5",
+       "id": "2061600310",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.09"
+      },
+      "2061600311": {
+       "handicap": "-4.5",
+       "id": "2061600311",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "6.75"
+      },
+      "20616003110": {
+       "handicap": "-2.5",
+       "id": "20616003110",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "16"
+      },
+      "20616003111": {
+       "handicap": "2.5",
+       "id": "20616003111",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.006"
+      },
+      "20616003112": {
+       "handicap": "3.5",
+       "id": "20616003112",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.273"
+      },
+      "20616003113": {
+       "handicap": "-3.5",
+       "id": "20616003113",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "3.45"
+      },
+      "2061600312": {
+       "handicap": "1.5",
+       "id": "2061600312",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "3.4"
+      },
+      "2061600313": {
+       "handicap": "-1.5",
+       "id": "2061600313",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.277"
+      },
+      "2061600314": {
+       "handicap": "-1.5",
+       "id": "2061600314",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "11"
+      },
+      "2061600315": {
+       "handicap": "1.5",
+       "id": "2061600315",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.02"
+      },
+      "2061600316": {
+       "handicap": "2.5",
+       "id": "2061600316",
+       "is_main": "1",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.666"
+      },
+      "2061600317": {
+       "handicap": "-2.5",
+       "id": "2061600317",
+       "is_main": "1",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "2.1"
+      },
+      "2061600318": {
+       "handicap": "5.5",
+       "id": "2061600318",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.025"
+      },
+      "2061600319": {
+       "handicap": "-5.5",
+       "id": "2061600319",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "10.5"
+      }
+     },
+     "short_name": "Run Lines (Asian Handicap)",
+     "suspend": "0"
+    },
+    "160032": {
+     "id": 160032,
+     "name": "Game Totals",
+     "order": "",
+     "participants": {
+      "2061600320": {
+       "handicap": "13.5",
+       "id": "2061600320",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "3.1"
+      },
+      "2061600321": {
+       "handicap": "13.5",
+       "id": "2061600321",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.333"
+      },
+      "20616003210": {
+       "handicap": "11.5",
+       "id": "20616003210",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.5"
+      },
+      "20616003211": {
+       "handicap": "11.5",
+       "id": "20616003211",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "2.5"
+      },
+      "2061600322": {
+       "handicap": "10.5",
+       "id": "2061600322",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.181"
+      },
+      "2061600323": {
+       "handicap": "10.5",
+       "id": "2061600323",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "4.4"
+      },
+      "2061600324": {
+       "handicap": "15.5",
+       "id": "2061600324",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "7.75"
+      },
+      "2061600325": {
+       "handicap": "15.5",
+       "id": "2061600325",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.066"
+      },
+      "2061600326": {
+       "handicap": "12.5",
+       "id": "2061600326",
+       "is_main": "1",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.869"
+      },
+      "2061600327": {
+       "handicap": "12.5",
+       "id": "2061600327",
+       "is_main": "1",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.8"
+      },
+      "2061600328": {
+       "handicap": "14.5",
+       "id": "2061600328",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "4.5"
+      },
+      "2061600329": {
+       "handicap": "14.5",
+       "id": "2061600329",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.166"
+      }
+     },
+     "short_name": "Game Totals",
+     "suspend": "0"
+    },
+    "160034": {
+     "id": 160034,
+     "name": "Home Team Total Goals",
+     "order": "",
+     "participants": {
+      "2061600340": {
+       "handicap": "8.5",
+       "id": "2061600340",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "11"
+      },
+      "2061600341": {
+       "handicap": "8.5",
+       "id": "2061600341",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.02"
+      },
+      "20616003410": {
+       "handicap": "7.5",
+       "id": "20616003410",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "8.5"
+      },
+      "20616003411": {
+       "handicap": "7.5",
+       "id": "20616003411",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.05"
+      },
+      "2061600342": {
+       "handicap": "9.5",
+       "id": "2061600342",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "15"
+      },
+      "2061600343": {
+       "handicap": "9.5",
+       "id": "2061600343",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.01"
+      },
+      "2061600344": {
+       "handicap": "4.5",
+       "id": "2061600344",
+       "is_main": "1",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.74"
+      },
+      "2061600345": {
+       "handicap": "4.5",
+       "id": "2061600345",
+       "is_main": "1",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.952"
+      },
+      "2061600346": {
+       "handicap": "5.5",
+       "id": "2061600346",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "3.2"
+      },
+      "2061600347": {
+       "handicap": "5.5",
+       "id": "2061600347",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.312"
+      },
+      "2061600348": {
+       "handicap": "6.5",
+       "id": "2061600348",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "5.5"
+      },
+      "2061600349": {
+       "handicap": "6.5",
+       "id": "2061600349",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.125"
+      }
+     },
+     "short_name": "Home Team Total Goals",
+     "suspend": "0"
+    },
+    "160035": {
+     "id": 160035,
+     "name": "Away Team Total Goals",
+     "order": "",
+     "participants": {
+      "2061600350": {
+       "handicap": "7.5",
+       "id": "2061600350",
+       "is_main": "1",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "2"
+      },
+      "2061600351": {
+       "handicap": "7.5",
+       "id": "2061600351",
+       "is_main": "1",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.714"
+      },
+      "2061600352": {
+       "handicap": "6.5",
+       "id": "2061600352",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.357"
+      },
+      "2061600353": {
+       "handicap": "6.5",
+       "id": "2061600353",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "3"
+      },
+      "2061600354": {
+       "handicap": "9.5",
+       "id": "2061600354",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "8"
+      },
+      "2061600355": {
+       "handicap": "9.5",
+       "id": "2061600355",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.062"
+      },
+      "2061600356": {
+       "handicap": "10.5",
+       "id": "2061600356",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "13"
+      },
+      "2061600357": {
+       "handicap": "10.5",
+       "id": "2061600357",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.012"
+      },
+      "2061600358": {
+       "handicap": "8.5",
+       "id": "2061600358",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "3.75"
+      },
+      "2061600359": {
+       "handicap": "8.5",
+       "id": "2061600359",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.235"
+      }
+     },
+     "short_name": "Away Team Total Goals",
+     "suspend": "0"
+    },
+    "56112661": {
+     "id": 56112661,
+     "name": "Race to Runs",
+     "order": "",
+     "participants": {
+      "206561126610": {
+       "handicap": "7",
+       "id": "206561126610",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "9"
+      },
+      "206561126611": {
+       "handicap": "7",
+       "id": "206561126611",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.476"
+      },
+      "206561126612": {
+       "handicap": "7",
+       "id": "206561126612",
+       "name": "Neither",
+       "short_name": "Neither",
+       "suspend": "0",
+       "value_eu": "3.1"
+      }
+     },
+     "short_name": "Race to Runs",
+     "suspend": "0"
+    },
+    "561127113": {
+     "id": 561127113,
+     "name": "Both Teams To Score by Goal",
+     "order": "",
+     "participants": {
+      "2065611271130": {
+       "handicap": "7",
+       "id": "2065611271130",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "7"
+      },
+      "2065611271131": {
+       "handicap": "7",
+       "id": "2065611271131",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.083"
+      },
+      "2065611271132": {
+       "handicap": "6",
+       "id": "2065611271132",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "3.2"
+      },
+      "2065611271133": {
+       "handicap": "6",
+       "id": "2065611271133",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.312"
+      },
+      "2065611271134": {
+       "handicap": "5",
+       "id": "2065611271134",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "1.74"
+      },
+      "2065611271135": {
+       "handicap": "5",
+       "id": "2065611271135",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.952"
+      }
+     },
+     "short_name": "Both Teams To Score by Goal",
+     "suspend": "0"
+    },
+    "561127114": {
+     "id": 561127114,
+     "name": "Correct Score",
+     "order": "",
+     "participants": {
+      "2065611271140": {
+       "id": "2065611271140",
+       "name": "5-4",
+       "short_name": "5-4",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "2065611271141": {
+       "id": "2065611271141",
+       "name": "6-4",
+       "short_name": "6-4",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "20656112711410": {
+       "id": "20656112711410",
+       "name": "T1 9+",
+       "short_name": "T1 9+",
+       "suspend": "0",
+       "value_eu": "19"
+      },
+      "20656112711411": {
+       "id": "20656112711411",
+       "name": "4-5",
+       "short_name": "4-5",
+       "suspend": "1",
+       "value_eu": "21"
+      },
+      "20656112711412": {
+       "id": "20656112711412",
+       "name": "4-6",
+       "short_name": "4-6",
+       "suspend": "0",
+       "value_eu": "4.4"
+      },
+      "20656112711413": {
+       "id": "20656112711413",
+       "name": "4-7",
+       "short_name": "4-7",
+       "suspend": "0",
+       "value_eu": "7.5"
+      },
+      "20656112711414": {
+       "id": "20656112711414",
+       "name": "4-8",
+       "short_name": "4-8",
+       "suspend": "0",
+       "value_eu": "8.5"
+      },
+      "20656112711415": {
+       "id": "20656112711415",
+       "name": "5-6",
+       "short_name": "5-6",
+       "suspend": "0",
+       "value_eu": "9.5"
+      },
+      "20656112711416": {
+       "id": "20656112711416",
+       "name": "5-7",
+       "short_name": "5-7",
+       "suspend": "0",
+       "value_eu": "12"
+      },
+      "20656112711417": {
+       "id": "20656112711417",
+       "name": "5-8",
+       "short_name": "5-8",
+       "suspend": "0",
+       "value_eu": "13.5"
+      },
+      "20656112711418": {
+       "id": "20656112711418",
+       "name": "6-7",
+       "short_name": "6-7",
+       "suspend": "0",
+       "value_eu": "12"
+      },
+      "20656112711419": {
+       "id": "20656112711419",
+       "name": "6-8",
+       "short_name": "6-8",
+       "suspend": "0",
+       "value_eu": "17.5"
+      },
+      "2065611271142": {
+       "id": "2065611271142",
+       "name": "7-4",
+       "short_name": "7-4",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "20656112711420": {
+       "id": "20656112711420",
+       "name": "7-8",
+       "short_name": "7-8",
+       "suspend": "0",
+       "value_eu": "21"
+      },
+      "20656112711421": {
+       "id": "20656112711421",
+       "name": "T2 9+",
+       "short_name": "T2 9+",
+       "suspend": "0",
+       "value_eu": "3.8"
+      },
+      "2065611271143": {
+       "id": "2065611271143",
+       "name": "8-4",
+       "short_name": "8-4",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "2065611271144": {
+       "id": "2065611271144",
+       "name": "6-5",
+       "short_name": "6-5",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "2065611271145": {
+       "id": "2065611271145",
+       "name": "7-5",
+       "short_name": "7-5",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "2065611271146": {
+       "id": "2065611271146",
+       "name": "8-5",
+       "short_name": "8-5",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "2065611271147": {
+       "id": "2065611271147",
+       "name": "7-6",
+       "short_name": "7-6",
+       "suspend": "0",
+       "value_eu": "34"
+      },
+      "2065611271148": {
+       "id": "2065611271148",
+       "name": "8-6",
+       "short_name": "8-6",
+       "suspend": "0",
+       "value_eu": "51"
+      },
+      "2065611271149": {
+       "id": "2065611271149",
+       "name": "8-7",
+       "short_name": "8-7",
+       "suspend": "0",
+       "value_eu": "41"
+      }
+     },
+     "short_name": "Correct Score",
+     "suspend": "0"
+    },
+    "561127115": {
+     "id": 561127115,
+     "name": "Result/Total Goals",
+     "order": "",
+     "participants": {
+      "2065611271150": {
+       "handicap": "14.5",
+       "id": "2065611271150",
+       "name": "1/o",
+       "short_name": "1/o",
+       "suspend": "0",
+       "value_eu": "14"
+      },
+      "2065611271151": {
+       "handicap": "14.5",
+       "id": "2065611271151",
+       "name": "1/u",
+       "short_name": "1/u",
+       "suspend": "0",
+       "value_eu": "21"
+      },
+      "20656112711510": {
+       "handicap": "15.5",
+       "id": "20656112711510",
+       "name": "2/o",
+       "short_name": "2/o",
+       "suspend": "1",
+       "value_eu": "3.65"
+      },
+      "20656112711511": {
+       "handicap": "15.5",
+       "id": "20656112711511",
+       "name": "2/u",
+       "short_name": "2/u",
+       "suspend": "1",
+       "value_eu": "1.606"
+      },
+      "20656112711512": {
+       "handicap": "13.5",
+       "id": "20656112711512",
+       "name": "2/o",
+       "short_name": "2/o",
+       "suspend": "0",
+       "value_eu": "3.4"
+      },
+      "20656112711513": {
+       "handicap": "13.5",
+       "id": "20656112711513",
+       "name": "2/u",
+       "short_name": "2/u",
+       "suspend": "0",
+       "value_eu": "1.357"
+      },
+      "20656112711514": {
+       "handicap": "13.5",
+       "id": "20656112711514",
+       "name": "1/o",
+       "short_name": "1/o",
+       "suspend": "1",
+       "value_eu": "8"
+      },
+      "20656112711515": {
+       "handicap": "13.5",
+       "id": "20656112711515",
+       "name": "1/u",
+       "short_name": "1/u",
+       "suspend": "1",
+       "value_eu": "15"
+      },
+      "20656112711516": {
+       "handicap": "12.5",
+       "id": "20656112711516",
+       "name": "2/o",
+       "short_name": "2/o",
+       "suspend": "0",
+       "value_eu": "2.2"
+      },
+      "20656112711517": {
+       "handicap": "12.5",
+       "id": "20656112711517",
+       "name": "2/u",
+       "short_name": "2/u",
+       "suspend": "0",
+       "value_eu": "1.8"
+      },
+      "2065611271152": {
+       "handicap": "14.5",
+       "id": "2065611271152",
+       "name": "2/o",
+       "short_name": "2/o",
+       "suspend": "1",
+       "value_eu": "3.25"
+      },
+      "2065611271153": {
+       "handicap": "14.5",
+       "id": "2065611271153",
+       "name": "2/u",
+       "short_name": "2/u",
+       "suspend": "1",
+       "value_eu": "1.408"
+      },
+      "2065611271154": {
+       "handicap": "11.5",
+       "id": "2065611271154",
+       "name": "2/o",
+       "short_name": "2/o",
+       "suspend": "0",
+       "value_eu": "1.645"
+      },
+      "2065611271155": {
+       "handicap": "11.5",
+       "id": "2065611271155",
+       "name": "2/u",
+       "short_name": "2/u",
+       "suspend": "0",
+       "value_eu": "2.5"
+      },
+      "2065611271156": {
+       "handicap": "16.5",
+       "id": "2065611271156",
+       "name": "1/o",
+       "short_name": "1/o",
+       "suspend": "0",
+       "value_eu": "19"
+      },
+      "2065611271157": {
+       "handicap": "16.5",
+       "id": "2065611271157",
+       "name": "1/u",
+       "short_name": "1/u",
+       "suspend": "0",
+       "value_eu": "10.5"
+      },
+      "2065611271158": {
+       "handicap": "15.5",
+       "id": "2065611271158",
+       "name": "1/o",
+       "short_name": "1/o",
+       "suspend": "0",
+       "value_eu": "17"
+      },
+      "2065611271159": {
+       "handicap": "15.5",
+       "id": "2065611271159",
+       "name": "1/u",
+       "short_name": "1/u",
+       "suspend": "0",
+       "value_eu": "13"
+      }
+     },
+     "short_name": "Result/Total Goals",
+     "suspend": "0"
+    },
+    "561127116": {
+     "id": 561127116,
+     "name": "Total Hits (9th Inning)",
+     "order": "",
+     "participants": {
+      "2065611271160": {
+       "handicap": "12",
+       "id": "2065611271160",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.869"
+      },
+      "2065611271161": {
+       "handicap": "12",
+       "id": "2065611271161",
+       "name": "Exactly",
+       "short_name": "Exactly",
+       "suspend": "0",
+       "value_eu": "5.75"
+      },
+      "2065611271162": {
+       "handicap": "12",
+       "id": "2065611271162",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "2.5"
+      }
+     },
+     "short_name": "Total Hits (9th Inning)",
+     "suspend": "0"
+    },
+    "562127122": {
+     "id": 562127122,
+     "name": "Total Band 3-Way",
+     "order": "",
+     "participants": {
+      "2065621271220": {
+       "id": "2065621271220",
+       "name": "Virginia Tech +2.5 & Over 13.5",
+       "short_name": "Virginia Tech +2.5 & Over 13.5",
+       "suspend": "0",
+       "value_eu": "5.5"
+      },
+      "2065621271221": {
+       "id": "2065621271221",
+       "name": "Virginia Tech +2.5 & Under 13.5",
+       "short_name": "Virginia Tech +2.5 & Under 13.5",
+       "suspend": "0",
+       "value_eu": "2.25"
+      },
+      "2065621271222": {
+       "id": "2065621271222",
+       "name": "North Carolina -2.5 & Over 13.5",
+       "short_name": "North Carolina -2.5 & Over 13.5",
+       "suspend": "0",
+       "value_eu": "6.25"
+      },
+      "2065621271223": {
+       "id": "2065621271223",
+       "name": "North Carolina -2.5 & Under 13.5",
+       "short_name": "North Carolina -2.5 & Under 13.5",
+       "suspend": "0",
+       "value_eu": "2.9"
+      }
+     },
+     "short_name": "Total Band 3-Way",
+     "suspend": "0"
+    },
+    "900932": {
+     "id": 900932,
+     "name": "1x2 (8th Inning)",
+     "order": "",
+     "participants": {
+      "2069009320": {
+       "id": "2069009320",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "4.5"
+      },
+      "2069009321": {
+       "id": "2069009321",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "2.45"
+      },
+      "2069009322": {
+       "id": "2069009322",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "0",
+       "value_eu": "2.1"
+      }
+     },
+     "short_name": "1x2 (8th Inning)",
+     "suspend": "0"
+    },
+    "900944": {
+     "id": 900944,
+     "name": "Total Runs (8th Inning)",
+     "order": "",
+     "participants": {
+      "2069009440": {
+       "handicap": "1.5",
+       "id": "2069009440",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "2.25"
+      },
+      "2069009441": {
+       "handicap": "1.5",
+       "id": "2069009441",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.571"
+      },
+      "2069009442": {
+       "handicap": "2.5",
+       "id": "2069009442",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "3.9"
+      },
+      "2069009443": {
+       "handicap": "2.5",
+       "id": "2069009443",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.222"
+      },
+      "2069009444": {
+       "handicap": "3.5",
+       "id": "2069009444",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "8"
+      },
+      "2069009445": {
+       "handicap": "3.5",
+       "id": "2069009445",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.062"
+      },
+      "2069009446": {
+       "handicap": "0.5",
+       "id": "2069009446",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.54"
+      },
+      "2069009447": {
+       "handicap": "0.5",
+       "id": "2069009447",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "2.35"
+      }
+     },
+     "short_name": "Total Runs (8th Inning)",
+     "suspend": "0"
+    },
+    "900951": {
+     "id": 900951,
+     "name": "A Run (8th Inning)",
+     "order": "",
+     "participants": {
+      "2069009510": {
+       "id": "2069009510",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "1.54"
+      },
+      "2069009511": {
+       "id": "2069009511",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "2.35"
+      }
+     },
+     "short_name": "A Run (8th Inning)",
+     "suspend": "0"
+    },
+    "900953": {
+     "id": 900953,
+     "name": "European Handicap",
+     "order": "",
+     "participants": {
+      "2069009530": {
+       "handicap": "2",
+       "id": "2069009530",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "3.4"
+      },
+      "2069009531": {
+       "handicap": "-2",
+       "id": "2069009531",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "0",
+       "value_eu": "2.95"
+      },
+      "2069009532": {
+       "handicap": "-2",
+       "id": "2069009532",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "2.1"
+      }
+     },
+     "short_name": "European Handicap",
+     "suspend": "0"
+    },
+    "900954": {
+     "id": 900954,
+     "name": "Home Winning Margin (8-Way)",
+     "order": "",
+     "participants": {
+      "2069009540": {
+       "id": "2069009540",
+       "name": "1 run",
+       "short_name": "1 run",
+       "suspend": "0",
+       "value_eu": "19"
+      },
+      "2069009541": {
+       "id": "2069009541",
+       "name": "2 runs",
+       "short_name": "2 runs",
+       "suspend": "0",
+       "value_eu": "31"
+      },
+      "2069009542": {
+       "id": "2069009542",
+       "name": "3 runs",
+       "short_name": "3 runs",
+       "suspend": "0",
+       "value_eu": "51"
+      },
+      "2069009543": {
+       "id": "2069009543",
+       "name": "4 or more runs",
+       "short_name": "4 or more runs",
+       "suspend": "0",
+       "value_eu": "41"
+      }
+     },
+     "short_name": "Home Winning Margin (8-Way)",
+     "suspend": "0"
+    },
+    "900955": {
+     "id": 900955,
+     "name": "Away Winning Margin (8-Way)",
+     "order": "",
+     "participants": {
+      "2069009550": {
+       "id": "2069009550",
+       "name": "1 run",
+       "short_name": "1 run",
+       "suspend": "0",
+       "value_eu": "4.5"
+      },
+      "2069009551": {
+       "id": "2069009551",
+       "name": "2 runs",
+       "short_name": "2 runs",
+       "suspend": "0",
+       "value_eu": "2.95"
+      },
+      "2069009552": {
+       "id": "2069009552",
+       "name": "3 runs",
+       "short_name": "3 runs",
+       "suspend": "0",
+       "value_eu": "4.5"
+      },
+      "2069009553": {
+       "id": "2069009553",
+       "name": "4 or more runs",
+       "short_name": "4 or more runs",
+       "suspend": "0",
+       "value_eu": "3.45"
+      }
+     },
+     "short_name": "Away Winning Margin (8-Way)",
+     "suspend": "0"
+    },
+    "900964": {
+     "id": 900964,
+     "name": "Home A Run (8th Inning)",
+     "order": "",
+     "participants": {
+      "2069009640": {
+       "id": "2069009640",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "3.1"
+      },
+      "2069009641": {
+       "id": "2069009641",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.333"
+      }
+     },
+     "short_name": "Home A Run (8th Inning)",
+     "suspend": "0"
+    },
+    "924": {
+     "id": 924,
+     "name": "Extra Innings",
+     "order": "",
+     "participants": {
+      "2069240": {
+       "id": "2069240",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "9.5"
+      },
+      "2069241": {
+       "id": "2069241",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.035"
+      }
+     },
+     "short_name": "Extra Innings",
+     "suspend": "0"
+    }
+   },
+   "stats": {
+    "0": {
+     "away": "North Carolina",
+     "home": "Virginia Tech",
+     "name": "ITeam"
+    },
+    "1": {
+     "away": "0",
+     "home": "0",
+     "name": "1"
+    },
+    "10": {
+     "away": null,
+     "home": null,
+     "name": "10"
+    },
+    "11": {
+     "away": null,
+     "home": null,
+     "name": "11"
+    },
+    "12": {
+     "away": null,
+     "home": null,
+     "name": "12"
+    },
+    "13": {
+     "away": null,
+     "home": null,
+     "name": "13"
+    },
+    "14": {
+     "away": null,
+     "home": null,
+     "name": "14"
+    },
+    "15": {
+     "away": null,
+     "home": null,
+     "name": "15"
+    },
+    "16": {
+     "away": "6",
+     "home": "4",
+     "name": "R"
+    },
+    "17": {
+     "away": "6",
+     "home": "10",
+     "name": "H"
+    },
+    "2": {
+     "away": "2",
+     "home": "0",
+     "name": "2"
+    },
+    "3": {
+     "away": "0",
+     "home": "3",
+     "name": "3"
+    },
+    "4": {
+     "away": "3",
+     "home": "0",
+     "name": "4"
+    },
+    "5": {
+     "away": "0",
+     "home": "1",
+     "name": "5"
+    },
+    "6": {
+     "away": "1",
+     "home": "0",
+     "name": "6"
+    },
+    "7": {
+     "away": "0",
+     "home": "0",
+     "name": "7"
+    },
+    "8": {
+     "away": null,
+     "home": null,
+     "name": "8"
+    },
+    "9": {
+     "away": null,
+     "home": null,
+     "name": "9"
+    }
+   },
+   "stream": "",
+   "sts": "0|Bottom of 7th|0|0|0|1|0|000^000|STS=Pitches,Balls,Strikes,Walks,HBP,Hits,Singles,Double,Triples,Homers,Runs,Batters,Left On Base|^|",
+   "team_info": {
+    "away": {
+     "Serve": "",
+     "color": "",
+     "kit_color": "#79ADE2,#F0F0F0,#FF00FF,#00FFFF,#FF0000,#0000FF,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#00FFFF",
+     "name": "North Carolina",
+     "score": "6"
+    },
+    "home": {
+     "Serve": "",
+     "color": "",
+     "kit_color": "#FC7E00,#5B000F,#D446BA,#00C1BA,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#00FFFF",
+     "name": "Virginia Tech",
+     "score": "4"
+    }
+   }
+  },
+  "298": {
+   "bonus": {},
+   "core": {
+    "blocked": "0",
+    "finished": "0",
+    "nc": "0",
+    "removed": "",
+    "safe": "",
+    "stopped": "0",
+    "updated": "22.05.2026 17:26:34",
+    "updated_ts": "1779470795055"
+   },
+   "extra": {
+    "0": {
+     "code": "",
+     "minute": "0",
+     "value": "End of Michigan State 1st, 1 hit, 0 runs, Game tied 0-0"
+    },
+    "1": {
+     "code": "",
+     "minute": "0",
+     "value": "End of USC 1st, 2 hits, 2 runs, USC lead 0-2"
+    },
+    "2": {
+     "code": "",
+     "minute": "0",
+     "value": "End of Michigan State 2nd, 0 hits, 0 runs, USC lead 0-2"
+    },
+    "3": {
+     "code": "",
+     "minute": "0",
+     "value": "End of USC 2nd, 0 hits, 0 runs, USC lead 0-2"
+    },
+    "4": {
+     "code": "",
+     "minute": "0",
+     "value": "End of Michigan State 3rd, 1 hit, 0 runs, USC lead 0-2"
+    },
+    "5": {
+     "code": "",
+     "minute": "0",
+     "value": "End of USC 3rd, 2 hits, 2 runs, USC lead 0-4"
+    },
+    "6": {
+     "code": "",
+     "minute": "0",
+     "value": "End of Michigan State 4th, 0 hits, 0 runs, USC lead 0-4"
+    },
+    "7": {
+     "code": "",
+     "minute": "0",
+     "value": "Rain Delay"
+    },
+    "8": {
+     "code": "",
+     "minute": "0",
+     "value": "End of USC 4th, 1 hits, 0 run, USC lead 0-4"
+    }
+   },
+   "history": {},
+   "info": {
+    "ball_pos": null,
+    "bet365id": "195024265",
+    "id": "298",
+    "league": "NCAA Baseball",
+    "mid": "9532110",
+    "minute": "0",
+    "name": "Michigan State vs USC",
+    "period": "Inning 5",
+    "score": "0:4",
+    "seconds": "00:00",
+    "sport": "Baseball",
+    "start_date": null,
+    "start_time": null,
+    "start_ts": "",
+    "start_ts_utc": "",
+    "state": "1218",
+    "state_info": null
+   },
+   "odds": {
+    "11406301": {
+     "id": 11406301,
+     "name": "Lead After",
+     "order": "",
+     "participants": {
+      "298114063010": {
+       "handicap": "5",
+       "id": "298114063010",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "298114063011": {
+       "handicap": "5",
+       "id": "298114063011",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "1",
+       "value_eu": "1.002"
+      },
+      "298114063012": {
+       "handicap": "5",
+       "id": "298114063012",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "298114063013": {
+       "handicap": "6",
+       "id": "298114063013",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "298114063014": {
+       "handicap": "6",
+       "id": "298114063014",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "1",
+       "value_eu": "1.002"
+      },
+      "298114063015": {
+       "handicap": "6",
+       "id": "298114063015",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "298114063016": {
+       "handicap": "7",
+       "id": "298114063016",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "20"
+      },
+      "298114063017": {
+       "handicap": "7",
+       "id": "298114063017",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.004"
+      },
+      "298114063018": {
+       "handicap": "7",
+       "id": "298114063018",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "0",
+       "value_eu": "20"
+      }
+     },
+     "short_name": "Lead After",
+     "suspend": "0"
+    },
+    "160030": {
+     "id": 160030,
+     "name": "Home/Away",
+     "order": "",
+     "participants": {
+      "2981600300": {
+       "id": "2981600300",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "18"
+      },
+      "2981600301": {
+       "id": "2981600301",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.006"
+      }
+     },
+     "short_name": "Home/Away",
+     "suspend": "0"
+    },
+    "160031": {
+     "id": 160031,
+     "name": "Run Lines (Asian Handicap)",
+     "order": "",
+     "participants": {
+      "2981600310": {
+       "handicap": "8.5",
+       "id": "2981600310",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.133"
+      },
+      "2981600311": {
+       "handicap": "-8.5",
+       "id": "2981600311",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "5.25"
+      },
+      "29816003110": {
+       "handicap": "3.5",
+       "id": "29816003110",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "4.5"
+      },
+      "29816003111": {
+       "handicap": "-3.5",
+       "id": "29816003111",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.166"
+      },
+      "29816003112": {
+       "handicap": "5.5",
+       "id": "29816003112",
+       "is_main": "1",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.952"
+      },
+      "29816003113": {
+       "handicap": "-5.5",
+       "id": "29816003113",
+       "is_main": "1",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.74"
+      },
+      "2981600312": {
+       "handicap": "7.5",
+       "id": "2981600312",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.263"
+      },
+      "2981600313": {
+       "handicap": "-7.5",
+       "id": "2981600313",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "3.6"
+      },
+      "2981600314": {
+       "handicap": "2.5",
+       "id": "2981600314",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "7.5"
+      },
+      "2981600315": {
+       "handicap": "-2.5",
+       "id": "2981600315",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.071"
+      },
+      "2981600316": {
+       "handicap": "4.5",
+       "id": "2981600316",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "2.85"
+      },
+      "2981600317": {
+       "handicap": "-4.5",
+       "id": "2981600317",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.37"
+      },
+      "2981600318": {
+       "handicap": "6.5",
+       "id": "2981600318",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.5"
+      },
+      "2981600319": {
+       "handicap": "-6.5",
+       "id": "2981600319",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "2.5"
+      }
+     },
+     "short_name": "Run Lines (Asian Handicap)",
+     "suspend": "0"
+    },
+    "160032": {
+     "id": 160032,
+     "name": "Game Totals",
+     "order": "",
+     "participants": {
+      "2981600320": {
+       "handicap": "6.5",
+       "id": "2981600320",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.2"
+      },
+      "2981600321": {
+       "handicap": "6.5",
+       "id": "2981600321",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "4.2"
+      },
+      "29816003210": {
+       "handicap": "10.5",
+       "id": "29816003210",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "3.55"
+      },
+      "29816003211": {
+       "handicap": "10.5",
+       "id": "29816003211",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.266"
+      },
+      "29816003212": {
+       "handicap": "9.5",
+       "id": "29816003212",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "2.55"
+      },
+      "29816003213": {
+       "handicap": "9.5",
+       "id": "29816003213",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.476"
+      },
+      "2981600322": {
+       "handicap": "5.5",
+       "id": "2981600322",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.066"
+      },
+      "2981600323": {
+       "handicap": "5.5",
+       "id": "2981600323",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "7.75"
+      },
+      "2981600324": {
+       "handicap": "11.5",
+       "id": "2981600324",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "4.75"
+      },
+      "2981600325": {
+       "handicap": "11.5",
+       "id": "2981600325",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.153"
+      },
+      "2981600326": {
+       "handicap": "8.5",
+       "id": "2981600326",
+       "is_main": "1",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.833"
+      },
+      "2981600327": {
+       "handicap": "8.5",
+       "id": "2981600327",
+       "is_main": "1",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.833"
+      },
+      "2981600328": {
+       "handicap": "7.5",
+       "id": "2981600328",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.454"
+      },
+      "2981600329": {
+       "handicap": "7.5",
+       "id": "2981600329",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "2.6"
+      }
+     },
+     "short_name": "Game Totals",
+     "suspend": "0"
+    },
+    "160034": {
+     "id": 160034,
+     "name": "Home Team Total Goals",
+     "order": "",
+     "participants": {
+      "2981600340": {
+       "handicap": "4.5",
+       "id": "2981600340",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "9.5"
+      },
+      "2981600341": {
+       "handicap": "4.5",
+       "id": "2981600341",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.035"
+      },
+      "29816003410": {
+       "handicap": "6.5",
+       "id": "29816003410",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "15"
+      },
+      "29816003411": {
+       "handicap": "6.5",
+       "id": "29816003411",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.01"
+      },
+      "29816003412": {
+       "handicap": "2.5",
+       "id": "29816003412",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "4.2"
+      },
+      "29816003413": {
+       "handicap": "2.5",
+       "id": "29816003413",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.2"
+      },
+      "2981600342": {
+       "handicap": "1.5",
+       "id": "2981600342",
+       "is_main": "1",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "2.3"
+      },
+      "2981600343": {
+       "handicap": "1.5",
+       "id": "2981600343",
+       "is_main": "1",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.555"
+      },
+      "2981600344": {
+       "handicap": "3.5",
+       "id": "2981600344",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "7"
+      },
+      "2981600345": {
+       "handicap": "3.5",
+       "id": "2981600345",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.083"
+      },
+      "2981600346": {
+       "handicap": "5.5",
+       "id": "2981600346",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "11"
+      },
+      "2981600347": {
+       "handicap": "5.5",
+       "id": "2981600347",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.02"
+      },
+      "2981600348": {
+       "handicap": "0.5",
+       "id": "2981600348",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.384"
+      },
+      "2981600349": {
+       "handicap": "0.5",
+       "id": "2981600349",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "2.8"
+      }
+     },
+     "short_name": "Home Team Total Goals",
+     "suspend": "0"
+    },
+    "160035": {
+     "id": 160035,
+     "name": "Away Team Total Goals",
+     "order": "",
+     "participants": {
+      "2981600350": {
+       "handicap": "4.5",
+       "id": "2981600350",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.045"
+      },
+      "2981600351": {
+       "handicap": "4.5",
+       "id": "2981600351",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "8.75"
+      },
+      "29816003510": {
+       "handicap": "8.5",
+       "id": "29816003510",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "3.3"
+      },
+      "29816003511": {
+       "handicap": "8.5",
+       "id": "29816003511",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.294"
+      },
+      "29816003512": {
+       "handicap": "7.5",
+       "id": "29816003512",
+       "is_main": "1",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "2.2"
+      },
+      "29816003513": {
+       "handicap": "7.5",
+       "id": "29816003513",
+       "is_main": "1",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.606"
+      },
+      "29816003514": {
+       "handicap": "5.5",
+       "id": "29816003514",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.2"
+      },
+      "29816003515": {
+       "handicap": "5.5",
+       "id": "29816003515",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "4.2"
+      },
+      "29816003516": {
+       "handicap": "6.5",
+       "id": "29816003516",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.555"
+      },
+      "29816003517": {
+       "handicap": "6.5",
+       "id": "29816003517",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "2.3"
+      },
+      "2981600352": {
+       "handicap": "9.5",
+       "id": "2981600352",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "5.25"
+      },
+      "2981600353": {
+       "handicap": "9.5",
+       "id": "2981600353",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.133"
+      },
+      "2981600354": {
+       "handicap": "12.5",
+       "id": "2981600354",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "12"
+      },
+      "2981600355": {
+       "handicap": "12.5",
+       "id": "2981600355",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.015"
+      },
+      "2981600356": {
+       "handicap": "11.5",
+       "id": "2981600356",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "10"
+      },
+      "2981600357": {
+       "handicap": "11.5",
+       "id": "2981600357",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.028"
+      },
+      "2981600358": {
+       "handicap": "10.5",
+       "id": "2981600358",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "8"
+      },
+      "2981600359": {
+       "handicap": "10.5",
+       "id": "2981600359",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.062"
+      }
+     },
+     "short_name": "Away Team Total Goals",
+     "suspend": "0"
+    },
+    "56112661": {
+     "id": 56112661,
+     "name": "Race to Runs",
+     "order": "",
+     "participants": {
+      "298561126610": {
+       "handicap": "5",
+       "id": "298561126610",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "31"
+      },
+      "298561126611": {
+       "handicap": "5",
+       "id": "298561126611",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.062"
+      },
+      "298561126612": {
+       "handicap": "5",
+       "id": "298561126612",
+       "name": "Neither",
+       "short_name": "Neither",
+       "suspend": "0",
+       "value_eu": "9"
+      },
+      "298561126613": {
+       "handicap": "7",
+       "id": "298561126613",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "41"
+      },
+      "298561126614": {
+       "handicap": "7",
+       "id": "298561126614",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.588"
+      },
+      "298561126615": {
+       "handicap": "7",
+       "id": "298561126615",
+       "name": "Neither",
+       "short_name": "Neither",
+       "suspend": "0",
+       "value_eu": "2.35"
+      },
+      "298561126616": {
+       "handicap": "6",
+       "id": "298561126616",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "41"
+      },
+      "298561126617": {
+       "handicap": "6",
+       "id": "298561126617",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.235"
+      },
+      "298561126618": {
+       "handicap": "6",
+       "id": "298561126618",
+       "name": "Neither",
+       "short_name": "Neither",
+       "suspend": "0",
+       "value_eu": "4"
+      }
+     },
+     "short_name": "Race to Runs",
+     "suspend": "0"
+    },
+    "561127113": {
+     "id": 561127113,
+     "name": "Both Teams To Score by Goal",
+     "order": "",
+     "participants": {
+      "2985611271130": {
+       "handicap": "3",
+       "id": "2985611271130",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "4.2"
+      },
+      "2985611271131": {
+       "handicap": "3",
+       "id": "2985611271131",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.2"
+      },
+      "29856112711310": {
+       "handicap": "4",
+       "id": "29856112711310",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "7"
+      },
+      "29856112711311": {
+       "handicap": "4",
+       "id": "29856112711311",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.083"
+      },
+      "2985611271132": {
+       "handicap": "2",
+       "id": "2985611271132",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "2.3"
+      },
+      "2985611271133": {
+       "handicap": "2",
+       "id": "2985611271133",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.555"
+      },
+      "2985611271134": {
+       "handicap": "7",
+       "id": "2985611271134",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "17"
+      },
+      "2985611271135": {
+       "handicap": "7",
+       "id": "2985611271135",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.004"
+      },
+      "2985611271136": {
+       "handicap": "6",
+       "id": "2985611271136",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "12"
+      },
+      "2985611271137": {
+       "handicap": "6",
+       "id": "2985611271137",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.015"
+      },
+      "2985611271138": {
+       "handicap": "5",
+       "id": "2985611271138",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "9.5"
+      },
+      "2985611271139": {
+       "handicap": "5",
+       "id": "2985611271139",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.035"
+      }
+     },
+     "short_name": "Both Teams To Score by Goal",
+     "suspend": "0"
+    },
+    "561127114": {
+     "id": 561127114,
+     "name": "Correct Score",
+     "order": "",
+     "participants": {
+      "2985611271140": {
+       "id": "2985611271140",
+       "name": "4-0",
+       "short_name": "4-0",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "2985611271141": {
+       "id": "2985611271141",
+       "name": "5-0",
+       "short_name": "5-0",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711410": {
+       "id": "29856112711410",
+       "name": "4-2",
+       "short_name": "4-2",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711411": {
+       "id": "29856112711411",
+       "name": "5-2",
+       "short_name": "5-2",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711412": {
+       "id": "29856112711412",
+       "name": "6-2",
+       "short_name": "6-2",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711413": {
+       "id": "29856112711413",
+       "name": "7-2",
+       "short_name": "7-2",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711414": {
+       "id": "29856112711414",
+       "name": "8-2",
+       "short_name": "8-2",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711415": {
+       "id": "29856112711415",
+       "name": "4-3",
+       "short_name": "4-3",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711416": {
+       "id": "29856112711416",
+       "name": "5-3",
+       "short_name": "5-3",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711417": {
+       "id": "29856112711417",
+       "name": "6-3",
+       "short_name": "6-3",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711418": {
+       "id": "29856112711418",
+       "name": "7-3",
+       "short_name": "7-3",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711419": {
+       "id": "29856112711419",
+       "name": "8-3",
+       "short_name": "8-3",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "2985611271142": {
+       "id": "2985611271142",
+       "name": "6-0",
+       "short_name": "6-0",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711420": {
+       "id": "29856112711420",
+       "name": "5-4",
+       "short_name": "5-4",
+       "suspend": "0",
+       "value_eu": "201"
+      },
+      "29856112711421": {
+       "id": "29856112711421",
+       "name": "6-4",
+       "short_name": "6-4",
+       "suspend": "0",
+       "value_eu": "201"
+      },
+      "29856112711422": {
+       "id": "29856112711422",
+       "name": "7-4",
+       "short_name": "7-4",
+       "suspend": "0",
+       "value_eu": "201"
+      },
+      "29856112711423": {
+       "id": "29856112711423",
+       "name": "8-4",
+       "short_name": "8-4",
+       "suspend": "0",
+       "value_eu": "201"
+      },
+      "29856112711424": {
+       "id": "29856112711424",
+       "name": "6-5",
+       "short_name": "6-5",
+       "suspend": "0",
+       "value_eu": "151"
+      },
+      "29856112711425": {
+       "id": "29856112711425",
+       "name": "7-5",
+       "short_name": "7-5",
+       "suspend": "0",
+       "value_eu": "201"
+      },
+      "29856112711426": {
+       "id": "29856112711426",
+       "name": "8-5",
+       "short_name": "8-5",
+       "suspend": "0",
+       "value_eu": "201"
+      },
+      "29856112711427": {
+       "id": "29856112711427",
+       "name": "7-6",
+       "short_name": "7-6",
+       "suspend": "0",
+       "value_eu": "201"
+      },
+      "29856112711428": {
+       "id": "29856112711428",
+       "name": "8-6",
+       "short_name": "8-6",
+       "suspend": "0",
+       "value_eu": "201"
+      },
+      "29856112711429": {
+       "id": "29856112711429",
+       "name": "8-7",
+       "short_name": "8-7",
+       "suspend": "0",
+       "value_eu": "201"
+      },
+      "2985611271143": {
+       "id": "2985611271143",
+       "name": "7-0",
+       "short_name": "7-0",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711430": {
+       "id": "29856112711430",
+       "name": "T1 9+",
+       "short_name": "T1 9+",
+       "suspend": "0",
+       "value_eu": "51"
+      },
+      "29856112711431": {
+       "id": "29856112711431",
+       "name": "0-4",
+       "short_name": "0-4",
+       "suspend": "0",
+       "value_eu": "26"
+      },
+      "29856112711432": {
+       "id": "29856112711432",
+       "name": "0-5",
+       "short_name": "0-5",
+       "suspend": "0",
+       "value_eu": "16.5"
+      },
+      "29856112711433": {
+       "id": "29856112711433",
+       "name": "0-6",
+       "short_name": "0-6",
+       "suspend": "0",
+       "value_eu": "13"
+      },
+      "29856112711434": {
+       "id": "29856112711434",
+       "name": "0-7",
+       "short_name": "0-7",
+       "suspend": "0",
+       "value_eu": "13"
+      },
+      "29856112711435": {
+       "id": "29856112711435",
+       "name": "0-8",
+       "short_name": "0-8",
+       "suspend": "0",
+       "value_eu": "16"
+      },
+      "29856112711436": {
+       "id": "29856112711436",
+       "name": "1-4",
+       "short_name": "1-4",
+       "suspend": "0",
+       "value_eu": "31"
+      },
+      "29856112711437": {
+       "id": "29856112711437",
+       "name": "1-5",
+       "short_name": "1-5",
+       "suspend": "0",
+       "value_eu": "19"
+      },
+      "29856112711438": {
+       "id": "29856112711438",
+       "name": "1-6",
+       "short_name": "1-6",
+       "suspend": "0",
+       "value_eu": "15"
+      },
+      "29856112711439": {
+       "id": "29856112711439",
+       "name": "1-7",
+       "short_name": "1-7",
+       "suspend": "0",
+       "value_eu": "15"
+      },
+      "2985611271144": {
+       "id": "2985611271144",
+       "name": "8-0",
+       "short_name": "8-0",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711440": {
+       "id": "29856112711440",
+       "name": "1-8",
+       "short_name": "1-8",
+       "suspend": "0",
+       "value_eu": "17.5"
+      },
+      "29856112711441": {
+       "id": "29856112711441",
+       "name": "2-4",
+       "short_name": "2-4",
+       "suspend": "0",
+       "value_eu": "41"
+      },
+      "29856112711442": {
+       "id": "29856112711442",
+       "name": "2-5",
+       "short_name": "2-5",
+       "suspend": "0",
+       "value_eu": "26"
+      },
+      "29856112711443": {
+       "id": "29856112711443",
+       "name": "2-6",
+       "short_name": "2-6",
+       "suspend": "0",
+       "value_eu": "21"
+      },
+      "29856112711444": {
+       "id": "29856112711444",
+       "name": "2-7",
+       "short_name": "2-7",
+       "suspend": "0",
+       "value_eu": "21"
+      },
+      "29856112711445": {
+       "id": "29856112711445",
+       "name": "2-8",
+       "short_name": "2-8",
+       "suspend": "0",
+       "value_eu": "23"
+      },
+      "29856112711446": {
+       "id": "29856112711446",
+       "name": "3-4",
+       "short_name": "3-4",
+       "suspend": "0",
+       "value_eu": "66"
+      },
+      "29856112711447": {
+       "id": "29856112711447",
+       "name": "3-5",
+       "short_name": "3-5",
+       "suspend": "0",
+       "value_eu": "41"
+      },
+      "29856112711448": {
+       "id": "29856112711448",
+       "name": "3-6",
+       "short_name": "3-6",
+       "suspend": "0",
+       "value_eu": "36"
+      },
+      "29856112711449": {
+       "id": "29856112711449",
+       "name": "3-7",
+       "short_name": "3-7",
+       "suspend": "0",
+       "value_eu": "34"
+      },
+      "2985611271145": {
+       "id": "2985611271145",
+       "name": "4-1",
+       "short_name": "4-1",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711450": {
+       "id": "29856112711450",
+       "name": "3-8",
+       "short_name": "3-8",
+       "suspend": "0",
+       "value_eu": "41"
+      },
+      "29856112711451": {
+       "id": "29856112711451",
+       "name": "4-5",
+       "short_name": "4-5",
+       "suspend": "0",
+       "value_eu": "61"
+      },
+      "29856112711452": {
+       "id": "29856112711452",
+       "name": "4-6",
+       "short_name": "4-6",
+       "suspend": "0",
+       "value_eu": "51"
+      },
+      "29856112711453": {
+       "id": "29856112711453",
+       "name": "4-7",
+       "short_name": "4-7",
+       "suspend": "0",
+       "value_eu": "51"
+      },
+      "29856112711454": {
+       "id": "29856112711454",
+       "name": "4-8",
+       "short_name": "4-8",
+       "suspend": "0",
+       "value_eu": "61"
+      },
+      "29856112711455": {
+       "id": "29856112711455",
+       "name": "5-6",
+       "short_name": "5-6",
+       "suspend": "0",
+       "value_eu": "66"
+      },
+      "29856112711456": {
+       "id": "29856112711456",
+       "name": "5-7",
+       "short_name": "5-7",
+       "suspend": "0",
+       "value_eu": "66"
+      },
+      "29856112711457": {
+       "id": "29856112711457",
+       "name": "5-8",
+       "short_name": "5-8",
+       "suspend": "0",
+       "value_eu": "81"
+      },
+      "29856112711458": {
+       "id": "29856112711458",
+       "name": "6-7",
+       "short_name": "6-7",
+       "suspend": "0",
+       "value_eu": "81"
+      },
+      "29856112711459": {
+       "id": "29856112711459",
+       "name": "6-8",
+       "short_name": "6-8",
+       "suspend": "0",
+       "value_eu": "126"
+      },
+      "2985611271146": {
+       "id": "2985611271146",
+       "name": "5-1",
+       "short_name": "5-1",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "29856112711460": {
+       "id": "29856112711460",
+       "name": "7-8",
+       "short_name": "7-8",
+       "suspend": "0",
+       "value_eu": "126"
+      },
+      "29856112711461": {
+       "id": "29856112711461",
+       "name": "T2 9+",
+       "short_name": "T2 9+",
+       "suspend": "0",
+       "value_eu": "3.4"
+      },
+      "2985611271147": {
+       "id": "2985611271147",
+       "name": "6-1",
+       "short_name": "6-1",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "2985611271148": {
+       "id": "2985611271148",
+       "name": "7-1",
+       "short_name": "7-1",
+       "suspend": "1",
+       "value_eu": "0"
+      },
+      "2985611271149": {
+       "id": "2985611271149",
+       "name": "8-1",
+       "short_name": "8-1",
+       "suspend": "1",
+       "value_eu": "0"
+      }
+     },
+     "short_name": "Correct Score",
+     "suspend": "0"
+    },
+    "561127115": {
+     "id": 561127115,
+     "name": "Result/Total Goals",
+     "order": "",
+     "participants": {
+      "2985611271150": {
+       "handicap": "14.5",
+       "id": "2985611271150",
+       "name": "1/o",
+       "short_name": "1/o",
+       "suspend": "0",
+       "value_eu": "31"
+      },
+      "2985611271151": {
+       "handicap": "14.5",
+       "id": "2985611271151",
+       "name": "1/u",
+       "short_name": "1/u",
+       "suspend": "0",
+       "value_eu": "31"
+      },
+      "29856112711510": {
+       "handicap": "9.5",
+       "id": "29856112711510",
+       "name": "2/o",
+       "short_name": "2/o",
+       "suspend": "0",
+       "value_eu": "2.6"
+      },
+      "29856112711511": {
+       "handicap": "9.5",
+       "id": "29856112711511",
+       "name": "2/u",
+       "short_name": "2/u",
+       "suspend": "0",
+       "value_eu": "1.476"
+      },
+      "2985611271152": {
+       "handicap": "13.5",
+       "id": "2985611271152",
+       "name": "1/o",
+       "short_name": "1/o",
+       "suspend": "0",
+       "value_eu": "29"
+      },
+      "2985611271153": {
+       "handicap": "13.5",
+       "id": "2985611271153",
+       "name": "1/u",
+       "short_name": "1/u",
+       "suspend": "0",
+       "value_eu": "41"
+      },
+      "2985611271154": {
+       "handicap": "15.5",
+       "id": "2985611271154",
+       "name": "1/o",
+       "short_name": "1/o",
+       "suspend": "0",
+       "value_eu": "34"
+      },
+      "2985611271155": {
+       "handicap": "15.5",
+       "id": "2985611271155",
+       "name": "1/u",
+       "short_name": "1/u",
+       "suspend": "0",
+       "value_eu": "21"
+      },
+      "2985611271156": {
+       "handicap": "8.5",
+       "id": "2985611271156",
+       "name": "2/o",
+       "short_name": "2/o",
+       "suspend": "0",
+       "value_eu": "1.869"
+      },
+      "2985611271157": {
+       "handicap": "8.5",
+       "id": "2985611271157",
+       "name": "2/u",
+       "short_name": "2/u",
+       "suspend": "0",
+       "value_eu": "1.833"
+      },
+      "2985611271158": {
+       "handicap": "7.5",
+       "id": "2985611271158",
+       "name": "2/o",
+       "short_name": "2/o",
+       "suspend": "0",
+       "value_eu": "1.5"
+      },
+      "2985611271159": {
+       "handicap": "7.5",
+       "id": "2985611271159",
+       "name": "2/u",
+       "short_name": "2/u",
+       "suspend": "0",
+       "value_eu": "2.6"
+      }
+     },
+     "short_name": "Result/Total Goals",
+     "suspend": "0"
+    },
+    "561127116": {
+     "id": 561127116,
+     "name": "Total Hits (9th Inning)",
+     "order": "",
+     "participants": {
+      "2985611271160": {
+       "handicap": "8",
+       "id": "2985611271160",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.833"
+      },
+      "2985611271161": {
+       "handicap": "8",
+       "id": "2985611271161",
+       "name": "Exactly",
+       "short_name": "Exactly",
+       "suspend": "0",
+       "value_eu": "5.75"
+      },
+      "2985611271162": {
+       "handicap": "8",
+       "id": "2985611271162",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "2.6"
+      }
+     },
+     "short_name": "Total Hits (9th Inning)",
+     "suspend": "0"
+    },
+    "562127122": {
+     "id": 562127122,
+     "name": "Total Band 3-Way",
+     "order": "",
+     "participants": {
+      "2985621271220": {
+       "id": "2985621271220",
+       "name": "Michigan State +5.5 & Over 10.5",
+       "short_name": "Michigan State +5.5 & Over 10.5",
+       "suspend": "0",
+       "value_eu": "9"
+      },
+      "2985621271221": {
+       "id": "2985621271221",
+       "name": "Michigan State +5.5 & Under 10.5",
+       "short_name": "Michigan State +5.5 & Under 10.5",
+       "suspend": "0",
+       "value_eu": "2.4"
+      },
+      "2985621271222": {
+       "id": "2985621271222",
+       "name": "USC -5.5 & Over 10.5",
+       "short_name": "USC -5.5 & Over 10.5",
+       "suspend": "0",
+       "value_eu": "5.25"
+      },
+      "2985621271223": {
+       "id": "2985621271223",
+       "name": "USC -5.5 & Under 10.5",
+       "short_name": "USC -5.5 & Under 10.5",
+       "suspend": "0",
+       "value_eu": "2.4"
+      }
+     },
+     "short_name": "Total Band 3-Way",
+     "suspend": "0"
+    },
+    "900930": {
+     "id": 900930,
+     "name": "1x2 (6th Inning)",
+     "order": "",
+     "participants": {
+      "2989009300": {
+       "id": "2989009300",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "6.25"
+      },
+      "2989009301": {
+       "id": "2989009301",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "2.2"
+      },
+      "2989009302": {
+       "id": "2989009302",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "0",
+       "value_eu": "2"
+      }
+     },
+     "short_name": "1x2 (6th Inning)",
+     "suspend": "0"
+    },
+    "900942": {
+     "id": 900942,
+     "name": "Total Runs (6th Inning)",
+     "order": "",
+     "participants": {
+      "2989009420": {
+       "handicap": "3.5",
+       "id": "2989009420",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "8.75"
+      },
+      "2989009421": {
+       "handicap": "3.5",
+       "id": "2989009421",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.045"
+      },
+      "2989009422": {
+       "handicap": "1.5",
+       "id": "2989009422",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "2.5"
+      },
+      "2989009423": {
+       "handicap": "1.5",
+       "id": "2989009423",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.5"
+      },
+      "2989009424": {
+       "handicap": "0.5",
+       "id": "2989009424",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.606"
+      },
+      "2989009425": {
+       "handicap": "0.5",
+       "id": "2989009425",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "2.2"
+      },
+      "2989009426": {
+       "handicap": "2.5",
+       "id": "2989009426",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "4.4"
+      },
+      "2989009427": {
+       "handicap": "2.5",
+       "id": "2989009427",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.181"
+      }
+     },
+     "short_name": "Total Runs (6th Inning)",
+     "suspend": "0"
+    },
+    "900949": {
+     "id": 900949,
+     "name": "A Run (6th Inning)",
+     "order": "",
+     "participants": {
+      "2989009490": {
+       "id": "2989009490",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "1.606"
+      },
+      "2989009491": {
+       "id": "2989009491",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "2.2"
+      }
+     },
+     "short_name": "A Run (6th Inning)",
+     "suspend": "0"
+    },
+    "900953": {
+     "id": 900953,
+     "name": "European Handicap",
+     "order": "",
+     "participants": {
+      "2989009530": {
+       "handicap": "6",
+       "id": "2989009530",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.952"
+      },
+      "2989009531": {
+       "handicap": "-6",
+       "id": "2989009531",
+       "name": "Draw",
+       "short_name": "Draw",
+       "suspend": "0",
+       "value_eu": "5.5"
+      },
+      "2989009532": {
+       "handicap": "-6",
+       "id": "2989009532",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "2.5"
+      }
+     },
+     "short_name": "European Handicap",
+     "suspend": "0"
+    },
+    "900954": {
+     "id": 900954,
+     "name": "Home Winning Margin (8-Way)",
+     "order": "",
+     "participants": {
+      "2989009540": {
+       "id": "2989009540",
+       "name": "1 run",
+       "short_name": "1 run",
+       "suspend": "0",
+       "value_eu": "41"
+      },
+      "2989009541": {
+       "id": "2989009541",
+       "name": "2 runs",
+       "short_name": "2 runs",
+       "suspend": "0",
+       "value_eu": "51"
+      },
+      "2989009542": {
+       "id": "2989009542",
+       "name": "3 runs",
+       "short_name": "3 runs",
+       "suspend": "0",
+       "value_eu": "66"
+      },
+      "2989009543": {
+       "id": "2989009543",
+       "name": "4 or more runs",
+       "short_name": "4 or more runs",
+       "suspend": "0",
+       "value_eu": "51"
+      }
+     },
+     "short_name": "Home Winning Margin (8-Way)",
+     "suspend": "0"
+    },
+    "900955": {
+     "id": 900955,
+     "name": "Away Winning Margin (8-Way)",
+     "order": "",
+     "participants": {
+      "2989009550": {
+       "id": "2989009550",
+       "name": "1 run",
+       "short_name": "1 run",
+       "suspend": "0",
+       "value_eu": "16"
+      },
+      "2989009551": {
+       "id": "2989009551",
+       "name": "2 runs",
+       "short_name": "2 runs",
+       "suspend": "0",
+       "value_eu": "10.5"
+      },
+      "2989009552": {
+       "id": "2989009552",
+       "name": "3 runs",
+       "short_name": "3 runs",
+       "suspend": "0",
+       "value_eu": "6.75"
+      },
+      "2989009553": {
+       "id": "2989009553",
+       "name": "4 or more runs",
+       "short_name": "4 or more runs",
+       "suspend": "0",
+       "value_eu": "1.166"
+      }
+     },
+     "short_name": "Away Winning Margin (8-Way)",
+     "suspend": "0"
+    },
+    "900970": {
+     "id": 900970,
+     "name": "Away A Run (5th Inning)",
+     "order": "",
+     "participants": {
+      "2989009700": {
+       "id": "2989009700",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "2.1"
+      },
+      "2989009701": {
+       "id": "2989009701",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.666"
+      }
+     },
+     "short_name": "Away A Run (5th Inning)",
+     "suspend": "0"
+    },
+    "924": {
+     "id": 924,
+     "name": "Extra Innings",
+     "order": "",
+     "participants": {
+      "2989240": {
+       "id": "2989240",
+       "name": "Yes",
+       "short_name": "Yes",
+       "suspend": "0",
+       "value_eu": "21"
+      },
+      "2989241": {
+       "id": "2989241",
+       "name": "No",
+       "short_name": "No",
+       "suspend": "0",
+       "value_eu": "1.002"
+      }
+     },
+     "short_name": "Extra Innings",
+     "suspend": "0"
+    },
+    "936": {
+     "id": 936,
+     "name": "Over/Under (1st 7 Innings)",
+     "order": "",
+     "participants": {
+      "2989360": {
+       "handicap": "9.5",
+       "id": "2989360",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "5"
+      },
+      "2989361": {
+       "handicap": "9.5",
+       "id": "2989361",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.142"
+      },
+      "2989362": {
+       "handicap": "8.5",
+       "id": "2989362",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "3.3"
+      },
+      "2989363": {
+       "handicap": "8.5",
+       "id": "2989363",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.294"
+      },
+      "2989364": {
+       "handicap": "7.5",
+       "id": "2989364",
+       "is_main": "1",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "2.2"
+      },
+      "2989365": {
+       "handicap": "7.5",
+       "id": "2989365",
+       "is_main": "1",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "1.606"
+      },
+      "2989366": {
+       "handicap": "6.5",
+       "id": "2989366",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.571"
+      },
+      "2989367": {
+       "handicap": "6.5",
+       "id": "2989367",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "2.25"
+      },
+      "2989368": {
+       "handicap": "5.5",
+       "id": "2989368",
+       "is_main": "0",
+       "name": "Over",
+       "short_name": "Over",
+       "suspend": "0",
+       "value_eu": "1.227"
+      },
+      "2989369": {
+       "handicap": "5.5",
+       "id": "2989369",
+       "is_main": "0",
+       "name": "Under",
+       "short_name": "Under",
+       "suspend": "0",
+       "value_eu": "3.9"
+      }
+     },
+     "short_name": "Over/Under (1st 7 Innings)",
+     "suspend": "0"
+    },
+    "937": {
+     "id": 937,
+     "name": "Asian Handicap (1st 7 Innings)",
+     "order": "",
+     "participants": {
+      "2989370": {
+       "handicap": "5.5",
+       "id": "2989370",
+       "is_main": "1",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.869"
+      },
+      "2989371": {
+       "handicap": "-5.5",
+       "id": "2989371",
+       "is_main": "1",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.8"
+      },
+      "2989372": {
+       "handicap": "4.5",
+       "id": "2989372",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "3"
+      },
+      "2989373": {
+       "handicap": "-4.5",
+       "id": "2989373",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.357"
+      },
+      "2989374": {
+       "handicap": "7.5",
+       "id": "2989374",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.181"
+      },
+      "2989375": {
+       "handicap": "-7.5",
+       "id": "2989375",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "4.4"
+      },
+      "2989376": {
+       "handicap": "6.5",
+       "id": "2989376",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "1.416"
+      },
+      "2989377": {
+       "handicap": "-6.5",
+       "id": "2989377",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "2.7"
+      },
+      "2989378": {
+       "handicap": "3.5",
+       "id": "2989378",
+       "is_main": "0",
+       "name": "Home",
+       "short_name": "Home",
+       "suspend": "0",
+       "value_eu": "6"
+      },
+      "2989379": {
+       "handicap": "-3.5",
+       "id": "2989379",
+       "is_main": "0",
+       "name": "Away",
+       "short_name": "Away",
+       "suspend": "0",
+       "value_eu": "1.111"
+      }
+     },
+     "short_name": "Asian Handicap (1st 7 Innings)",
+     "suspend": "0"
+    }
+   },
+   "stats": {
+    "0": {
+     "away": "USC",
+     "home": "Michigan State",
+     "name": "ITeam"
+    },
+    "1": {
+     "away": "2",
+     "home": "0",
+     "name": "1"
+    },
+    "10": {
+     "away": null,
+     "home": null,
+     "name": "10"
+    },
+    "11": {
+     "away": null,
+     "home": null,
+     "name": "11"
+    },
+    "12": {
+     "away": null,
+     "home": null,
+     "name": "12"
+    },
+    "13": {
+     "away": null,
+     "home": null,
+     "name": "13"
+    },
+    "14": {
+     "away": null,
+     "home": null,
+     "name": "14"
+    },
+    "15": {
+     "away": null,
+     "home": null,
+     "name": "15"
+    },
+    "16": {
+     "away": "4",
+     "home": "0",
+     "name": "R"
+    },
+    "17": {
+     "away": "5",
+     "home": "3",
+     "name": "H"
+    },
+    "2": {
+     "away": "0",
+     "home": "0",
+     "name": "2"
+    },
+    "3": {
+     "away": "2",
+     "home": "0",
+     "name": "3"
+    },
+    "4": {
+     "away": "0",
+     "home": "0",
+     "name": "4"
+    },
+    "5": {
+     "away": null,
+     "home": "0",
+     "name": "5"
+    },
+    "6": {
+     "away": null,
+     "home": null,
+     "name": "6"
+    },
+    "7": {
+     "away": null,
+     "home": null,
+     "name": "7"
+    },
+    "8": {
+     "away": null,
+     "home": null,
+     "name": "8"
+    },
+    "9": {
+     "away": null,
+     "home": null,
+     "name": "9"
+    }
+   },
+   "stream": "",
+   "sts": "1|Top of 5th|0|1|1|2|0|100|STS=Pitches,Balls,Strikes,Walks,HBP,Hits,Singles,Double,Triples,Homers,Runs,Batters,Left On Base||",
+   "team_info": {
+    "away": {
+     "Serve": "",
+     "color": "",
+     "kit_color": "#F0F0F0,#832034,#D446BA,#00C1BA,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#00FFFF",
+     "name": "USC",
+     "score": "4"
+    },
+    "home": {
+     "Serve": "",
+     "color": "",
+     "kit_color": "#025C17,#F0F0F0,#D446BA,#00C1BA,#C40010,#0046A8,#3D4A4E,#FFFFFF,#FFFF00,#FF00FF,#00FFFF",
+     "name": "Michigan State",
+     "score": "0"
+    }
+   }
+  }
+ },
+ "updated": "05.22.2026 17:26:40",
+ "updated_ts": 1779470800639
+}

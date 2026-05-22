@@ -57,19 +57,6 @@ def test_settings_goalserve_proxy_set_passes_validation() -> None:
     assert readiness.ready_to_trade
 
 
-def test_settings_goalserve_sport_codes_default() -> None:
-    """goalserve_sport_codes 默认返回包含核心运动代码的元组。"""
-    settings = _settings()
-
-    codes = settings.goalserve_sport_codes
-
-    assert isinstance(codes, tuple)
-    assert "basketball" in codes
-    assert "soccer" in codes
-    assert "hockey" in codes
-    assert "baseball" in codes
-
-
 def test_settings_rejects_missing_goalserve_api_key() -> None:
     """sports_live_state_enabled 且未提供 GOALSERVE_API_KEY 时应报 blocking issue。"""
     settings = _settings(
