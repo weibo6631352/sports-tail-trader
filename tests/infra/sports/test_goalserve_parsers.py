@@ -66,9 +66,10 @@ def test_stp_7_is_paused() -> None:
     assert events[0].status == SportsLiveGameStatus.PAUSED
 
 
-def test_stp_0_is_scheduled() -> None:
+def test_stp_0_is_live() -> None:
+    # inplay WS 是进行中赛事流——stp=0 表示 LIVE，不是 scheduled。
     events = parse_goalserve_ws_events("soccer", _state("ev1", stp=0), observed_at=_OBSERVED)
-    assert events[0].status == SportsLiveGameStatus.SCHEDULED
+    assert events[0].status == SportsLiveGameStatus.LIVE
 
 
 def test_stp_4_is_postponed() -> None:

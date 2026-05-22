@@ -41,7 +41,8 @@ class ConfirmCandidateRequest(BaseModel):
 
 @router.get("")
 async def list_candidates(
-    limit: int = Query(default=100, ge=1, le=500),
+    # 上限放大：候选可能上千，过小的 limit 会把正在直播比赛的候选截掉。
+    limit: int = Query(default=2000, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
     condition_id: str | None = Query(default=None),
     token_id: str | None = Query(default=None),
@@ -88,7 +89,9 @@ async def get_data_freshness(
 
 @router.get("/live-states")
 async def list_live_states(
-    limit: int = Query(default=100, ge=1, le=500),
+    # 默认上限放大到 2000：直播状态条数可能上千，过小的 limit 会把正在直播的
+    # 赛事截掉。服务层已把 phase=live 排到最前，limit 再大也不漏直播。
+    limit: int = Query(default=2000, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:

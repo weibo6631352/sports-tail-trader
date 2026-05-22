@@ -73,6 +73,11 @@ class AdminSportsQueryMixin(_Base):
             if store is None
             else tuple(record for record in store.records() if bool(record.live_state_payload))
         )
+        # 正在直播（phase=live）的排在最前——保证分页 limit 永远不会把正在
+        # 直播的赛事截掉（scheduled 赛事数量多，否则会把 live 挤出首页）。
+        records = tuple(
+            sorted(records, key=lambda r: 0 if str(r.live_state_phase or "").lower() == "live" else 1)
+        )
         page = self._slice_sequence(records, limit=limit, offset=offset)
         return page_payload(page, serializer=lambda record: record.as_payload())
 

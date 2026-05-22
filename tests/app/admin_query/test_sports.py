@@ -38,6 +38,7 @@ class _StubRecord:
     market_slug: str
     event_slug: str | None
     live_state_payload: dict[str, Any] = field(default_factory=dict)
+    live_state_phase: str | None = None
 
     def as_payload(self) -> dict[str, Any]:
         return {"condition_id": self.condition_id, "has_state": bool(self.live_state_payload)}

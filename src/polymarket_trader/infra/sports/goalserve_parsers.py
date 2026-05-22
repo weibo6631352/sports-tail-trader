@@ -107,9 +107,13 @@ class GoalserveOdds:
 # 核心工具
 # ---------------------------------------------------------------------------
 
-# stp 整数 → SportsLiveGameStatus 映射
+# stp 整数 → SportsLiveGameStatus 映射。
+# 注意：inplay WS 是"进行中赛事流"——能进到这个 feed 的赛事就是在打。实测带
+# 比分/赔率的 avl/updt 消息 stp=0，因此 stp=0 表示 LIVE（不是 scheduled）；
+# stp 终态 3/4/5（ended/postponed/cancelled）、99（removed，已在 client 过滤）。
+# 历史上 0→SCHEDULED 是错的，会把所有 inplay 直播赛事误判为未开赛。
 _STP_STATUS: dict[int, SportsLiveGameStatus] = {
-    0: SportsLiveGameStatus.SCHEDULED,
+    0: SportsLiveGameStatus.LIVE,
     1: SportsLiveGameStatus.LIVE,
     3: SportsLiveGameStatus.ENDED,
     4: SportsLiveGameStatus.POSTPONED,
