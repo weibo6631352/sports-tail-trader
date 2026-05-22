@@ -37,6 +37,7 @@ from .core import (
     _evaluate_moneyline_scale_in,
     _evaluate_soccer_btts,
     _evaluate_soccer_halftime_result,
+    _evaluate_soccer_moneyline,
     _evaluate_spreads,
     _evaluate_spreads_scale_in,
     _evaluate_totals,
@@ -45,6 +46,7 @@ from .core import (
     _reject,
     is_soccer_btts_market,
     is_soccer_halftime_market,
+    is_soccer_moneyline_market,
 )
 from .mlb import (
     _evaluate_mlb_moneyline,
@@ -139,6 +141,15 @@ def evaluate_tail_opportunity(
     # 橄榄球胜负盘是 3-way 拆成的 binary_prop——路由到橄榄球评估器。
     if market.market_type == SportsMarketType.BINARY_PROP and is_rugby_game(game):
         return _evaluate_rugby_moneyline(candidate, policy)
+
+    # 足球胜负盘也是 3-way 拆成的 binary_prop——排在 rugby 之后，避免橄榄球
+    # 同构 slug 误入；再以 is_soccer_game 收口。
+    if (
+        market.market_type == SportsMarketType.BINARY_PROP
+        and is_soccer_game(game)
+        and is_soccer_moneyline_market(market)
+    ):
+        return _evaluate_soccer_moneyline(candidate, policy)
 
     if market.market_type == SportsMarketType.BINARY_PROP:
         return _reject(candidate, "binary_prop_no_tail_model")

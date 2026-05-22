@@ -358,6 +358,94 @@ def _evaluate_soccer_btts(
     return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
 
 
+# 足球胜负锁定所需净胜球（按剩余分钟缩放）。进球稀少——临近终场对手越难
+# 追回，所需领先越小。
+_SOCCER_MONEYLINE_MARGIN_BY_MINUTES_LEFT: tuple[tuple[float, int], ...] = (
+    (5.0, 2),    # ≤5 分钟：净胜 ≥2
+    (15.0, 3),   # ≤15 分钟：净胜 ≥3
+)
+
+
+def _soccer_moneyline_direction(market: SportsMarketSnapshot) -> str | None:
+    """足球 3-way 胜平负 binary 盘的方向。
+
+    slug 形如 ``{league}-{home}-{away}-{yyyy}-{mm}-{dd}-{suffix}``（恰 7 段）：
+    suffix == 主队缩写 → home；== 客队缩写 → away；== ``draw`` → draw。
+    段数不为 7 的盘口（halftime/total/handicap 等）不在此识别。
+    """
+    slug = (market.market_slug or "").strip().lower()
+    parts = [p for p in slug.split("-") if p]
+    if len(parts) != 7:
+        return None
+    home_abbr, away_abbr, suffix = parts[1], parts[2], parts[-1]
+    if suffix == "draw":
+        return "draw"
+    if suffix == home_abbr:
+        return "home"
+    if suffix == away_abbr:
+        return "away"
+    return None
+
+
+def is_soccer_moneyline_market(market: SportsMarketSnapshot) -> bool:
+    """识别足球胜负盘（3-way 拆成的 binary_prop）。"""
+    return _soccer_moneyline_direction(market) is not None
+
+
+def _soccer_moneyline_required_margin(seconds_remaining: int) -> int | None:
+    """按剩余时间返回足球胜负锁定所需净胜球；超过 15 分钟（太早）返回 None。"""
+    minutes_left = seconds_remaining / 60.0
+    for cutoff, margin in _SOCCER_MONEYLINE_MARGIN_BY_MINUTES_LEFT:
+        if minutes_left <= cutoff:
+            return margin
+    return None
+
+
+def _evaluate_soccer_moneyline(
+    candidate: SportsTailCandidate,
+    policy: TailPolicy,
+) -> TailEvaluation:
+    """足球胜负盘评估：进球稀少，临近终场领先达到安全净胜球时锁定。
+
+    平局盘中无可靠锁定模型——给可审计原因后跳过。binary_prop 在通用门禁
+    跳过 ask 检查，这里自查入场价。
+    """
+    game = candidate.game
+    market = candidate.market
+    direction = _soccer_moneyline_direction(market)
+    if direction is None:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SCOPE.value)
+    if direction == "draw":
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+    if market.side not in {SportsMarketSide.YES, SportsMarketSide.NO}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    if market.best_ask is None:
+        return _reject(candidate, TailRejectReason.MISSING_BEST_ASK.value)
+    if market.best_ask < policy.min_entry_price:
+        return _reject(candidate, TailRejectReason.PRICE_BELOW_MIN.value)
+    if market.best_ask > policy.moneyline_max_entry_price:
+        return _reject(candidate, TailRejectReason.PRICE_ABOVE_MAX.value)
+    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
+        return _reject(candidate, TailRejectReason.LIQUIDITY_BELOW_MIN.value)
+    if game.seconds_remaining is None:
+        return _reject(candidate, TailRejectReason.MISSING_SECONDS_REMAINING.value)
+    required = _soccer_moneyline_required_margin(game.seconds_remaining)
+    if required is None:
+        return _reject(candidate, TailRejectReason.GAME_NOT_LATE_ENOUGH.value)
+    if direction == "home":
+        lead = game.home_score - game.away_score
+    else:
+        lead = game.away_score - game.home_score
+    if market.side == SportsMarketSide.YES:
+        if lead >= required:
+            return _accept(candidate, "soccer_moneyline_locked", policy.moneyline_execution_permission)
+        return _reject(candidate, TailRejectReason.INSUFFICIENT_LEAD.value)
+    # NO：该方向落后达到安全净胜球 → 已不可能赢 → NO 锁定。
+    if -lead >= required:
+        return _accept(candidate, "soccer_moneyline_no_locked", policy.moneyline_execution_permission)
+    return _reject(candidate, TailRejectReason.INSUFFICIENT_LEAD.value)
+
+
 # ---- ended-not-closed 通用评估器 --------------------------------------
 
 
