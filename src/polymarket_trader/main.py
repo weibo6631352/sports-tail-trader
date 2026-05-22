@@ -125,8 +125,12 @@ logger = logging.getLogger(__name__)
 # 聚合器超时 = 单次 provider 超时 × 倍率，floor 防止 timeout_s 配置极小时完全没预算。
 _PROVIDER_TIMEOUT_MULTIPLIER = 3
 _PROVIDER_TIMEOUT_FLOOR_S = 12.0
-# 启动快照加载上限，限制重启时的内存占用；超出部分等 WS 增量补齐。
+# 启动快照加载上限（positions/orders/fills），限制重启时的内存占用。
 _STARTUP_SNAPSHOT_ITEM_LIMIT = 500
+# 市场单独用大上限：跟踪的市场可达数千，只恢复 500 会让重启后 discovery 现场
+# 重扫数百页（数分钟）才补齐，正在直播的赛事在此期间匹配不上。从 DB 一次性
+# 恢复全部市场（一条索引查询，远快于重新发现），让重启后 registry 立即就绪。
+_STARTUP_MARKET_SNAPSHOT_LIMIT = 50000
 # reconcile 批次上限，防止 maintenance 队列积压时单批过大阻塞主循环。
 _RECONCILE_BATCH_SIZE_LIMIT = 256
 
@@ -1132,7 +1136,7 @@ async def _load_reference_state(runtime: RuntimeComponents) -> dict[str, int]:
     try:
         async with runtime.db_session_factory() as session:
             account_snapshot = await AccountSnapshotRepository(session).get_current_snapshot()
-            markets = await MarketRepository(session).list_markets_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
+            markets = await MarketRepository(session).list_markets_snapshot(limit=_STARTUP_MARKET_SNAPSHOT_LIMIT, offset=0)
             positions = await PositionRepository(session).list_positions_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
             open_orders = await OrderRepository(session).list_open_orders_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
             fills = await FillRepository(session).list_fills_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
