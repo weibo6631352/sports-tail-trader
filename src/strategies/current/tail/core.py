@@ -319,6 +319,45 @@ def _evaluate_soccer_halftime_result(
     return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
 
 
+def is_soccer_btts_market(market: SportsMarketSnapshot) -> bool:
+    """识别足球 BTTS（both teams to score，双方进球）盘口。"""
+    slug = (market.market_slug or "").lower()
+    return slug.endswith("-btts") or slug.endswith("-both-teams-to-score")
+
+
+def _evaluate_soccer_btts(
+    candidate: SportsTailCandidate,
+    policy: TailPolicy,
+) -> TailEvaluation:
+    """评估足球 BTTS（双方进球）盘口。
+
+    双方均已进球 → BTTS YES 100% 锁定：进球既成事实、不可撤销，无论比赛
+    后续如何 YES 必中。NO 侧在比赛结束前无法锁定（0 球方随时可能进球），
+    本盘中评估器只对 YES 给出锁定。binary_prop 在通用门禁跳过 ask 检查，
+    这里自查入场价。
+    """
+    game = candidate.game
+    market = candidate.market
+    if market.side not in {SportsMarketSide.YES, SportsMarketSide.NO}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    if market.best_ask is None:
+        return _reject(candidate, TailRejectReason.MISSING_BEST_ASK.value)
+    if market.best_ask < policy.min_entry_price:
+        return _reject(candidate, TailRejectReason.PRICE_BELOW_MIN.value)
+    if market.best_ask > policy.totals_max_entry_price:
+        return _reject(candidate, TailRejectReason.PRICE_ABOVE_MAX.value)
+    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
+        return _reject(candidate, TailRejectReason.LIQUIDITY_BELOW_MIN.value)
+
+    both_scored = game.home_score >= 1 and game.away_score >= 1
+    if market.side == SportsMarketSide.YES:
+        if both_scored:
+            return _accept(candidate, "soccer_btts_yes_locked", policy.totals_execution_permission)
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+    # NO：比赛结束前 0 球方仍可能进球——盘中不可锁定。
+    return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+
 # ---- ended-not-closed 通用评估器 --------------------------------------
 
 

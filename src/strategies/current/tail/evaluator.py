@@ -35,6 +35,7 @@ from .core import (
     _evaluate_ended_totals,
     _evaluate_moneyline,
     _evaluate_moneyline_scale_in,
+    _evaluate_soccer_btts,
     _evaluate_soccer_halftime_result,
     _evaluate_spreads,
     _evaluate_spreads_scale_in,
@@ -42,6 +43,7 @@ from .core import (
     _evaluate_totals_scale_in,
     _market_family_reject_reason,
     _reject,
+    is_soccer_btts_market,
     is_soccer_halftime_market,
 )
 from .mlb import (
@@ -130,6 +132,9 @@ def evaluate_tail_opportunity(
 
     if market.market_type == SportsMarketType.BINARY_PROP and is_soccer_halftime_market(market):
         return _evaluate_soccer_halftime_result(candidate, policy)
+
+    if market.market_type == SportsMarketType.BINARY_PROP and is_soccer_btts_market(market):
+        return _evaluate_soccer_btts(candidate, policy)
 
     # 橄榄球胜负盘是 3-way 拆成的 binary_prop——路由到橄榄球评估器。
     if market.market_type == SportsMarketType.BINARY_PROP and is_rugby_game(game):
