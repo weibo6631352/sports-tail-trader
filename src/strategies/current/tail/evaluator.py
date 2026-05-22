@@ -129,10 +129,17 @@ def evaluate_tail_opportunity(
     if odds_gap_evaluation.accepted:
         return odds_gap_evaluation
     # 两条路径都未命中：返回扫尾锁定的拒绝原因（信息量更大，含具体未锁定原因）。
-    # 仅当 Money Line 盘口的锁定原因是泛化的 OUTCOME_NOT_LOCKED 时，换成 no_odds_gap
-    # 让审计能区分"扫尾未锁 + 赔率差价也不够"。非 Money Line 保留原锁定原因。
+    # 仅当锁定原因是泛化的 OUTCOME_NOT_LOCKED 时，换成赔率差价的拒绝原因
+    # （no_odds_gap / odds_gap_line_mismatch），让审计能区分"扫尾未锁 + 赔率差价也
+    # 不够"以及"totals/spread 盘口线对不上"。MONEYLINE/TOTALS/SPREADS 三类赔率差价
+    # 均覆盖；其它锁定原因（缺数据、缺线等）信息量更大，保留。
     if (
-        market.market_type == SportsMarketType.MONEYLINE
+        market.market_type
+        in {
+            SportsMarketType.MONEYLINE,
+            SportsMarketType.TOTALS,
+            SportsMarketType.SPREADS,
+        }
         and locked_evaluation.reason == TailRejectReason.OUTCOME_NOT_LOCKED.value
     ):
         return odds_gap_evaluation

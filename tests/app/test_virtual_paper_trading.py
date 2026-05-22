@@ -80,7 +80,9 @@ def test_virtual_paper_trade_prioritizes_live_rejection_over_scheduled_single_ga
 
     assert result["status"] == "no_trade"
     assert result["selection"]["market_slug"] == "nhl-live-tail-2026-04-28-total-10pt5"
-    assert result["reason"] == "outcome_not_locked"
+    # totals 盘口扫尾未锁定后会继续走赔率差价：无 Goalserve totals 数据 → no_odds_gap。
+    # 本用例只验证"live 拒绝优先于 scheduled 拒绝"，拒绝原因为 odds-gap 路径产物即可。
+    assert result["reason"] == "no_odds_gap"
 
 
 # === F-3 显式 market 找不到时不静默 fallback ===

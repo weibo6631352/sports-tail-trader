@@ -256,3 +256,439 @@ def test_kelly_sizes_odds_gap_on_devigged_prob() -> None:
     assert stake.edge > Decimal("0")
     # 用 implied≈1.0 定注会严重 over-bet；devigged 定注的 f_star 应明显小于 1。
     assert stake.f_star < Decimal("1")
+
+
+# ===========================================================================
+# Totals（Over/Under）赔率差价：线 + 范围对账
+# ===========================================================================
+
+
+def _totals_market(
+    side: SportsMarketSide,
+    best_ask: Decimal,
+    *,
+    line: Decimal | None,
+    market_slug: str = "nba-lal-bos-2026-05-23-total-220pt5",
+    goalserve_totals: dict | None = None,
+) -> SportsMarketSnapshot:
+    metadata: dict = {}
+    if goalserve_totals is not None:
+        metadata["goalserve_totals"] = goalserve_totals
+    return SportsMarketSnapshot(
+        market_type=SportsMarketType.TOTALS,
+        side=side,
+        token_id="tok",
+        line=line,
+        best_ask=best_ask,
+        best_bid=best_ask - Decimal("0.02"),
+        buyable_liquidity_usdc=Decimal("50"),
+        market_slug=market_slug,
+        metadata=metadata,
+    )
+
+
+def _spread_market(
+    side: SportsMarketSide,
+    best_ask: Decimal,
+    *,
+    line: Decimal | None,
+    market_slug: str = "nba-lal-bos-2026-05-23-spread",
+    goalserve_spread: dict | None = None,
+) -> SportsMarketSnapshot:
+    metadata: dict = {}
+    if goalserve_spread is not None:
+        metadata["goalserve_spread"] = goalserve_spread
+    return SportsMarketSnapshot(
+        market_type=SportsMarketType.SPREADS,
+        side=side,
+        token_id="tok",
+        line=line,
+        best_ask=best_ask,
+        best_bid=best_ask - Decimal("0.02"),
+        buyable_liquidity_usdc=Decimal("50"),
+        market_slug=market_slug,
+        metadata=metadata,
+    )
+
+
+def test_totals_odds_gap_accepted_when_line_matches_and_edge_clears() -> None:
+    # Goalserve raw over=0.70 under=0.40 → overround 1.10, devigged over ≈ 0.6364。
+    # line 220.5 = Polymarket line 220.5；ask=0.55 → edge ≈ 0.0864 ≥ 0.06 → accept。
+    gs = {
+        "market_name": "Total",
+        "total_line": "220.5",
+        "over_implied_prob": 0.70,
+        "under_implied_prob": 0.40,
+        "suspended": False,
+    }
+    market = _totals_market(
+        SportsMarketSide.OVER, Decimal("0.55"), line=Decimal("220.5"), goalserve_totals=gs
+    )
+    ev = evaluate_tail_opportunity(_game(), market, policy=TailPolicy())
+    assert ev.accepted, ev.reason
+    assert ev.opportunity_type == SportsTailOpportunityType.ODDS_GAP
+    assert ev.metadata["odds_gap_side"] == "over"
+    assert ev.metadata["odds_gap_market_type"] == "totals"
+    true_p = Decimal(ev.metadata["odds_gap_true_p"])
+    assert Decimal(ev.metadata["odds_gap_edge"]) == true_p - Decimal("0.55")
+
+
+def test_totals_odds_gap_rejected_when_line_mismatch_no_fabricated_edge() -> None:
+    # Goalserve totals 线 9.5 ≠ Polymarket 市场线 8.5：over 9.5 与 over 8.5 结算条件
+    # 不同，概率不可比。即便 edge 看似充足也不得入场 → odds_gap_line_mismatch。
+    gs = {
+        "market_name": "Total",
+        "total_line": "9.5",
+        "over_implied_prob": 0.70,
+        "under_implied_prob": 0.40,
+        "suspended": False,
+    }
+    market = _totals_market(
+        SportsMarketSide.OVER,
+        Decimal("0.55"),
+        line=Decimal("8.5"),
+        market_slug="mlb-nyy-bos-2026-05-23-total-8pt5",
+        goalserve_totals=gs,
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.ODDS_GAP_LINE_MISMATCH.value
+
+
+def test_totals_odds_gap_rejected_when_scope_mismatch() -> None:
+    # Polymarket 是篮球上半场 totals（1h total），Goalserve totals 是整场 "Total"。
+    # 范围不一致 → 概率不可比 → odds_gap_line_mismatch（不凭空造 edge）。
+    gs = {
+        "market_name": "Total",
+        "total_line": "110.5",
+        "over_implied_prob": 0.70,
+        "under_implied_prob": 0.40,
+        "suspended": False,
+    }
+    market = _totals_market(
+        SportsMarketSide.OVER,
+        Decimal("0.55"),
+        line=Decimal("110.5"),
+        market_slug="nba-lal-bos-2026-05-23-1h-total-110pt5",
+        goalserve_totals=gs,
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.ODDS_GAP_LINE_MISMATCH.value
+
+
+def test_totals_odds_gap_rejected_when_goalserve_market_name_is_subperiod() -> None:
+    # Polymarket 整场 totals，但 Goalserve market_name 携带子周期标记 "(map 2)"。
+    # 二次范围确认必须捕获——电竞分图 totals 不能与整场比较。
+    gs = {
+        "market_name": "Total (map 2)",
+        "total_line": "220.5",
+        "over_implied_prob": 0.70,
+        "under_implied_prob": 0.40,
+        "suspended": False,
+    }
+    market = _totals_market(
+        SportsMarketSide.OVER, Decimal("0.55"), line=Decimal("220.5"), goalserve_totals=gs
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.ODDS_GAP_LINE_MISMATCH.value
+
+
+def test_totals_odds_gap_under_side_uses_under_true_p() -> None:
+    # raw under=0.72 over=0.45 → overround 1.17, devigged under ≈ 0.6154。
+    # ask=0.52 → edge ≈ 0.0954 ≥ 0.06 → accept；验证 under 侧取 under_true_p。
+    gs = {
+        "market_name": "Total",
+        "total_line": "220.5",
+        "over_implied_prob": 0.45,
+        "under_implied_prob": 0.72,
+        "suspended": False,
+    }
+    market = _totals_market(
+        SportsMarketSide.UNDER, Decimal("0.52"), line=Decimal("220.5"), goalserve_totals=gs
+    )
+    ev = evaluate_tail_opportunity(_game(), market, policy=TailPolicy())
+    assert ev.accepted, ev.reason
+    assert ev.metadata["odds_gap_side"] == "under"
+    true_p = Decimal(ev.metadata["odds_gap_true_p"])
+    # devigged under ≈ 0.72/1.17；over 侧若被误取会是 0.45/1.17 < ask，必拒。
+    assert abs(true_p - (Decimal("0.72") / Decimal("1.17"))) < Decimal("1e-9")
+
+
+def test_totals_odds_gap_rejected_when_edge_below_threshold() -> None:
+    # devigged over ≈ 0.5238；ask=0.50 → edge ≈ 0.0238 < 0.06 → no_odds_gap。
+    gs = {
+        "market_name": "Total",
+        "total_line": "220.5",
+        "over_implied_prob": 0.55,
+        "under_implied_prob": 0.50,
+        "suspended": False,
+    }
+    market = _totals_market(
+        SportsMarketSide.OVER, Decimal("0.50"), line=Decimal("220.5"), goalserve_totals=gs
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
+
+
+def test_totals_odds_gap_rejected_when_market_suspended() -> None:
+    gs = {
+        "market_name": "Total",
+        "total_line": "220.5",
+        "over_implied_prob": 0.70,
+        "under_implied_prob": 0.40,
+        "suspended": True,
+    }
+    market = _totals_market(
+        SportsMarketSide.OVER, Decimal("0.55"), line=Decimal("220.5"), goalserve_totals=gs
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
+
+
+def test_totals_odds_gap_rejected_when_our_side_suspended() -> None:
+    # over 侧被单独暂停 → 该侧赔率不可信 → no_odds_gap。
+    gs = {
+        "market_name": "Total",
+        "total_line": "220.5",
+        "over_implied_prob": 0.70,
+        "under_implied_prob": 0.40,
+        "suspended": False,
+        "over_suspended": True,
+    }
+    market = _totals_market(
+        SportsMarketSide.OVER, Decimal("0.55"), line=Decimal("220.5"), goalserve_totals=gs
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
+
+
+def test_totals_odds_gap_rejected_when_no_goalserve_totals() -> None:
+    market = _totals_market(SportsMarketSide.OVER, Decimal("0.55"), line=Decimal("220.5"))
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
+
+
+# ===========================================================================
+# Spreads（让分盘）赔率差价：让分线 + 范围对账
+# ===========================================================================
+
+
+def test_spread_odds_gap_accepted_when_line_matches_and_edge_clears() -> None:
+    # Goalserve raw home=0.70 away=0.40 → overround 1.10, devigged home ≈ 0.6364。
+    # home_handicap -3.5 = Polymarket line -3.5；ask=0.55 → edge ≈ 0.0864 → accept。
+    gs = {
+        "market_name": "Handicap",
+        "home_handicap": "-3.5",
+        "away_handicap": "3.5",
+        "home_implied_prob": 0.70,
+        "away_implied_prob": 0.40,
+        "suspended": False,
+    }
+    market = _spread_market(
+        SportsMarketSide.HOME, Decimal("0.55"), line=Decimal("-3.5"), goalserve_spread=gs
+    )
+    ev = evaluate_tail_opportunity(_game(), market, policy=TailPolicy())
+    assert ev.accepted, ev.reason
+    assert ev.opportunity_type == SportsTailOpportunityType.ODDS_GAP
+    assert ev.metadata["odds_gap_side"] == "home"
+    assert ev.metadata["odds_gap_market_type"] == "spreads"
+
+
+def test_spread_odds_gap_rejected_when_handicap_mismatch() -> None:
+    # Goalserve home_handicap -2.5 ≠ Polymarket line -3.5 → 让分条件不同，不可比。
+    gs = {
+        "market_name": "Handicap",
+        "home_handicap": "-2.5",
+        "away_handicap": "2.5",
+        "home_implied_prob": 0.70,
+        "away_implied_prob": 0.40,
+        "suspended": False,
+    }
+    market = _spread_market(
+        SportsMarketSide.HOME, Decimal("0.55"), line=Decimal("-3.5"), goalserve_spread=gs
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.ODDS_GAP_LINE_MISMATCH.value
+
+
+def test_spread_odds_gap_rejected_when_scope_mismatch() -> None:
+    # Polymarket 篮球上半场让分盘（1h spread），Goalserve 让分盘是整场 → 范围不一致。
+    gs = {
+        "market_name": "Handicap",
+        "home_handicap": "-3.5",
+        "away_handicap": "3.5",
+        "home_implied_prob": 0.70,
+        "away_implied_prob": 0.40,
+        "suspended": False,
+    }
+    market = _spread_market(
+        SportsMarketSide.HOME,
+        Decimal("0.55"),
+        line=Decimal("-3.5"),
+        market_slug="nba-lal-bos-2026-05-23-1h-spread",
+        goalserve_spread=gs,
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.ODDS_GAP_LINE_MISMATCH.value
+
+
+def test_spread_odds_gap_away_side_uses_away_handicap_and_true_p() -> None:
+    # away 侧：对账 Polymarket line 与 away_handicap，取 devigged away_true_p。
+    # raw away=0.72 home=0.45 → overround 1.17, devigged away ≈ 0.6154。
+    gs = {
+        "market_name": "Handicap",
+        "home_handicap": "-3.5",
+        "away_handicap": "3.5",
+        "home_implied_prob": 0.45,
+        "away_implied_prob": 0.72,
+        "suspended": False,
+    }
+    market = _spread_market(
+        SportsMarketSide.AWAY, Decimal("0.52"), line=Decimal("3.5"), goalserve_spread=gs
+    )
+    ev = evaluate_tail_opportunity(_game(), market, policy=TailPolicy())
+    assert ev.accepted, ev.reason
+    assert ev.metadata["odds_gap_side"] == "away"
+    true_p = Decimal(ev.metadata["odds_gap_true_p"])
+    assert abs(true_p - (Decimal("0.72") / Decimal("1.17"))) < Decimal("1e-9")
+
+
+def test_spread_odds_gap_rejected_when_edge_below_threshold() -> None:
+    gs = {
+        "market_name": "Handicap",
+        "home_handicap": "-3.5",
+        "away_handicap": "3.5",
+        "home_implied_prob": 0.55,
+        "away_implied_prob": 0.50,
+        "suspended": False,
+    }
+    market = _spread_market(
+        SportsMarketSide.HOME, Decimal("0.50"), line=Decimal("-3.5"), goalserve_spread=gs
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
+
+
+def test_spread_odds_gap_rejected_when_suspended() -> None:
+    gs = {
+        "market_name": "Handicap",
+        "home_handicap": "-3.5",
+        "away_handicap": "3.5",
+        "home_implied_prob": 0.70,
+        "away_implied_prob": 0.40,
+        "suspended": True,
+    }
+    market = _spread_market(
+        SportsMarketSide.HOME, Decimal("0.55"), line=Decimal("-3.5"), goalserve_spread=gs
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
+
+
+def test_spread_odds_gap_rejected_when_our_side_suspended() -> None:
+    gs = {
+        "market_name": "Handicap",
+        "home_handicap": "-3.5",
+        "away_handicap": "3.5",
+        "home_implied_prob": 0.70,
+        "away_implied_prob": 0.40,
+        "suspended": False,
+        "home_suspended": True,
+    }
+    market = _spread_market(
+        SportsMarketSide.HOME, Decimal("0.55"), line=Decimal("-3.5"), goalserve_spread=gs
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
+
+
+def test_spread_odds_gap_rejected_when_no_goalserve_spread() -> None:
+    market = _spread_market(SportsMarketSide.HOME, Decimal("0.55"), line=Decimal("-3.5"))
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
+
+
+# ===========================================================================
+# 回归：moneyline 行为不变 + Kelly 对 totals 赔率差价同样用去抽水 true_p
+# ===========================================================================
+
+
+def test_moneyline_odds_gap_unchanged_does_not_use_totals_metadata() -> None:
+    # moneyline 市场即便带了 goalserve_totals 也只看 goalserve_moneyline——
+    # 验证分派后 moneyline 路径与扩展前完全一致。
+    gs_ml = {"home_implied_prob": 0.70, "away_implied_prob": 0.40, "suspended": False}
+    # 注入一个会构成 over edge 的 totals dict——不应影响 moneyline 判断。
+    market = SportsMarketSnapshot(
+        market_type=SportsMarketType.MONEYLINE,
+        side=SportsMarketSide.HOME,
+        token_id="tok",
+        line=None,
+        best_ask=Decimal("0.55"),
+        best_bid=Decimal("0.53"),
+        buyable_liquidity_usdc=Decimal("50"),
+        market_slug="nba-lal-bos-2026-05-23",
+        metadata={
+            "goalserve_moneyline": gs_ml,
+            "goalserve_totals": {
+                "market_name": "Total",
+                "total_line": "220.5",
+                "over_implied_prob": 0.90,
+                "under_implied_prob": 0.20,
+                "suspended": False,
+            },
+        },
+    )
+    ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
+    assert ev.accepted
+    assert ev.metadata["odds_gap_market_type"] == "moneyline"
+    assert ev.metadata["odds_gap_side"] == "home"
+    # true_p 必须来自 ML devig（0.70/1.10），不是 totals。
+    assert abs(Decimal(ev.metadata["odds_gap_true_p"]) - (Decimal("0.70") / Decimal("1.10"))) < Decimal("1e-9")
+
+
+def test_kelly_sizes_totals_odds_gap_on_devigged_prob() -> None:
+    from polymarket_trader.domain.kelly import kelly_stake
+
+    gs = {
+        "market_name": "Total",
+        "total_line": "220.5",
+        "over_implied_prob": 0.70,
+        "under_implied_prob": 0.40,
+        "suspended": False,
+    }
+    market = _totals_market(
+        SportsMarketSide.OVER, Decimal("0.55"), line=Decimal("220.5"), goalserve_totals=gs
+    )
+    ev = evaluate_tail_opportunity(_game(), market, policy=TailPolicy())
+    assert ev.accepted, ev.reason
+    true_p = Decimal(ev.metadata["odds_gap_true_p"])
+    stake = kelly_stake(
+        bankroll_usdc=Decimal("100"),
+        price_c=Decimal("0.55"),
+        fair_value_p=true_p,
+        side="BUY_YES",
+        kelly_fraction=Decimal("0.25"),
+        prob_confidence=Decimal("1"),
+        max_position_fraction=Decimal("1.0"),
+        min_edge=Decimal("0.02"),
+        min_stake_usdc=Decimal("1"),
+        market_min_order_size_shares=Decimal("5"),
+        fee_rate_bps=0,
+        fees_enabled=False,
+        liquidity_usdc=Decimal("50"),
+    )
+    assert stake.stake_usdc > Decimal("0")
+    assert stake.edge > Decimal("0")
+    assert stake.f_star < Decimal("1")

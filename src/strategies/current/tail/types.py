@@ -93,6 +93,9 @@ class TailRejectReason(StrEnum):
     ESPORTS_BEST_OF_UNKNOWN = "esports_best_of_unknown"
     # 既不构成扫尾锁定、也没有可入场的赔率差价。
     NO_ODDS_GAP = "no_odds_gap"
+    # totals/spread 赔率差价：Goalserve 盘口线/范围与 Polymarket 市场不一致，
+    # 两侧概率不可直接比较——单独标记以便审计区分"线对不上"与"edge 不足"。
+    ODDS_GAP_LINE_MISMATCH = "odds_gap_line_mismatch"
 
 
 @dataclass(frozen=True, slots=True)
