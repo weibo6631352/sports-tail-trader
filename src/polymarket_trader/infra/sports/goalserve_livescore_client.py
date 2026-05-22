@@ -23,8 +23,6 @@ from typing import Any
 
 import httpx
 
-logger = logging.getLogger(__name__)
-
 from polymarket_trader.domain.sports_live import (
     SportsLiveSnapshot,
     SportsLiveSourceHealth,
@@ -32,6 +30,8 @@ from polymarket_trader.domain.sports_live import (
 )
 from polymarket_trader.infra.sports.common import utc_now
 from polymarket_trader.infra.sports.goalserve_livescore_parsers import parse_goalserve_livescore_sport
+
+logger = logging.getLogger(__name__)
 
 # (path, xml) — path is appended after {api_key}/; xml=True → parse as XML, False → ?json=1
 _SPORT_FEEDS: dict[str, tuple[str, bool]] = {
@@ -89,6 +89,9 @@ class GoalserveLivescoreClient:
         self._base_url = base_url.rstrip("/")
         self._now_provider = now_provider
         self._poll_interval_s = poll_interval_s
+        # 整轮抓取硬超时：单 httpx 请求各有 timeout，但代理半死时整轮 gather
+        # 仍可能卡死。没有外层超时，后台轮询会永久僵死、缓存永不刷新。
+        self._fetch_round_timeout_s = max(60.0, timeout_s * 4)
         # Background polling: _cache holds the last successful snapshot; _poll_task is the
         # background loop. list_events() returns cached data without blocking on HTTP.
         self._cache: SportsLiveSnapshot | None = None
@@ -155,25 +158,45 @@ class GoalserveLivescoreClient:
 
         首次调用（缓存为空）同步拉取一次并启动后台轮询任务；此后每次调用立即
         返回内存缓存，sync_once 不再被 HTTP 延迟拖慢。
+
+        每次调用都探测后台轮询任务是否已退出（崩溃 / 被取消）。任务一旦退出，
+        缓存会永久冻结、livescore 数据源静默断流——这里检测并重启，保证自愈。
         """
         if self._cache is not None:
+            self._ensure_poll_task_alive()
             return self._cache
         # First call: fetch synchronously so the caller has real data immediately.
         snapshot = await self._fetch_all_sports()
         self._cache = snapshot
         # Kick off background loop for all subsequent calls.
-        if self._poll_task is None:
-            self._poll_task = asyncio.create_task(
-                self._poll_loop(), name="goalserve_livescore_poll"
-            )
+        self._ensure_poll_task_alive()
         return snapshot
+
+    def _ensure_poll_task_alive(self) -> None:
+        """启动后台轮询任务；任务已退出时记录原因并重启。"""
+
+        prev = self._poll_task
+        if prev is not None and not prev.done():
+            return
+        if prev is not None:
+            reason = "cancelled" if prev.cancelled() else repr(prev.exception())
+            logger.warning(
+                "goalserve_livescore: poll task exited (%s), restarting", reason
+            )
+        self._poll_task = asyncio.create_task(
+            self._poll_loop(), name="goalserve_livescore_poll"
+        )
 
     async def _poll_loop(self) -> None:
         """后台持续轮询：每次 fetch 完立即更新缓存，再等 poll_interval_s。"""
         while True:
             await asyncio.sleep(self._poll_interval_s)
             try:
-                snapshot = await self._fetch_all_sports()
+                # 整轮抓取设硬超时：代理半死时 gather 可能永不返回，
+                # 没有外层超时会让本轮询永久僵死。
+                snapshot = await asyncio.wait_for(
+                    self._fetch_all_sports(), timeout=self._fetch_round_timeout_s
+                )
                 self._cache = snapshot
             except asyncio.CancelledError:
                 return
