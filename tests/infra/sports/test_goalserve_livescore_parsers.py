@@ -929,13 +929,127 @@ def test_unknown_sport_returns_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Config wiring — volleyball/amfootball must be reachable end-to-end
+# Table Tennis — tennis_scores/tt_live；与常规网球 tennis_scores 家族同构 XML：
+# <match><player .../><player .../></match>，_xml_to_livescore_dict 转 _player_list。
+# 实现时 tt_live 无 live 比赛，按家族同构构造合成数据 + 一条真实 XML 转换路径。
+# ---------------------------------------------------------------------------
+
+
+def _table_tennis_scores(*matches: dict, name: str = "World: WTT") -> dict:
+    return {"scores": {"category": [{"name": name, "match": list(matches)}]}}
+
+
+def test_table_tennis_live_match() -> None:
+    """live 局：status 含 "Set" 关键词 → LIVE；score 用已赢局数（totalscore）。"""
+    data = _table_tennis_scores(
+        {
+            "id": "990001",
+            "status": "Set 3",
+            "_player_list": [
+                {"name": "Ma Long", "totalscore": "2", "s1": "11", "s2": "9",
+                 "s3": "5", "s4": "", "s5": ""},
+                {"name": "Fan Zhendong", "totalscore": "1", "s1": "8", "s2": "11",
+                 "s3": "7", "s4": "", "s5": ""},
+            ],
+        }
+    )
+    events = parse_goalserve_livescore_sport("table-tennis", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.sport == "table-tennis"
+    assert ev.source == "goalserve_livescore"
+    assert ev.kind is LiveEventKind.TEAM_MATCH
+    assert ev.status is SportsLiveGameStatus.LIVE
+    assert ev.league == "World: WTT"
+    home, away = ev.participants
+    assert (home.name, home.score) == ("Ma Long", 2)
+    assert (away.name, away.score) == ("Fan Zhendong", 1)
+    # 乒乓球无 domain GameState——只产基础 LiveEvent。
+    assert ev.tennis_state is None
+    assert ev.volleyball_state is None
+
+
+def test_table_tennis_finished_match() -> None:
+    data = _table_tennis_scores(
+        {
+            "id": "990002",
+            "status": "Finished",
+            "_player_list": [
+                {"name": "T. Samuel", "totalscore": "3", "s1": "11", "s2": "11",
+                 "s3": "9", "s4": "11", "s5": ""},
+                {"name": "L. Cheng", "totalscore": "1", "s1": "7", "s2": "9",
+                 "s3": "11", "s4": "6", "s5": ""},
+            ],
+        }
+    )
+    events = parse_goalserve_livescore_sport("table-tennis", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.status is SportsLiveGameStatus.ENDED
+    assert (ev.participants[0].score, ev.participants[1].score) == (3, 1)
+
+
+def test_table_tennis_not_started() -> None:
+    data = _table_tennis_scores(
+        {
+            "id": "990003",
+            "status": "Not Started",
+            "_player_list": [
+                {"name": "A. Player", "totalscore": ""},
+                {"name": "B. Player", "totalscore": ""},
+            ],
+        }
+    )
+    events = parse_goalserve_livescore_sport("table-tennis", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    assert events[0].status is SportsLiveGameStatus.SCHEDULED
+    assert events[0].participants[0].score is None
+
+
+def test_table_tennis_match_without_two_players_skipped() -> None:
+    data = _table_tennis_scores(
+        {"id": "990004", "status": "Set 1", "_player_list": [{"name": "Solo"}]}
+    )
+    assert parse_goalserve_livescore_sport("table-tennis", data, observed_at=_OBSERVED) == []
+
+
+def test_table_tennis_xml_conversion_path() -> None:
+    """端到端：tt_live XML（与 tennis_scores/home 同构）经 _xml_to_livescore_dict
+    转 _player_list 后由 dispatch 解析，验证客户端 xml=True 接线正确。"""
+    from polymarket_trader.infra.sports.goalserve_livescore_client import (
+        _xml_to_livescore_dict,
+    )
+
+    xml = (
+        b'<?xml version="1.0" encoding="utf-8"?>'
+        b'<scores sport="table_tennis">'
+        b'<category name="World: WTT Champions" id="42">'
+        b'<match date="23.05.2026" time="12:00" status="Set 2" id="990005">'
+        b'<player name="W. Chuqin" s1="11" s2="6" s3="" s4="" s5=""'
+        b' totalscore="1" winner="False" id="1" />'
+        b'<player name="L. Shidong" s1="9" s2="8" s3="" s4="" s5=""'
+        b' totalscore="0" winner="False" id="2" />'
+        b'</match></category></scores>'
+    )
+    data = _xml_to_livescore_dict(xml)
+    events = parse_goalserve_livescore_sport("table-tennis", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.sport == "table-tennis"
+    assert ev.status is SportsLiveGameStatus.LIVE
+    assert ev.league == "World: WTT Champions"
+    assert (ev.participants[0].name, ev.participants[0].score) == ("W. Chuqin", 1)
+    assert (ev.participants[1].name, ev.participants[1].score) == ("L. Shidong", 0)
+
+
+# ---------------------------------------------------------------------------
+# Config wiring — volleyball/amfootball/table-tennis must be reachable end-to-end
 # ---------------------------------------------------------------------------
 
 
 def test_sport_feeds_and_code_map_include_new_sports() -> None:
-    """_SPORT_FEEDS 与 SPORT_CODE_TO_FEED_KEYS 都必须包含 volleyball/amfootball，
-    否则 demand-driven 轮询永不抓取这两个 livescore 兜底源。"""
+    """_SPORT_FEEDS 与 SPORT_CODE_TO_FEED_KEYS 都必须包含 volleyball/amfootball/
+    table-tennis，否则 demand-driven 轮询永不抓取这些 livescore 兜底源。"""
     from polymarket_trader.infra.sports.goalserve_livescore_client import (
         _SPORT_FEEDS,
         SPORT_CODE_TO_FEED_KEYS,
@@ -943,6 +1057,10 @@ def test_sport_feeds_and_code_map_include_new_sports() -> None:
 
     assert _SPORT_FEEDS["volleyball"] == ("volleyball/home", False)
     assert _SPORT_FEEDS["amfootball"] == ("football/home", False)
+    # 乒乓球 tt_live 与网球同属 tennis_scores XML 家族 → xml=True。
+    assert _SPORT_FEEDS["table-tennis"] == ("tennis_scores/tt_live", True)
     # 规范运动码 → feed key 映射（american-football 是规范码，amfootball 是 feed key）。
     assert "amfootball" in SPORT_CODE_TO_FEED_KEYS["american-football"]
     assert "volleyball" in SPORT_CODE_TO_FEED_KEYS["volleyball"]
+    # table-tennis 规范码与 feed key 同名。
+    assert "table-tennis" in SPORT_CODE_TO_FEED_KEYS["table-tennis"]

@@ -44,12 +44,11 @@ def test_feed_key_map_values_are_known_feed_keys() -> None:
             assert key in _SPORT_FEEDS, f"{code} 映射到未知 feed key {key}"
 
 
-def test_feed_key_map_no_livescore_sports_map_empty() -> None:
-    """仍无 livescore feed 的运动（table-tennis）映射为空集，不会触发抓取。
-
-    volleyball / american-football 已补 livescore getfeed 兜底源，映射到非空集。
+def test_feed_key_map_all_sports_have_livescore_feed() -> None:
+    """volleyball / american-football / table-tennis 均已补 livescore getfeed
+    兜底源，映射到非空 feed key 集合——demand-driven 轮询可正常触发抓取。
     """
-    assert SPORT_CODE_TO_FEED_KEYS["table-tennis"] == frozenset()
+    assert SPORT_CODE_TO_FEED_KEYS["table-tennis"] == frozenset({"table-tennis"})
     assert SPORT_CODE_TO_FEED_KEYS["volleyball"] == frozenset({"volleyball"})
     assert SPORT_CODE_TO_FEED_KEYS["american-football"] == frozenset({"amfootball"})
 
@@ -142,8 +141,9 @@ def test_provider_includes_amfootball_livescore_feed() -> None:
     assert "amfootball" in provider()
 
 
-def test_table_tennis_still_has_no_livescore_feed() -> None:
-    """table-tennis 仍无 livescore feed——live 市场也不产生 feed key。"""
+def test_provider_includes_table_tennis_livescore_feed() -> None:
+    """table-tennis 已补 tennis_scores/tt_live livescore 兜底源——
+    live 乒乓市场触发 table-tennis 抓取。"""
     registry = MarketRegistry()
     now = datetime.now(timezone.utc)
     registry.upsert(
@@ -154,7 +154,7 @@ def test_table_tennis_still_has_no_livescore_feed() -> None:
         )
     )
     provider = _build_livescore_active_sports_provider(registry)
-    assert provider() == frozenset()
+    assert "table-tennis" in provider()
 
 
 def test_provider_includes_market_with_no_start_time_via_end_date() -> None:

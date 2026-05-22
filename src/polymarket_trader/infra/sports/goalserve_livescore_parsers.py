@@ -1683,6 +1683,89 @@ def _parse_amfootball(scores: dict[str, Any], observed_at: datetime) -> list[Liv
 
 
 # ---------------------------------------------------------------------------
+# Table Tennis（tennis_scores/tt_live）
+# ---------------------------------------------------------------------------
+
+
+def _parse_table_tennis(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
+    """解析 tennis_scores/tt_live getfeed（乒乓球 / WTT 等）。
+
+    tt_live 与常规网球 tennis_scores/home 同属 tennis_scores 家族、同为 XML：
+      <scores><category name="..."><match id=".." status=".."><player .../></match>
+    _xml_to_livescore_dict 把两个 <player> 子节点转为 _player_list。
+    实测 tennis_scores 网球 player 字段：name / totalscore / s1..s5 / winner /
+    game_score / serve（见 d-1 历史 feed 的 <player> 行）；tt_live 当前无 live
+    比赛，按家族同构假设 player 字段一致——首次拿到真实乒乓数据后需校验。
+
+    乒乓球是「局制」（best-of-5/7 games，每局 11 分），与网球的「盘+局」、排球的
+    「盘」语义都不同；domain 无对应 GameState，按 §任务约定只产出基础 LiveEvent
+    （score=已赢局数 + period + status），不误用 TennisGameState/VolleyballGameState。
+    participants.score 用 totalscore（已赢局数），使已结束比赛走通用 ended-moneyline
+    评估器。set/game 关键词触发 _text_status → LIVE。
+    """
+    events: list[LiveEvent] = []
+    categories = scores.get("category") or []
+    if isinstance(categories, dict):
+        categories = [categories]
+    for cat in categories:
+        if not isinstance(cat, dict):
+            continue
+        cat_name = _str_val(cat.get("name"))
+        raw = cat.get("match") or []
+        if isinstance(raw, dict):
+            raw = [raw]
+        for match in raw:
+            if not isinstance(match, dict):
+                continue
+            event_id = _str_val(match.get("id") or match.get("matchid") or "")
+            if not event_id:
+                continue
+            status_raw = _str_val(match.get("status"))
+            status = _text_status(status_raw)
+            players: list[dict[str, Any]] = match.get("_player_list") or []
+            if len(players) < 2:
+                continue
+            home_name = _str_val(players[0].get("name"))
+            away_name = _str_val(players[1].get("name"))
+            if not home_name or not away_name:
+                continue
+            # totalscore = 已赢局数（games won）；缺省 0 而非 None，保证比分可比
+            home_games = _int_val(players[0].get("totalscore"))
+            away_games = _int_val(players[1].get("totalscore"))
+            events.append(
+                LiveEvent(
+                    source="goalserve_livescore",
+                    source_event_id=event_id,
+                    kind=LiveEventKind.TEAM_MATCH,
+                    league=cat_name,
+                    sport="table-tennis",
+                    participants=(
+                        Participant(
+                            role="home",
+                            name=home_name,
+                            score=home_games,
+                            short_name=_tennis_surname(home_name),
+                            external_ids={"goalserve": event_id},
+                        ),
+                        Participant(
+                            role="away",
+                            name=away_name,
+                            score=away_games,
+                            short_name=_tennis_surname(away_name),
+                            external_ids={"goalserve": event_id},
+                        ),
+                    ),
+                    status=status,
+                    period=status_raw,
+                    raw_status=status_raw,
+                    observed_at=observed_at,
+                    external_ids={"goalserve": event_id},
+                )
+            )
+    return events
+
+
+# ---------------------------------------------------------------------------
 # 顶层分派
 # ---------------------------------------------------------------------------
 
@@ -1717,6 +1800,8 @@ def parse_goalserve_livescore_sport(
             return _parse_baseball_with_cats(scores, ts)
         case "tennis":
             return _parse_tennis_with_cats(scores, ts)
+        case "table-tennis":
+            return _parse_table_tennis(scores, ts)
         case "cricket":
             return _parse_cricket(scores, ts)
         case "esports":
