@@ -384,6 +384,8 @@ def _max_live_state_age_seconds(config: CurrentStrategyConfig, game: LiveEvent) 
         return config.tail_tennis_max_game_state_age_seconds
     if game.baseball_state is not None or league in {"mlb", "baseball"}:
         return config.tail_baseball_max_game_state_age_seconds
+    if game.esports_state is not None or (game.sport or "").strip().lower() == "esports":
+        return config.tail_esports_max_game_state_age_seconds
     return config.tail_max_game_state_age_seconds
 
 

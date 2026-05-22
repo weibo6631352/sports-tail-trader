@@ -256,6 +256,9 @@ class CurrentStrategyConfig:
     tail_max_game_state_age_seconds: int = 10
     tail_baseball_max_game_state_age_seconds: int = 45
     tail_tennis_max_game_state_age_seconds: int = 35
+    # esports livescore feed 服务端每 60s 刷新、锁定信号（已赢地图数）单调，
+    # 90s 新鲜度窗口匹配其真实更新率。
+    tail_esports_max_game_state_age_seconds: int = 90
     # 赛事起始时间超过该秒数且仍无任何直播状态 → 视为 stale market 主动 pause。
     # 默认 24 小时：MLB/NBA/NHL 单场比赛通常 4-6 小时内完成；超过 24 小时无任何
     # 直播信号意味着该 market 已脱离入场窗口（赛事已结束 / 联赛不被任何数据源覆盖），
@@ -481,6 +484,7 @@ def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
         max_game_state_age_seconds=config.tail_max_game_state_age_seconds,
         baseball_max_game_state_age_seconds=config.tail_baseball_max_game_state_age_seconds,
         tennis_max_game_state_age_seconds=config.tail_tennis_max_game_state_age_seconds,
+        esports_max_game_state_age_seconds=config.tail_esports_max_game_state_age_seconds,
         max_under_seconds_remaining=config.tail_max_under_seconds_remaining,
         max_moneyline_seconds_remaining=config.tail_max_moneyline_seconds_remaining,
         max_spreads_seconds_remaining=config.tail_max_spreads_seconds_remaining,

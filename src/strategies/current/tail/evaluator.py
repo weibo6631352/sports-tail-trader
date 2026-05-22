@@ -376,6 +376,8 @@ def _is_stale(
         max_age_seconds = policy.tennis_max_game_state_age_seconds
     elif is_mlb_game(game) and game.baseball_state is not None:
         max_age_seconds = policy.baseball_max_game_state_age_seconds
+    elif is_esports_game(game):
+        max_age_seconds = policy.esports_max_game_state_age_seconds
     else:
         max_age_seconds = policy.max_game_state_age_seconds
     return age_seconds > max_age_seconds

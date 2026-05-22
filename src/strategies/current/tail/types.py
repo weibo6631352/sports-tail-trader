@@ -112,6 +112,10 @@ class TailPolicy:
     max_game_state_age_seconds: int = 10
     baseball_max_game_state_age_seconds: int = 45
     tennis_max_game_state_age_seconds: int = 35
+    # esports 只能靠 livescore getfeed（服务端每 60s 才刷新），且锁定信号"已赢
+    # 地图数"单调不衰减——60s 前赢的局现在仍赢着。放宽到 90s 是匹配该信号的
+    # 真实衰减率，不是过度放宽。
+    esports_max_game_state_age_seconds: int = 90
     max_under_seconds_remaining: int = 30
     max_moneyline_seconds_remaining: int = 180
     max_spreads_seconds_remaining: int = 120
