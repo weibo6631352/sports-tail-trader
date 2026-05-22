@@ -130,6 +130,20 @@ class BaseballGameState:
 
 
 @dataclass(frozen=True, slots=True)
+class BasketballGameState:
+    """篮球比赛分节状态。
+
+    current_period：当前节（1-4，5+ 为加时）。
+    home_quarter_scores / away_quarter_scores：各节得分，下标 0 = 第 1 节。
+    None 表示该节尚未开始或数据缺失。供分场盘口（上半场 1H 等）判定。
+    """
+
+    current_period: int | None = None
+    home_quarter_scores: tuple[int | None, ...] = ()
+    away_quarter_scores: tuple[int | None, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class TennisGameState:
     """网球比赛盘分、局分和即时分状态。"""
 
@@ -312,6 +326,7 @@ class LiveEvent:
     event_name: str = ""
     external_ids: Mapping[str, str] = field(default_factory=dict)
     baseball_state: BaseballGameState | None = None
+    basketball_state: BasketballGameState | None = None
     tennis_state: TennisGameState | None = None
     soccer_state: SoccerGameState | None = None
     esports_state: EsportsGameState | None = None

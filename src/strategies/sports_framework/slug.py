@@ -104,11 +104,22 @@ def totals_market_scope(market: SportsMarketSnapshot) -> SportsMarketScope:
     return SportsMarketScope(SportsMarketScopeType.FULL_GAME)
 
 
+def is_basketball_first_half(text: str) -> bool:
+    """识别篮球上半场盘口（1H total / 1H spread / 1H moneyline）。
+
+    text 为 normalized_market_slug 输出（连字符已转空格），故 "1h" 是独立 token。
+    """
+
+    return " 1h " in f" {text} " or "first half" in text or "1st half" in text
+
+
 def market_scope(market: SportsMarketSnapshot) -> SportsMarketScope:
     """返回盘口的结构化结算范围。"""
 
     if market.scope_type != SportsMarketScopeType.FULL_GAME or market.scope_number is not None:
         return SportsMarketScope(market.scope_type, market.scope_number)
+    if is_basketball_first_half(normalized_market_slug(market)):
+        return SportsMarketScope(SportsMarketScopeType.BASKETBALL_FIRST_HALF)
     if market.market_type == SportsMarketType.TOTALS:
         return totals_market_scope(market)
     return SportsMarketScope(SportsMarketScopeType.FULL_GAME)

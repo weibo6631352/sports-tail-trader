@@ -15,6 +15,7 @@ from decimal import Decimal
 from strategies.sports_framework import (
     LiveGameState,
     LiveGameStatus,
+    SportsMarketScopeType,
     SportsMarketSnapshot,
     SportsMarketType,
     is_hockey_game,
@@ -22,11 +23,13 @@ from strategies.sports_framework import (
     is_nfl_game,
     is_soccer_game,
     is_tennis_game,
+    market_scope,
 )
 
 from .core import (
     _accept,
     _candidate,
+    _evaluate_basketball_first_half,
     _evaluate_ended_moneyline,
     _evaluate_ended_spreads,
     _evaluate_ended_totals,
@@ -103,6 +106,10 @@ def evaluate_tail_opportunity(
     common_reject_reason = _common_reject_reason(game, market, policy, now=now)
     if common_reject_reason:
         return _reject(candidate, common_reject_reason.value)
+
+    # 篮球上半场盘口：半场结束即由 q1+q2 锁定，独立于整场 sport 评估器。
+    if market_scope(market).scope_type == SportsMarketScopeType.BASKETBALL_FIRST_HALF:
+        return _evaluate_basketball_first_half(candidate, policy)
 
     if is_mlb_game(game):
         if market.market_type == SportsMarketType.TOTALS:

@@ -13,6 +13,7 @@ from typing import Any, Mapping
 
 from polymarket_trader.domain.sports_live import (
     BaseballGameState,
+    BasketballGameState,
     EsportsGameState,
     SoccerGameState,
     TennisGameState,
@@ -59,6 +60,8 @@ class SportsMarketScopeType(StrEnum):
     TENNIS_MATCH_GAMES = "tennis_match_games"
     TENNIS_TOTAL_SETS = "tennis_total_sets"
     TENNIS_SET_GAMES = "tennis_set_games"
+    # 篮球上半场盘口（1H total / 1H spread / 1H moneyline）。
+    BASKETBALL_FIRST_HALF = "basketball_first_half"
     UNSUPPORTED_PERIOD = "unsupported_period"
 
 
@@ -97,6 +100,7 @@ class LiveGameState:
     source_conflicts: tuple[Mapping[str, Any], ...] = ()
     sport: str = ""
     baseball_state: BaseballGameState | None = None
+    basketball_state: BasketballGameState | None = None
     tennis_state: TennisGameState | None = None
     soccer_state: SoccerGameState | None = None
     esports_state: EsportsGameState | None = None

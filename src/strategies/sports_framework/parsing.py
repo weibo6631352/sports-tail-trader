@@ -9,7 +9,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Mapping
 
-from polymarket_trader.domain.sports_live import BaseballGameState, SoccerGameState, VolleyballGameState
+from polymarket_trader.domain.sports_live import (
+    BaseballGameState,
+    BasketballGameState,
+    SoccerGameState,
+    VolleyballGameState,
+)
 
 from .types import LiveGameState, LiveGameStatus, TennisGameState
 
@@ -48,6 +53,7 @@ def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState 
         source_conflicts=_source_conflicts(raw_game.get("source_conflicts")),
         sport=str(raw_game.get("sport") or ""),
         baseball_state=_baseball_state(raw_game.get("baseball_state")),
+        basketball_state=_basketball_state(raw_game.get("basketball_state")),
         tennis_state=_tennis_state(raw_game.get("tennis_state")),
         soccer_state=_soccer_state(raw_game.get("soccer_state")),
         volleyball_state=_volleyball_state(raw_game.get("volleyball_state")),
@@ -113,6 +119,18 @@ def _inning_runs(value: object) -> tuple[int | None, ...]:
     if not isinstance(value, (tuple, list)):
         return ()
     return tuple(_optional_int(item) for item in value)
+
+
+def _basketball_state(value: object) -> BasketballGameState | None:
+    if isinstance(value, BasketballGameState):
+        return value
+    if not isinstance(value, Mapping):
+        return None
+    return BasketballGameState(
+        current_period=_optional_int(value.get("current_period")),
+        home_quarter_scores=_inning_runs(value.get("home_quarter_scores")),
+        away_quarter_scores=_inning_runs(value.get("away_quarter_scores")),
+    )
 
 
 def _tennis_state(value: object) -> TennisGameState | None:

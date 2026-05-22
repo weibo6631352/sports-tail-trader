@@ -182,6 +182,11 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
             "home_inning_runs": list(event.baseball_state.home_inning_runs),
             "away_inning_runs": list(event.baseball_state.away_inning_runs),
         },
+        "basketball_state": None if event.basketball_state is None else {
+            "current_period": event.basketball_state.current_period,
+            "home_quarter_scores": list(event.basketball_state.home_quarter_scores),
+            "away_quarter_scores": list(event.basketball_state.away_quarter_scores),
+        },
         "tennis_state": _tennis_state_metadata(event.tennis_state),
         "soccer_state": None if event.soccer_state is None else {
             "period": event.soccer_state.period,

@@ -209,6 +209,60 @@ def _evaluate_spreads(
     return _accept(candidate, "spreads_late_cover", policy.spreads_execution_permission)
 
 
+def _evaluate_basketball_first_half(
+    candidate: SportsTailCandidate,
+    policy: TailPolicy,
+) -> TailEvaluation:
+    """评估篮球上半场盘口（1H total / spread / moneyline）。
+
+    上半场结束（进入第 3 节或之后）后，1H 结果由第 1、2 节得分 100% 决定，
+    是干净的锁定扫尾。ask/价格/流动性门禁已在通用 _common_reject_reason 处理。
+    """
+    game = candidate.game
+    market = candidate.market
+    state = game.basketball_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_BASKETBALL_STATE.value)
+    if (state.current_period or 0) < 3:
+        return _reject(candidate, TailRejectReason.BASKETBALL_FIRST_HALF_NOT_COMPLETE.value)
+    home_q = state.home_quarter_scores
+    away_q = state.away_quarter_scores
+    if len(home_q) < 2 or len(away_q) < 2:
+        return _reject(candidate, TailRejectReason.MISSING_BASKETBALL_STATE.value)
+    if None in (home_q[0], home_q[1], away_q[0], away_q[1]):
+        return _reject(candidate, TailRejectReason.MISSING_BASKETBALL_STATE.value)
+    home_1h = home_q[0] + home_q[1]
+    away_1h = away_q[0] + away_q[1]
+
+    if market.market_type == SportsMarketType.TOTALS:
+        if market.line is None:
+            return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+        total_1h = Decimal(home_1h + away_1h)
+        if market.side == SportsMarketSide.OVER and total_1h > market.line:
+            return _accept(candidate, "basketball_1h_total_over_locked", policy.totals_execution_permission)
+        if market.side == SportsMarketSide.UNDER and total_1h < market.line:
+            return _accept(candidate, "basketball_1h_total_under_locked", policy.totals_execution_permission)
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+    if market.market_type == SportsMarketType.MONEYLINE:
+        if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+            return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+        margin = home_1h - away_1h if market.side == SportsMarketSide.HOME else away_1h - home_1h
+        if margin > 0:
+            return _accept(candidate, "basketball_1h_moneyline_locked", policy.moneyline_execution_permission)
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+    if market.market_type == SportsMarketType.SPREADS:
+        if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY} or market.line is None:
+            return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
+        margin = home_1h - away_1h if market.side == SportsMarketSide.HOME else away_1h - home_1h
+        if Decimal(margin) + market.line > 0:
+            return _accept(candidate, "basketball_1h_spread_locked", policy.spreads_execution_permission)
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+    return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+
+
 # ---- ended-not-closed 通用评估器 --------------------------------------
 
 

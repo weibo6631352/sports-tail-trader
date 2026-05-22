@@ -29,6 +29,7 @@ from typing import Any
 
 from polymarket_trader.domain.sports_live import (
     BaseballGameState,
+    BasketballGameState,
     CricketGameState,
     HandballGameState,
     LiveEvent,
@@ -950,6 +951,46 @@ def _parse_basketball(scores: dict[str, Any], observed_at: datetime) -> list[Liv
     return events
 
 
+def _basketball_quarter_scores(team: dict[str, Any]) -> tuple[int | None, ...]:
+    """从 hometeam/awayteam 的 q1..q4 属性提取各节得分；空字符串 → None。"""
+    out: list[int | None] = []
+    for q in ("q1", "q2", "q3", "q4"):
+        raw = team.get(q)
+        text = "" if raw is None else str(raw).strip()
+        out.append(int(text) if text.lstrip("-").isdigit() else None)
+    return tuple(out)
+
+
+def _basketball_current_period(status_raw: str) -> int | None:
+    """从 status 文本判定当前节。Halftime 映射为 3（上半场已结束）。"""
+    s = status_raw.lower()
+    if "halftime" in s or "half time" in s:
+        return 3
+    if "overtime" in s or "over time" in s or f" {s} ".find(" ot ") >= 0:
+        return 5
+    markers = (
+        (1, ("1st", "q1", "quarter 1", "1 quarter")),
+        (2, ("2nd", "q2", "quarter 2", "2 quarter")),
+        (3, ("3rd", "q3", "quarter 3", "3 quarter")),
+        (4, ("4th", "q4", "quarter 4", "4 quarter")),
+    )
+    for period, tokens in markers:
+        if any(t in s for t in tokens):
+            return period
+    return None
+
+
+def _basketball_state_from_match(match: dict[str, Any]) -> BasketballGameState:
+    """从 XML 转换后的 dict 提取 BasketballGameState（分节比分）。"""
+    home_team = match.get("localteam") or match.get("hometeam") or {}
+    away_team = match.get("awayteam") or {}
+    return BasketballGameState(
+        current_period=_basketball_current_period(_str_val(match.get("status"))),
+        home_quarter_scores=_basketball_quarter_scores(home_team if isinstance(home_team, dict) else {}),
+        away_quarter_scores=_basketball_quarter_scores(away_team if isinstance(away_team, dict) else {}),
+    )
+
+
 def _parse_basketball_with_cats(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     """从 category 结构解析 basketball，category.name 作为 league。"""
     events: list[LiveEvent] = []
@@ -982,6 +1023,7 @@ def _parse_basketball_with_cats(scores: dict[str, Any], observed_at: datetime) -
             away_loc, away_nick = _split_team_name(away_name)
             timer_raw = match.get("timer")
             seconds_remaining = _basketball_seconds_remaining(status_raw, timer_raw) if status == SportsLiveGameStatus.LIVE else None
+            basketball_state = _basketball_state_from_match(match) if status == SportsLiveGameStatus.LIVE else None
             events.append(
                 LiveEvent(
                     source="goalserve_livescore",
@@ -999,6 +1041,7 @@ def _parse_basketball_with_cats(scores: dict[str, Any], observed_at: datetime) -
                     raw_status=status_raw,
                     observed_at=observed_at,
                     external_ids={"goalserve": event_id},
+                    basketball_state=basketball_state,
                 )
             )
     return events
