@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Mapping
 
+from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.runtime import ws_loops
 from polymarket_trader.runtime.entry_metadata import EntryMetadataRecord
@@ -309,3 +310,50 @@ def test_market_ws_priority_token_ids_excludes_settled_zero() -> None:
 
     assert "tok-a" not in priority
     assert "tok-b" in priority
+
+
+def test_position_book_update_triggers_exit_reconcile() -> None:
+    """持仓 token 的盘口更新事件 → 立即唤醒 periodic_reconcile（事件驱动退出）。"""
+
+    ws_loops._last_ws_exit_reconcile_at = 0.0  # 重置去抖
+    scheduler = _FakeScheduler()
+    held = object()
+    store = SimpleNamespace(
+        snapshot=lambda: SimpleNamespace(
+            get_position=lambda c, t: held if (c, t) == ("c1", "t1") else None
+        )
+    )
+    runtime = SimpleNamespace(account_state_store=store, scheduler=scheduler)
+    event = SimpleNamespace(
+        event_type=DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED,
+        condition_id="c1",
+        token_id="t1",
+    )
+
+    async def run() -> None:
+        ws_loops._trigger_exit_reconcile_for_position_books(runtime, [event])
+
+    asyncio.run(run())
+    assert scheduler.triggers == ["periodic_reconcile"]
+
+
+def test_non_position_book_update_does_not_trigger_exit_reconcile() -> None:
+    """非持仓 token 的盘口更新不触发 reconcile——只对有持仓的 token 事件驱动。"""
+
+    ws_loops._last_ws_exit_reconcile_at = 0.0
+    scheduler = _FakeScheduler()
+    store = SimpleNamespace(
+        snapshot=lambda: SimpleNamespace(get_position=lambda c, t: None)
+    )
+    runtime = SimpleNamespace(account_state_store=store, scheduler=scheduler)
+    event = SimpleNamespace(
+        event_type=DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED,
+        condition_id="cX",
+        token_id="tX",
+    )
+
+    async def run() -> None:
+        ws_loops._trigger_exit_reconcile_for_position_books(runtime, [event])
+
+    asyncio.run(run())
+    assert scheduler.triggers == []

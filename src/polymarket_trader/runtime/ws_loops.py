@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents
 
 from polymarket_trader.domain.account import AccountSnapshot
+from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics
 from polymarket_trader.runtime.status import WorkerLifecycleState
 
@@ -384,6 +385,43 @@ def market_ws_message_type(message: Mapping[str, Any]) -> str:
     return "" if value is None else str(value).strip().lower()
 
 
+# 事件驱动退出：持仓 token 的盘口一更新就立刻唤醒 reconcile，让动态
+# decide_exit 立即重估退出——比等下一次定时 reconcile 轮询快得多。
+# 去抖窗口：盘口推送极频繁，限制最多每 0.5s 触发一次，避免 reconcile 被打爆。
+_WS_EXIT_RECONCILE_DEBOUNCE_S = 0.5
+_last_ws_exit_reconcile_at: float = 0.0
+
+
+def _trigger_exit_reconcile_for_position_books(runtime: Any, events: Any) -> None:
+    """有持仓的 token 收到盘口更新事件时，立即唤醒 periodic_reconcile。
+
+    reconcile 每周期对每个持仓调用动态 ``decide_exit``；这里把"等定时轮询"
+    变成"持仓盘口一动就触发"，退出能在价格变动后 ~0.5s 内重估（事件驱动）。
+    """
+
+    if not events:
+        return
+    store = getattr(runtime, "account_state_store", None)
+    scheduler = getattr(runtime, "scheduler", None)
+    if store is None or scheduler is None:
+        return
+    global _last_ws_exit_reconcile_at
+    now = asyncio.get_running_loop().time()
+    if now - _last_ws_exit_reconcile_at < _WS_EXIT_RECONCILE_DEBOUNCE_S:
+        return
+    snapshot = store.snapshot()
+    for event in events:
+        if getattr(event, "event_type", None) != DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED:
+            continue
+        condition_id = getattr(event, "condition_id", None)
+        token_id = getattr(event, "token_id", None)
+        if condition_id and token_id and snapshot.get_position(condition_id, token_id) is not None:
+            _last_ws_exit_reconcile_at = now
+            with suppress(KeyError):
+                scheduler.trigger_now("periodic_reconcile")
+            return
+
+
 async def handle_market_ws_message(
     runtime: Any,
     message: Mapping[str, Any],
@@ -393,7 +431,8 @@ async def handle_market_ws_message(
             message,
             trace_id=f"market-ws-discovery-{uuid4().hex}",
         )
-    await runtime.market_ws_worker.handle_message(message, source="market_ws")
+    events = await runtime.market_ws_worker.handle_message(message, source="market_ws")
+    _trigger_exit_reconcile_for_position_books(runtime, events)
 
 
 async def stream_user_ws_messages(
