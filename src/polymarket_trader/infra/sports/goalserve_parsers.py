@@ -267,8 +267,28 @@ def _parse_odds_ws(odds_raw: Any, event_id: str) -> GoalserveOdds:
     return GoalserveOdds(event_id=event_id, markets=tuple(markets))
 
 
+# Goalserve soccer inplay WS 的 pc（period code）实测值：
+#   1 = 上半场, 2 = 中场休息, 3 = 下半场, 4/5 = 加时上/下半场。
+# 比 et 阈值更可靠（Esoccer 压缩赛制下 et 秒数被加速，阈值会误判赛段）。
+_SOCCER_PC_PERIOD: dict[int, str] = {
+    1: "first_half",
+    2: "half_time",
+    3: "second_half",
+    4: "extra_time",
+    5: "extra_time",
+}
+
+
+def _pc_to_soccer_period(pc: Any) -> str | None:
+    """把 inplay WS 的 period code（pc）映射到足球 period 字符串。"""
+    code = _int_val(pc)
+    if code is None:
+        return None
+    return _SOCCER_PC_PERIOD.get(code)
+
+
 def _et_to_soccer_period(et: int | None) -> str | None:
-    """把 elapsed seconds 映射到足球 period 字符串。"""
+    """从 elapsed seconds 推断足球 period（仅作 pc 缺失时的回退）。"""
     if et is None:
         return None
     if et < 2700:
@@ -276,6 +296,36 @@ def _et_to_soccer_period(et: int | None) -> str | None:
     if et < 5400:
         return "second_half"
     return "extra_time"
+
+
+# Goalserve soccer inplay WS 的 cms（commentary）事件类型码：
+#   mt="255" = 进球（含点球进球）。ti="1"=主队, ti="2"=客队。
+# 实测 stats.g 恒为 [0,0]（无效）；stat 字符串也不含进球 token。
+# 因此 WS 足球比分唯一可靠来源是 cms 里的 mt=255 计数（已对 livescore 校准）。
+_SOCCER_GOAL_EVENT_TYPE = "255"
+
+
+def _soccer_score_from_cms(cms: Any) -> tuple[int, int]:
+    """从 inplay WS 的 cms 进球事件统计足球比分。
+
+    实测 ``stats.g`` 恒 [0,0]、``stat`` 字符串无进球字段——唯一可靠来源是
+    cms 里 ``mt="255"`` 的进球事件，``ti`` 标识进球方（"1"主/"2"客）。
+    与 livescore getfeed 同场比分交叉校准一致。
+    """
+    home = away = 0
+    if not isinstance(cms, list):
+        return 0, 0
+    for item in cms:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("mt")) != _SOCCER_GOAL_EVENT_TYPE:
+            continue
+        ti = str(item.get("ti", ""))
+        if ti == "1":
+            home += 1
+        elif ti == "2":
+            away += 1
+    return home, away
 
 
 # 各运动比赛时钟上限（秒）——用于从 et（已打比赛时钟秒数）推算剩余时间。
@@ -409,12 +459,15 @@ def _parse_soccer(state_dict: dict[str, Any], observed_at: datetime) -> list[Liv
         stp = ev.get("stp", 0)
         status = _stp_to_status(stp)
         stats = ev.get("stats", {})
-        home_score, away_score = _score_pair(stats, "g")
+        # 进球比分来自 cms（mt=255）——stats.g 实测恒 [0,0] 无效。
+        home_score, away_score = _soccer_score_from_cms(ev.get("cms"))
+        # 黄/红牌 stats.y/stats.r 实测有效（与 stat 字符串 YELLOW_CARD/RED_CARD 一致）。
         home_yellow, away_yellow = _score_pair(stats, "y")
         home_red, away_red = _score_pair(stats, "r")
         et = _int_val(ev.get("et"))
+        period = _pc_to_soccer_period(ev.get("pc")) or _et_to_soccer_period(et)
         soccer_state = SoccerGameState(
-            period=_et_to_soccer_period(et),
+            period=period,
             clock_minutes=et // 60 if et is not None else None,
             home_red_cards=home_red or 0,
             away_red_cards=away_red or 0,
@@ -436,7 +489,7 @@ def _parse_soccer(state_dict: dict[str, Any], observed_at: datetime) -> list[Liv
                     Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=_et_to_soccer_period(et) or "",
+                period=period or "",
                 seconds_remaining=_soccer_seconds_remaining(et, status),
                 event_name=f"{home_name} vs {away_name}",
                 event_start_time=_parse_start_time(ev.get("st")),

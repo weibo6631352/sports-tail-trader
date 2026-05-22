@@ -11,6 +11,20 @@ from polymarket_trader.infra.sports.goalserve_parsers import (
 _OBSERVED = datetime(2026, 5, 19, tzinfo=timezone.utc)
 
 
+def _soccer_cms(home_score: int, away_score: int) -> list[dict]:
+    """构造 soccer inplay WS 的 cms 进球事件列表（mt=255, ti=1主/2客）。
+
+    实测 Goalserve soccer inplay WS 比分唯一来源是 cms 里的进球事件——
+    stats.g 恒 [0,0] 无效。
+    """
+    cms: list[dict] = []
+    for _ in range(max(0, home_score)):
+        cms.append({"id": "0", "mt": "255", "ti": "1"})
+    for _ in range(max(0, away_score)):
+        cms.append({"id": "0", "mt": "255", "ti": "2"})
+    return cms
+
+
 def _ws_event(
     event_id: str,
     *,
@@ -25,8 +39,12 @@ def _ws_event(
     league: str = "Test League",
     odds: list | None = None,
     sc: str = "11001",
+    pc: int | None = None,
 ) -> dict:
-    return {
+    # soccer 进球比分来自 cms（mt=255）；stats.g 实测恒 [0,0] 无效。
+    # 其余运动（basketball/hockey/esports 等）解析器仍读 stats.g（未在本轮校准）。
+    stats_g = [0, 0] if sport == "soccer" else [home_score, away_score]
+    ev: dict = {
         "mt": "updt",
         "sp": sport,
         "id": event_id,
@@ -37,9 +55,13 @@ def _ws_event(
         "sc": sc,
         "ctry_name": league,
         "st": st,
-        "stats": {"g": [home_score, away_score], "y": [0, 1], "r": [0, 0], "c": [2, 3]},
+        "cms": _soccer_cms(home_score, away_score),
+        "stats": {"g": stats_g, "y": [0, 1], "r": [0, 0], "c": [2, 3]},
         "odds": odds or [],
     }
+    if pc is not None:
+        ev["pc"] = pc
+    return ev
 
 
 def _state(event_id: str, **kwargs) -> dict:
@@ -110,15 +132,64 @@ def test_soccer_basic_fields() -> None:
 
 
 def test_soccer_state_period_first_half() -> None:
-    events = parse_goalserve_ws_events("soccer", _state("ev1", et=1800), observed_at=_OBSERVED)
+    # period 由 pc 决定：pc=1 → first_half（实测 pc 比 et 阈值可靠）。
+    events = parse_goalserve_ws_events("soccer", _state("ev1", et=1800, pc=1), observed_at=_OBSERVED)
     assert events[0].soccer_state is not None
     assert events[0].soccer_state.period == "first_half"
     assert events[0].soccer_state.clock_minutes == 30
 
 
 def test_soccer_state_period_second_half() -> None:
-    events = parse_goalserve_ws_events("soccer", _state("ev1", et=4000), observed_at=_OBSERVED)
+    events = parse_goalserve_ws_events("soccer", _state("ev1", et=4000, pc=3), observed_at=_OBSERVED)
     assert events[0].soccer_state.period == "second_half"
+
+
+def test_soccer_period_falls_back_to_et_when_pc_missing() -> None:
+    # pc 缺失时回退 et 阈值推断赛段。
+    ws = _ws_event("ev1", et=1800)
+    assert "pc" not in ws
+    events = parse_goalserve_ws_events("soccer", {"ev1": ws}, observed_at=_OBSERVED)
+    assert events[0].soccer_state.period == "first_half"
+
+
+def test_soccer_score_from_cms_real_format() -> None:
+    """实测校准：soccer inplay WS 比分来自 cms 的 mt=255 进球事件。
+
+    真实消息（China Division 2, Guizhou vs Hangzhou）：stats.g=[0,0]（无效），
+    cms 含 4 个 mt=255/ti=1 进球事件，livescore getfeed 同场确认 4-0。
+    """
+    ws = {
+        "mt": "updt",
+        "sp": "soccer",
+        "id": "133955210",
+        "t1": {"n": "Guizhou Zhucheng Athletic"},
+        "t2": {"n": "Hangzhou Linping Wuyue"},
+        "stp": 1,
+        "et": 4037,
+        "sc": "11002",
+        "pc": 3,
+        "ctry_name": "China Division 2",
+        "st": 1779449400,
+        # 真实 cms：mt=255 进球；mt=253 黄牌；mt=1 半场比分摘要——只有 255 算进球。
+        "cms": [
+            {"id": "1", "mt": "253", "ti": "1"},
+            {"id": "2", "mt": "255", "ti": "1"},
+            {"id": "3", "mt": "255", "ti": "1"},
+            {"id": "4", "mt": "1", "n": "Score After First Half - 3-0", "ti": "0"},
+            {"id": "5", "mt": "255", "ti": "1"},
+            {"id": "6", "mt": "255", "ti": "1"},
+            {"id": "7", "mt": "252", "ti": "2"},
+        ],
+        "stats": {"g": [0, 0], "y": [3, 1], "r": [0, 0], "c": [2, 1]},
+        "odds": [],
+    }
+    events = parse_goalserve_ws_events("soccer", {"133955210": ws}, observed_at=_OBSERVED)
+    ev = events[0]
+    assert ev.home.score == 4
+    assert ev.away.score == 0
+    assert ev.soccer_state.period == "second_half"
+    assert ev.soccer_state.home_yellow_cards == 3
+    assert ev.soccer_state.away_yellow_cards == 1
 
 
 def test_soccer_card_counts() -> None:

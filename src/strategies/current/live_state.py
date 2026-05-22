@@ -642,7 +642,7 @@ def best_live_match(
 # inplay WS 解析器已对真实消息校准、比分/赛段可信的运动——这些运动的 inplay
 # WS 事件可作为 live state 基底（inplay WS 每秒刷新、比 livescore 轮询更快）。
 # 其余运动的 inplay 解析器尚未校准，仍只取 livescore 作 state、inplay 仅供 odds。
-_INPLAY_CALIBRATED_SPORTS = frozenset({"tennis", "volleyball"})
+_INPLAY_CALIBRATED_SPORTS = frozenset({"tennis", "volleyball", "soccer"})
 
 
 def _is_inplay_only_event(event: LiveEvent) -> bool:
