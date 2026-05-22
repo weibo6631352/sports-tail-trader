@@ -15,6 +15,30 @@ from polymarket_trader.domain.market import Market, TradingStatus
 # 为保证在比赛进行中（最长 ~4h）仍持续跟踪，跟 end_date 比较时加 6h 宽限期。
 _END_DATE_GRACE = timedelta(hours=6)
 
+# 单场赛事 WS 跟踪时间窗口：只有进行中/临近开赛的赛事才纳入 WS 订阅——
+# 避免 discovery 一次性 track 上万个远期市场、market WS 订阅永远追不上。
+# 过去 6h 覆盖仍在进行中的比赛；未来 30 分钟覆盖临近开赛（留足 discovery
+# 重新评估的余量）。窗口外市场由后续 discovery 轮次在赛事临近时重新纳入。
+_TRADE_WINDOW_PAST = timedelta(hours=6)
+_TRADE_WINDOW_FUTURE = timedelta(minutes=30)
+
+
+def market_outside_trade_window(market: Market, *, now: datetime) -> bool:
+    """单场赛事市场是否在 WS 跟踪时间窗口之外（远期未开赛 / 早已结束）。
+
+    无开赛时间（outright / futures / 系列赛等）无法判定 → 返回 False，
+    不因数据缺失误排除。
+    """
+
+    start = market.game_start_time
+    if start is None:
+        return False
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return start > now + _TRADE_WINDOW_FUTURE or start < now - _TRADE_WINDOW_PAST
+
 TERMINAL_LIVE_STATE_PAUSE_REASONS = frozenset(
     {
         "sports_live_state_cancelled",

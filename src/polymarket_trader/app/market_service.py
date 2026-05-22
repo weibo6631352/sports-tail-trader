@@ -6,7 +6,10 @@ from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
 
 from polymarket_trader.app.market_payload_parser import MarketParseResult, MarketPayloadParser
-from polymarket_trader.app.market_tracking_policy import market_unsubscribe_prune_reason
+from polymarket_trader.app.market_tracking_policy import (
+    market_outside_trade_window,
+    market_unsubscribe_prune_reason,
+)
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.market import Market
 from polymarket_trader.observability.trace import ensure_trace_id
@@ -112,6 +115,15 @@ class MarketService:
                     self._remove_market_tracking(existing_market)
             else:
                 universe_decision = self._extension_hooks.select_market(candidate_market)
+                # 时间窗口门禁：远期未开赛 / 早已结束的单场赛事不纳入 WS 跟踪——
+                # 否则 discovery 会 track 上万个远期市场、market WS 订阅追不上。
+                # 有账户敞口的市场走下方 retain-filtered 分支，仍保留跟踪。
+                if universe_decision.selected and market_outside_trade_window(
+                    candidate_market, now=discovered_at
+                ):
+                    universe_decision = UniverseDecision.exclude(
+                        reason="game_outside_trade_window"
+                    )
                 if universe_decision.selected:
                     market = candidate_market
                     tracked_market = market

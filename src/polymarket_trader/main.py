@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from contextlib import suppress
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from polymarket_trader.api.routes.stream import SseSubscriptionRegistry
 from polymarket_trader.app.market_service import MarketService
+from polymarket_trader.app.market_tracking_policy import market_outside_trade_window
 from polymarket_trader.app.ports import bind_extension_orderbook_reader, bind_extension_season_state, build_extension_ports
 from polymarket_trader.app.reconcile_service import ReconcileService
 from polymarket_trader.app.extension_host import load_extension
@@ -1100,67 +1101,35 @@ def _restore_account_reference_state(runtime: RuntimeComponents, *, balance_usdc
     )
 
 
-# 启动只恢复近期赛事的市场（开赛在此窗口内）做 WS 订阅。窗口外的旧/远期
-# 市场不进 WS——一次性 track_market 上万市场会让 market WS 订阅数万 token、
-# 撑爆订阅导致全市场拿不到 orderbook、整个系统无法交易。
-# 过去 6h 覆盖仍在进行中的比赛；未来只取 30 分钟（临近开赛）——不预订几十
-# 小时后的比赛。窗口外市场由 discovery 在赛事临近/开打时重新发现并纳入。
-_STARTUP_WS_RESTORE_PAST = timedelta(hours=6)
-_STARTUP_WS_RESTORE_FUTURE = timedelta(minutes=30)
-
-
-def _market_within_startup_ws_window(market: Market, now: datetime) -> bool:
-    """市场对应赛事是否在启动 WS 订阅窗口内（近期/进行中/即将开赛）。"""
-
-    start = market.game_start_time
-    if start is None:
-        return False
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
-    return now - _STARTUP_WS_RESTORE_PAST <= start <= now + _STARTUP_WS_RESTORE_FUTURE
-
-
 def _restore_trackable_markets(runtime: RuntimeComponents, markets: Iterable[Market]) -> int:
     """按当前业务扩展重新校验数据库恢复出的 market。
 
     数据库快照只作为恢复参考，不能把旧策略留下的 eligible 状态直接恢复成
     运行时真相；启动时必须重新走当前策略的 universe 与保留规则。
-
-    只对近期赛事窗口内的市场做 WS 订阅——避免一次性订阅数万 token 撑爆
-    market WS（详见 _market_within_startup_ws_window）。
     """
 
     restored = 0
-    skipped_out_of_window = 0
     now = datetime.now(timezone.utc)
     account_snapshot = runtime.account_state_store.snapshot()
     hooks = runtime.extension.hooks
     for market in markets:
         universe_decision = hooks.select_market(market)
-        if universe_decision.selected:
-            # 近期赛事窗口外的可交易市场不在启动时订阅——由 discovery 在赛事
-            # 临近时重新发现并纳入。窗口过滤只作用于"无账户敞口"的市场。
-            if _market_within_startup_ws_window(market, now):
-                runtime.market_ws_worker.track_market(market)
-                restored += 1
-            else:
-                skipped_out_of_window += 1
+        # 时间窗口门禁：远期未开赛 / 早已结束的单场赛事不纳入 WS 跟踪——否则
+        # 启动会一次性 track 上万个远期市场、撑爆 market WS 订阅。
+        if universe_decision.selected and not market_outside_trade_window(market, now=now):
+            runtime.market_ws_worker.track_market(market)
+            restored += 1
             continue
-        # 未被 universe 选中：仅当仍有账户敞口（持仓/挂单）才保留追踪。
-        # 持仓市场必须订阅以监控退出，不受近期赛事窗口限制。
+        # 未选中 或 在交易窗口外：仅当有账户敞口才保留跟踪（持仓需监控退出）。
         if not hooks.should_keep_tracking(market, account_snapshot):
             continue
         tracked_market = hooks.build_filtered_tracking_market(
             market,
             existing_market=market,
-            reason=universe_decision.reason,
+            reason=universe_decision.reason or "game_outside_trade_window",
         )
         runtime.market_ws_worker.track_market(tracked_market)
         restored += 1
-    logger.info(
-        "restored trackable markets from snapshot",
-        extra={"restored": restored, "skipped_out_of_window": skipped_out_of_window},
-    )
     return restored
 
 
