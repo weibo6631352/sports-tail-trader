@@ -610,14 +610,16 @@ def best_live_match(
     ]
     if not matches:
         return None
-    # livescore getfeed 是权威比分源；inplay WS 的 per-sport 比分/赛段解析不可靠
-    # （stats 键因运动而异、period 字段实为状态码），只可信其 odds。因此只要有
-    # livescore 源事件匹配上就用它作基底；inplay 事件仅在 livescore 完全没有该
-    # 场比赛时才兜底。否则 inplay 的 0-0/垃圾赛段会盖掉 livescore 的真实比分。
-    livescore_matches = [m for m in matches if m.event.source == "goalserve_livescore"]
-    ranked = livescore_matches or matches
+    # inplay WS（source="goalserve"）的 per-sport 比分/赛段解析从未对真实格式
+    # 校准——stats 键因运动而异（网球是 POINTS/S1，无 g）、period 字段实为状态码，
+    # 产出的恒是 0-0 + 垃圾赛段。因此纯 inplay WS 事件绝不作为 live state 基底，
+    # 它只是 odds 来源。某场比赛只有 inplay 匹配（无任何权威比分源）时返回 None
+    # （无 live state、跳过该场），好过用 inplay 垃圾比分误导策略。
+    usable = [m for m in matches if not _is_inplay_only_event(m.event)]
+    if not usable:
+        return None
     # 按 confidence 排序：team-pair 优先，但高 confidence 的 race 也能击败低 confidence team。
-    best = max(ranked, key=lambda item: (item.confidence, item.score))
+    best = max(usable, key=lambda item: (item.confidence, item.score))
     # 胜出事件常来自 livescore（无盘中赔率）。inplay WS 事件带 goalserve_odds，但
     # 两源名字格式不同（全名 vs 缩写名）在 aggregate 融合时分不到一组。这里用
     # "同样匹配到该 market" 这一事实把 inplay 赔率接到胜出事件上——不放松任何
@@ -635,6 +637,17 @@ def best_live_match(
                 )
                 break
     return best
+
+
+def _is_inplay_only_event(event: LiveEvent) -> bool:
+    """事件是否为纯 inplay WS 源（比分/赛段解析不可靠，不可作 live state 基底）。
+
+    inplay WS 源标签为 ``goalserve``；若 livescore 也参与了融合
+    （``goalserve_livescore`` 在 contributing_sources）则不算纯 inplay。
+    """
+    return event.source == "goalserve" and "goalserve_livescore" not in (
+        event.contributing_sources or ()
+    )
 
 
 def build_live_state_match(
