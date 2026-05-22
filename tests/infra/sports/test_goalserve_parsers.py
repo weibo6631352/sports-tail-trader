@@ -202,11 +202,13 @@ def test_baseball_parses_score() -> None:
 # Tennis
 # ---------------------------------------------------------------------------
 
-def test_tennis_sets_from_stats_g() -> None:
+def test_tennis_sets_from_stats_t() -> None:
+    # WS 网球真实格式：T=已赢盘数、S1..S5=各盘局分、pc=当前盘。
     state = {
         "ev1": {
             **_ws_event("ev1", sport="tennis"),
-            "stats": {"g": [2, 1]},
+            "pc": 3,
+            "stats": {"T": [2, 0], "S1": [6, 4], "S2": [6, 3], "S3": [2, 1], "POINTS": [30, 15]},
         }
     }
     events = parse_goalserve_ws_events("tennis", state, observed_at=_OBSERVED)
@@ -214,9 +216,13 @@ def test_tennis_sets_from_stats_g() -> None:
     assert ev.sport == "tennis"
     assert ev.tennis_state is not None
     assert ev.tennis_state.home_sets_won == 2
-    assert ev.tennis_state.away_sets_won == 1
+    assert ev.tennis_state.away_sets_won == 0
+    assert ev.tennis_state.current_set == 3
+    assert ev.tennis_state.set_scores == ((6, 4), (6, 3), (2, 1))
+    assert ev.tennis_state.home_current_set_games == 2
+    assert ev.tennis_state.away_current_set_games == 1
     assert ev.home.score == 2
-    assert ev.away.score == 1
+    assert ev.away.score == 0
 
 
 # ---------------------------------------------------------------------------
@@ -385,15 +391,19 @@ def test_hockey_overtime_has_buffer() -> None:
     assert events[0].seconds_remaining == 300
 
 
-def test_tennis_live_current_set_inferred_from_sets_won() -> None:
-    # 1-0 sets, live → current_set = 1+0+1 = 2 (playing 2nd set)
-    events = parse_goalserve_ws_events(
-        "tennis",
-        _state("ev1", sport="tennis", stp=1, home_score=1, away_score=0),
-        observed_at=_OBSERVED,
-    )
+def test_tennis_current_set_from_pc() -> None:
+    # current_set 来自 pc 字段（当前进行的盘号），不再用 sets_won 推断。
+    state = {
+        "ev1": {
+            **_ws_event("ev1", sport="tennis", stp=1),
+            "pc": 2,
+            "stats": {"T": [1, 0], "S1": [6, 4], "S2": [1, 0]},
+        }
+    }
+    events = parse_goalserve_ws_events("tennis", state, observed_at=_OBSERVED)
     assert events[0].tennis_state is not None
     assert events[0].tennis_state.current_set == 2
+    assert events[0].tennis_state.set_scores == ((6, 4), (1, 0))
 
 
 def test_tennis_not_live_current_set_none() -> None:

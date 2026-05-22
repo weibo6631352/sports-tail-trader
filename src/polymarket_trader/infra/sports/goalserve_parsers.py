@@ -166,6 +166,33 @@ def _score_pair(stats: dict[str, Any], key: str) -> tuple[int | None, int | None
     return _int_val(pair[0]), _int_val(pair[1])
 
 
+def _set_based_state(
+    stats: dict[str, Any], pc: Any
+) -> tuple[int, int, tuple[tuple[int, int], ...], int | None, int | None, int | None]:
+    """从 inplay WS 的盘制 stats（tennis / volleyball）提取盘分。
+
+    实测格式（已对真实 WS 消息校准）：
+    - ``stats.T``  = [已赢盘数_主, 已赢盘数_客]
+    - ``stats.S1``..``S5`` = 各盘局分/分数 [主, 客]
+    - ``pc`` = 当前进行的盘号
+
+    返回 (home_sets, away_sets, set_scores, current_set, home_cur, away_cur)。
+    """
+    home_sets, away_sets = _score_pair(stats, "T")
+    set_scores: list[tuple[int, int]] = []
+    for i in range(1, 6):
+        h, a = _score_pair(stats, f"S{i}")
+        if h is None and a is None:
+            break
+        set_scores.append((h or 0, a or 0))
+    current_set = _int_val(pc)
+    home_cur: int | None = None
+    away_cur: int | None = None
+    if current_set is not None and 1 <= current_set <= len(set_scores):
+        home_cur, away_cur = set_scores[current_set - 1]
+    return (home_sets or 0, away_sets or 0, tuple(set_scores), current_set, home_cur, away_cur)
+
+
 def _infer_ws_market_name(outcome_names: list[str], handicap: str) -> str:
     """WS inplay 赔率市场只有数字 id、没有名字——按结果集与盘口线推断类型名，
 
@@ -545,20 +572,21 @@ def _parse_tennis(state_dict: dict[str, Any], observed_at: datetime) -> list[Liv
         stp = ev.get("stp", 0)
         status = _stp_to_status(stp)
         stats = ev.get("stats", {})
-        # WS 网球：stats.g = [home_sets, away_sets]（盘数）
-        home_sets, away_sets = _score_pair(stats, "g")
-        sets_a = home_sets or 0
-        sets_b = away_sets or 0
+        # WS 网球 stats（已对真实消息校准）：T=已赢盘数、S1..S5=各盘局分、
+        # POINTS=当前局比分、pc=当前盘号。sc 是状态码（见 states 字典），不是赛段。
+        sets_a, sets_b, set_scores, current_set, home_cur, away_cur = _set_based_state(
+            stats, ev.get("pc")
+        )
+        points_h, points_a = _score_pair(stats, "POINTS")
         tennis_state = TennisGameState(
             home_sets_won=sets_a,
             away_sets_won=sets_b,
-            # current_set = 已完成盘数 + 1；当 status 为 LIVE 时为当前打的盘。
-            current_set=sets_a + sets_b + 1 if status == SportsLiveGameStatus.LIVE else None,
-            home_current_set_games=None,
-            away_current_set_games=None,
-            set_scores=(),
-            home_point=None,
-            away_point=None,
+            current_set=current_set,
+            home_current_set_games=home_cur,
+            away_current_set_games=away_cur,
+            set_scores=set_scores,
+            home_point=str(points_h) if points_h is not None else None,
+            away_point=str(points_a) if points_a is not None else None,
             serving_side=None,
         )
         odds = _parse_odds_ws(ev.get("odds", []), event_id)
@@ -576,12 +604,12 @@ def _parse_tennis(state_dict: dict[str, Any], observed_at: datetime) -> list[Liv
                     Participant(role="away", name=away_name, score=sets_b, short_name=_tennis_surname(away_name), external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=str(ev.get("sc", "")),
+                period=f"Set {current_set}" if current_set else "",
                 seconds_remaining=None,
                 event_name=f"{home_name} vs {away_name}",
                 event_start_time=_parse_start_time(ev.get("st")),
                 external_ids={"goalserve": event_id},
-                raw_status=str(stp),
+                raw_status=str(ev.get("sc", stp)),
                 observed_at=observed_at,
                 tennis_state=tennis_state,
                 source_payload={"goalserve_odds": odds.as_dict()},
@@ -687,16 +715,18 @@ def _parse_volleyball(state_dict: dict[str, Any], observed_at: datetime) -> list
         stp = ev.get("stp", 0)
         status = _stp_to_status(stp)
         stats = ev.get("stats", {})
-        home_sets, away_sets = _score_pair(stats, "g")
-        home_sets_n = home_sets or 0
-        away_sets_n = away_sets or 0
+        # WS 排球 stats（已对真实消息校准）：T=已赢盘数、S1..S5=各盘比分、
+        # pc=当前盘号。与网球同构。
+        home_sets_n, away_sets_n, set_scores, current_set, home_cur, away_cur = _set_based_state(
+            stats, ev.get("pc")
+        )
         vball_state = VolleyballGameState(
             home_sets_won=home_sets_n,
             away_sets_won=away_sets_n,
-            current_set=home_sets_n + away_sets_n + 1 if status == SportsLiveGameStatus.LIVE else None,
-            home_current_set_points=None,
-            away_current_set_points=None,
-            set_scores=(),
+            current_set=current_set,
+            home_current_set_points=home_cur,
+            away_current_set_points=away_cur,
+            set_scores=set_scores,
         )
         odds = _parse_odds_ws(ev.get("odds", []), event_id)
         home_name = ev.get("t1", {}).get("n", "")
@@ -709,16 +739,16 @@ def _parse_volleyball(state_dict: dict[str, Any], observed_at: datetime) -> list
                 league=ev.get("ctry_name", ""),
                 sport="volleyball",
                 participants=(
-                    Participant(role="home", name=home_name, score=home_sets, external_ids={"goalserve": event_id}),
-                    Participant(role="away", name=away_name, score=away_sets, external_ids={"goalserve": event_id}),
+                    Participant(role="home", name=home_name, score=home_sets_n, external_ids={"goalserve": event_id}),
+                    Participant(role="away", name=away_name, score=away_sets_n, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=str(ev.get("sc", "")),
+                period=f"Set {current_set}" if current_set else "",
                 seconds_remaining=None,
                 event_name=f"{home_name} vs {away_name}",
                 event_start_time=_parse_start_time(ev.get("st")),
                 external_ids={"goalserve": event_id},
-                raw_status=str(stp),
+                raw_status=str(ev.get("sc", stp)),
                 observed_at=observed_at,
                 volleyball_state=vball_state,
                 source_payload={"goalserve_odds": odds.as_dict()},

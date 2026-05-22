@@ -639,15 +639,23 @@ def best_live_match(
     return best
 
 
-def _is_inplay_only_event(event: LiveEvent) -> bool:
-    """事件是否为纯 inplay WS 源（比分/赛段解析不可靠，不可作 live state 基底）。
+# inplay WS 解析器已对真实消息校准、比分/赛段可信的运动——这些运动的 inplay
+# WS 事件可作为 live state 基底（inplay WS 每秒刷新、比 livescore 轮询更快）。
+# 其余运动的 inplay 解析器尚未校准，仍只取 livescore 作 state、inplay 仅供 odds。
+_INPLAY_CALIBRATED_SPORTS = frozenset({"tennis", "volleyball"})
 
-    inplay WS 源标签为 ``goalserve``；若 livescore 也参与了融合
-    （``goalserve_livescore`` 在 contributing_sources）则不算纯 inplay。
+
+def _is_inplay_only_event(event: LiveEvent) -> bool:
+    """事件是否为"比分不可信的纯 inplay WS 事件"，不可作 live state 基底。
+
+    inplay WS 源标签为 ``goalserve``。已校准运动（_INPLAY_CALIBRATED_SPORTS）
+    的 inplay 比分可信，不算不可用；若 livescore 也参与融合也不算。
     """
-    return event.source == "goalserve" and "goalserve_livescore" not in (
-        event.contributing_sources or ()
-    )
+    if event.source != "goalserve":
+        return False
+    if "goalserve_livescore" in (event.contributing_sources or ()):
+        return False
+    return (event.sport or "").strip().lower() not in _INPLAY_CALIBRATED_SPORTS
 
 
 def build_live_state_match(
