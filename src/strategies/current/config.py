@@ -68,8 +68,25 @@ class CurrentStrategyConfig:
             启用自动退出时使用的目标挂卖价格。当前默认扫尾策略买入后等待
             权威结算，不主动挂 follow-up SELL。
         auto_exit_enabled:
-            是否在 BUY 成交或持仓恢复时自动生成 SELL。默认关闭，避免扫尾盘
-            在结果确定后为了提前卖出而增加挂单、撤单和流动性风险。
+            是否在 BUY 成交或持仓恢复时自动生成 SELL。默认开启：退出 overlay
+            必须每个决策周期运行，才能基于实时盘口动态重估退出价/退出时机；
+            settlement-only 模式（仅等权威结算、不主动挂 SELL）需显式设为 False。
+        tail_dynamic_exit_stop_loss_fraction:
+            动态止损阈值（CLAUDE.md §17）。当我方方向的 fair value 跌到
+            买入价 × 此比例以下时，说明比赛/赔率已明确逆转，主动按当前
+            best bid 卖出止损，宁可只损失部分本金，不等结算归零。默认 0.5。
+        tail_dynamic_exit_take_profit_multiple:
+            动态止盈倍数。best bid ≥ 买入价 × 此倍数时按 best bid 卖出锁利，
+            抓波段高点。无 Goalserve 赔率的市场靠此判据触发止盈。默认 1.5。
+        tail_dynamic_exit_lock_in_price:
+            动态止盈锁定价。best bid ≥ 此价即视为结果接近锁定，提前锁利
+            避开结算黑天鹅（CLAUDE.md §17）。默认 0.93。
+        tail_dynamic_exit_trailing_retreat_fraction:
+            动态止盈回撤反转阈值。处于止盈区时 best bid 从峰值回撤达到峰值
+            的此比例即判定顺势趋势反转，在接近峰值处兑现。默认 0.04（回撤 4%）。
+        tail_dynamic_exit_min_hold_return_per_hour:
+            动态止盈资金占用效率门槛。持有到结算的每小时收益率低于此值时
+            主动卖出腾资金重新部署。默认 0.03（每小时 < 3% 视为低效）。
         min_liquidity_usdc:
             允许入场前要求达到的最小盘口深度，单位是 USDC。
         max_spread:
@@ -156,7 +173,7 @@ class CurrentStrategyConfig:
 
     entry_no_price_max: Decimal = Decimal("0.99")
     exit_no_price: Decimal = Decimal("0.995")
-    auto_exit_enabled: bool = False
+    auto_exit_enabled: bool = True
     min_liquidity_usdc: Decimal = Decimal("1")
     max_spread: Decimal | None = Decimal("0.10")
     discovery_title_searches: tuple[str, ...] = ("nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
@@ -307,6 +324,22 @@ class CurrentStrategyConfig:
     # 两者都为 None：只上一档 tick（原有资金效率模式）。
     tail_profit_take_offset: Decimal | None = None
     tail_profit_take_multiplier: Decimal | None = None
+    # 动态止损阈值：fair value 跌破 entry_price × 此比例时主动按 best bid 卖出止损。
+    # 0.5 = 价值跌到买入价一半即止损（CLAUDE.md §17），不等结算输掉全部本金。
+    tail_dynamic_exit_stop_loss_fraction: Decimal = Decimal("0.5")
+    # 动态止盈倍数：best bid ≥ entry_price × 此倍数时按 best bid 卖出锁利。
+    # 1.5 = 浮盈达 50% 即抓波段高点；这是无 Goalserve 赔率市场的止盈兜底
+    # （fair value 退回市场中价时 bid≥fair value 永不成立，靠此倍数判据触发）。
+    tail_dynamic_exit_take_profit_multiple: Decimal = Decimal("1.5")
+    # 动态止盈锁定价：best bid ≥ 此价即视为结果接近锁定，提前锁利避开结算
+    # 黑天鹅（CLAUDE.md §17：价格超过约 0.92 应挂卖单）。
+    tail_dynamic_exit_lock_in_price: Decimal = Decimal("0.93")
+    # 动态止盈回撤反转阈值：处于止盈区时，best bid 从峰值回撤达到峰值的此比例
+    # 即判定顺势趋势反转，在接近峰值处兑现浮盈。0.04 = 回撤 4%。
+    tail_dynamic_exit_trailing_retreat_fraction: Decimal = Decimal("0.04")
+    # 动态止盈资金占用效率门槛：持有到结算的每小时收益率低于此值时主动卖出
+    # 腾出资金重新部署。0.03 = 每小时 < 3% 即认为占用资金太低效（CLAUDE.md §17）。
+    tail_dynamic_exit_min_hold_return_per_hour: Decimal = Decimal("0.03")
     tail_entry_maker_max_resting_seconds: int = 60
     tail_settlement_hold_minutes: int = 180
     # 比赛结束后等待 Polymarket 权威结算的缓冲时间（分钟）。

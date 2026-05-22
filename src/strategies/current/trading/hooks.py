@@ -32,7 +32,11 @@ from .allocation import (
     _skipped_allocation,
     _market_skip_metadata,
 )
-from .exit_overlay import _apply_profit_take_exit_plan, _capital_efficiency_gate
+from .exit_overlay import (
+    _apply_profit_take_exit_plan,
+    _capital_efficiency_gate,
+    evaluate_dynamic_exit,
+)
 from .gates import (
     _ask_depth_notional,
     _scale_in_allocation_gate,
@@ -330,16 +334,58 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
         source_reason="strategy_exit",
         target_size_shares=uncovered_shares,
     )
+
+    # 动态退出：有实时盘口时每个决策周期重估退出价/退出时机，结果优先于
+    # 旧的静态 _profit_take_target_price。无盘口时返回 None，退回静态退出价。
+    exit_price = exit_price_for_context(config, context)
+    exit_reason = "strategy_exit"
+    entry_price = _position_entry_price(context)
+    if entry_price is not None:
+        dynamic = evaluate_dynamic_exit(
+            config,
+            context,
+            token_id=token_id,
+            entry_price=entry_price,
+        )
+        if dynamic is not None:
+            decision_metadata.update(dynamic.metadata)
+            if not dynamic.should_exit:
+                # 本周期 HOLD：不挂 SELL，让头寸继续持有等待更优出价或结算。
+                return ExtensionDecision.skip(
+                    reason=dynamic.reason,
+                    metadata=decision_metadata,
+                )
+            assert dynamic.exit_price is not None  # should_exit=True 时 exit_price 必有值
+            exit_price = dynamic.exit_price
+            exit_reason = dynamic.reason
+            decision_metadata["exit_target_price"] = str(exit_price)
+            plan = decision_metadata.get("exit_plan")
+            if isinstance(plan, dict):
+                plan["target_exit_price"] = str(exit_price)
+
     return ExtensionDecision.sell(
-        reason="strategy_exit",
+        reason=exit_reason,
         token_id=token_id,
-        price=exit_price_for_context(config, context),
+        price=exit_price,
         size_shares=uncovered_shares,
         market_slug=(
             context.market.market_slug if context.market is not None else _metadata_text(context, "market_slug")
         ),
         metadata=decision_metadata,
     )
+
+
+def _position_entry_price(context: ExtensionContext) -> Decimal | None:
+    """估算我方持仓的实际买入均价（cost / shares）。
+
+    动态止盈/止损都以买入均价为基准；无持仓或数据异常（零份额/零成本）时
+    返回 None，调用侧退回静态退出价。
+    """
+
+    position = context.position
+    if position is None or position.shares <= Decimal("0") or position.cost_usdc <= Decimal("0"):
+        return None
+    return position.cost_usdc / position.shares
 
 
 def _empty_sizing(context: ExtensionContext, *, reason: str) -> EntrySizing:

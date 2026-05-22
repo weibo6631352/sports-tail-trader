@@ -44,6 +44,7 @@ from strategies.current.tail import (
 )
 from strategies.current.strategy import CurrentStrategy
 from strategies.current.trading import decide_entry
+from strategies.current.trading.exit_overlay import reset_dynamic_exit_peaks
 from strategies.current.universe import select_market
 
 
@@ -1584,9 +1585,9 @@ def test_entry_plan_preserves_event_metadata_through_application_entry_path() ->
     assert plan.metadata["exit_plan"]["primary_action"] == "place_profit_take_gtc_sell_after_buy_fill"
 
 
-def test_follow_up_waits_for_settlement_by_default() -> None:
+def test_follow_up_waits_for_settlement_when_auto_exit_disabled() -> None:
     market = _totals_market().with_tick_size(Decimal("0.01"))
-    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+    strategy = CurrentStrategy(config=CurrentStrategyConfig(auto_exit_enabled=False))
 
     decisions = strategy.decide_follow_up(
         ExtensionContext(
@@ -2875,7 +2876,9 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
         extension_hooks=CurrentStrategy(
             # bankroll=20，要把 event_exposure cap 顶到 40 USDC（旧 tail_max_event_exposure_usdc=40 等价）：
             # cap = max(bankroll × fraction, min_floor) → fraction=0、min_floor=40 → cap=40。
+            # settlement-only：本用例验证结算模式下加仓不被未覆盖持仓阻断。
             config=CurrentStrategyConfig(
+                auto_exit_enabled=False,
                 tail_max_event_exposure_fraction=Decimal("0"),
                 tail_max_event_exposure_min_floor_usdc=Decimal("40"),
             )
@@ -3610,9 +3613,9 @@ def test_spreads_default_permission_enters_auto_buy_path() -> None:
     assert decision.metadata["execution_permission"] == "auto_execute"
 
 
-def test_follow_up_sell_is_not_created_after_buy_fill() -> None:
+def test_follow_up_sell_is_not_created_after_buy_fill_in_settlement_only_mode() -> None:
     market = _totals_market()
-    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+    strategy = CurrentStrategy(config=CurrentStrategyConfig(auto_exit_enabled=False))
 
     decisions = strategy.decide_follow_up(
         ExtensionContext(
@@ -3729,9 +3732,9 @@ def test_profit_take_overlay_follow_up_sell_is_created_after_settlement_buy_fill
     assert decisions[0].metadata["profit_take_overlay_enabled"] is True
 
 
-def test_position_exit_waits_for_settlement_by_default() -> None:
+def test_position_exit_waits_for_settlement_when_auto_exit_disabled() -> None:
     market = _totals_market()
-    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+    strategy = CurrentStrategy(config=CurrentStrategyConfig(auto_exit_enabled=False))
 
     decision = strategy.decide_exit(
         ExtensionContext(
@@ -3753,6 +3756,336 @@ def test_position_exit_waits_for_settlement_by_default() -> None:
 
     assert decision.action.value == "skip"
     assert decision.reason == "settlement_only_exit_disabled"
+
+
+def _dynamic_exit_orderbook(
+    market: Market,
+    *,
+    best_bid: Decimal,
+    best_ask: Decimal,
+) -> OrderbookSnapshot:
+    """构造动态退出测试用的盘口快照（over token，单档 bid/ask）。"""
+
+    return OrderbookSnapshot(
+        token_id="over",
+        condition_id=market.condition_id,
+        market_slug=market.market_slug,
+        best_bid=best_bid,
+        best_ask=best_ask,
+        bids=(PriceLevel(price=best_bid, size=Decimal("50")),),
+        asks=(PriceLevel(price=best_ask, size=Decimal("50")),),
+        received_at=datetime(2026, 5, 22, tzinfo=timezone.utc),
+        tick_size=Decimal("0.01"),
+    )
+
+
+def _dynamic_exit_context(
+    market: Market,
+    orderbook: OrderbookSnapshot | None,
+    *,
+    trace_id: str,
+    cost_usdc: Decimal,
+    metadata: dict | None = None,
+    current_value: Decimal | None = None,
+) -> ExtensionContext:
+    """构造动态退出测试用的 ExtensionContext（10 股 over 持仓）。"""
+
+    return ExtensionContext(
+        strategy_id="sports_tail",
+        trace_id=trace_id,
+        market=market,
+        token_id="over",
+        orderbook=orderbook,
+        position=Position(
+            strategy_id="sports_tail",
+            condition_id=market.condition_id,
+            token_id="over",
+            shares=Decimal("10"),
+            cost_usdc=cost_usdc,
+            current_value=current_value,
+            market_slug=market.market_slug,
+        ),
+        metadata=metadata or {},
+    )
+
+
+def test_dynamic_exit_rides_uptrend_when_bid_makes_new_high() -> None:
+    """顺势上行 HOLD：best bid 创新高 → 即使在止盈区也 HOLD，骑住动量。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+    # 买入均价 0.51；best bid 0.80 高于买入价、且 ≥ entry×1.5=0.765（在止盈区），
+    # 但这是首次观察 → 创新高 → 必须 HOLD 不退，由 riding_uptrend 规则压过止盈。
+    orderbook = _dynamic_exit_orderbook(market, best_bid=Decimal("0.80"), best_ask=Decimal("0.82"))
+
+    decision = strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            orderbook,
+            trace_id="trace-dynamic-riding-uptrend",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    assert decision.action.value == "skip"
+    assert decision.reason == "dynamic_exit_hold"
+    assert decision.metadata["dynamic_exit_decision"] == "hold"
+    assert decision.metadata["dynamic_exit_trigger"] == "riding_uptrend"
+
+
+def test_dynamic_exit_takes_profit_on_trailing_reversal_after_peak() -> None:
+    """回撤反转 EXIT：先创峰值，再从峰值回撤 ≥4% 且在止盈区 → 按 bid 止盈。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+
+    # 第一周期：best bid 0.90 创新高 → HOLD，把峰值锁在 0.90。
+    first = strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(market, best_bid=Decimal("0.90"), best_ask=Decimal("0.92")),
+            trace_id="trace-dynamic-trailing-1",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+    assert first.action.value == "skip"
+    assert first.metadata["dynamic_exit_trigger"] == "riding_uptrend"
+
+    # 第二周期：best bid 回落到 0.85 = 从峰值 0.90 回撤 5.5% ≥ 4%；0.85 ≥
+    # entry 0.51×1.5=0.765 在止盈区 → 触发 trailing_reversal 止盈。
+    decision = strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(market, best_bid=Decimal("0.85"), best_ask=Decimal("0.87")),
+            trace_id="trace-dynamic-trailing-2",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    assert decision.action.value == "sell"
+    assert decision.reason == "dynamic_exit_take_profit"
+    assert decision.price == Decimal("0.85")
+    assert decision.size_shares == Decimal("10")
+    assert decision.metadata["dynamic_exit_decision"] == "take_profit"
+    assert decision.metadata["dynamic_exit_trigger"] == "trailing_reversal"
+
+
+def test_dynamic_exit_takes_profit_on_capital_efficiency() -> None:
+    """资金效率 EXIT：bid 高但非新高、回撤不足、结算慢 → 按 bid 止盈腾资金。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+
+    # 第一周期：best bid 0.90 创新高 → HOLD，峰值锁 0.90。
+    strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(market, best_bid=Decimal("0.90"), best_ask=Decimal("0.92")),
+            trace_id="trace-dynamic-capeff-1",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    # 第二周期：best bid 0.89 —— 非新高（≤0.90），从峰值仅回撤 1.1% < 4%（不触
+    # trailing_reversal），在止盈区。无 game state → 结算估算 180 分钟，
+    # hold_return_per_hour = (1-0.89)/0.89/3 ≈ 0.041... 仍 ≥ 0.03。改用 0.97：
+    # (1-0.97)/0.97/3 ≈ 0.0103 < 0.03 → capital_efficiency 触发。
+    strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(market, best_bid=Decimal("0.985"), best_ask=Decimal("0.987")),
+            trace_id="trace-dynamic-capeff-peak",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+    # 上一周期 best bid 0.985 创新高 → 峰值升到 0.985。本周期 0.97 ≤ 0.985 非
+    # 新高；回撤 (0.985-0.97)/0.985 ≈ 1.5% < 4%；在止盈区（≥lock_in 0.93）。
+    decision = strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(market, best_bid=Decimal("0.97"), best_ask=Decimal("0.975")),
+            trace_id="trace-dynamic-capeff-2",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    assert decision.action.value == "sell"
+    assert decision.reason == "dynamic_exit_take_profit"
+    assert decision.price == Decimal("0.97")
+    assert decision.metadata["dynamic_exit_decision"] == "take_profit"
+    assert decision.metadata["dynamic_exit_trigger"] == "capital_efficiency"
+
+
+def test_dynamic_exit_takes_profit_when_book_is_settled() -> None:
+    """已结算 EXIT：best bid ≥ 0.99（盘口几乎结算到 1）→ 直接吃掉 bid。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+    # 买入均价 0.51；best bid 0.99 ≥ lock_in 0.93 且 ≥ 0.99 → settled 立即止盈，
+    # 即使是首次观察也不走 riding_uptrend（settled 规则排在创新高判据之前）。
+    orderbook = _dynamic_exit_orderbook(market, best_bid=Decimal("0.99"), best_ask=Decimal("1"))
+
+    decision = strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            orderbook,
+            trace_id="trace-dynamic-settled",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    assert decision.action.value == "sell"
+    assert decision.reason == "dynamic_exit_take_profit"
+    assert decision.price == Decimal("0.99")
+    assert decision.metadata["dynamic_exit_decision"] == "take_profit"
+    assert decision.metadata["dynamic_exit_trigger"] == "settled"
+
+
+def test_dynamic_exit_stops_loss_when_fair_value_collapses_below_entry_half() -> None:
+    """不利退出：fair value 跌破买入价 × 0.5 → 按 bid 止损离场。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+    # 买入均价 0.80；市场已逆转，best bid 0.20 / best ask 0.22 → mid 0.21，
+    # 低于 0.80 × 0.5 = 0.40 → 触发止损，按 best bid 0.20 卖出。
+    orderbook = OrderbookSnapshot(
+        token_id="over",
+        condition_id=market.condition_id,
+        market_slug=market.market_slug,
+        best_bid=Decimal("0.20"),
+        best_ask=Decimal("0.22"),
+        bids=(PriceLevel(price=Decimal("0.20"), size=Decimal("50")),),
+        asks=(PriceLevel(price=Decimal("0.22"), size=Decimal("50")),),
+        received_at=datetime(2026, 5, 22, tzinfo=timezone.utc),
+        tick_size=Decimal("0.01"),
+    )
+
+    decision = strategy.decide_exit(
+        ExtensionContext(
+            strategy_id="sports_tail",
+            trace_id="trace-dynamic-stop-loss",
+            market=market,
+            token_id="over",
+            orderbook=orderbook,
+            position=Position(
+                strategy_id="sports_tail",
+                condition_id=market.condition_id,
+                token_id="over",
+                shares=Decimal("10"),
+                cost_usdc=Decimal("8.00"),
+                market_slug=market.market_slug,
+            ),
+        )
+    )
+
+    assert decision.action.value == "sell"
+    assert decision.reason == "dynamic_exit_stop_loss"
+    assert decision.price == Decimal("0.20")
+    assert decision.size_shares == Decimal("10")
+    assert decision.metadata["dynamic_exit_decision"] == "stop_loss"
+
+
+def test_dynamic_exit_holds_below_entry_when_not_stop_loss() -> None:
+    """水下 HOLD：best bid ≤ 买入价但未触止损 → 本周期不挂 SELL。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+    # 买入均价 0.51；best bid 0.45 ≤ 买入价但 fair value mid (0.45+0.55)/2=0.50
+    # 远高于止损线 0.255 → 走 below_entry HOLD，不挂 SELL。
+    orderbook = _dynamic_exit_orderbook(market, best_bid=Decimal("0.45"), best_ask=Decimal("0.55"))
+
+    decision = strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            orderbook,
+            trace_id="trace-dynamic-below-entry",
+            cost_usdc=Decimal("5.10"),
+        )
+    )
+
+    assert decision.action.value == "skip"
+    assert decision.reason == "dynamic_exit_hold"
+    assert decision.metadata["dynamic_exit_decision"] == "hold"
+    assert decision.metadata["dynamic_exit_trigger"] == "below_entry"
+
+
+def test_dynamic_exit_falls_back_to_static_price_when_no_orderbook() -> None:
+    """无盘口兜底：缺实时盘口时不产出动态决策，退回静态退出价。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+
+    decision = strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            None,
+            trace_id="trace-dynamic-no-orderbook",
+            cost_usdc=Decimal("5.10"),
+            # current_value 非零：避免触发 position_zero_value_no_orderbook
+            # 僵尸仓位跳过逻辑，确保走到动态退出兜底分支。
+            current_value=Decimal("8.00"),
+        )
+    )
+
+    assert decision.action.value == "sell"
+    assert decision.reason == "strategy_exit"
+    # 无盘口时退回静态退出价（exit_no_price 0.995 对齐到 0.99 tick）。
+    assert decision.price == Decimal("0.99")
+    assert "dynamic_exit_decision" not in decision.metadata
+
+
+def test_dynamic_exit_uses_goalserve_implied_prob_as_fair_value() -> None:
+    """Goalserve 赔率优先：metadata 有我方方向隐含概率时用它作 fair value。"""
+
+    reset_dynamic_exit_peaks()
+    market = _totals_market().with_tick_size(Decimal("0.01"))
+    strategy = CurrentStrategy(config=CurrentStrategyConfig())
+    goalserve_metadata = {
+        "goalserve_totals": {
+            "over_implied_prob": 0.55,
+            "under_implied_prob": 0.48,
+            "suspended": False,
+        },
+    }
+
+    # 第一周期：best bid 0.62 创新高 → HOLD，峰值锁 0.62。
+    strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(market, best_bid=Decimal("0.62"), best_ask=Decimal("0.95")),
+            trace_id="trace-dynamic-goalserve-1",
+            cost_usdc=Decimal("5.10"),
+            metadata=goalserve_metadata,
+        )
+    )
+
+    # 第二周期：best bid 0.58 —— 非新高，从峰值 0.62 回撤 6.5% ≥ 4%。
+    # bid 0.58 未达 entry 0.51×1.5=0.765、未达 lock_in 0.93，市场中价兜底不会
+    # 进止盈区；但 Goalserve totals 给 Over 隐含概率 0.55 ≤ bid 0.58 →
+    # odds_fair_value 把它判进止盈区 → 触发 trailing_reversal 止盈。
+    decision = strategy.decide_exit(
+        _dynamic_exit_context(
+            market,
+            _dynamic_exit_orderbook(market, best_bid=Decimal("0.58"), best_ask=Decimal("0.95")),
+            trace_id="trace-dynamic-goalserve-2",
+            cost_usdc=Decimal("5.10"),
+            metadata=goalserve_metadata,
+        )
+    )
+
+    assert decision.action.value == "sell"
+    assert decision.reason == "dynamic_exit_take_profit"
+    assert decision.metadata["dynamic_exit_fair_value_source"] == "goalserve_implied_prob"
+    assert decision.metadata["dynamic_exit_fair_value"] == "0.55"
+    assert decision.metadata["dynamic_exit_trigger"] == "trailing_reversal"
+    assert decision.price == Decimal("0.58")
 
 
 def test_recovery_keeps_ended_single_game_open_for_ended_not_closed_scan() -> None:
@@ -3837,8 +4170,10 @@ def test_recovery_manages_all_sports_target_tokens_instead_of_fixed_primary_toke
         market_slug=market.market_slug,
     )
 
+    # settlement-only：聚焦验证 recovery 跨所有 target token 撤掉历史 BUY，
+    # 不混入 auto_exit 持仓退出动作。
     decision = decide_recovery(
-        CurrentStrategyConfig(),
+        CurrentStrategyConfig(auto_exit_enabled=False),
         ExtensionContext(
             strategy_id="sports_tail",
             trace_id="trace-4",
@@ -3866,7 +4201,7 @@ def test_recovery_does_not_create_exit_order_in_settlement_only_mode() -> None:
     )
 
     decision = decide_recovery(
-        CurrentStrategyConfig(),
+        CurrentStrategyConfig(auto_exit_enabled=False),
         ExtensionContext(
             strategy_id="sports_tail",
             trace_id="trace-settlement-only-recovery",
@@ -3891,7 +4226,7 @@ def test_recovery_places_profit_take_for_near_settlement_position_missing_overla
     )
 
     decision = decide_recovery(
-        CurrentStrategyConfig(),
+        CurrentStrategyConfig(auto_exit_enabled=False),
         ExtensionContext(
             strategy_id="sports_tail",
             trace_id="trace-near-settlement-overlay-recovery",
@@ -3921,7 +4256,7 @@ def test_recovery_places_profit_take_for_high_price_uncovered_position() -> None
     )
 
     decision = decide_recovery(
-        CurrentStrategyConfig(),
+        CurrentStrategyConfig(auto_exit_enabled=False),
         ExtensionContext(
             strategy_id="sports_tail",
             trace_id="trace-recovery-profit-take",
@@ -3964,7 +4299,7 @@ def test_recovery_uses_profitable_best_bid_when_one_tick_profit_is_too_small() -
     )
 
     decision = decide_recovery(
-        CurrentStrategyConfig(),
+        CurrentStrategyConfig(auto_exit_enabled=False),
         ExtensionContext(
             strategy_id="sports_tail",
             trace_id="trace-recovery-profit-take-best-bid",
@@ -4115,7 +4450,7 @@ def test_recovery_cancels_historical_open_exit_order_in_settlement_only_mode() -
     )
 
     decision = decide_recovery(
-        CurrentStrategyConfig(),
+        CurrentStrategyConfig(auto_exit_enabled=False),
         ExtensionContext(
             strategy_id="sports_tail",
             trace_id="trace-settlement-only-open-exit",
