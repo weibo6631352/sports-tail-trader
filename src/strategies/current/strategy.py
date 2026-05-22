@@ -46,7 +46,6 @@ from strategies.current.live_state import (
     _market_sport_codes,
     _ensure_utc,
 )
-from strategies.current.trading.tail_bypass import market_tail_window_bypass_reason
 from strategies.current.outcomes import describe_sports_market, SportsMarketFamily
 from strategies.current.outright import (
     decide_outright_entry,
@@ -542,16 +541,7 @@ class CurrentStrategy:
         if not descriptor.accepted or descriptor.market_family != SportsMarketFamily.SINGLE_GAME:
             return None
         candidate_events = self._candidate_live_events_for_market(market, events)
-
-        def _bypass(matched_market, event):
-            return market_tail_window_bypass_reason(matched_market, event, descriptor, self._config)
-
-        return build_live_state_match(
-            market,
-            candidate_events,
-            market_end_horizon_seconds=self._config.tail_market_end_horizon_seconds,
-            bypass_resolver=_bypass,
-        )
+        return build_live_state_match(market, candidate_events)
 
     def _candidate_live_events_for_market(
         self,

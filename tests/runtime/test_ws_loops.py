@@ -156,7 +156,7 @@ def test_market_ws_subscribes_strategy_allowed_tail_signal_even_when_gamma_end_d
     assert token_ids == ("erhard-token", "nedic-token")
 
 
-def test_market_ws_prewarms_live_market_even_before_tail_signal_window() -> None:
+def test_market_ws_subscribes_live_market_with_signal_allowed() -> None:
     market = Market(
         condition_id="tennis-live-condition",
         market_slug="atp-ghibaud-pieri-2026-04-29-first-set-winner-Ghibaudo-vs-Pieri",
@@ -173,8 +173,8 @@ def test_market_ws_prewarms_live_market_even_before_tail_signal_window() -> None
             EntryMetadataRecord(
                 condition_id=market.condition_id,
                 metadata={"live_game": {"status": "live", "period": "S1"}},
-                live_state_signal_allowed=False,
-                live_state_signal_reason="market_end_too_far",
+                live_state_signal_allowed=True,
+                live_state_signal_reason="live",
                 live_state_phase="live",
                 live_state_payload={"status": "live", "period": "S1"},
             )
@@ -226,7 +226,7 @@ def test_market_ws_subscribes_outright_with_season_odds_despite_signal_allowed_f
 
 
 def test_market_ws_blocks_single_game_with_signal_allowed_false() -> None:
-    """SINGLE_GAME 的 signal_allowed=False（非 market_end_too_far）应保持封锁不变。"""
+    """SINGLE_GAME 的 signal_allowed=False 应保持封锁不变（scheduled/unknown 状态）。"""
     market = Market(
         condition_id="nba-game-condition",
         market_slug="nba-game-boston-vs-miami-2026-05-01",

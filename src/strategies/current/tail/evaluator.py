@@ -4,7 +4,6 @@
 - 公开评估函数 ``evaluate_tail_opportunity`` / ``evaluate_scale_in_opportunity``
 - 体育分派（按联赛选 generic / MLB / NFL / Tennis 评估器）
 - 通用入场门槛检查（``_common_reject_reason`` / ``_market_data_reject_reason``）
-- 价格上限和 endDate 粗筛绕过
 """
 
 from __future__ import annotations
@@ -39,13 +38,11 @@ from .core import (
     _evaluate_totals_scale_in,
     _market_family_reject_reason,
     _reject,
-    _standard_tail_state_reached,
 )
 from .mlb import (
     _evaluate_mlb_moneyline,
     _evaluate_mlb_spreads,
     _evaluate_mlb_totals,
-    _mlb_tail_state_reached,
 )
 from .slug import _is_tennis_set_winner_market, _market_scope_reject_reason
 from .tennis import (
@@ -54,7 +51,6 @@ from .tennis import (
     _evaluate_tennis_scale_in,
     _evaluate_tennis_totals,
     _tennis_set_winner_completed_for_side,
-    _tennis_tail_state_reached,
 )
 from .types import (
     ExecutionPermission,
@@ -101,9 +97,6 @@ def evaluate_tail_opportunity(
         if market_reject_reason:
             return _reject(candidate, market_reject_reason.value)
         return _evaluate_ended_not_closed(candidate, policy)
-
-    if _market_end_too_far(game, market, policy, now=now) and not _can_bypass_market_end_window(game, market, policy):
-        return _reject(candidate, TailRejectReason.MARKET_END_TOO_FAR.value)
 
     common_reject_reason = _common_reject_reason(game, market, policy, now=now)
     if common_reject_reason:
@@ -184,9 +177,6 @@ def evaluate_scale_in_opportunity(
             ended.execution_permission or ExecutionPermission.AUTO_EXECUTE,
             opportunity_type=SportsTailOpportunityType.SCALE_IN_ADVANTAGE,
         )
-
-    if _market_end_too_far(game, market, policy, now=now) and not _can_bypass_market_end_window(game, market, policy):
-        return _reject(candidate, TailRejectReason.MARKET_END_TOO_FAR.value)
 
     common_reject_reason = _common_reject_reason(game, market, policy, now=now)
     if common_reject_reason:
@@ -337,67 +327,6 @@ def _is_stale(
         max_age_seconds = policy.max_game_state_age_seconds
     return age_seconds > max_age_seconds
 
-
-def _market_end_too_far(
-    game: LiveGameState | None,
-    market: SportsMarketSnapshot,
-    policy: TailPolicy,
-    *,
-    now: datetime | None,
-) -> bool:
-    """判断距离盘口结算是否超出扫尾窗口。
-
-    优先用比赛剩余时间估算实际结算窗口：Polymarket end_date 对季后赛/系列赛
-    市场经常是系列结算日期，不等于单场封盘时间。已结束的比赛只等结算缓冲，
-    不受 end_date 限制。无比赛状态时才退回 end_date 兜底。
-
-    网球无固定时长：end_date 是赛事轮次截止日（通常数天后），与单场比赛何时
-    结束无关；match-level 时间窗由网球评估器的尾盘条件（set/game 进度）决定，
-    此处直接放行。
-    """
-    if policy.max_market_end_seconds <= 0:
-        return False
-    if game is not None:
-        if game.status == LiveGameStatus.ENDED:
-            return False
-        if is_tennis_game(game):
-            return False
-        if game.status == LiveGameStatus.LIVE and game.seconds_remaining is not None:
-            return game.seconds_remaining > policy.max_market_end_seconds
-    if market.market_end_date is None:
-        return False
-    current_time = now or datetime.now(timezone.utc)
-    market_end = market.market_end_date
-    if market_end.tzinfo is None:
-        market_end = market_end.replace(tzinfo=timezone.utc)
-    return (market_end.astimezone(timezone.utc) - current_time.astimezone(timezone.utc)).total_seconds() > (
-        policy.max_market_end_seconds
-    )
-
-
-def _can_bypass_market_end_window(
-    game: LiveGameState,
-    market: SportsMarketSnapshot,
-    policy: TailPolicy,
-) -> bool:
-    """判断结果已数学锁定的 live 盘口是否可绕过 endDate 粗筛。
-
-    Polymarket 体育 ``endDate`` 经常是结算展示日期，不等同于封盘时间。对
-    已经达到策略尾盘条件的盘口，不能只因 endDate 很远就丢弃；否则会等到
-    盘口完全单边化后才尝试入场。
-    """
-
-    if game.status != LiveGameStatus.LIVE:
-        return False
-    if is_tennis_game(game):
-        return _tennis_tail_state_reached(game, market)
-    if is_mlb_game(game):
-        # MLB/KBO 等棒球市场的 Gamma endDate 常是结算展示日期，不是比赛封盘时间。
-        # 已拿到结构化局面时，应由局数、出局数、垒上状态和分差决定是否可入场。
-        if game.baseball_state is not None:
-            return True
-        return _mlb_tail_state_reached(game, market, policy)
-    return _standard_tail_state_reached(game, market, _sport_moneyline_policy(game, policy))
 
 
 def _sport_moneyline_policy(game: LiveGameState, policy: TailPolicy) -> TailPolicy:

@@ -1,7 +1,7 @@
 """当前体育扫尾策略的外部直播状态映射。
 
 本模块只处理体育事件与市场的文本匹配、运动类型识别和候选事件预过滤。
-不包含策略决策逻辑（尾盘条件、入场阈值等由 trading/tail_bypass.py 承担）。
+不包含策略决策逻辑（尾盘条件、入场阈值等由 trading/gates.py 和 tail/ 承担）。
 
 匹配按 ``LiveEvent.kind`` 分支：team_match 走 home/away 别名匹配，
 race 走 leader_driver / top-3 driver / event_name 关键字命中。
@@ -608,9 +608,6 @@ def best_live_match(
 def build_live_state_match(
     market: Market,
     events: tuple[LiveEvent, ...],
-    *,
-    market_end_horizon_seconds: int,
-    bypass_resolver: "callable | None" = None,
 ) -> LiveStateMatch | None:
     """框架 hook ``match_live_state`` 的策略侧实现：返回强类型 LiveStateMatch。"""
 
@@ -619,16 +616,7 @@ def build_live_state_match(
         return None
     matched_market = match.market
     event = match.event
-    signal_allowed, signal_reason = entry_signal_gate(
-        matched_market,
-        event,
-        market_end_horizon_seconds=market_end_horizon_seconds,
-    )
-    if not signal_allowed and signal_reason == "market_end_too_far" and bypass_resolver is not None:
-        bypass = bypass_resolver(matched_market, event)
-        if bypass is not None:
-            signal_allowed = True
-            signal_reason = bypass
+    signal_allowed, signal_reason = entry_signal_gate(matched_market, event)
     payload = match.metadata()
     return LiveStateMatch(
         market=matched_market,
@@ -646,29 +634,17 @@ def build_live_state_match(
 def entry_signal_gate(
     market: Market,
     event: LiveEvent,
-    *,
-    market_end_horizon_seconds: int,
 ) -> tuple[bool, str]:
     """判断直播匹配是否应触发 P0 入场信号。
 
-    metadata 写入用于候选展示和复盘；P0 entry signal 只给真正进入扫尾观察窗、
-    或已经结束但 Polymarket 尚未封盘的 market，避免远期 live 匹配挤压交易队列。
+    ENDED 和 LIVE 市场立即放行；资金效率和时间窗由 _capital_efficiency_gate 处理。
     """
 
     if event.status == SportsLiveGameStatus.ENDED:
         return True, "ended_not_closed"
     if event.status != SportsLiveGameStatus.LIVE:
         return False, f"sports_live_state_{event.status.value}"
-    if market.end_date is None or market_end_horizon_seconds <= 0:
-        return True, "market_end_unknown"
-    current_time = _ensure_utc(event.observed_at) or datetime.now(timezone.utc)
-    market_end = _ensure_utc(market.end_date)
-    if market_end is None:
-        return True, "market_end_unknown"
-    seconds_until_end = (market_end - current_time).total_seconds()
-    if seconds_until_end > market_end_horizon_seconds:
-        return False, "market_end_too_far"
-    return True, "within_tail_window"
+    return True, "live"
 
 
 def _market_text(market: Market) -> str:

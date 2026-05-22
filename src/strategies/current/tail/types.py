@@ -51,7 +51,6 @@ class TailRejectReason(StrEnum):
 
     MISSING_LIVE_GAME_STATE = "missing_live_game_state"
     GAME_NOT_LIVE = "game_not_live"
-    MARKET_END_TOO_FAR = "market_end_too_far"
     STALE_GAME_STATE = "stale_game_state"
     MISSING_MARKET_LINE = "missing_market_line"
     MISSING_BEST_ASK = "missing_best_ask"
@@ -103,7 +102,6 @@ class TailPolicy:
     max_game_state_age_seconds: int = 10
     baseball_max_game_state_age_seconds: int = 45
     tennis_max_game_state_age_seconds: int = 35
-    max_market_end_seconds: int = 3600
     max_under_seconds_remaining: int = 30
     max_moneyline_seconds_remaining: int = 180
     max_spreads_seconds_remaining: int = 120

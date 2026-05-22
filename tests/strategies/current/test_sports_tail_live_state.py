@@ -674,7 +674,7 @@ def test_current_strategy_matches_wtt_table_tennis_live_state() -> None:
     assert match.signal_reason == "sports_live_state_scheduled"
 
 
-def test_current_strategy_marks_far_live_match_as_non_entry_signal() -> None:
+def test_current_strategy_allows_live_match_regardless_of_far_end_date() -> None:
     market = _market("nba-phi-bos-2026-04-28").with_metadata(
         end_date=datetime(2026, 4, 28, 2, 1, tzinfo=timezone.utc)
     )
@@ -686,8 +686,8 @@ def test_current_strategy_marks_far_live_match_as_non_entry_signal() -> None:
     assert match is not None
     assert match.market.condition_id == market.condition_id
     assert match.event.source_event_id == game.source_event_id
-    assert match.signal_allowed is False
-    assert match.signal_reason == "market_end_too_far"
+    assert match.signal_allowed is True
+    assert match.signal_reason == "live"
 
 
 def test_current_strategy_allows_far_mlb_signal_when_structured_tail_state_reached() -> None:
@@ -732,7 +732,7 @@ def test_current_strategy_allows_far_mlb_signal_when_structured_tail_state_reach
 
     assert match is not None
     assert match.signal_allowed is True
-    assert match.signal_reason == "live_tail_state_candidate"
+    assert match.signal_reason == "live"
 
 
 def test_current_strategy_allows_far_tennis_set_winner_signal_after_set_completed() -> None:
@@ -782,7 +782,7 @@ def test_current_strategy_allows_far_tennis_set_winner_signal_after_set_complete
 
     assert match is not None
     assert match.signal_allowed is True
-    assert match.signal_reason == "live_outcome_lock_candidate"
+    assert match.signal_reason == "live"
 
 
 def test_current_strategy_allows_far_tennis_match_total_when_minimum_final_games_crosses_line() -> None:
@@ -832,7 +832,7 @@ def test_current_strategy_allows_far_tennis_match_total_when_minimum_final_games
 
     assert match is not None
     assert match.signal_allowed is True
-    assert match.signal_reason == "live_outcome_lock_candidate"
+    assert match.signal_reason == "live"
 
 
 def test_current_strategy_allows_far_tennis_moneyline_signal_when_tail_state_reached() -> None:
@@ -882,7 +882,7 @@ def test_current_strategy_allows_far_tennis_moneyline_signal_when_tail_state_rea
 
     assert match is not None
     assert match.signal_allowed is True
-    assert match.signal_reason == "live_tail_state_candidate"
+    assert match.signal_reason == "live"
 
 
 def test_current_strategy_does_not_apply_single_game_live_source_to_series_market() -> None:

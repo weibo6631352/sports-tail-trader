@@ -25,11 +25,7 @@ from strategies.current.live_state import build_live_state_match
 def _live_state_match_from_metadata(market, events):
     """Test helper: 用策略侧 build_live_state_match 构造 LiveStateMatch。"""
 
-    return build_live_state_match(
-        market,
-        events,
-        market_end_horizon_seconds=900,
-    )
+    return build_live_state_match(market, events)
 
 
 def test_sports_live_state_worker_writes_metadata_and_entry_signals() -> None:
@@ -103,7 +99,7 @@ def test_sports_live_state_worker_does_not_track_blocked_entry_signal_market() -
                 market=market,
                 event=events[0],
                 signal_allowed=False,
-                signal_reason="market_end_too_far",
+                signal_reason="sports_live_state_scheduled",
                 payload={
                     "live_game": {
                         "league": "NBA",
@@ -183,7 +179,7 @@ def test_sports_live_state_worker_writes_metadata_without_blocked_entry_signals(
                 market=market,
                 event=events[0],
                 signal_allowed=False,
-                signal_reason="market_end_too_far",
+                signal_reason="sports_live_state_scheduled",
                 payload={
                     "live_game": {
                         "league": "NBA",
@@ -215,7 +211,7 @@ def test_sports_live_state_worker_writes_metadata_without_blocked_entry_signals(
         record = store.find(condition_id="moneyline-condition")
         assert record is not None
         assert record.live_state_signal_allowed is False
-        assert record.live_state_signal_reason == "market_end_too_far"
+        assert record.live_state_signal_reason == "sports_live_state_scheduled"
 
     asyncio.run(run())
 

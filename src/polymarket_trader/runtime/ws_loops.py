@@ -184,15 +184,13 @@ def _market_requires_market_ws(
         # 以下逻辑针对依赖 live_state 的市场（SINGLE_GAME）：
         # 显式拒（signal_allowed=False）立刻返回，避免 polymarket 兜底误绕过。
         signal_reason = (record.live_state_signal_reason or "").strip()
-        if record.live_state_signal_allowed is False and signal_reason != "market_end_too_far":
+        if record.live_state_signal_allowed is False:
             return False
         phase = (record.live_state_phase or "").strip().lower()
         if phase == "ended":
             return True
         if phase in _MARKET_WS_LIVE_STATUSES:
             if record.live_state_signal_allowed is True:
-                return True
-            if phase == "live" and signal_reason == "market_end_too_far":
                 return True
             if _market_end_within_tail_window(market, now=now):
                 return True

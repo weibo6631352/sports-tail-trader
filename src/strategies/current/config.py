@@ -96,9 +96,6 @@ class CurrentStrategyConfig:
             体育扫尾允许纳入 universe 的盘口类型。
         tail_*:
             体育扫尾策略自己的价格、流动性、时间窗口和执行权限参数。
-        tail_market_end_horizon_seconds:
-            live 市场进入扫尾候选前允许的最长封盘剩余秒数。默认 3600 秒，
-            用于把远离封盘的真实直播赛事留在全量发现里，但不进入实时交易候选。
         tail_max_*:
             体育扫尾策略级相关性硬上限，用于约束同一比赛、同一联赛和当日新增
             暴露（替代旧绝对 USDC，改为 bankroll fraction + 绝对 floor）。
@@ -216,7 +213,6 @@ class CurrentStrategyConfig:
     # 直播信号意味着该 market 已脱离入场窗口（赛事已结束 / 联赛不被任何数据源覆盖），
     # 继续扫描只是 noise。reconcile 看到 pause 后会把 market 从订阅集合排除。
     tail_stale_no_live_state_seconds: int = 86_400
-    tail_market_end_horizon_seconds: int = 3600
     tail_max_under_seconds_remaining: int = 30
     tail_max_moneyline_seconds_remaining: int = 180
     tail_max_spreads_seconds_remaining: int = 120
@@ -402,7 +398,6 @@ def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
         max_game_state_age_seconds=config.tail_max_game_state_age_seconds,
         baseball_max_game_state_age_seconds=config.tail_baseball_max_game_state_age_seconds,
         tennis_max_game_state_age_seconds=config.tail_tennis_max_game_state_age_seconds,
-        max_market_end_seconds=config.tail_market_end_horizon_seconds,
         max_under_seconds_remaining=config.tail_max_under_seconds_remaining,
         max_moneyline_seconds_remaining=config.tail_max_moneyline_seconds_remaining,
         max_spreads_seconds_remaining=config.tail_max_spreads_seconds_remaining,
