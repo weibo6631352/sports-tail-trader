@@ -112,6 +112,35 @@ class GoalserveLivescoreClient:
                 limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             )
 
+    def livescore_per_sport_status(self) -> list[dict[str, Any]]:
+        """每个 sport HTTP 轮询状态快照（读缓存，不触发 I/O，仅用于观测）。"""
+        cache = self._cache
+        poll_age_s: float | None = None
+        if cache is not None and cache.observed_at is not None:
+            import time as _time
+            poll_age_s = round(_time.time() - cache.observed_at.timestamp(), 1)
+
+        status_by_sport: dict[str, SportsLiveSourceStatus] = {}
+        if cache is not None:
+            for ss in cache.source_statuses:
+                # source format: "goalserve_livescore:{sport}"
+                if ":" in ss.source:
+                    status_by_sport[ss.source.split(":", 1)[1]] = ss
+
+        result = []
+        for sport in self._sports:
+            ss = status_by_sport.get(sport)
+            result.append({
+                "sport": sport,
+                "type": "http",
+                "connected": ss.success if ss is not None else (cache is None),
+                "events": ss.events_seen if ss is not None else 0,
+                "last_error": ss.last_error if ss is not None else None,
+                "poll_age_s": poll_age_s,
+                "poll_task_running": self._poll_task is not None and not self._poll_task.done(),
+            })
+        return result
+
     async def aclose(self) -> None:
         if self._poll_task is not None:
             self._poll_task.cancel()

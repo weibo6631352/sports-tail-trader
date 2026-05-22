@@ -264,6 +264,27 @@ class GoalserveClient:
             self._state_stp[sport].pop(event_id, None)
             logger.info("goalserve: evicted %s/%s reason=%s", sport, event_id, reason)
 
+    def ws_per_sport_status(self) -> list[dict[str, Any]]:
+        """每个 sport 的 WS 连接状态快照（不加锁，读瞬时值，仅用于观测）。"""
+        now = time.time()
+        result = []
+        for sport in self._sports:
+            last_msg = self._last_msg_time.get(sport)
+            n_errors = self._consecutive_errors.get(sport, 0)
+            events_count = len(self._state.get(sport, {}))
+            reconnect_at = self._reconnect_at.get(sport)
+            stale = last_msg is None or (now - last_msg) > _STALE_THRESHOLD_S
+            result.append({
+                "sport": sport,
+                "type": "ws",
+                "connected": n_errors == 0 and not stale,
+                "consecutive_errors": n_errors,
+                "events_in_memory": events_count,
+                "last_msg_age_s": round(now - last_msg, 1) if last_msg is not None else None,
+                "last_connected_at": reconnect_at,
+            })
+        return result
+
     async def list_events(self) -> SportsLiveSnapshot:
         await self._ensure_started()
         observed_at = utc_now(self._now_provider)

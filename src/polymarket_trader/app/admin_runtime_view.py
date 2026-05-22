@@ -469,6 +469,9 @@ class AdminRuntimeView:
             snapshot["recent_match_sources"] = recent_sources
             snapshot["recent_match_sources_limit"] = _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT
             snapshot["recent_match_sources_truncated"] = full_count > _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT
+            # Per-sport WS / HTTP 连接状态（WS 连接是否稳定、每个 sport HTTP 轮询是否健康）。
+            client = self.runtime.sports_live_state_client if self.runtime else None
+            snapshot["source_detail"] = client.source_detail_status() if client is not None else []
             return snapshot
         settings = self._settings()
         live_enabled = settings.sports_live_state_enabled if isinstance(settings, Settings) else False

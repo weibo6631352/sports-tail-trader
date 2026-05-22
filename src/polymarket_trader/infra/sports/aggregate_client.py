@@ -88,9 +88,11 @@ class SportsLiveAggregateClient:
         cooldown_failure_threshold: int = 3,
         league_source_priority: Mapping[str, Sequence[str]] | None = None,
         trusted_sources: Sequence[str] | None = None,
+        status_providers: Sequence[tuple[str, Callable[[], list[dict]]]] | None = None,
     ) -> None:
         self._providers = tuple((str(source).strip().lower(), provider) for source, provider in providers)
         self._closers = tuple(closers)
+        self._status_providers: tuple[tuple[str, Callable[[], list[dict]]], ...] = tuple(status_providers or ())
         self._now_provider = now_provider
         self._provider_timeout_s = max(0.1, float(provider_timeout_s))
         self._cooldown_base_s = max(1.0, float(cooldown_base_s))
@@ -108,6 +110,16 @@ class SportsLiveAggregateClient:
             if trusted_sources
             else _DEFAULT_OFFICIAL_SOURCES
         )
+
+    def source_detail_status(self) -> list[dict]:
+        """每个数据源的 per-sport 连接状态（WS / HTTP），供 admin 观测，不触发 I/O。"""
+        result: list[dict] = []
+        for _name, provider in self._status_providers:
+            try:
+                result.extend(provider())
+            except Exception:
+                pass
+        return result
 
     async def aclose(self) -> None:
         if not self._closers:

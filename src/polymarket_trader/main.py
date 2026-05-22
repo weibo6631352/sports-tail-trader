@@ -221,6 +221,7 @@ def _build_sports_live_state_client(
     )
     providers: list[tuple[str, Any]] = [("goalserve", goalserve.list_events)]
     closers: list[Any] = [goalserve.aclose]
+    status_providers: list[tuple[str, Any]] = [("goalserve_ws", goalserve.ws_per_sport_status)]
 
     if settings.goalserve_livescore_enabled and api_key:
         livescore = GoalserveLivescoreClient(
@@ -232,6 +233,7 @@ def _build_sports_live_state_client(
         )
         providers.append(("goalserve_livescore", livescore.list_events))
         closers.append(livescore.aclose)
+        status_providers.append(("goalserve_livescore", livescore.livescore_per_sport_status))
 
     provider_timeout_s = max(
         settings.sports_live_state_timeout_s * _PROVIDER_TIMEOUT_MULTIPLIER,
@@ -240,6 +242,7 @@ def _build_sports_live_state_client(
     return SportsLiveAggregateClient(
         providers=providers,
         closers=closers,
+        status_providers=status_providers,
         provider_timeout_s=provider_timeout_s,
         cooldown_base_s=settings.sports_live_state_health_cooldown_base_s,
         eviction_s=settings.sports_live_state_health_eviction_s,
