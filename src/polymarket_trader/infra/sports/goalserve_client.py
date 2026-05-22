@@ -51,6 +51,9 @@ logger = logging.getLogger(__name__)
 _TOKEN_URL = "http://live.goalserve.com/api/v1/auth/gettoken"
 _WS_BASE_URL = "ws://live.goalserve.com/ws"
 _TOKEN_REFRESH_MARGIN_S = 300   # 过期前 5 分钟刷新
+# gettoken 失败（401/429 等）后的共享冷却：冷却期内所有 sport 直接跳过 gettoken，
+# 不再各自重试。没有这个冷却，8 个 sport 各自每 60s 重试会持续打爆 gettoken 配额。
+_TOKEN_FAILURE_COOLDOWN_S = 600
 _RECONNECT_BASE_S = 5.0
 _RECONNECT_MAX_S = 60.0
 _STALE_THRESHOLD_S = 30.0       # 超过此时间无消息视为源失活
@@ -86,15 +89,28 @@ class GoalserveClient:
         *,
         api_key: str,
         sports: tuple[str, ...] = ("basketball", "soccer", "hockey", "baseball", "tennis", "esports"),
+        proxy: str | None = None,
+        token_cache_path: Path | None = None,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self._api_key = api_key
         self._sports = tuple(s for s in sports if s in _SUPPORTED_SPORTS)
+        # live.goalserve.com 直连会被拒（401）；与 livescore 一样必须走代理。
+        self._proxy = proxy
+        self._token_cache_path = token_cache_path or _TOKEN_CACHE_PATH
         self._now_provider = now_provider
 
         self._token: str | None = None
         self._token_exp: float = 0.0
         self._token_lock = asyncio.Lock()
+        # Token 生命周期观测：必须记录每次 gettoken 的次数/结果/占用，否则无从
+        # 得知 token 槽占用情况与 WS 连接上限。
+        self._token_acquired_at: float | None = None
+        self._token_fetch_count = 0
+        self._token_fetch_failures = 0
+        self._last_token_attempt_at: float | None = None
+        self._last_token_error: str | None = None
+        self._token_cooldown_until: float = 0.0
 
         # event 状态快照：{sport: {event_id: ws_message_dict}}
         self._state: dict[str, dict[str, Any]] = {s: {} for s in self._sports}
@@ -112,6 +128,9 @@ class GoalserveClient:
         self._tasks: list[asyncio.Task] = []
         self._started = False
 
+        # 启动即恢复 token 占用记录，重启后仍知晓槽位占用与累计 gettoken。
+        self._restore_token_record()
+
     async def _ensure_started(self) -> None:
         if self._started:
             return
@@ -123,7 +142,8 @@ class GoalserveClient:
             self._tasks.append(task)
 
     async def _fetch_token(self) -> tuple[str, float]:
-        async with httpx.AsyncClient(trust_env=False, timeout=15) as client:
+        # trust_env=False 屏蔽系统 SOCKS 代理；proxy 显式走配置的 HTTP 代理。
+        async with httpx.AsyncClient(trust_env=False, timeout=15, proxy=self._proxy) as client:
             r = await client.post(_TOKEN_URL, json={"apiKey": self._api_key})
             r.raise_for_status()
             token = r.json()["token"]
@@ -132,36 +152,104 @@ class GoalserveClient:
         exp = float(json.loads(base64.urlsafe_b64decode(payload_b64))["exp"])
         return token, exp
 
-    def _load_cached_token(self) -> tuple[str, float] | None:
-        try:
-            data = json.loads(_TOKEN_CACHE_PATH.read_text())
-            token, exp = data["token"], float(data["exp"])
-            if time.time() < exp - _TOKEN_REFRESH_MARGIN_S:
-                return token, exp
-        except Exception:
-            pass
-        return None
+    def _restore_token_record(self) -> None:
+        """启动时从磁盘恢复 token 占用记录。
 
-    def _save_cached_token(self, token: str, exp: float) -> None:
+        token 槽在 token 过期前一直被占用（即使本进程已重启）。持久化完整记录
+        让重启后仍能知道：是否还持有有效 token、累计 gettoken 次数/失败、冷却是否
+        仍生效——避免重启后盲目重新申请打爆 token 槽。
+        """
+
         try:
-            _TOKEN_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _TOKEN_CACHE_PATH.write_text(json.dumps({"token": token, "exp": exp}))
+            data = json.loads(self._token_cache_path.read_text())
+        except Exception:
+            return
+        try:
+            self._token_fetch_count = int(data.get("gettoken_count", 0))
+            self._token_fetch_failures = int(data.get("gettoken_failures", 0))
+            self._last_token_error = data.get("last_error")
+            attempt = data.get("last_attempt_at")
+            self._last_token_attempt_at = None if attempt is None else float(attempt)
+            cooldown = float(data.get("cooldown_until", 0.0))
+            if cooldown > time.time():
+                self._token_cooldown_until = cooldown
+            token = data.get("token")
+            exp = data.get("exp")
+            if token and exp is not None and time.time() < float(exp) - _TOKEN_REFRESH_MARGIN_S:
+                self._token = str(token)
+                self._token_exp = float(exp)
+                acquired = data.get("acquired_at")
+                self._token_acquired_at = None if acquired is None else float(acquired)
+                logger.info(
+                    "goalserve: inplay token record restored — token still valid, exp=%.0f "
+                    "(cumulative gettoken=%d failures=%d)",
+                    self._token_exp, self._token_fetch_count, self._token_fetch_failures,
+                )
+            else:
+                logger.info(
+                    "goalserve: inplay token record restored — no valid token "
+                    "(cumulative gettoken=%d failures=%d cooldown_remaining=%.0fs)",
+                    self._token_fetch_count, self._token_fetch_failures,
+                    max(0.0, self._token_cooldown_until - time.time()),
+                )
         except Exception as exc:
-            logger.warning("goalserve: failed to save token cache: %s", exc)
+            logger.warning("goalserve: failed to restore token record: %s", exc)
+
+    def _persist_token_record(self) -> None:
+        """把当前 token 占用记录写盘，供重启后恢复。"""
+
+        try:
+            self._token_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            self._token_cache_path.write_text(json.dumps({
+                "token": self._token,
+                "exp": self._token_exp,
+                "acquired_at": self._token_acquired_at,
+                "gettoken_count": self._token_fetch_count,
+                "gettoken_failures": self._token_fetch_failures,
+                "last_attempt_at": self._last_token_attempt_at,
+                "last_error": self._last_token_error,
+                "cooldown_until": self._token_cooldown_until,
+            }))
+        except Exception as exc:
+            logger.warning("goalserve: failed to persist token record: %s", exc)
 
     async def _ensure_token(self) -> str:
         async with self._token_lock:
-            if self._token is None or time.time() > self._token_exp - _TOKEN_REFRESH_MARGIN_S:
-                # Try cached token from disk first to avoid consuming a token slot on restart
-                cached = self._load_cached_token()
-                if cached:
-                    self._token, self._token_exp = cached
-                    logger.info("goalserve: token loaded from cache, exp=%.0f", self._token_exp)
-                else:
-                    self._token, self._token_exp = await self._fetch_token()
-                    self._save_cached_token(self._token, self._token_exp)
-                    logger.info("goalserve: token refreshed, exp=%.0f", self._token_exp)
-            assert self._token is not None  # invariant: always set by branches above
+            # 内存中已有有效 token（含启动时从持久记录恢复的）→ 直接复用，不占新槽。
+            if self._token is not None and time.time() <= self._token_exp - _TOKEN_REFRESH_MARGIN_S:
+                return self._token
+            # 共享冷却：一个 sport 失败后，其余 sport 在冷却期内不再各自打 gettoken。
+            now = time.time()
+            if now < self._token_cooldown_until:
+                raise RuntimeError(
+                    f"goalserve inplay token cooldown {self._token_cooldown_until - now:.0f}s "
+                    f"(last_error={self._last_token_error})"
+                )
+            self._last_token_attempt_at = now
+            self._token_fetch_count += 1
+            try:
+                self._token, self._token_exp = await self._fetch_token()
+            except Exception as exc:
+                self._token_fetch_failures += 1
+                self._last_token_error = repr(exc)
+                self._token_cooldown_until = time.time() + _TOKEN_FAILURE_COOLDOWN_S
+                self._persist_token_record()
+                logger.warning(
+                    "goalserve: inplay gettoken #%d FAILED: %s — cooldown %ds "
+                    "(total fetches=%d failures=%d)",
+                    self._token_fetch_count, exc, _TOKEN_FAILURE_COOLDOWN_S,
+                    self._token_fetch_count, self._token_fetch_failures,
+                )
+                raise
+            self._token_acquired_at = time.time()
+            self._last_token_error = None
+            self._persist_token_record()
+            logger.info(
+                "goalserve: inplay gettoken #%d OK, exp=%.0f — token slot occupied "
+                "(total fetches=%d failures=%d)",
+                self._token_fetch_count, self._token_exp,
+                self._token_fetch_count, self._token_fetch_failures,
+            )
             return self._token
 
     async def _ws_loop(self, sport: str) -> None:
@@ -171,8 +259,10 @@ class GoalserveClient:
                 token = await self._ensure_token()
                 url = f"{_WS_BASE_URL}/{sport}?tkn={token}"
                 logger.info("goalserve: connecting WS for %s", sport)
+                # live.goalserve.com 需走代理；proxy=None 时 websockets 用默认行为。
+                ws_kwargs = {"proxy": self._proxy} if self._proxy else {}
                 async with websockets.connect(
-                    url, open_timeout=15, ping_interval=30, ping_timeout=10
+                    url, open_timeout=15, ping_interval=30, ping_timeout=10, **ws_kwargs
                 ) as ws:
                     delay = _RECONNECT_BASE_S
                     self._consecutive_errors[sport] = 0
@@ -193,10 +283,10 @@ class GoalserveClient:
                     async with self._token_lock:
                         if self._token == token:
                             self._token = None
-                            try:
-                                _TOKEN_CACHE_PATH.unlink(missing_ok=True)
-                            except Exception:
-                                pass
+                            self._token_acquired_at = None
+                            # 持久化清空后的记录（保留累计计数），不删文件——重启后
+                            # 仍能看到历史 gettoken 次数与失败。
+                            self._persist_token_record()
                     logger.warning("goalserve: WS 401 for %s, forcing token refresh", sport)
                 else:
                     err = self._consecutive_errors.get(sport, 0) + 1
@@ -265,9 +355,39 @@ class GoalserveClient:
             logger.info("goalserve: evicted %s/%s reason=%s", sport, event_id, reason)
 
     def ws_per_sport_status(self) -> list[dict[str, Any]]:
-        """每个 sport 的 WS 连接状态快照（不加锁，读瞬时值，仅用于观测）。"""
+        """每个 sport 的 WS 连接状态快照（不加锁，读瞬时值，仅用于观测）。
+
+        首条为 inplay token 生命周期记录：暴露 token 占用、累计 gettoken 次数/失败、
+        冷却剩余、当前活跃 WS 连接数——据此判断 token 槽占用与 WS 连接上限。
+        """
         now = time.time()
-        result = []
+        result: list[dict[str, Any]] = []
+        connected = sum(
+            1
+            for sport in self._sports
+            if self._consecutive_errors.get(sport, 0) == 0
+            and self._last_msg_time.get(sport) is not None
+            and now - self._last_msg_time[sport] <= _STALE_THRESHOLD_S
+        )
+        result.append({
+            "sport": "_inplay_token",
+            "type": "token",
+            "token_present": self._token is not None,
+            "token_exp_in_s": (
+                round(self._token_exp - now, 1) if self._token is not None else None
+            ),
+            "token_age_s": (
+                round(now - self._token_acquired_at, 1)
+                if self._token_acquired_at is not None
+                else None
+            ),
+            "gettoken_count": self._token_fetch_count,
+            "gettoken_failures": self._token_fetch_failures,
+            "cooldown_remaining_s": round(max(0.0, self._token_cooldown_until - now), 1),
+            "last_error": self._last_token_error,
+            "active_ws_connections": connected,
+            "configured_sports": len(self._sports),
+        })
         for sport in self._sports:
             last_msg = self._last_msg_time.get(sport)
             n_errors = self._consecutive_errors.get(sport, 0)

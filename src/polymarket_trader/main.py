@@ -218,6 +218,7 @@ def _build_sports_live_state_client(
     goalserve = GoalserveClient(
         api_key=api_key or "",
         sports=settings.goalserve_sport_codes,
+        proxy=settings.goalserve_proxy,
     )
     providers: list[tuple[str, Any]] = [("goalserve", goalserve.list_events)]
     closers: list[Any] = [goalserve.aclose]
