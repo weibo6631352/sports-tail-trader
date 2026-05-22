@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from polymarket_trader.domain.market import Market
 from polymarket_trader.extension_api import ExtensionContext, ExtensionPorts
 
 from strategies.current.config import CurrentStrategyConfig
@@ -34,8 +33,11 @@ def _tail_price_cap(
         return entry_no_price_max
     if token_id is not None and target_for_token(market, token_id) is None:
         return entry_no_price_max
-    if locked_outcome_signal and descriptor.market_type.value == "moneyline" and _is_tennis_set_winner_market(market):
-        return config.tail_tennis_locked_moneyline_max_entry_price
+    # 直播源已判定该市场为锁定候选（live_outcome_lock_candidate / ended_not_closed）——
+    # 结果已经确定，放宽到锁定上限（任意盘口类型），把 0.97~0.995 这段确定性
+    # 机会纳入入场；非锁定市场仍走下方各盘口类型的常规上限。
+    if locked_outcome_signal:
+        return config.tail_locked_outcome_max_entry_price
     if descriptor.market_type.value == "totals":
         return config.tail_totals_max_entry_price
     if descriptor.market_type.value == "moneyline":
@@ -56,8 +58,3 @@ def _tail_locked_outcome_signal(context: ExtensionContext) -> bool:
         "live_outcome_lock_candidate",
         "ended_not_closed",
     }
-
-
-def _is_tennis_set_winner_market(market: Market) -> bool:
-    text = (market.market_slug or "").strip().lower().replace("_", " ").replace("-", " ")
-    return "set winner" in text or "first set winner" in text

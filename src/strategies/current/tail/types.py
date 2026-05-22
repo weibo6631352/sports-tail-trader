@@ -104,7 +104,7 @@ class TailPolicy:
     min_entry_price: Decimal = Decimal("0.10")
     totals_max_entry_price: Decimal = Decimal("0.99")
     moneyline_max_entry_price: Decimal = Decimal("0.97")
-    tennis_locked_moneyline_max_entry_price: Decimal = Decimal("0.995")
+    locked_outcome_max_entry_price: Decimal = Decimal("0.995")
     spreads_max_entry_price: Decimal = Decimal("0.96")
     min_liquidity_usdc: Decimal = Decimal("1")
     max_game_state_age_seconds: int = 10

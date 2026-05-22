@@ -338,7 +338,7 @@ def _max_entry_price(
         and game.tennis_state is not None
         and _tennis_set_winner_completed_for_side(game.tennis_state, market)
     ):
-        return policy.tennis_locked_moneyline_max_entry_price
+        return policy.locked_outcome_max_entry_price
     if market.market_type == SportsMarketType.TOTALS:
         return policy.totals_max_entry_price
     if market.market_type == SportsMarketType.MONEYLINE:

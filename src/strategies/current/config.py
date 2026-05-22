@@ -203,7 +203,7 @@ class CurrentStrategyConfig:
     tail_min_entry_price: Decimal = Decimal("0.10")
     tail_totals_max_entry_price: Decimal = Decimal("0.99")
     tail_moneyline_max_entry_price: Decimal = Decimal("0.98")
-    tail_tennis_locked_moneyline_max_entry_price: Decimal = Decimal("0.995")
+    tail_locked_outcome_max_entry_price: Decimal = Decimal("0.995")
     tail_spreads_max_entry_price: Decimal = Decimal("0.96")
     tail_min_liquidity_usdc: Decimal = Decimal("1")
     tail_max_game_state_age_seconds: int = 10
@@ -402,7 +402,7 @@ def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
         min_entry_price=config.tail_min_entry_price,
         totals_max_entry_price=config.tail_totals_max_entry_price,
         moneyline_max_entry_price=config.tail_moneyline_max_entry_price,
-        tennis_locked_moneyline_max_entry_price=config.tail_tennis_locked_moneyline_max_entry_price,
+        locked_outcome_max_entry_price=config.tail_locked_outcome_max_entry_price,
         spreads_max_entry_price=config.tail_spreads_max_entry_price,
         min_liquidity_usdc=config.tail_min_liquidity_usdc,
         max_game_state_age_seconds=config.tail_max_game_state_age_seconds,

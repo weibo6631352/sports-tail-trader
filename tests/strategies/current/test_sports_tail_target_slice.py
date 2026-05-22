@@ -65,7 +65,7 @@ def test_config_expresses_complete_tail_policy() -> None:
     assert policy.totals_execution_permission == ExecutionPermission.AUTO_EXECUTE
     assert policy.moneyline_execution_permission == ExecutionPermission.AUTO_EXECUTE
     assert policy.spreads_execution_permission == ExecutionPermission.AUTO_EXECUTE
-    assert policy.tennis_locked_moneyline_max_entry_price == Decimal("0.995")
+    assert policy.locked_outcome_max_entry_price == Decimal("0.995")
     assert policy.baseball_max_game_state_age_seconds == 45
 
 
