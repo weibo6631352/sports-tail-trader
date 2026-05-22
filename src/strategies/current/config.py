@@ -203,7 +203,9 @@ class CurrentStrategyConfig:
     tail_min_entry_price: Decimal = Decimal("0.10")
     tail_totals_max_entry_price: Decimal = Decimal("0.99")
     tail_moneyline_max_entry_price: Decimal = Decimal("0.98")
-    tail_locked_outcome_max_entry_price: Decimal = Decimal("0.995")
+    # 锁定结果的入场价上限。锁定方向必然结算到 1.0，0.98 保证 ≥2% 确定毛利——
+    # Polymarket 手续费 ∝ price×(1-price)，p=0.98 处手续费极小，2% 毛利稳覆盖。
+    tail_locked_outcome_max_entry_price: Decimal = Decimal("0.98")
     tail_spreads_max_entry_price: Decimal = Decimal("0.96")
     tail_min_liquidity_usdc: Decimal = Decimal("1")
     tail_max_game_state_age_seconds: int = 10
