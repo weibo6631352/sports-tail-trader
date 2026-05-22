@@ -111,13 +111,19 @@ def _reject(
     *,
     metadata: Mapping[str, Any] | None = None,
 ) -> TailEvaluation:
+    # candidate.metadata 为基础,显式 metadata 覆盖——拒绝原因相关的数值证据
+    # (如 odds_gap edge / true_p / best_ask)必须能写入审计 metadata,供
+    # CLAUDE.md §17 门限复盘使用。此前 candidate 非空时显式 metadata 被丢弃。
+    base = dict(candidate.metadata) if candidate is not None else {}
+    if metadata:
+        base.update(metadata)
     return TailEvaluation(
         accepted=False,
         action=TailAction.REJECT,
         reason=reason,
         candidate=candidate,
         execution_permission=None,
-        metadata=dict(metadata or {}) if candidate is None else candidate.metadata,
+        metadata=base,
     )
 
 

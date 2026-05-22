@@ -414,7 +414,21 @@ def _accept_odds_gap(
     assert market.best_ask is not None
     edge = true_p - market.best_ask
     if edge < policy.odds_gap_min_edge:
-        return _reject(candidate, TailRejectReason.NO_ODDS_GAP.value)
+        # CLAUDE.md §17 门限复盘:edge 不足拒绝时把实际数值写进 audit metadata,
+        # 这样能事后判定"差价是不是只差几个 bp、阈值是否过紧"。
+        return _reject(
+            candidate,
+            TailRejectReason.NO_ODDS_GAP.value,
+            metadata={
+                "odds_gap_edge": str(edge),
+                "odds_gap_true_p": str(true_p),
+                "odds_gap_best_ask": str(market.best_ask),
+                "odds_gap_min_edge_threshold": str(policy.odds_gap_min_edge),
+                "odds_gap_overround": str(overround),
+                "odds_gap_side": market.side.value,
+                "odds_gap_market_type": market.market_type.value,
+            },
+        )
 
     enriched = SportsTailCandidate(
         game=candidate.game,
