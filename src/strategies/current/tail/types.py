@@ -141,6 +141,13 @@ class TailRejectReason(StrEnum):
     # totals/spread 赔率差价：Goalserve 盘口线/范围与 Polymarket 市场不一致，
     # 两侧概率不可直接比较——单独标记以便审计区分"线对不上"与"edge 不足"。
     ODDS_GAP_LINE_MISMATCH = "odds_gap_line_mismatch"
+    # 足球 anytime-goalscorer（球员是否在比赛中进球）扫尾锁定原因。
+    # 球员名称匹配是该家族唯一的关键正确性环节——CLAUDE.md §18 要求名称
+    # 解析失败必须给可审计原因，不静默归到泛化 OUTCOME_NOT_LOCKED。
+    ANYTIME_GOALSCORER_PLAYER_AMBIGUOUS = "anytime_goalscorer_player_ambiguous"
+    # 锁定方向与下注方向不一致：玩家已进球但 market.side=NO（注定输），
+    # 或玩家未进球且比赛已结束但 market.side=YES（注定输）——精确拒绝。
+    ANYTIME_GOALSCORER_WRONG_SIDE = "anytime_goalscorer_wrong_side"
 
 
 @dataclass(frozen=True, slots=True)

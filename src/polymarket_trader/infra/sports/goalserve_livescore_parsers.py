@@ -40,6 +40,7 @@ from polymarket_trader.domain.sports_live import (
     RaceState,
     RugbyGameState,
     SoccerGameState,
+    SoccerGoalEvent,
     SportsLiveGameStatus,
     TennisGameState,
     VolleyballGameState,
@@ -1120,6 +1121,70 @@ def _soccer_halftime_scores(match: dict[str, Any]) -> tuple[int | None, int | No
     return int(m.group(1)), int(m.group(2))
 
 
+def _extract_soccer_goal_events(match: dict[str, Any]) -> tuple[SoccerGoalEvent, ...]:
+    """从 soccernew/home match dict 提取所有进球事件。
+
+    livescore feed 的 events 实际形态（已与真实 XML/JSON 对账）：
+      - XML 转 dict 后：``match["events"]["_children"]`` = 各 event 属性 dict
+        列表（裸 key：``type/minute/team/player/playerId/result/...``）；
+      - ?json=1 形态：``match["events"]["event"]`` = list/dict，key 带 ``@``
+        前缀。两种形态都接受。
+
+    只收 ``type=goal`` 事件；yellowcard / subst / var / redcard 等跳过——
+    点球罚失（``pen miss``）也不计为进球。``@team`` 字段：``localteam``
+    映射 ``home``；``visitorteam`` 映射 ``away``——其它值（含空）丢弃，
+    不臆测。
+    """
+    events_container = match.get("events")
+    if not isinstance(events_container, dict):
+        return ()
+    # XML 转 dict：多个 <event> 子节点 → _children；?json=1：events.event 列表
+    raw_events: list[dict[str, Any]] = []
+    children = events_container.get("_children")
+    if isinstance(children, list):
+        raw_events.extend(c for c in children if isinstance(c, dict))
+    inner = events_container.get("event")
+    if isinstance(inner, list):
+        raw_events.extend(e for e in inner if isinstance(e, dict))
+    elif isinstance(inner, dict):
+        raw_events.append(inner)
+    if not raw_events:
+        return ()
+    goals: list[SoccerGoalEvent] = []
+    for e in raw_events:
+        # 兼容裸 key 与 @key 两种形态。
+        etype = _str_val(e.get("type") or e.get("@type")).lower()
+        if etype != "goal":
+            continue
+        team_raw = _str_val(e.get("team") or e.get("@team")).lower()
+        if team_raw == "localteam":
+            team: Any = "home"
+        elif team_raw == "visitorteam":
+            team = "away"
+        else:
+            # 队归属未知不臆测（CLAUDE.md §17：拒绝可审计、不静默吞数据）。
+            continue
+        minute = _int_val(e.get("minute") or e.get("@minute"))
+        if minute is None:
+            minute = 0
+        player_name = _str_val(e.get("player") or e.get("@player"))
+        player_id = _str_val(e.get("playerId") or e.get("@playerId"))
+        if not player_name and not player_id:
+            # 无人名也无 ID 的进球事件无法用于球员级匹配，丢弃。
+            continue
+        score_after = _str_val(e.get("result") or e.get("@result"))
+        goals.append(
+            SoccerGoalEvent(
+                player_name=player_name,
+                player_id=player_id,
+                team=team,
+                minute=minute,
+                score_after=score_after,
+            )
+        )
+    return tuple(goals)
+
+
 def _parse_soccer_with_cats(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
     """解析 soccernew/home 的 category → match 结构。
 
@@ -1160,11 +1225,19 @@ def _parse_soccer_with_cats(scores: dict[str, Any], observed_at: datetime) -> li
             timer_raw = match.get("timer")
             seconds_remaining = _soccer_seconds_remaining(status_raw, timer_raw) if status == SportsLiveGameStatus.LIVE else None
             ht_home, ht_away = _soccer_halftime_scores(match)
-            soccer_state = (
-                SoccerGameState(home_halftime_score=ht_home, away_halftime_score=ht_away)
-                if ht_home is not None and ht_away is not None
-                else None
-            )
+            goal_events = _extract_soccer_goal_events(match)
+            # 进球事件是 anytime-goalscorer 扫尾锁定的唯一数据源——只要存在
+            # 任一信号（半场比分或进球流）就构造 SoccerGameState，避免漏数据。
+            if ht_home is not None and ht_away is not None:
+                soccer_state: SoccerGameState | None = SoccerGameState(
+                    home_halftime_score=ht_home,
+                    away_halftime_score=ht_away,
+                    goal_events=goal_events,
+                )
+            elif goal_events:
+                soccer_state = SoccerGameState(goal_events=goal_events)
+            else:
+                soccer_state = None
             events.append(
                 LiveEvent(
                     source="goalserve_livescore",

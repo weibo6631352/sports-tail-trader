@@ -199,6 +199,19 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
             "last_event_minute": event.soccer_state.last_event_minute,
             "home_halftime_score": event.soccer_state.home_halftime_score,
             "away_halftime_score": event.soccer_state.away_halftime_score,
+            # 进球事件流（anytime-goalscorer 评估器消费）：保留 player_name/
+            # player_id/team/minute/score_after，policy/evaluator 侧据此匹配
+            # Polymarket slug 中点名的球员。
+            "goal_events": [
+                {
+                    "player_name": g.player_name,
+                    "player_id": g.player_id,
+                    "team": g.team,
+                    "minute": g.minute,
+                    "score_after": g.score_after,
+                }
+                for g in event.soccer_state.goal_events
+            ],
         },
         "esports_state": None if event.esports_state is None else {
             "best_of": event.esports_state.best_of,

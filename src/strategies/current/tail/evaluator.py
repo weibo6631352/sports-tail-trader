@@ -62,6 +62,10 @@ from .mlb import (
     _evaluate_mlb_totals,
     is_nrfi_market,
 )
+from .anytime_goalscorer import (
+    _evaluate_anytime_goalscorer,
+    is_anytime_goalscorer_market,
+)
 from .odds_gap import evaluate_odds_gap_opportunity
 from .esports import _evaluate_esports_moneyline, is_esports_game
 from .event_props import (
@@ -181,6 +185,13 @@ def _dispatch_tail_lock(
     sport_prop_reject = sport_specific_prop_reject_reason(market)
     if sport_prop_reject is not None:
         return _reject(candidate, sport_prop_reject.value)
+
+    # 足球 anytime-goalscorer：BINARY_PROP 但锁定模型基于球员级 goal_events，
+    # 完全独立于扫尾/分段/事件 prop 链路；必须先于 scope / 体育专属 binary_prop
+    # 分派，否则会被 soccer 整场 BTTS / exact-score / moneyline 误吞或落到
+    # 兜底 binary_prop_no_tail_model。
+    if is_anytime_goalscorer_market(market):
+        return _evaluate_anytime_goalscorer(candidate, policy)
 
     # 分段盘口（半场/单节/分节）：先按 scope 分派到分段评估器，避免落到整场
     # sport 评估器后被误判为缺数据。
@@ -381,6 +392,10 @@ def _evaluate_ended_not_closed(
     sport_prop_reject = sport_specific_prop_reject_reason(market)
     if sport_prop_reject is not None:
         return _reject(candidate, sport_prop_reject.value)
+    # ENDED 路径同样优先路由 anytime-goalscorer：终场后无任何匹配进球事件
+    # 即可干净锁定 NO 方向（CLAUDE.md §17：可锁定机会不能被兜底原因吞掉）。
+    if is_anytime_goalscorer_market(market):
+        return _evaluate_anytime_goalscorer(candidate, policy)
     if is_tennis_game(candidate.game):
         return _evaluate_ended_tennis(candidate, policy)
     if market.market_type == SportsMarketType.TOTALS:

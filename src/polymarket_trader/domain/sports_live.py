@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from polymarket_trader.serialization import jsonable
 
@@ -188,6 +188,23 @@ class TennisGameState:
 
 
 @dataclass(frozen=True, slots=True)
+class SoccerGoalEvent:
+    """足球单粒进球事件（livescore feed events[type=goal] 归一化）。
+
+    供 anytime-goalscorer（球员是否进球）盘口扫尾锁定使用——比分数学上不可
+    逆，一旦某球员出现在 goal 事件中，YES 即永久锁定。``player_name`` 保留
+    Goalserve 原始格式（如 "A. Khaldi"），匹配时再做规范化；``player_id``
+    是 Goalserve playerId（跨场稳定 ID），便于多源对账。
+    """
+
+    player_name: str
+    player_id: str
+    team: Literal["home", "away"]
+    minute: int
+    score_after: str
+
+
+@dataclass(frozen=True, slots=True)
 class SoccerGameState:
     """足球比赛节奏状态。
 
@@ -206,6 +223,9 @@ class SoccerGameState:
     # 半场比分：仅在半场结束后由数据源给出；两者均非 None 即表示半场已锁定。
     home_halftime_score: int | None = None
     away_halftime_score: int | None = None
+    # 进球事件流（来自 livescore events feed）；anytime-goalscorer 扫尾锁定
+    # 唯一数据源。inplay GZIP feed 只提供整队比分，不携带球员级进球事件。
+    goal_events: tuple[SoccerGoalEvent, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

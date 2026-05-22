@@ -16,6 +16,7 @@ from polymarket_trader.domain.sports_live import (
     EsportsGameState,
     HandballGameState,
     SoccerGameState,
+    SoccerGoalEvent,
     VolleyballGameState,
 )
 
@@ -196,7 +197,38 @@ def _soccer_state(value: object) -> SoccerGameState | None:
         last_event_minute=_optional_int(value.get("last_event_minute")),
         home_halftime_score=_optional_int(value.get("home_halftime_score")),
         away_halftime_score=_optional_int(value.get("away_halftime_score")),
+        goal_events=_soccer_goal_events(value.get("goal_events")),
     )
+
+
+def _soccer_goal_events(value: object) -> tuple[SoccerGoalEvent, ...]:
+    """从 metadata 重建足球进球事件元组；非列表或字段缺失返回空元组。
+
+    anytime-goalscorer 评估器的输入——异常输入安静返回空，由评估器据缺数据
+    给精确拒绝原因，而不是在解析层抛异常阻断其它盘口评估。
+    """
+    if not isinstance(value, (tuple, list)):
+        return ()
+    out: list[SoccerGoalEvent] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        team_raw = str(item.get("team") or "").strip().lower()
+        if team_raw not in ("home", "away"):
+            continue
+        minute = _optional_int(item.get("minute"))
+        if minute is None:
+            minute = 0
+        out.append(
+            SoccerGoalEvent(
+                player_name=str(item.get("player_name") or ""),
+                player_id=str(item.get("player_id") or ""),
+                team=team_raw,  # type: ignore[arg-type]
+                minute=minute,
+                score_after=str(item.get("score_after") or ""),
+            )
+        )
+    return tuple(out)
 
 
 def _esports_state(value: object) -> EsportsGameState | None:
