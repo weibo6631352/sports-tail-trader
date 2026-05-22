@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 from uuid import uuid4
@@ -418,10 +418,6 @@ async def fetch_full_market_discovery_page(
     params: dict[str, Any] = {
         "active": True,
         "closed": False,
-        # 只扫近期创建的 event——把数月前创建的古老期货/赛季盘挡在 gamma 查询
-        # 之外，大幅减少扫描页数。体育单场赛事的 event 通常在赛前数天~数周创建，
-        # 30 天余量足以覆盖今天的比赛。
-        "start_date_min": _market_discovery_start_date_min(),
     }
     params.update(_safe_query_params(query.params))
     params["limit"] = _MARKET_DISCOVERY_EVENT_PAGE_LIMIT
@@ -437,16 +433,6 @@ async def fetch_full_market_discovery_page(
 
 DEFAULT_DISCOVERY_QUERY = DiscoveryQuery()
 _FRAMEWORK_DISCOVERY_PARAM_KEYS = {"limit", "after_cursor"}
-# discovery gamma 扫描只回溯 30 天内创建的 event——更早创建的多为已结束赛事
-# 与长期期货盘，不需要重新扫描。
-_MARKET_DISCOVERY_CREATED_LOOKBACK = timedelta(days=30)
-
-
-def _market_discovery_start_date_min() -> str:
-    """gamma 扫描的 start_date_min 参数（当前时间回溯 30 天，UTC ISO8601）。"""
-    return (datetime.now(timezone.utc) - _MARKET_DISCOVERY_CREATED_LOOKBACK).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
 
 
 def _discovery_queries(runtime: RuntimeComponents) -> tuple[DiscoveryQuery, ...]:

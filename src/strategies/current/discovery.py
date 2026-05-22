@@ -1,362 +1,89 @@
 """当前体育扫尾策略的远端发现查询构造。
 
-远端 discovery 只能做粗筛；本文件负责把策略配置和直播源中的真实比赛，
-转换成 Polymarket Gamma 支持的 ``DiscoveryQuery``。最终是否可交易仍由
-universe、盘口解析、直播状态和风控决定。
+远端 discovery 只能做粗筛；本文件负责把策略配置转换成 Polymarket Gamma
+支持的 ``DiscoveryQuery``。最终是否可交易仍由 universe、盘口解析、直播状态
+和风控决定。
 """
 
 from __future__ import annotations
 
-import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from polymarket_trader.domain.sports_live import (
-    LiveEvent,
-    LiveEventKind,
-    Participant,
-    SportsLiveGameStatus,
-)
+from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.extension_api import DiscoveryQuery
 from strategies.current.config import CurrentStrategyConfig
 
-# IIHF World Championship country name → Polymarket slug abbreviation.
-# Polymarket uses IOC-style 3-letter codes in lowercase for WCH event slugs.
-_WCH_COUNTRY_SLUG: dict[str, str] = {
-    "austria": "aut",
-    "belarus": "blr",
-    "canada": "can",
-    "czech republic": "cze",
-    "czechia": "cze",
-    "denmark": "den",
-    "finland": "fin",
-    "france": "fra",
-    "germany": "ger",
-    "great britain": "gbr",
-    "hungary": "hun",
-    "kazakhstan": "kaz",
-    "latvia": "lat",
-    "norway": "nor",
-    "russia": "rus",
-    "slovakia": "svk",
-    "south korea": "kor",
-    "sweden": "swe",
-    "switzerland": "sui",
-    "ukraine": "ukr",
-    "usa": "usa",
-    "united states": "usa",
-}
-
-_LIVE_DISCOVERY_STATUSES = {
-    SportsLiveGameStatus.SCHEDULED,
-    SportsLiveGameStatus.LIVE,
-    SportsLiveGameStatus.PAUSED,
-    SportsLiveGameStatus.UNKNOWN,
-}
-_LIVE_DISCOVERY_STATUS_PRIORITY = {
-    SportsLiveGameStatus.LIVE: 0,
-    SportsLiveGameStatus.PAUSED: 1,
-    SportsLiveGameStatus.SCHEDULED: 2,
-    SportsLiveGameStatus.UNKNOWN: 3,
-}
-# 正在进行中的状态——这些赛事的发现查询不受 max_games / max_queries 截断。
-_LIVE_PLAY_STATUSES = {SportsLiveGameStatus.LIVE, SportsLiveGameStatus.PAUSED}
-_LIVE_DISCOVERY_MAJOR_LEAGUE_TOKENS = (
-    "nba",
-    "nhl",
-    "mlb",
-    "wta",
-    "atp",
-)
-_LIVE_DISCOVERY_SECONDARY_LEAGUE_TOKENS = (
-    "nfl",
-    "challenger",
-    "libertadores",
-    "sudamericana",
-)
-_LIVE_DISCOVERY_LOW_COVERAGE_TOKENS = (
-    "itf",
-)
-_TEAM_TERM_STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "club",
-    "fc",
-    "sc",
-    "state",
-    "team",
-    "the",
-    "united",
-}
-
 
 def build_configured_discovery_queries(config: CurrentStrategyConfig) -> tuple[DiscoveryQuery, ...]:
-    """根据静态策略配置生成 Gamma 粗筛查询。"""
+    """生成 Gamma 粗筛查询——复用 Polymarket 官方 sports/live 页面的发现方法。
 
-    title_searches = tuple(
-        title_search.strip()
-        for title_search in config.discovery_title_searches
-        if title_search.strip()
-    )
+    官方 live 页面对 ``/events/keyset`` 只发三个定向查询、不做全量翻页扫描：
+    ① ``live=true``——正在直播的赛事；
+    ② ``start_time_min/max``——按**开赛时间**窗口查进行中+临近开赛的赛事；
+    ③ ``start_time_min/max``——未来 24h 即将开赛的赛事。
+
+    这三个查询都基于 Polymarket 自己的事件数据(零名字匹配、不会漏市场)，
+    每个一次定向查询、秒级返回——取代旧的 title_search × tag_slug 全量翻页。
+    每轮发现都会用当前时间重新生成窗口。
+    """
+
     tag_slugs = tuple(
-        tag_slug.strip()
-        for tag_slug in config.discovery_tag_slugs
-        if tag_slug.strip()
-    )
-    if not tag_slugs:
-        return tuple(DiscoveryQuery.title_search(title_search) for title_search in title_searches)
-    if not title_searches:
-        return tuple(
+        tag_slug.strip() for tag_slug in config.discovery_tag_slugs if tag_slug.strip()
+    ) or ("sports",)
+    now = datetime.now(timezone.utc)
+
+    def _iso(dt: datetime) -> str:
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    queries: list[DiscoveryQuery] = []
+    for tag_slug in tag_slugs:
+        base = {"tag_slug": tag_slug, "order": "startTime", "ascending": "true"}
+        # ① 正在直播
+        queries.append(
+            DiscoveryQuery(name=f"sports_live:{tag_slug}", params={**base, "live": "true"})
+        )
+        # ② 进行中 + 临近开赛：开赛时间在 [now-12h, now+1h]。
+        # 这条按 start_time 取，与 live 标志无关——所有进行中的比赛(startTime
+        # 在过去)都会被捞到，是 ①(live=true 可能滞后)的完整兜底。-12h 覆盖
+        # 长时/雨延比赛。
+        queries.append(
             DiscoveryQuery(
-                name=f"tag_slug:{tag_slug}",
-                params={"tag_slug": tag_slug},
+                name=f"sports_inplay_soon:{tag_slug}",
+                params={
+                    **base,
+                    "start_time_min": _iso(now - timedelta(hours=12)),
+                    "start_time_max": _iso(now + timedelta(hours=1)),
+                },
             )
-            for tag_slug in tag_slugs
         )
-    return tuple(
-        DiscoveryQuery(
-            name=f"title_search:{title_search}|tag_slug:{tag_slug}",
-            params={"title_search": title_search, "tag_slug": tag_slug},
+        # ③ 即将开赛：开赛时间在 [now+1h, now+24h]——提前发现、临近时再纳入订阅
+        queries.append(
+            DiscoveryQuery(
+                name=f"sports_upcoming:{tag_slug}",
+                params={
+                    **base,
+                    "start_time_min": _iso(now + timedelta(hours=1)),
+                    "start_time_max": _iso(now + timedelta(hours=24)),
+                },
+            )
         )
-        for title_search in title_searches
-        for tag_slug in tag_slugs
-    )
+    return tuple(queries)
 
 
 def build_live_event_discovery_queries(
     config: CurrentStrategyConfig,
     events: tuple[LiveEvent, ...],
 ) -> tuple[DiscoveryQuery, ...]:
-    """用直播源里的真实比赛生成高意图查询。
+    """不再由直播源驱动发现——返回空。
 
-    Polymarket 的通用 ``nba/nhl/mlb`` 搜索经常优先返回冠军、选秀、系列赛或
-    电竞等长期市场；直播比赛的队名搜索能更快扫到今日单场盘口。这里只生成
-    远端粗筛词，不直接把任何 market 放入交易 universe。
-
-    WCH（IIHF 世界锦标赛）等赛事 Gamma title_search 质量差，用 slug 直接查。
+    历史上这里用 Goalserve 直播比赛的队名/slug 去 Gamma 反查市场，但
+    Goalserve 与 Polymarket 的名字格式不一致，名字对不上就会漏市场。
+    现 ``build_configured_discovery_queries`` 直接用 Polymarket 官方的
+    ``live=true`` + ``start_time`` 查询，基于 Polymarket 自己的数据完整覆盖
+    正在直播/即将开赛的赛事，零名字匹配、不会漏——这条直播源驱动的反查路
+    径已无必要。保留函数签名只为兼容 ``discovery_queries_for_live_events``
+    扩展钩子契约。
     """
 
-    tag_slugs = tuple(tag_slug.strip() for tag_slug in config.discovery_tag_slugs if tag_slug.strip())
-    active_events = tuple(
-        sorted(
-            (event for event in events if event.status in _LIVE_DISCOVERY_STATUSES),
-            key=_live_event_rank,
-        )
-    )
-    # 正在直播/暂停的赛事必须全部生成发现查询——discovery 的 limit 绝不能把
-    # 直播赛事挤出（CLAUDE.md §17：limit/截断不得卡掉直播/入场机会）。
-    # scheduled/unknown 才受 max_games 上限约束。
-    live_events = tuple(e for e in active_events if e.status in _LIVE_PLAY_STATUSES)
-    other_events = tuple(e for e in active_events if e.status not in _LIVE_PLAY_STATUSES)
-    prioritized = live_events + other_events[: config.tail_live_discovery_max_games]
-
-    queries: list[DiscoveryQuery] = []
-    seen: set[tuple[str, str | None]] = set()
-    slug_seen: set[str] = set()
-
-    # 按 game 交错生成 slug_lookup + title_search：slug 猜测可能错（联赛特定
-    # 前缀如 rusrp/atp/itf），title_search 按队名兜底。此前先跑完所有 slug 再
-    # 跑 title，slug 循环吃光预算导致 title 永不执行、靠队名才能发现的市场全漏。
-    for index, event in enumerate(prioritized):
-        is_live = index < len(live_events)
-        slug = _event_polymarket_slug(event)
-        if slug and slug not in slug_seen:
-            slug_seen.add(slug)
-            queries.append(
-                DiscoveryQuery(
-                    name=f"slug_lookup:{event.league.lower()}:{event.source_event_id}:{slug}",
-                    params={"slug": slug},
-                )
-            )
-        for term in _event_query_terms(event):
-            for tag_slug in tag_slugs or (None,):
-                key = (term, tag_slug)
-                if key in seen:
-                    continue
-                seen.add(key)
-                params: dict[str, str] = {"title_search": term}
-                suffix = term
-                if tag_slug is not None:
-                    params["tag_slug"] = tag_slug
-                    suffix = f"{term}|tag_slug:{tag_slug}"
-                queries.append(
-                    DiscoveryQuery(
-                        name=f"live_event:{event.league.lower()}:{event.source_event_id}:{suffix}",
-                        params=params,
-                    )
-                )
-        # 预算兜底只作用于 scheduled 部分——直播赛事排在 prioritized 最前、
-        # 永不被 max_queries 截断。
-        if not is_live and len(queries) >= config.tail_live_discovery_max_queries:
-            break
-    return tuple(queries)
-
-
-def _live_event_rank(event: LiveEvent) -> tuple[int, int, str, str]:
-    """优先用真正 live 且 Polymarket 覆盖更高的比赛生成 discovery 查询。"""
-
-    return (
-        _LIVE_DISCOVERY_STATUS_PRIORITY.get(event.status, 99),
-        _market_coverage_priority(event),
-        event.league.lower(),
-        event.source_event_id,
-    )
-
-
-def _market_coverage_priority(event: LiveEvent) -> int:
-    """估计直播源事件在 Polymarket 单场盘口中的发现价值。
-
-    SofaScore 会返回大量 ITF 等低覆盖赛事；如果不按可交易覆盖排序，有限的
-    Gamma 请求预算会先被低覆盖比赛消耗，导致 ATP/WTA 等真实可交易盘口延后。
-    这里仍只影响 discovery 查询顺序，不改变最终入场判断。
-    """
-
-    league = event.league.lower()
-    sport = (event.sport or "").strip().lower()
-    searchable_text = f"{league} {sport}"
-    if any(token in searchable_text for token in _LIVE_DISCOVERY_MAJOR_LEAGUE_TOKENS):
-        return 0
-    if any(token in searchable_text for token in _LIVE_DISCOVERY_SECONDARY_LEAGUE_TOKENS):
-        return 1
-    if any(token in searchable_text for token in _LIVE_DISCOVERY_LOW_COVERAGE_TOKENS):
-        return 4
-    if sport == "tennis" or "tennis" in league:
-        return 3
-    return 2
-
-
-def _event_query_terms(event: LiveEvent) -> tuple[str, ...]:
-    """按 kind 分支构造查询词。
-
-    team_match：home/away 对阵 + 单队名兜底；
-    race：用 leader_driver / event_name 关键字，赛车 market 经常用赛事名 + 车手提问。
-    """
-
-    if event.kind == LiveEventKind.TEAM_MATCH and event.home is not None and event.away is not None:
-        return _team_event_query_terms(event)
-    if event.kind == LiveEventKind.RACE:
-        return _race_event_query_terms(event)
+    _ = (config, events)
     return ()
-
-
-def _team_event_query_terms(event: LiveEvent) -> tuple[str, ...]:
-    terms: list[str] = []
-    seen: set[str] = set()
-    for term in _matchup_query_terms(event):
-        if term in seen:
-            continue
-        seen.add(term)
-        terms.append(term)
-    for participant in (event.home, event.away):
-        if participant is None:
-            continue
-        for term in _team_query_terms(participant):
-            if term in seen:
-                continue
-            seen.add(term)
-            terms.append(term)
-    return tuple(terms)
-
-
-def _race_event_query_terms(event: LiveEvent) -> tuple[str, ...]:
-    terms: list[str] = []
-    seen: set[str] = set()
-    leader = event.race_state.leader_driver if event.race_state else None
-    if leader:
-        normalized = _normalize_query_term(leader)
-        if normalized:
-            for term in _compact_team_terms(normalized):
-                if term in seen:
-                    continue
-                seen.add(term)
-                terms.append(term)
-    event_name = event.event_name
-    if event_name:
-        normalized = _normalize_query_term(event_name)
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            terms.append(normalized)
-    return tuple(terms)
-
-
-def _matchup_query_terms(event: LiveEvent) -> tuple[str, ...]:
-    """生成优先级最高的对阵组合词，减少单队名搜索带来的远期噪声。"""
-
-    if event.home is None or event.away is None:
-        return ()
-    home_terms = _team_query_terms(event.home)
-    away_terms = _team_query_terms(event.away)
-    if not home_terms or not away_terms:
-        return ()
-    home = home_terms[0]
-    away = away_terms[0]
-    if home == away:
-        return ()
-    return (f"{home} {away}", f"{away} {home}")
-
-
-def _team_query_terms(participant: Participant) -> tuple[str, ...]:
-    terms: list[str] = []
-    seen: set[str] = set()
-    location = _normalize_query_term(participant.location or "")
-    abbreviation = _normalize_query_term(participant.abbreviation or "")
-    aliases = tuple(
-        alias
-        for alias in (
-            participant.name,
-            participant.display_name,
-            participant.short_name,
-            *participant.aliases,
-        )
-        if alias
-    )
-    for alias in aliases:
-        normalized = _normalize_query_term(alias)
-        if not normalized or normalized == location or normalized == abbreviation:
-            continue
-        for term in _compact_team_terms(normalized):
-            if term in seen:
-                continue
-            seen.add(term)
-            terms.append(term)
-    return tuple(terms)
-
-
-def _compact_team_terms(text: str) -> tuple[str, ...]:
-    parts = tuple(part for part in text.split() if part and part not in _TEAM_TERM_STOPWORDS)
-    if not parts:
-        return ()
-    if len(parts) == 1:
-        return (parts[0],)
-    # 队名昵称通常是 Polymarket 单场 title_search 命中率最高的词，例如 Oilers、Wild、Lakers。
-    return (parts[-1], " ".join(parts))
-
-
-def _normalize_query_term(value: str) -> str:
-    normalized = re.sub(r"[^a-zA-Z0-9]+", " ", value).strip().lower()
-    normalized = re.sub(r"\s+", " ", normalized)
-    if len(normalized) < 3:
-        return ""
-    return normalized
-
-
-def _event_polymarket_slug(event: LiveEvent) -> str | None:
-    """构造直播事件对应的 Polymarket event slug（如能确定）。
-
-    当前支持：IIHF World Championship（league 含 "world championship"）。
-    slug 格式：``wch-{home_abbr}-{away_abbr}-{date}``，日期取 Goalserve 赛事当天 UTC。
-    """
-    if event.kind != LiveEventKind.TEAM_MATCH:
-        return None
-    if event.home is None or event.away is None:
-        return None
-    league_lower = (event.league or "").lower()
-    if "world championship" not in league_lower:
-        return None
-    home_abbr = _WCH_COUNTRY_SLUG.get(event.home.name.lower())
-    away_abbr = _WCH_COUNTRY_SLUG.get(event.away.name.lower())
-    if not home_abbr or not away_abbr:
-        return None
-    # Use today's UTC date; WCH games are same-day events.
-    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return f"wch-{home_abbr}-{away_abbr}-{date_str}"
