@@ -109,6 +109,17 @@ class TailRejectReason(StrEnum):
     UNSUPPORTED_WINNING_MARGIN = "unsupported_winning_margin"
     # 首个得分方：归一化直播模型不携带首得分方/进球时间线，缺数据不臆测。
     UNSUPPORTED_TO_SCORE_FIRST = "unsupported_to_score_first"
+    # 拳击/MMA 胜利方式（KO/TKO、降服、判定、"打满全程"、回合组）：只有当
+    # 比赛以特定方式结束时才结算，盘中永不可扫尾锁定；归一化直播模型也不携带
+    # 拳击/MMA 的回合/胜利方式遥测数据。给精确可审计原因，不强行建模。
+    UNSUPPORTED_METHOD_OF_VICTORY = "unsupported_method_of_victory"
+    # F1 子盘口（杆位、登台、最快圈速、安全车等）：需要 F1 专属遥测（排位赛
+    # 结果、圈速、赛道事件），本系统未建模该数据源。整场冠军（race winner）
+    # 不在此列——由 RACE-kind 直播匹配链路另行处理。
+    UNSUPPORTED_F1_PROP = "unsupported_f1_prop"
+    # 板球 prop（掷币胜方、最佳击球手、最多六分球等）：需要逐球员板球数据，
+    # 本系统未接入；给精确可审计原因，不强行建模。
+    UNSUPPORTED_CRICKET_PROP = "unsupported_cricket_prop"
     # 既不构成扫尾锁定、也没有可入场的赔率差价。
     NO_ODDS_GAP = "no_odds_gap"
     # totals/spread 赔率差价：Goalserve 盘口线/范围与 Polymarket 市场不一致，

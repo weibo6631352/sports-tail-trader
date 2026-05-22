@@ -190,6 +190,7 @@ def _tail_entry_gate(
         ),
         market_family=descriptor.market_family,
         market_slug=context.market.market_slug,
+        sports_market_type=descriptor.sports_market_type,
         market_end_date=context.market.end_date,
         metadata={**snapshot_metadata, **_goalserve_odds_metadata(context)},
     )
@@ -343,6 +344,7 @@ def _tail_allocation_gate(
             buyable_liquidity_usdc=buyable_liquidity_usdc,
             market_family=descriptor.market_family,
             market_slug=snapshot.market_slug,
+            sports_market_type=descriptor.sports_market_type,
             market_end_date=snapshot.market.end_date,
             metadata=_goalserve_odds_metadata(context),
         ),
@@ -419,6 +421,7 @@ def _scale_in_allocation_gate(
             buyable_liquidity_usdc=buyable_liquidity_usdc,
             market_family=descriptor.market_family,
             market_slug=snapshot.market_slug,
+            sports_market_type=descriptor.sports_market_type,
             market_end_date=snapshot.market.end_date,
         ),
         policy=tail_policy_from_config(config),

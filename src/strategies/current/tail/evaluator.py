@@ -67,6 +67,7 @@ from .event_props import (
     is_modeled_event_prop_market,
 )
 from .rugby import _evaluate_rugby_moneyline, is_rugby_game
+from .sport_props import sport_specific_prop_reject_reason
 from .slug import (
     _is_tennis_set_handicap_market,
     _is_tennis_set_winner_market,
@@ -165,6 +166,16 @@ def _dispatch_tail_lock(
     policy: TailPolicy,
 ) -> TailEvaluation:
     """按运动/盘口分派扫尾锁定评估（赔率差价之外的原确定性入场路径）。"""
+
+    # 运动专属 prop 家族（拳击/MMA 胜利方式、F1 子盘口、板球 prop）：用 Gamma
+    # sportsMarketType 精确识别，给 distinct 可审计拒绝原因（CLAUDE.md §17）。
+    # 必须先于 scope / 体育专属分派——这些 prop 的 market_type 可能是 MONEYLINE
+    # （多结果胜利方式）或 BINARY_PROP（Yes/No F1 子盘口），不先拦截会被泛化的
+    # binary_prop_no_tail_model / OUTCOME_NOT_LOCKED 兜底吞掉具体原因。这三类
+    # 都不可扫尾锁定、也无所需专属数据源，故只给精确原因、不建模。
+    sport_prop_reject = sport_specific_prop_reject_reason(market)
+    if sport_prop_reject is not None:
+        return _reject(candidate, sport_prop_reject.value)
 
     # 分段盘口（半场/单节/分节）：先按 scope 分派到分段评估器，避免落到整场
     # sport 评估器后被误判为缺数据。
@@ -340,6 +351,11 @@ def _evaluate_ended_not_closed(
     """用最终比分判断已结束但未封盘 market 的确定性方向。"""
 
     market = candidate.market
+    # 运动专属 prop 家族即使比赛已结束也不可锁定（缺胜利方式/逐球员/F1 遥测
+    # 数据）——ENDED 路径同样先给精确可审计原因，不退化到泛化兜底。
+    sport_prop_reject = sport_specific_prop_reject_reason(market)
+    if sport_prop_reject is not None:
+        return _reject(candidate, sport_prop_reject.value)
     if is_tennis_game(candidate.game):
         return _evaluate_ended_tennis(candidate, policy)
     if market.market_type == SportsMarketType.TOTALS:

@@ -128,6 +128,7 @@ class MarketModel(Base, TimestampMixin):
             "fee_rate_updated_at": _json_safe(market.fee_rate_updated_at),
             "category": market.category,
             "tags": list(market.tags),
+            "sports_market_type": market.sports_market_type,
             "matched_keywords": list(market.matched_keywords),
             "trading_status": market.trading_status.value,
             "reject_reason": market.reject_reason,
@@ -213,6 +214,12 @@ class MarketModel(Base, TimestampMixin):
             ),
             category=self.category,
             tags=_tuple_from_sequence(self.tags),
+            # sports_market_type 不设专用列：值随 raw_payload JSON 持久化，
+            # 恢复时从中重建（避免给已存在的 markets 表加列、create_all 不补列）。
+            sports_market_type=(
+                _text(raw_payload.get("sports_market_type"))
+                or _text(raw_payload.get("sportsMarketType"))
+            ),
             matched_keywords=_tuple_from_sequence(self.matched_keywords),
             trading_status=TradingStatus(self.trading_status),
             reject_reason=self.reject_reason,

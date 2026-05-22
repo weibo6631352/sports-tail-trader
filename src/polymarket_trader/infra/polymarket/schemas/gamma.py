@@ -84,6 +84,7 @@ class GammaMarketDTO:
     taker_base_fee_bps: int | None = None
     category: str | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
+    sports_market_type: str | None = None
     active: bool | None = None
     closed: bool | None = None
     archived: bool | None = None
@@ -191,6 +192,13 @@ class GammaMarketDTO:
         )
         object.__setattr__(self, "category", self.category or _first_text(self.raw, "category", "cat") or _first_text(event or {}, "category"))
         object.__setattr__(self, "tags", self.tags or _string_tuple(raw_tags))
+        object.__setattr__(
+            self,
+            "sports_market_type",
+            self.sports_market_type
+            or _first_text(self.raw, "sportsMarketType", "sports_market_type")
+            or _first_text(event or {}, "sportsMarketType", "sports_market_type"),
+        )
         object.__setattr__(self, "active", self.active if self.active is not None else _coerce_bool(_first_value(self.raw, "active", "is_active")))
         object.__setattr__(self, "closed", self.closed if self.closed is not None else _coerce_bool(_first_value(self.raw, "closed", "is_closed")))
         object.__setattr__(self, "archived", self.archived if self.archived is not None else _coerce_bool(_first_value(self.raw, "archived", "is_archived")))
@@ -231,6 +239,7 @@ class GammaMarketDTO:
             fee_rate_bps=self.taker_base_fee_bps,
             category=self.category,
             tags=self.tags,
+            sports_market_type=self.sports_market_type,
             trading_status=status,
         )
 

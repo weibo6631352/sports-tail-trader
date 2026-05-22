@@ -333,6 +333,11 @@ def market_from_record(record: Mapping[str, Any]) -> Market | None:
         ),
         category=_text(record.get("category")),
         tags=_string_tuple(record.get("tags")),
+        sports_market_type=(
+            _text(record.get("sports_market_type"))
+            or _text(raw_market.get("sports_market_type"))
+            or _text(raw_market.get("sportsMarketType"))
+        ),
         matched_keywords=_string_tuple(record.get("matched_keywords")),
         trading_status=_trading_status(record.get("trading_status")),
         reject_reason=_text(record.get("reject_reason")),

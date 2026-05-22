@@ -223,6 +223,7 @@ def _load_market_snapshot(case: Mapping[str, Any]) -> SportsMarketSnapshot:
         best_ask=_optional_decimal(market_payload.get("best_ask")),
         buyable_liquidity_usdc=_optional_decimal(market_payload.get("buyable_liquidity_usdc")) or Decimal("0"),
         market_slug=_optional_text(market_payload.get("market_slug")),
+        sports_market_type=_optional_text(market_payload.get("sports_market_type")),
         metadata=market_payload,
     )
 

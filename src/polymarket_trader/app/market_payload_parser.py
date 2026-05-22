@@ -41,6 +41,7 @@ class MarketParseResult:
     taker_base_fee_bps: int | None
     category: str | None
     tags: tuple[str, ...]
+    sports_market_type: str | None
     market_name: str | None
     market_question: str | None
     market_slug: str | None
@@ -94,6 +95,7 @@ class MarketParseResult:
             "taker_base_fee_bps": self.taker_base_fee_bps,
             "category": self.category,
             "tags": self.tags,
+            "sports_market_type": self.sports_market_type,
             "market_name": self.market_name,
             "market_question": self.market_question,
             "market_slug": self.market_slug,
@@ -157,6 +159,7 @@ class MarketParseResult:
             fee_rate_bps=self.taker_base_fee_bps,
             category=self.category,
             tags=self.tags,
+            sports_market_type=self.sports_market_type,
             matched_keywords=self.matched_keywords,
             trading_status=trading_status,
         )
@@ -209,6 +212,7 @@ class MarketPayloadParser:
             taker_base_fee_bps=parsed["taker_base_fee_bps"],
             category=parsed["category"],
             tags=parsed["tags"],
+            sports_market_type=parsed.get("sports_market_type"),
             market_name=parsed["market_name"],
             market_question=parsed["market_question"],
             market_slug=parsed["market_slug"],
@@ -246,6 +250,7 @@ class MarketPayloadParser:
             taker_base_fee_bps=parsed["taker_base_fee_bps"],
             category=parsed["category"],
             tags=parsed["tags"],
+            sports_market_type=parsed.get("sports_market_type"),
             market_name=parsed["market_name"],
             market_question=parsed["market_question"],
             market_slug=parsed["market_slug"],
@@ -322,6 +327,13 @@ class MarketPayloadParser:
             tags = self._parse_tags(self._first_value(raw_market, "tags"))
             if not tags and event is not None:
                 tags = self._parse_tags(self._first_value(event, "tags"))
+            sports_market_type = self._parse_text(
+                self._first_value(raw_market, "sportsMarketType", "sports_market_type")
+            )
+            if sports_market_type is None and event is not None:
+                sports_market_type = self._parse_text(
+                    self._first_value(event, "sportsMarketType", "sports_market_type")
+                )
             market_name = self._parse_text(self._first_value(raw_market, "name", "marketName"))
             market_question = self._parse_text(
                 self._first_value(
@@ -403,6 +415,7 @@ class MarketPayloadParser:
             "taker_base_fee_bps": taker_base_fee_bps,
             "category": category,
             "tags": tags,
+            "sports_market_type": sports_market_type,
             "market_name": market_name,
             "market_question": market_question,
             "market_slug": market_slug,

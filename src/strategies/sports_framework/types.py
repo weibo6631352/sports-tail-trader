@@ -137,6 +137,9 @@ class SportsMarketSnapshot:
     buyable_liquidity_usdc: Decimal
     market_family: SportsMarketFamily = SportsMarketFamily.SINGLE_GAME
     market_slug: str | None = None
+    # Polymarket Gamma 的 sportsMarketType：运动专属 prop 家族（method-of-victory、
+    # F1 props、cricket props 等）识别的首选信号；常规盘口多为空，回退 slug 关键字。
+    sports_market_type: str | None = None
     market_end_date: datetime | None = None
     scope_type: SportsMarketScopeType = SportsMarketScopeType.FULL_GAME
     scope_number: int | None = None

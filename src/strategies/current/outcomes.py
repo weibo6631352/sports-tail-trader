@@ -46,6 +46,8 @@ class SportsMarketDescriptor:
     market_type: SportsMarketType | None = None
     line: Decimal | None = None
     targets: tuple[SportsTokenTarget, ...] = ()
+    # 透传 Polymarket Gamma 的 sportsMarketType，供评估器精确识别运动专属 prop 家族。
+    sports_market_type: str | None = None
 
     @property
     def target_token_ids(self) -> tuple[str, ...]:
@@ -101,6 +103,7 @@ def describe_sports_market(market: Market) -> SportsMarketDescriptor:
         market_type=market_type,
         line=line,
         targets=targets,
+        sports_market_type=market.sports_market_type,
     )
 
 
