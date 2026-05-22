@@ -186,6 +186,7 @@ def size_series_entry(
         )
         evaluator_inputs = SeriesEvaluatorInputs(
             best_ask=best_ask,
+            best_bid=ob.best_bid if ob is not None else None,
             buyable_liquidity_usdc=buyable_usdc,
             now=now,
             min_edge_bps=settings.min_edge_bps,
