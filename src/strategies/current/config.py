@@ -290,7 +290,9 @@ class CurrentStrategyConfig:
     tail_min_expected_profit_usdc: Decimal = Decimal("0.03")
     tail_min_expected_profit_per_hour_usdc: Decimal = Decimal("0.10")
     tail_profit_take_min_profit_usdc: Decimal = Decimal("0.02")
-    tail_profit_take_hold_minutes: int = 2
+    tail_profit_take_hold_minutes: int = 2  # 流动性好时预计止盈成交时间（分钟）
+    # bid 侧深度低于此值视为薄市场，止盈单大概率等结算，效率按结算持仓时间算
+    tail_profit_take_liquid_bid_depth_usdc: Decimal = Decimal("10")
     # 止盈目标价倍数：目标卖价 = entry_price × multiplier，超过 1.0 时自动收敛到 0.99。
     # None（默认）= 只上一档 tick（原有资金效率模式）；
     # 1.6 = 低价买入时预期 60% 价格涨幅，高价买入自动收敛到近结算价。

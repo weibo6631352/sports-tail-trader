@@ -269,7 +269,7 @@ def _profit_take_metadata(
     if target_price is None or target_price > Decimal("1"):
         return None
     expected_profit_take_profit = shares * (target_price - entry_price)
-    hold_minutes = max(int(config.tail_profit_take_hold_minutes), 1)
+    hold_minutes = _estimated_profit_take_fill_minutes(config, context)
     expected_profit_take_profit_per_hour = expected_profit_take_profit * Decimal("60") / Decimal(
         hold_minutes
     )
@@ -284,6 +284,35 @@ def _profit_take_metadata(
         "profit_take_estimated_hold_minutes": hold_minutes,
         "profit_take_min_profit_usdc": str(config.tail_profit_take_min_profit_usdc),
     }
+
+
+def _bid_depth_usdc(context: ExtensionContext) -> Decimal | None:
+    """计算盘口 bid 侧总深度（USDC），作为市场活跃度代理。"""
+    ob = context.orderbook
+    if ob is None:
+        return None
+    if ob.bids:
+        return sum((level.price * level.size for level in ob.bids), Decimal("0"))
+    if ob.best_bid is not None and ob.best_bid_size is not None:
+        return ob.best_bid * ob.best_bid_size
+    return None
+
+
+def _estimated_profit_take_fill_minutes(
+    config: CurrentStrategyConfig,
+    context: ExtensionContext,
+) -> int:
+    """按 bid 侧深度估算止盈 GTC SELL 的预期成交时间。
+
+    流动性好（bid depth ≥ 阈值）→ 快速成交，用 tail_profit_take_hold_minutes。
+    流动性差（bid depth < 阈值）→ 止盈单大概率等结算，用结算持仓时间估算。
+    无盘口数据时退回 tail_profit_take_hold_minutes 默认值。
+    """
+    bid_depth = _bid_depth_usdc(context)
+    if bid_depth is None or bid_depth >= config.tail_profit_take_liquid_bid_depth_usdc:
+        return max(int(config.tail_profit_take_hold_minutes), 1)
+    # 薄市场：挂单成交时间接近结算，用结算持仓时间估算
+    return _estimated_settlement_hold_minutes(config, context)
 
 
 def _profit_take_target_price(
