@@ -271,3 +271,8 @@ Goalserve 覆盖面极广，任何主要联赛/赛事在 Goalserve 上几乎必�
 **持续监控职责**：
 - 实盘运行期间，live-source-gaps 出现大量 `started_or_past_due` 是告警信号，必须主动排查，不能只看拒绝率。
 - 新修复的匹配逻辑（如 §16 的名称匹配 bug fix）需要在修复后观察 live states 数量是否恢复正常，以验证修复有效。
+- **无交易机会时必须做差异核对**：每当系统当前没有任何可执行进场机会（candidates 全部被拒、`ready_to_trade` 为 0），不能直接判定"市场空窗"了事，必须人工核对 https://polymarket.com/zh/sports/live 上实时进行中的市场，与我方系统的 live states / candidates 逐一比对，定位差异：
+  - Polymarket 有该直播市场、我方没发现 → discovery 缺口（参照 §16）。
+  - 我方发现了市场但无 live state → 直播源映射缺口（参照 §16/§18）。
+  - 有 live state 但 candidate 被拒 → 核对拒绝原因是否合理（参照 §17 门禁复盘），区分"真实无 edge"与"门禁过保守误杀"。
+  - 只有逐项确认每个差异都有合理解释，才能判定确实无机会；任何无法解释的差异都按 bug 排查修复。
