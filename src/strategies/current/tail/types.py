@@ -106,6 +106,12 @@ class TailPolicy:
     max_moneyline_seconds_remaining: int = 180
     max_spreads_seconds_remaining: int = 120
     min_under_safety_margin: Decimal = Decimal("2")
+    # MLB Under 总分入场最早可考虑的局数；早于此局一律拒绝。
+    mlb_under_min_inning: int = 6
+    # MLB Under 每提前一局（早于 9 局）额外要求的 safety margin。
+    # 默认 9 局基准 margin=2，每往前一局 +2：8 局需 4、7 局需 6、6 局需 8。
+    # margin 足够大时 Under 在该局已基本锁定，配合提前止盈做准量化盈利。
+    mlb_under_inning_margin_step: Decimal = Decimal("2")
     min_moneyline_lead: int = 6
     soccer_min_moneyline_lead: int = 1
     hockey_min_moneyline_lead: int = 1

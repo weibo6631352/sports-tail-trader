@@ -34,11 +34,10 @@ def _evaluate_mlb_totals(
     if market.side == SportsMarketSide.OVER and total_score > market.line:
         return _accept(candidate, "totals_over_locked", policy.totals_execution_permission)
     if market.side == SportsMarketSide.UNDER:
-        reject_reason = _mlb_low_scoring_tail_reject_reason(game)
+        reject_reason = _mlb_under_totals_reject_reason(game, market, policy)
         if reject_reason is not None:
             return _reject(candidate, reject_reason.value)
-        if market.line - total_score >= policy.min_under_safety_margin:
-            return _accept(candidate, "mlb_totals_under_late_low_risk", policy.totals_execution_permission)
+        return _accept(candidate, "mlb_totals_under_margin_scaled", policy.totals_execution_permission)
     return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
 
 
@@ -101,8 +100,7 @@ def _mlb_tail_state_reached(
             return total_score > market.line
         return (
             market.side == SportsMarketSide.UNDER
-            and _mlb_low_scoring_tail_reject_reason(game) is None
-            and market.line - total_score >= policy.min_under_safety_margin
+            and _mlb_under_totals_reject_reason(game, market, policy) is None
         )
     if market.market_type == SportsMarketType.MONEYLINE:
         return (
@@ -208,16 +206,33 @@ def _mlb_eighth_moneyline_threat_reject_reason(
     return None
 
 
-def _mlb_low_scoring_tail_reject_reason(game: LiveGameState) -> TailRejectReason | None:
+def _mlb_under_totals_reject_reason(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    policy: TailPolicy,
+) -> TailRejectReason | None:
+    """MLB Under 总分入场门禁：所需 safety margin 随局数缩放。
+
+    越早的局剩余得分机会越多，要求的安全边际越大：9 局用基准
+    ``min_under_safety_margin``，每往前一局额外加 ``mlb_under_inning_margin_step``。
+    margin（盘口线 − 当前总分）足够大时 Under 在该局已基本锁定，不必死等
+    九局两出局——配合提前止盈做准量化盈利。早于 ``mlb_under_min_inning`` 一律拒绝。
+    """
+
     state = game.baseball_state
     if state is None:
         return TailRejectReason.MISSING_BASEBALL_STATE
-    if (state.current_inning or 0) < 9 or (state.outs or 0) < 2:
+    if market.line is None:
+        return TailRejectReason.MISSING_MARKET_LINE
+    inning = state.current_inning or 0
+    if inning < policy.mlb_under_min_inning:
         return TailRejectReason.BASEBALL_NOT_LATE_ENOUGH
-    if str(state.inning_half or "").strip().lower() != "bottom":
-        return TailRejectReason.BASEBALL_NOT_LATE_ENOUGH
-    if state.occupied_bases:
-        return TailRejectReason.BASEBALL_THREAT_ON_BASE
+    required_margin = policy.min_under_safety_margin + (
+        policy.mlb_under_inning_margin_step * Decimal(max(0, 9 - inning))
+    )
+    safety_margin = market.line - Decimal(game.total_score)
+    if safety_margin < required_margin:
+        return TailRejectReason.OUTCOME_NOT_LOCKED
     return None
 
 

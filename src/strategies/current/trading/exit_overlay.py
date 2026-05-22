@@ -265,7 +265,12 @@ def _profit_take_metadata(
 ) -> dict[str, object] | None:
     """计算一档 profit-take SELL 的审计 metadata。"""
 
-    target_price = _profit_take_target_price(context, entry_price, config.tail_profit_take_multiplier)
+    target_price = _profit_take_target_price(
+        context,
+        entry_price,
+        offset=config.tail_profit_take_offset,
+        multiplier=config.tail_profit_take_multiplier,
+    )
     if target_price is None or target_price > Decimal("1"):
         return None
     expected_profit_take_profit = shares * (target_price - entry_price)
@@ -318,18 +323,24 @@ def _estimated_profit_take_fill_minutes(
 def _profit_take_target_price(
     context: ExtensionContext,
     entry_price: Decimal,
+    *,
+    offset: Decimal | None = None,
     multiplier: Decimal | None = None,
 ) -> Decimal | None:
-    """计算 profit-take 目标价。
+    """计算 profit-take 目标价。优先级 offset > multiplier > 上一档 tick。
 
-    multiplier 不为 None 时：target = entry_price × multiplier，超 CLOB 上限收敛到
-    cap（0.99）；适合低价买入预期大幅涨价后止盈。
-    multiplier 为 None 时：target = entry_price + 1 tick（原资金效率模式）。
+    offset 不为 None 时：target = entry_price + offset，超 CLOB 上限收敛到 cap；
+    固定 offset 让盘中提前止盈可达（买 0.88 → 卖 0.95），不必死等结算。
+    multiplier 不为 None 时：target = entry_price × multiplier，超上限收敛到 cap。
+    两者皆 None：target = entry_price + 1 tick（原资金效率模式）。
     """
 
     tick_size = _effective_tick_size(context)
     if tick_size is None or tick_size <= Decimal("0"):
         tick_size = Decimal("0.01")
+    if offset is not None and offset > Decimal("0"):
+        raw = entry_price + offset
+        return cap_price_to_clob_limit(raw, tick_size=tick_size)
     if multiplier is not None and multiplier > Decimal("1"):
         raw = entry_price * multiplier
         return cap_price_to_clob_limit(raw, tick_size=tick_size)

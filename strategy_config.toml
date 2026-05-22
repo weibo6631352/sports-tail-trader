@@ -22,7 +22,8 @@ tail_max_moneyline_seconds_remaining = 300
 tail_max_spreads_seconds_remaining = 180
 
 # 止盈与自动退出
-# auto_exit_enabled = true：每次 BUY 成交后立即挂 GTC SELL @ exit_no_price(0.995)
-# tail_profit_take_multiplier = 1.6：买入价 × 1.6 为止盈目标（高价入场自动收敛到 0.99）
+# auto_exit_enabled = true：每次 BUY 成交后立即挂 GTC SELL
+# tail_profit_take_offset = 0.07：止盈目标 = 买入价 + 0.07，盘中提前止盈可达
+#   （买 0.88 → 卖 0.95），高价入场自动收敛到近结算价。做准量化盈利、不死等结算。
 auto_exit_enabled = true
-tail_profit_take_multiplier = "1.6"
+tail_profit_take_offset = "0.07"

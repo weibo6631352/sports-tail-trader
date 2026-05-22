@@ -217,6 +217,10 @@ class CurrentStrategyConfig:
     tail_max_moneyline_seconds_remaining: int = 180
     tail_max_spreads_seconds_remaining: int = 120
     tail_min_under_safety_margin: Decimal = Decimal("2")
+    # MLB Under 总分入场最早可考虑的局数；早于此局一律拒绝。
+    tail_mlb_under_min_inning: int = 6
+    # MLB Under 每提前一局（早于 9 局）额外要求的 safety margin。
+    tail_mlb_under_inning_margin_step: Decimal = Decimal("2")
     tail_min_moneyline_lead: int = 6
     tail_soccer_min_moneyline_lead: int = 1
     tail_hockey_min_moneyline_lead: int = 1
@@ -293,9 +297,12 @@ class CurrentStrategyConfig:
     tail_profit_take_hold_minutes: int = 2  # 流动性好时预计止盈成交时间（分钟）
     # bid 侧深度低于此值视为薄市场，止盈单大概率等结算，效率按结算持仓时间算
     tail_profit_take_liquid_bid_depth_usdc: Decimal = Decimal("10")
-    # 止盈目标价倍数：目标卖价 = entry_price × multiplier，超过 1.0 时自动收敛到 0.99。
-    # None（默认）= 只上一档 tick（原有资金效率模式）；
-    # 1.6 = 低价买入时预期 60% 价格涨幅，高价买入自动收敛到近结算价。
+    # 止盈目标价：三选一，优先级 offset > multiplier > 默认上一档 tick。
+    # tail_profit_take_offset：目标卖价 = entry_price + offset，超过 1.0 自动收敛到 0.99。
+    #   固定 offset 让盘中提前止盈可达（如 +0.07：买 0.88 → 卖 0.95），不必死等结算。
+    # tail_profit_take_multiplier：目标卖价 = entry_price × multiplier（旧模式）。
+    # 两者都为 None：只上一档 tick（原有资金效率模式）。
+    tail_profit_take_offset: Decimal | None = None
     tail_profit_take_multiplier: Decimal | None = None
     tail_entry_maker_max_resting_seconds: int = 60
     tail_settlement_hold_minutes: int = 180
@@ -404,6 +411,8 @@ def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
         max_moneyline_seconds_remaining=config.tail_max_moneyline_seconds_remaining,
         max_spreads_seconds_remaining=config.tail_max_spreads_seconds_remaining,
         min_under_safety_margin=config.tail_min_under_safety_margin,
+        mlb_under_min_inning=config.tail_mlb_under_min_inning,
+        mlb_under_inning_margin_step=config.tail_mlb_under_inning_margin_step,
         min_moneyline_lead=config.tail_min_moneyline_lead,
         soccer_min_moneyline_lead=config.tail_soccer_min_moneyline_lead,
         hockey_min_moneyline_lead=config.tail_hockey_min_moneyline_lead,
