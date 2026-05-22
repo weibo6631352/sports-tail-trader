@@ -162,12 +162,30 @@ def _score_pair(stats: dict[str, Any], key: str) -> tuple[int | None, int | None
     return _int_val(pair[0]), _int_val(pair[1])
 
 
+def _infer_ws_market_name(outcome_names: list[str], handicap: str) -> str:
+    """WS inplay 赔率市场只有数字 id、没有名字——按结果集与盘口线推断类型名，
+
+    使下游 ``_extract_goalserve_*`` 能按名称识别（moneyline/totals/spread）。
+    """
+    names = {n.strip().lower() for n in outcome_names if n}
+    if not names:
+        return ""
+    has_handicap = bool(handicap) and handicap.strip() not in ("", "0", "0.0", "-0", "-0.0")
+    if names <= {"over", "under"}:
+        return "over/under"
+    if names <= {"1", "2", "home", "away"}:
+        return "handicap" if has_handicap else "money line"
+    if names <= {"yes", "no"}:
+        return "yes/no"
+    return ""
+
+
 def _parse_odds_ws(odds_raw: Any, event_id: str) -> GoalserveOdds:
     """解析 WS odds 列表 → GoalserveOdds。
 
-    WS odds 元素短键格式：id, nm（name）, sp（suspended）, o（outcomes list）
-    每个 outcome：nm, v（value_eu）, hc（handicap）, sp（suspended）
-    同时兼容长键格式以防服务端变更。
+    WS odds 实测格式：市场 ``{id, ha(盘口线), o(outcomes)}``——市场无名字；
+    outcome ``{n(name), v(decimal odds), lv, b}``。盘口线 ``ha`` 在市场级。
+    市场名从结果集推断（见 _infer_ws_market_name）。兼容长键以防服务端变更。
     """
     if not isinstance(odds_raw, list):
         return GoalserveOdds(event_id=event_id, markets=())
@@ -176,30 +194,37 @@ def _parse_odds_ws(odds_raw: Any, event_id: str) -> GoalserveOdds:
     for item in odds_raw:
         if not isinstance(item, dict):
             continue
-        name = str(item.get("nm") or item.get("name", ""))
         mkt_id = _int_val(item.get("id")) or 0
-        mkt_susp_raw = item.get("sp") or item.get("suspend", 0)
-        mkt_susp = bool(_int_val(mkt_susp_raw))
+        mkt_susp = bool(_int_val(item.get("sp") or item.get("suspend", 0)))
+        # 盘口线在市场级 ha；兼容旧 handicap 键。
+        ha_raw = item.get("ha")
+        handicap = str(ha_raw if ha_raw is not None else (item.get("handicap") or "") or "")
 
         outcomes: list[GoalserveOutcome] = []
+        outcome_names: list[str] = []
         for od in item.get("o", []):
             if not isinstance(od, dict):
                 continue
-            eu_raw = od.get("v") or od.get("value_eu")
-            eu = _dec_val(eu_raw)
+            eu = _dec_val(od.get("v") if od.get("v") is not None else od.get("value_eu"))
             if eu is None or eu <= 0:
                 continue
             implied = (Decimal("1") / eu).quantize(Decimal("0.0001"))
-            od_susp_raw = od.get("sp") or od.get("suspend", 0)
+            # 结果名实测键为 n；盘口线取结果级 hc，缺失回退市场级 ha。
+            oname = str(od.get("n") or od.get("nm") or od.get("name", ""))
+            outcome_names.append(oname)
             outcomes.append(
                 GoalserveOutcome(
-                    name=str(od.get("nm") or od.get("name", "")),
+                    name=oname,
                     value_eu=eu,
                     implied_prob=implied,
-                    handicap=str(od.get("hc") or od.get("handicap", "") or ""),
-                    suspended=bool(_int_val(od_susp_raw)),
+                    handicap=str(od.get("hc") or od.get("handicap") or handicap or ""),
+                    suspended=bool(_int_val(od.get("sp") or od.get("suspend", 0))),
                 )
             )
+        # WS 市场无名字 → 从结果集推断；服务端若日后给 nm/name 则优先用。
+        name = str(item.get("nm") or item.get("name") or "") or _infer_ws_market_name(
+            outcome_names, handicap
+        )
         markets.append(
             GoalserveMarket(
                 market_id=mkt_id,

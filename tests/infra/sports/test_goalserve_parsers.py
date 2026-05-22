@@ -403,3 +403,38 @@ def test_tennis_not_live_current_set_none() -> None:
     )
     assert events[0].tennis_state is not None
     assert events[0].tennis_state.current_set is None
+
+
+def test_parse_odds_ws_real_inplay_format() -> None:
+    """实测 inplay WS 赔率格式：市场无名字（仅数字 id + ha），结果名键为 n。
+
+    parser 须读对键并从结果集推断市场类型名，否则下游赔率提取拿不到数据。
+    """
+    from polymarket_trader.infra.sports.goalserve_parsers import _parse_odds_ws
+
+    odds_raw = [
+        {"id": 130021, "ha": 12.5, "o": [{"n": "Over", "v": 7}, {"n": "Under", "v": 1.083}]},
+        {"id": 130204, "ha": -1.5, "o": [{"n": "1", "v": 1.666}, {"n": "2", "v": 2.1}]},
+        {"id": 99001, "o": [{"n": "1", "v": 1.5}, {"n": "2", "v": 2.6}]},
+    ]
+    odds = _parse_odds_ws(odds_raw, "evt-1")
+    by_name = {m.name: m for m in odds.markets}
+
+    # {Over,Under} → totals
+    assert "over/under" in by_name
+    ou = by_name["over/under"]
+    assert ou.outcomes[0].name == "Over"
+    assert ou.outcomes[0].handicap == "12.5"
+    assert ou.outcomes[1].implied_prob > ou.outcomes[0].implied_prob  # Under 更可能
+
+    # {1,2} + ha → handicap；{1,2} 无 ha → money line
+    assert "handicap" in by_name
+    assert "money line" in by_name
+    assert odds.moneyline() is not None
+    assert odds.moneyline().market_id == 99001
+
+
+def test_parse_odds_ws_empty_when_not_list() -> None:
+    from polymarket_trader.infra.sports.goalserve_parsers import _parse_odds_ws
+
+    assert _parse_odds_ws(None, "evt-1").markets == ()
