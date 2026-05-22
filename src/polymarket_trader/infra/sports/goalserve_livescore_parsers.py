@@ -118,8 +118,37 @@ def _iter_matches(scores: dict[str, Any]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Cricket
 # ---------------------------------------------------------------------------
+#
+# 实测 cricket/livescore 真实结构（与早期推断不同，已按真实 feed 校准）：
+#   match.localteam / match.visitorteam: {id, name, totalscore: "208/6" 或 "158",
+#       winner: "True"/"False"}
+#   match.comment: {first_batting_teamId, toss_winner_teamId,
+#       post: "Middlesex need 72 runs in 29 balls." / "Nepal won by 122 runs"}
+#   match.inning[]: 每局 {inningnum: "1"/"2", team: "localteam"/"visitorteam",
+#       total: {tot: "208 ( 20 )", wickets: "6"}}
+#   match.type: "T20" / "ODI" / "TEST"
+# totalscore 字符串 "runs/wickets"——全员出局或一局完成时只剩 "runs"（wickets=10
+# 或局已收）。chase（追分）锁定的关键信号 required_runs / required_balls 直接来自
+# comment.post，正则解析；first-innings target = 首打方得分 + 1。
 
-_CRICKET_BATTING_MAP = {"1": "home", "2": "away"}
+# comment.post 形如 "Middlesex need 72 runs in 29 balls."
+_CRICKET_CHASE_RE = re.compile(
+    r"need\s+(\d+)\s+runs?\s+in\s+(\d+)\s+ball", re.IGNORECASE
+)
+
+
+def _parse_cricket_score(raw: Any) -> tuple[int | None, int | None]:
+    """解析 totalscore 字符串 "208/6" → (runs, wickets)；"158" → (158, None)。
+
+    wickets 缺省（无 "/" 部分）返回 None——可能是一局已收、或数据未给。
+    """
+    text = _str_val(raw)
+    if not text:
+        return None, None
+    if "/" in text:
+        runs_part, wkts_part = text.split("/", 1)
+        return _int_val(runs_part), _int_val(wkts_part)
+    return _int_val(text), None
 
 
 def _parse_cricket(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
@@ -129,40 +158,87 @@ def _parse_cricket(scores: dict[str, Any], observed_at: datetime) -> list[LiveEv
         if not event_id:
             continue
         status = _text_status(match.get("status"))
-        home_team = match.get("localteam") or {}
-        away_team = match.get("awayteam") or {}
+        home_team = match.get("localteam") if isinstance(match.get("localteam"), dict) else {}
+        away_team = match.get("visitorteam") if isinstance(match.get("visitorteam"), dict) else {}
+        # awayteam 是早期接口字段名；真实 cricket/livescore 用 visitorteam，二者都兼容。
+        if not away_team:
+            away_team = match.get("awayteam") if isinstance(match.get("awayteam"), dict) else {}
         home_name = _str_val(home_team.get("name"))
         away_name = _str_val(away_team.get("name"))
-        home_score = _int_val(home_team.get("totalscore") or home_team.get("score"))
-        away_score = _int_val(away_team.get("totalscore") or away_team.get("score"))
+        home_runs, home_wkts = _parse_cricket_score(home_team.get("totalscore"))
+        away_runs, away_wkts = _parse_cricket_score(away_team.get("totalscore"))
         league = _str_val(match.get("competition") or match.get("league") or "")
+        match_type = _str_val(match.get("type"))
+        comment = match.get("comment") if isinstance(match.get("comment"), dict) else {}
 
-        # overs 格式 "12.3" → completed=12, balls_in_over=3
-        time_raw = _str_val(match.get("time") or match.get("overs") or "")
-        overs_completed: int | None = None
-        balls_in_over: int | None = None
-        if "." in time_raw:
-            parts = time_raw.split(".", 1)
-            overs_completed = _int_val(parts[0])
-            balls_in_over = _int_val(parts[1])
-        else:
-            overs_completed = _int_val(time_raw) if time_raw else None
+        # 首打方（设定 target 的一方）由 first_batting_teamId 与队伍 id 匹配决定。
+        first_bat_id = _str_val(comment.get("first_batting_teamId"))
+        home_id = _str_val(home_team.get("id"))
+        away_id = _str_val(away_team.get("id"))
+        first_batting_side: str | None = None
+        if first_bat_id and first_bat_id == home_id:
+            first_batting_side = "home"
+        elif first_bat_id and first_bat_id == away_id:
+            first_batting_side = "away"
 
-        innings_list = match.get("innings") or []
-        if isinstance(innings_list, dict):
-            innings_list = list(innings_list.values())
+        # inning[] 给出每局的 inningnum / team / 累计 wickets。
+        innings_raw = match.get("inning") or []
+        if isinstance(innings_raw, dict):
+            innings_raw = [innings_raw]
+        innings = [x for x in innings_raw if isinstance(x, dict)]
+
         current_innings: int | None = None
         batting_side: str | None = None
         runs: int | None = None
         wickets: int | None = None
-        if isinstance(innings_list, list) and innings_list:
-            last = innings_list[-1]
-            if isinstance(last, dict):
-                current_innings = _int_val(last.get("number") or last.get("innings_number"))
-                batting_team_id = _str_val(last.get("batting_team") or last.get("team_id") or "")
-                batting_side = _CRICKET_BATTING_MAP.get(batting_team_id)
-                runs = _int_val(last.get("runs") or last.get("score"))
-                wickets = _int_val(last.get("wickets"))
+        overs_completed: int | None = None
+        balls_in_over: int | None = None
+        if innings:
+            last = innings[-1]
+            current_innings = _int_val(last.get("inningnum"))
+            team_key = _str_val(last.get("team")).lower()
+            if team_key == "localteam":
+                batting_side = "home"
+            elif team_key in ("visitorteam", "awayteam"):
+                batting_side = "away"
+            total = last.get("total") if isinstance(last.get("total"), dict) else {}
+            wickets = _int_val(total.get("wickets"))
+            # total.tot 形如 "137 ( 15.1 )" → runs=137, overs=15, balls=1
+            tot_text = _str_val(total.get("tot"))
+            tot_match = re.match(r"\s*(\d+)\s*\(\s*([\d.]+)\s*\)", tot_text)
+            if tot_match:
+                runs = _int_val(tot_match.group(1))
+                overs_text = tot_match.group(2)
+                if "." in overs_text:
+                    o_parts = overs_text.split(".", 1)
+                    overs_completed = _int_val(o_parts[0])
+                    balls_in_over = _int_val(o_parts[1])
+                else:
+                    overs_completed = _int_val(overs_text)
+                    balls_in_over = 0
+        # inning 缺失时回退到 totalscore（batting_side 仍未知则保持 None）。
+        if runs is None and batting_side == "home":
+            runs, wickets = home_runs, home_wkts
+        elif runs is None and batting_side == "away":
+            runs, wickets = away_runs, away_wkts
+
+        # 追分目标：首打方得分 + 1。首打方一局尚未结束时不构成 target——
+        # current_innings>=2 才说明进入追分局。
+        target: int | None = None
+        if first_batting_side == "home" and home_runs is not None:
+            target = home_runs + 1
+        elif first_batting_side == "away" and away_runs is not None:
+            target = away_runs + 1
+
+        # required_runs / required_balls 来自 comment.post（"need N runs in M balls"）；
+        # 这是追分局最权威的实时信号，整数化避免 overs 浮点。
+        required_runs: int | None = None
+        required_balls: int | None = None
+        post_text = _str_val(comment.get("post"))
+        chase_match = _CRICKET_CHASE_RE.search(post_text)
+        if chase_match:
+            required_runs = _int_val(chase_match.group(1))
+            required_balls = _int_val(chase_match.group(2))
 
         cricket_state = CricketGameState(
             current_innings=current_innings,
@@ -171,7 +247,22 @@ def _parse_cricket(scores: dict[str, Any], observed_at: datetime) -> list[LiveEv
             wickets=wickets,
             overs_completed=overs_completed,
             balls_in_over=balls_in_over,
+            target=target,
+            required_runs=required_runs,
+            required_balls=required_balls,
         )
+        # winner 字段（Finished 时）决定 participant.score 的胜负方向——
+        # 整场胜负盘是 single_game moneyline，ended-moneyline 用 score 大小判定胜者。
+        # 用 runs 作为 participant.score 不可靠（追分方赢时分数可能更低且追平即胜）；
+        # 故 score 用胜负标志：胜者 1、负者 0、未结束 None。
+        home_winner = _str_val(home_team.get("winner")).lower() in ("true", "yes", "1")
+        away_winner = _str_val(away_team.get("winner")).lower() in ("true", "yes", "1")
+        if status == SportsLiveGameStatus.ENDED and (home_winner or away_winner):
+            home_score: int | None = 1 if home_winner else 0
+            away_score: int | None = 1 if away_winner else 0
+        else:
+            home_score = None
+            away_score = None
         events.append(
             LiveEvent(
                 source="goalserve_livescore",
@@ -184,7 +275,7 @@ def _parse_cricket(scores: dict[str, Any], observed_at: datetime) -> list[LiveEv
                     Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
-                period=time_raw,
+                period=match_type,
                 raw_status=_str_val(match.get("status")),
                 observed_at=observed_at,
                 external_ids={"goalserve": event_id},
@@ -226,7 +317,11 @@ def _parse_handball(scores: dict[str, Any], observed_at: datetime) -> list[LiveE
         home_p1 = _int_val(home_team.get("t1"))
         away_p1 = _int_val(away_team.get("t1"))
 
-        period_raw = _str_val(match.get("status_str") or match.get("period") or "")
+        # 真实 handball/live feed 把赛段放在 status 字段（"1st Half"/"2nd Half"），
+        # 不带独立 status_str——优先 status_str（早期接口），回退 status。
+        period_raw = _str_val(
+            match.get("status_str") or match.get("period") or match.get("status") or ""
+        )
         handball_period = _HALF_PERIOD_MAP.get(period_raw.lower())
         # time field in Goalserve is scheduled kickoff time (HH:MM), not game clock
         clock_minutes: int | None = None
@@ -452,8 +547,26 @@ def _parse_esports(scores: dict[str, Any], observed_at: datetime) -> list[LiveEv
 
 
 # ---------------------------------------------------------------------------
-# Boxing
+# Boxing / MMA
 # ---------------------------------------------------------------------------
+
+
+def _fight_winner_scores(
+    status: SportsLiveGameStatus, winner_side: str | None
+) -> tuple[int | None, int | None]:
+    """格斗（拳击/MMA）胜负 → participant.score。
+
+    格斗无可靠盘中比分模型——只有打完后 winner 字段才能确定胜负。已结束且
+    winner 已知时胜者 1、负者 0，使比赛走通用 ended-moneyline 评估器；未结束
+    或 winner 未知一律返回 (None, None)，绝不臆造比分（CLAUDE.md §17）。
+    """
+    if status != SportsLiveGameStatus.ENDED or winner_side is None:
+        return None, None
+    if winner_side == "home":
+        return 1, 0
+    if winner_side == "away":
+        return 0, 1
+    return None, None
 
 
 def _parse_boxing(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
@@ -485,6 +598,10 @@ def _parse_boxing(scores: dict[str, Any], observed_at: datetime) -> list[LiveEve
             total_rounds=total_rounds,
             winner_side=winner_side,
         )
+        # 拳击无盘中比分模型——胜负只在打完后由 winner 字段确定。把胜者
+        # participant.score 置 1、负者 0，使已结束比赛走通用 ended-moneyline
+        # 评估器锁定胜方；未结束（winner 未知）保持 None，不臆造比分。
+        home_score, away_score = _fight_winner_scores(status, winner_side)
         events.append(
             LiveEvent(
                 source="goalserve_livescore",
@@ -493,8 +610,8 @@ def _parse_boxing(scores: dict[str, Any], observed_at: datetime) -> list[LiveEve
                 league=league,
                 sport="boxing",
                 participants=(
-                    Participant(role="home", name=home_name, external_ids={"goalserve": event_id}),
-                    Participant(role="away", name=away_name, external_ids={"goalserve": event_id}),
+                    Participant(role="home", name=home_name, score=home_score, external_ids={"goalserve": event_id}),
+                    Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
                 raw_status=_str_val(match.get("status")),
@@ -555,6 +672,9 @@ def _parse_mma(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]
             result_method=result_method,
             winner_side=winner_side,
         )
+        # MMA 无盘中比分模型——同 boxing，胜者 score=1、负者 0，已结束比赛走
+        # 通用 ended-moneyline 评估器；未结束保持 None。
+        home_score, away_score = _fight_winner_scores(status, winner_side)
         events.append(
             LiveEvent(
                 source="goalserve_livescore",
@@ -563,8 +683,8 @@ def _parse_mma(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]
                 league="",
                 sport="mma",
                 participants=(
-                    Participant(role="home", name=home_name, external_ids={"goalserve": event_id}),
-                    Participant(role="away", name=away_name, external_ids={"goalserve": event_id}),
+                    Participant(role="home", name=home_name, score=home_score, external_ids={"goalserve": event_id}),
+                    Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
                 ),
                 status=status,
                 raw_status=_str_val(match.get("status")),

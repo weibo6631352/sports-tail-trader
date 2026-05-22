@@ -12,7 +12,9 @@ from typing import Any, Mapping
 from polymarket_trader.domain.sports_live import (
     BaseballGameState,
     BasketballGameState,
+    CricketGameState,
     EsportsGameState,
+    HandballGameState,
     SoccerGameState,
     VolleyballGameState,
 )
@@ -58,6 +60,8 @@ def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState 
         tennis_state=_tennis_state(raw_game.get("tennis_state")),
         soccer_state=_soccer_state(raw_game.get("soccer_state")),
         esports_state=_esports_state(raw_game.get("esports_state")),
+        cricket_state=_cricket_state(raw_game.get("cricket_state")),
+        handball_state=_handball_state(raw_game.get("handball_state")),
         volleyball_state=_volleyball_state(raw_game.get("volleyball_state")),
     )
 
@@ -214,6 +218,37 @@ def _esports_state(value: object) -> EsportsGameState | None:
         home_current_map_score=_optional_int(value.get("home_current_map_score")),
         away_current_map_score=_optional_int(value.get("away_current_map_score")),
         map_winners=map_winners,
+    )
+
+
+def _cricket_state(value: object) -> CricketGameState | None:
+    if isinstance(value, CricketGameState):
+        return value
+    if not isinstance(value, Mapping):
+        return None
+    return CricketGameState(
+        current_innings=_optional_int(value.get("current_innings")),
+        batting_side=_opt_str(value, "batting_side"),
+        runs=_optional_int(value.get("runs")),
+        wickets=_optional_int(value.get("wickets")),
+        overs_completed=_optional_int(value.get("overs_completed")),
+        balls_in_over=_optional_int(value.get("balls_in_over")),
+        target=_optional_int(value.get("target")),
+        required_runs=_optional_int(value.get("required_runs")),
+        required_balls=_optional_int(value.get("required_balls")),
+    )
+
+
+def _handball_state(value: object) -> HandballGameState | None:
+    if isinstance(value, HandballGameState):
+        return value
+    if not isinstance(value, Mapping):
+        return None
+    return HandballGameState(
+        period=_opt_str(value, "period"),
+        clock_minutes=_optional_int(value.get("clock_minutes")),
+        home_period1=_optional_int(value.get("home_period1")),
+        away_period1=_optional_int(value.get("away_period1")),
     )
 
 

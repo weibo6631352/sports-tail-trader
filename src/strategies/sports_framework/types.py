@@ -14,10 +14,11 @@ from typing import Any, Mapping
 from polymarket_trader.domain.sports_live import (
     BaseballGameState,
     BasketballGameState,
+    CricketGameState,
     EsportsGameState,
+    HandballGameState,
     SoccerGameState,
     TennisGameState,
-    CricketGameState,
     VolleyballGameState,
 )
 
@@ -111,6 +112,7 @@ class LiveGameState:
     soccer_state: SoccerGameState | None = None
     esports_state: EsportsGameState | None = None
     cricket_state: CricketGameState | None = None
+    handball_state: HandballGameState | None = None
     volleyball_state: VolleyballGameState | None = None
 
     @property

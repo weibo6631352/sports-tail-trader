@@ -18,6 +18,9 @@ from strategies.sports_framework import (
     SportsMarketScopeType,
     SportsMarketSnapshot,
     SportsMarketType,
+    is_combat_sport_game,
+    is_cricket_game,
+    is_handball_game,
     is_hockey_game,
     is_mlb_game,
     is_nfl_game,
@@ -66,6 +69,8 @@ from .event_props import (
     event_prop_reject_reason,
     is_modeled_event_prop_market,
 )
+from .cricket import _evaluate_cricket_moneyline
+from .handball import _evaluate_handball_moneyline
 from .rugby import _evaluate_rugby_moneyline, is_rugby_game
 from .sport_props import sport_specific_prop_reject_reason
 from .slug import (
@@ -257,6 +262,26 @@ def _dispatch_tail_lock(
         if market.market_type == SportsMarketType.MONEYLINE:
             return _evaluate_esports_moneyline(candidate, policy)
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+
+    # 板球胜负盘是 2-way MONEYLINE，锁定模型是追分（chase）局的 target/required，
+    # 与比分差/剩余时间无关——必须在通用 _evaluate_moneyline 之前专属路由。
+    if is_cricket_game(game):
+        if market.market_type == SportsMarketType.MONEYLINE:
+            return _evaluate_cricket_moneyline(candidate, policy)
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+
+    # 手球胜负盘是 2-way MONEYLINE，但 livescore 无盘中时钟——锁定模型只依赖
+    # 超大领先/已判定，与通用 lead+seconds 模型不同，专属路由。
+    if is_handball_game(game):
+        if market.market_type == SportsMarketType.MONEYLINE:
+            return _evaluate_handball_moneyline(candidate, policy)
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+
+    # 拳击 / MMA：盘中无可靠比分模型，且不建立回合评分模型（CLAUDE.md §17）。
+    # 比赛结束后由 ENDED 路径的 ended-moneyline 用 winner 锁定胜方；进行中的
+    # 任何盘口只给精确可审计拒绝原因，不退化到泛化的 missing_seconds_remaining。
+    if is_combat_sport_game(game):
+        return _reject(candidate, TailRejectReason.MMA_IN_PROGRESS_NO_MODEL.value)
 
     if is_tennis_game(game):
         if market.market_type == SportsMarketType.TOTALS:

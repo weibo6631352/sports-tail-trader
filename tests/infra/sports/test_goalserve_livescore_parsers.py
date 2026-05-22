@@ -119,6 +119,8 @@ def test_non_dict_data_returns_empty_list() -> None:
 
 
 def test_cricket_basic_parse() -> None:
+    # Fixture shaped to the REAL cricket/livescore feed: localteam/visitorteam with
+    # totalscore "runs/wickets", comment.post chase line, inning[] with total dict.
     data = {
         "scores": {
             "category": [
@@ -127,12 +129,21 @@ def test_cricket_basic_parse() -> None:
                         {
                             "id": "cr_001",
                             "status": "In Progress",
-                            "localteam": {"name": "India", "totalscore": "250"},
-                            "awayteam": {"name": "Australia", "totalscore": "180"},
-                            "time": "45.3",
-                            "competition": "Test Series",
-                            "innings": [
-                                {"number": "1", "batting_team": "1", "runs": "250", "wickets": "6"}
+                            "type": "T20",
+                            "competition": "T20 Blast",
+                            "comment": {
+                                "first_batting_teamId": "10",
+                                "post": "Australia need 71 runs in 30 balls.",
+                            },
+                            "localteam": {"id": "10", "name": "India", "totalscore": "250/6",
+                                          "winner": "False"},
+                            "visitorteam": {"id": "20", "name": "Australia", "totalscore": "180/4",
+                                            "winner": "False"},
+                            "inning": [
+                                {"inningnum": "1", "team": "localteam",
+                                 "total": {"tot": "250 ( 20 )", "wickets": "6"}},
+                                {"inningnum": "2", "team": "visitorteam",
+                                 "total": {"tot": "180 ( 15.0 )", "wickets": "4"}},
                             ],
                         }
                     ]
@@ -149,22 +160,53 @@ def test_cricket_basic_parse() -> None:
     assert ev.home is not None and ev.home.name == "India"
     assert ev.away is not None and ev.away.name == "Australia"
     assert ev.cricket_state is not None
-    assert ev.cricket_state.overs_completed == 45
-    assert ev.cricket_state.balls_in_over == 3
-    assert ev.cricket_state.runs == 250
-    assert ev.cricket_state.wickets == 6
-    assert ev.cricket_state.batting_side == "home"
+    # current/last inning is the chasing 2nd innings (visitorteam = away).
+    assert ev.cricket_state.current_innings == 2
+    assert ev.cricket_state.batting_side == "away"
+    assert ev.cricket_state.runs == 180
+    assert ev.cricket_state.wickets == 4
+    assert ev.cricket_state.overs_completed == 15
+    assert ev.cricket_state.balls_in_over == 0
+    # target = first-batting side (home) runs + 1.
+    assert ev.cricket_state.target == 251
+    # required runs/balls parsed from comment.post.
+    assert ev.cricket_state.required_runs == 71
+    assert ev.cricket_state.required_balls == 30
     assert ev.source == "goalserve_livescore"
 
 
 def test_cricket_missing_innings_is_safe() -> None:
     data = _scores_team_wrap(
-        {"id": "c1", "status": "Not Started", "localteam": {"name": "A"}, "awayteam": {"name": "B"}}
+        {"id": "c1", "status": "Not Started",
+         "localteam": {"id": "1", "name": "A"}, "visitorteam": {"id": "2", "name": "B"}}
     )
     events = parse_goalserve_livescore_sport("cricket", data, observed_at=_OBSERVED)
     assert len(events) == 1
     assert events[0].cricket_state is not None
     assert events[0].cricket_state.runs is None
+    assert events[0].cricket_state.target is None
+
+
+def test_cricket_finished_winner_score() -> None:
+    # Finished match: winner flag flows to participant.score for ended-moneyline.
+    data = _scores_team_wrap(
+        {
+            "id": "cr_fin",
+            "status": "Finished",
+            "type": "ODI",
+            "comment": {"first_batting_teamId": "10", "post": "Nepal won by 122 runs"},
+            "localteam": {"id": "10", "name": "Nepal", "totalscore": "317/8", "winner": "True"},
+            "visitorteam": {"id": "20", "name": "Netherlands", "totalscore": "195", "winner": "False"},
+        }
+    )
+    events = parse_goalserve_livescore_sport("cricket", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.status == SportsLiveGameStatus.ENDED
+    home = next(p for p in ev.participants if p.role == "home")
+    away = next(p for p in ev.participants if p.role == "away")
+    assert home.score == 1
+    assert away.score == 0
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +446,11 @@ def test_boxing_basic_parse() -> None:
     assert ev.mma_state.current_round == 8
     assert ev.mma_state.total_rounds == 12
     assert ev.mma_state.winner_side == "home"
+    # Finished fight: winner flows to participant.score for ended-moneyline.
+    bx_home = next(p for p in ev.participants if p.role == "home")
+    bx_away = next(p for p in ev.participants if p.role == "away")
+    assert bx_home.score == 1
+    assert bx_away.score == 0
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +485,10 @@ def test_mma_basic_parse() -> None:
     assert ev.mma_state is not None
     assert ev.mma_state.result_method == "Decision"
     assert ev.mma_state.winner_side == "home"
+    home = next(p for p in ev.participants if p.role == "home")
+    away = next(p for p in ev.participants if p.role == "away")
+    assert home.score == 1
+    assert away.score == 0
 
 
 def test_mma_winner_from_team_field() -> None:
@@ -452,7 +503,33 @@ def test_mma_winner_from_team_field() -> None:
     )
     events = parse_goalserve_livescore_sport("mma", data, observed_at=_OBSERVED)
     assert len(events) == 1
-    assert events[0].mma_state.winner_side == "away"
+    ev = events[0]
+    assert ev.mma_state.winner_side == "away"
+    home = next(p for p in ev.participants if p.role == "home")
+    away = next(p for p in ev.participants if p.role == "away")
+    assert home.score == 0
+    assert away.score == 1
+
+
+def test_mma_in_progress_no_winner_score() -> None:
+    # In-progress fight: no winner → participant.score stays None, no fabricated score.
+    data = _scores_team_wrap(
+        {
+            "id": "mma_live",
+            "status": "In Progress",
+            "round": "2",
+            "localteam": {"name": "Fighter A", "winner": "False"},
+            "awayteam": {"name": "Fighter B", "winner": "False"},
+        }
+    )
+    events = parse_goalserve_livescore_sport("mma", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.status == SportsLiveGameStatus.LIVE
+    home = next(p for p in ev.participants if p.role == "home")
+    away = next(p for p in ev.participants if p.role == "away")
+    assert home.score is None
+    assert away.score is None
 
 
 def test_mma_empty_scores_returns_empty() -> None:

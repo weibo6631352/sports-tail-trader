@@ -101,6 +101,22 @@ class TailRejectReason(StrEnum):
     RUGBY_MARKET_NOT_SUPPORTED = "rugby_market_not_supported"
     MISSING_ESPORTS_STATE = "missing_esports_state"
     ESPORTS_BEST_OF_UNKNOWN = "esports_best_of_unknown"
+    # 板球扫尾锁定拒绝原因。板球追分（chase）锁定依赖 target / 追分局
+    # required_runs / required_balls；缺这些数据不臆测，给精确可审计原因。
+    MISSING_CRICKET_STATE = "missing_cricket_state"
+    # 第一局（设定 target 的一方还在打）—— 尚无 target，不可锁定追分结果。
+    CRICKET_NOT_LATE_ENOUGH = "cricket_not_late_enough"
+    # 追分局已开始但 feed 未给出 target / required 数据，无法判断锁定。
+    CRICKET_CHASE_DATA_MISSING = "cricket_chase_data_missing"
+    # 追分局进行中，结果尚未数学锁定（既未追平 target，也未失败出局）。
+    CRICKET_OUTCOME_NOT_LOCKED = "cricket_outcome_not_locked"
+    # 手球扫尾锁定拒绝原因。手球 livescore 无盘中时钟（time 是开球时间），
+    # 只能靠"超大领先"或"比赛已判定/结束"锁定；其余给精确可审计原因。
+    MISSING_HANDBALL_STATE = "missing_handball_state"
+    HANDBALL_LEAD_NOT_SAFE = "handball_lead_not_safe"
+    # 格斗（拳击/MMA）盘中无比分模型——只在打完后由 winner 锁定胜方。
+    # 盘中市场只能给此精确可审计原因，绝不建立回合评分模型（CLAUDE.md §17）。
+    MMA_IN_PROGRESS_NO_MODEL = "mma_in_progress_no_model"
     # 利基事件型 prop 的精确拒绝原因（CLAUDE.md §17：每个被拒市场都要能
     # 回答"为什么不做"，泛化的 OUTCOME_NOT_LOCKED 对未建模 prop 不可审计）。
     # 总分奇偶：每进一分奇偶翻转，永不可扫尾锁定。
