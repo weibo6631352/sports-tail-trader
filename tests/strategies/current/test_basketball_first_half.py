@@ -103,7 +103,8 @@ def test_1h_moneyline_losing_side_rejected() -> None:
     m = _market(SportsMarketType.MONEYLINE, SportsMarketSide.AWAY, None, "1h-moneyline")
     ev = evaluate_tail_opportunity(game, m, policy=TailPolicy())
     assert not ev.accepted
-    assert ev.reason == TailRejectReason.OUTCOME_NOT_LOCKED.value
+    # 上半场未锁定 + 无 Goalserve 赔率差价 → Money Line 落到 no_odds_gap。
+    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
 
 
 def test_1h_spread_covered_after_halftime() -> None:

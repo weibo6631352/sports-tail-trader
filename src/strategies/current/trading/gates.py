@@ -191,7 +191,7 @@ def _tail_entry_gate(
         market_family=descriptor.market_family,
         market_slug=context.market.market_slug,
         market_end_date=context.market.end_date,
-        metadata=snapshot_metadata,
+        metadata={**snapshot_metadata, **_goalserve_odds_metadata(context)},
     )
     evaluation = evaluate_tail_opportunity(
         game,
@@ -344,6 +344,7 @@ def _tail_allocation_gate(
             market_family=descriptor.market_family,
             market_slug=snapshot.market_slug,
             market_end_date=snapshot.market.end_date,
+            metadata=_goalserve_odds_metadata(context),
         ),
         policy=policy,
         now=context.now,
@@ -506,6 +507,22 @@ def _has_open_order(snapshot: AllocationMarketSnapshot, side: OrderSide) -> bool
     """判断当前 token 是否已有开放订单，避免入场计划重复占仓。"""
 
     return any(order.side == side and order.open for order in snapshot.open_orders)
+
+
+def _goalserve_odds_metadata(context: ExtensionContext) -> dict[str, object]:
+    """从 context.metadata 抽出 Goalserve 盘口赔率，透传给 SportsMarketSnapshot。
+
+    赔率差价评估器（odds_gap.py）需要 ``goalserve_moneyline`` 的去抽水原料，但
+    evaluator 只接收 SportsMarketSnapshot；通过 snapshot.metadata 这一既有通道把
+    赔率带进纯领域评估器，避免给评估器加 Goalserve 专属参数。
+    """
+
+    odds: dict[str, object] = {}
+    for key in ("goalserve_moneyline", "goalserve_totals", "goalserve_spread"):
+        value = context.metadata.get(key)
+        if isinstance(value, dict):
+            odds[key] = value
+    return odds
 
 
 def _tail_evaluation_metadata(evaluation: TailEvaluation) -> dict[str, object]:

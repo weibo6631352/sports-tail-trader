@@ -44,6 +44,8 @@ class SportsTailOpportunityType(StrEnum):
     LIVE_TAIL = "live_tail"
     ENDED_NOT_CLOSED = "ended_not_closed"
     SCALE_IN_ADVANTAGE = "scale_in_advantage"
+    # 赔率差价入场：Goalserve 去抽水真实概率显著高于 Polymarket ask（CLAUDE.md §17）。
+    ODDS_GAP = "odds_gap"
 
 
 class TailRejectReason(StrEnum):
@@ -89,6 +91,8 @@ class TailRejectReason(StrEnum):
     RUGBY_MARKET_NOT_SUPPORTED = "rugby_market_not_supported"
     MISSING_ESPORTS_STATE = "missing_esports_state"
     ESPORTS_BEST_OF_UNKNOWN = "esports_best_of_unknown"
+    # 既不构成扫尾锁定、也没有可入场的赔率差价。
+    NO_ODDS_GAP = "no_odds_gap"
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +136,11 @@ class TailPolicy:
     mlb_eighth_moneyline_min_lead: int = 2
     mlb_ninth_moneyline_min_lead: int = 3
     min_spread_safety_margin: Decimal = Decimal("2")
+    # 赔率差价入场（odds-gap）：去抽水真实概率高出 Polymarket ask 多少才入场。
+    # 0.06 需覆盖约 3% taker 手续费 + 安全余量；低于此差价不下单。
+    odds_gap_min_edge: Decimal = Decimal("0.06")
+    # 赔率差价候选的执行权限；默认 AUTO_EXECUTE，与扫尾锁定一致走完整入场链路。
+    odds_gap_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
 
 
 @dataclass(frozen=True, slots=True)

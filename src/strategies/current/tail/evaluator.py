@@ -57,6 +57,7 @@ from .mlb import (
     _evaluate_mlb_totals,
     is_nrfi_market,
 )
+from .odds_gap import evaluate_odds_gap_opportunity
 from .esports import _evaluate_esports_moneyline, is_esports_game
 from .rugby import _evaluate_rugby_moneyline, is_rugby_game
 from .slug import _is_tennis_set_winner_market, _market_scope_reject_reason
@@ -116,6 +117,35 @@ def evaluate_tail_opportunity(
     common_reject_reason = _common_reject_reason(game, market, policy, now=now)
     if common_reject_reason:
         return _reject(candidate, common_reject_reason.value)
+
+    # 先评估扫尾锁定（结果数学锁定的确定性入场）；未命中再评估赔率差价。
+    locked_evaluation = _dispatch_tail_lock(game, market, candidate, policy)
+    if locked_evaluation.accepted:
+        return locked_evaluation
+    # 扫尾锁定未命中 → 尝试赔率差价入场（CLAUDE.md §17 的第二条入场路径）。
+    # 价格/流动性/价差门禁已在 _common_reject_reason 通过，odds-gap 直接复用——
+    # 概率性入场必须保留这些门禁以保证有退出通道。
+    odds_gap_evaluation = evaluate_odds_gap_opportunity(candidate, policy)
+    if odds_gap_evaluation.accepted:
+        return odds_gap_evaluation
+    # 两条路径都未命中：返回扫尾锁定的拒绝原因（信息量更大，含具体未锁定原因）。
+    # 仅当 Money Line 盘口的锁定原因是泛化的 OUTCOME_NOT_LOCKED 时，换成 no_odds_gap
+    # 让审计能区分"扫尾未锁 + 赔率差价也不够"。非 Money Line 保留原锁定原因。
+    if (
+        market.market_type == SportsMarketType.MONEYLINE
+        and locked_evaluation.reason == TailRejectReason.OUTCOME_NOT_LOCKED.value
+    ):
+        return odds_gap_evaluation
+    return locked_evaluation
+
+
+def _dispatch_tail_lock(
+    game: LiveGameState,
+    market: SportsMarketSnapshot,
+    candidate: SportsTailCandidate,
+    policy: TailPolicy,
+) -> TailEvaluation:
+    """按运动/盘口分派扫尾锁定评估（赔率差价之外的原确定性入场路径）。"""
 
     # 篮球上半场盘口：半场结束即由 q1+q2 锁定，独立于整场 sport 评估器。
     if market_scope(market).scope_type == SportsMarketScopeType.BASKETBALL_FIRST_HALF:

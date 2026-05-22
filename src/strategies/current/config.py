@@ -278,6 +278,12 @@ class CurrentStrategyConfig:
     tail_mlb_eighth_moneyline_min_lead: int = 2
     tail_mlb_ninth_moneyline_min_lead: int = 3
     tail_min_spread_safety_margin: Decimal = Decimal("2")
+    # 赔率差价入场（odds-gap，CLAUDE.md §17 第二条入场路径）：当 Goalserve 盘中
+    # 去抽水真实概率高出 Polymarket ask 至少此差值时入场。0.06 需覆盖约 3% taker
+    # 手续费 + 安全余量；低于此差价不下单。操盘手可经 ParameterStore override 调整。
+    tail_odds_gap_min_edge: Decimal = Decimal("0.06")
+    # 赔率差价候选执行权限；默认 AUTO_EXECUTE，与扫尾锁定一致走完整入场链路。
+    tail_odds_gap_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     # 相关性硬上限（与 Kelly 单市场 cap 互补）：单一事件 / 联赛 / 日新增 限额
     # = bankroll × fraction。bankroll 涨大时 cap 同步放大；bankroll 极小时 cap
     # 接近 0 但是用绝对 USDC floor 兜底，避免极小 bankroll 阶段每个 cap 都拒。
@@ -497,6 +503,8 @@ def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
         mlb_eighth_moneyline_min_lead=config.tail_mlb_eighth_moneyline_min_lead,
         mlb_ninth_moneyline_min_lead=config.tail_mlb_ninth_moneyline_min_lead,
         min_spread_safety_margin=config.tail_min_spread_safety_margin,
+        odds_gap_min_edge=config.tail_odds_gap_min_edge,
+        odds_gap_execution_permission=config.tail_odds_gap_execution_permission,
     )
 
 

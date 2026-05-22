@@ -91,7 +91,8 @@ def test_esports_not_locked_when_maps_below_needed() -> None:
     assert game is not None
     ev = evaluate_tail_opportunity(game, _market(SportsMarketSide.HOME), policy=TailPolicy())
     assert not ev.accepted
-    assert ev.reason == TailRejectReason.OUTCOME_NOT_LOCKED.value
+    # 系列赛未锁定 + 无 Goalserve 赔率差价 → live Money Line 落到 no_odds_gap。
+    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
 
 
 def test_esports_losing_side_not_locked() -> None:
@@ -100,7 +101,7 @@ def test_esports_losing_side_not_locked() -> None:
     assert game is not None
     ev = evaluate_tail_opportunity(game, _market(SportsMarketSide.AWAY), policy=TailPolicy())
     assert not ev.accepted
-    assert ev.reason == TailRejectReason.OUTCOME_NOT_LOCKED.value
+    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
 
 
 def test_esports_best_of_unknown_rejected() -> None:
