@@ -17,6 +17,11 @@
 
 精确拒绝类只给 distinct 的 ``TailRejectReason``；建模类走真实评估器，做
 ``Decimal`` 比分数学并返回可审计 accept/reject。
+
+识别信号：odd/even total 与 to-score-first 首选 Gamma ``sportsMarketType``
+（``basketball_odd_even`` / ``basketball_team_to_score_first``），缺失时回退
+slug 关键字。winning-margin / clean-sheet / race-to-N / draw-no-bet /
+double-chance 在真实 Gamma 数据中无对应 ``sportsMarketType``，只能用 slug。
 """
 
 from __future__ import annotations
@@ -49,11 +54,37 @@ def _slug_parts(market: SportsMarketSnapshot) -> list[str]:
     return [p for p in _slug(market).split("-") if p]
 
 
+def _normalized_type(market: SportsMarketSnapshot) -> str:
+    return (market.sports_market_type or "").strip().lower()
+
+
+# ---- sportsMarketType 前缀（首选识别信号） ----------------------------
+#
+# Polymarket Gamma 的 ``sportsMarketType`` 对部分利基 prop 家族会可靠填充，
+# 是优于 slug-后缀猜测的类型信号；下列字符串均取自真实 Gamma 数据。其余
+# 家族（winning-margin / clean-sheet / race-to-N / draw-no-bet / double-chance）
+# 当前在真实数据中无对应 ``sportsMarketType``，仍只能依赖 slug 关键字回退。
+
+# 总分奇偶：常规运动以 ``{sport}_odd_even`` 标记（如 ``basketball_odd_even``）。
+# 电竞的 ``cs2_odd_even_total_*`` / ``lol_odd_even_total_kills`` 走 esports 评估器，
+# 不进本模块，因此这里只收常规运动的 odd/even 类型。
+_ODD_EVEN_TYPES = frozenset({"basketball_odd_even"})
+
+# 首得分方：常规运动以 ``{sport}_team_to_score_first`` 标记。
+_TO_SCORE_FIRST_TYPES = frozenset({"basketball_team_to_score_first"})
+
+
 # ---- odd/even total（精确拒绝） ---------------------------------------
 
 
 def is_odd_even_total_market(market: SportsMarketSnapshot) -> bool:
-    """识别总分奇偶盘口（total points/goals odd or even）。"""
+    """识别总分奇偶盘口（total points/goals odd or even）。
+
+    首选 Gamma ``sportsMarketType``（``basketball_odd_even`` 等）——slug 拼写
+    与预期不符时仍能识别；该字段为空时回退 slug 关键字。
+    """
+    if _normalized_type(market) in _ODD_EVEN_TYPES:
+        return True
     slug = _slug(market)
     # "odd-even" / "total-odd" / "total-even" / "odd-or-even" 等常见拼法。
     return (
@@ -85,7 +116,13 @@ def is_winning_margin_market(market: SportsMarketSnapshot) -> bool:
 
 
 def is_to_score_first_market(market: SportsMarketSnapshot) -> bool:
-    """识别首个得分方盘口（to score first / first goal / first to score）。"""
+    """识别首个得分方盘口（to score first / first goal / first to score）。
+
+    首选 Gamma ``sportsMarketType``（``basketball_team_to_score_first`` 等）——
+    slug 拼写与预期不符时仍能识别；该字段为空时回退 slug 关键字。
+    """
+    if _normalized_type(market) in _TO_SCORE_FIRST_TYPES:
+        return True
     slug = _slug(market)
     return (
         "score-first" in slug

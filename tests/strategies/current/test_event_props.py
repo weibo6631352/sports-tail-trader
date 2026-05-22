@@ -39,7 +39,12 @@ def _game(home_score: int, away_score: int, status: str = "live"):
     })
 
 
-def _market(side: SportsMarketSide, slug: str) -> SportsMarketSnapshot:
+def _market(
+    side: SportsMarketSide,
+    slug: str,
+    *,
+    sports_market_type: str | None = None,
+) -> SportsMarketSnapshot:
     return SportsMarketSnapshot(
         market_type=SportsMarketType.BINARY_PROP,
         side=side,
@@ -48,6 +53,7 @@ def _market(side: SportsMarketSide, slug: str) -> SportsMarketSnapshot:
         best_ask=Decimal("0.90"),
         buyable_liquidity_usdc=Decimal("10"),
         market_slug=slug,
+        sports_market_type=sports_market_type,
     )
 
 
@@ -295,3 +301,99 @@ def test_to_score_first_precise_reject_ended_game() -> None:
     )
     assert not ev.accepted
     assert ev.reason == TailRejectReason.UNSUPPORTED_TO_SCORE_FIRST.value
+
+
+# ---- sportsMarketType 首选识别（slug 关键字漏识别时的兜底） -----------
+
+
+def test_odd_even_recognized_via_sports_market_type_when_slug_misses() -> None:
+    # slug 不含任何 odd/even 关键字，旧的纯 slug 逻辑会漏掉 → 落到泛化拒绝；
+    # Gamma sportsMarketType=basketball_odd_even 仍能精确识别。
+    game = _game(home_score=1, away_score=1)
+    assert game is not None
+    ev = evaluate_tail_opportunity(
+        game,
+        _market(
+            SportsMarketSide.YES,
+            "nba-okc-sas-2026-05-22-parity",
+            sports_market_type="basketball_odd_even",
+        ),
+        policy=TailPolicy(),
+    )
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.UNSUPPORTED_ODD_EVEN.value
+    assert ev.reason != "binary_prop_no_tail_model"
+
+
+def test_odd_even_recognized_via_slug_when_sports_market_type_null() -> None:
+    # sportsMarketType 为空时仍走 slug 关键字回退。
+    game = _game(home_score=1, away_score=1)
+    assert game is not None
+    ev = evaluate_tail_opportunity(
+        game,
+        _market(
+            SportsMarketSide.YES,
+            "epl1-ars-che-2026-05-22-total-goals-odd-even",
+            sports_market_type=None,
+        ),
+        policy=TailPolicy(),
+    )
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.UNSUPPORTED_ODD_EVEN.value
+
+
+def test_to_score_first_recognized_via_sports_market_type_when_slug_misses() -> None:
+    # slug 无首得分方关键字 → 旧 slug 逻辑漏识别；sportsMarketType 仍精确识别。
+    game = _game(home_score=1, away_score=0)
+    assert game is not None
+    ev = evaluate_tail_opportunity(
+        game,
+        _market(
+            SportsMarketSide.YES,
+            "nba-okc-sas-2026-05-22-opening-bucket",
+            sports_market_type="basketball_team_to_score_first",
+        ),
+        policy=TailPolicy(),
+    )
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.UNSUPPORTED_TO_SCORE_FIRST.value
+    assert ev.reason != "binary_prop_no_tail_model"
+
+
+def test_to_score_first_recognized_via_slug_when_sports_market_type_null() -> None:
+    # sportsMarketType 为空时仍走 slug 关键字回退。
+    game = _game(home_score=1, away_score=0)
+    assert game is not None
+    ev = evaluate_tail_opportunity(
+        game,
+        _market(
+            SportsMarketSide.YES,
+            "epl1-ars-che-2026-05-22-first-goal-home",
+            sports_market_type=None,
+        ),
+        policy=TailPolicy(),
+    )
+    assert not ev.accepted
+    assert ev.reason == TailRejectReason.UNSUPPORTED_TO_SCORE_FIRST.value
+
+
+def test_non_matching_market_not_recognized_as_event_prop() -> None:
+    # 普通胜负盘：slug 无关键字、sportsMarketType=moneyline → 不被识别为
+    # 利基 prop，不应返回 odd/even 等精确拒绝原因。
+    game = _game(home_score=1, away_score=1)
+    assert game is not None
+    ev = evaluate_tail_opportunity(
+        game,
+        _market(
+            SportsMarketSide.YES,
+            "epl1-ars-che-2026-05-22-some-binary-prop",
+            sports_market_type="moneyline",
+        ),
+        policy=TailPolicy(),
+    )
+    assert not ev.accepted
+    assert ev.reason not in {
+        TailRejectReason.UNSUPPORTED_ODD_EVEN.value,
+        TailRejectReason.UNSUPPORTED_TO_SCORE_FIRST.value,
+        TailRejectReason.UNSUPPORTED_WINNING_MARGIN.value,
+    }

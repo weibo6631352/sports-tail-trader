@@ -45,9 +45,14 @@ def _is_tennis_set_handicap_market(market: SportsMarketSnapshot) -> bool:
 
     与网球局数让分（games handicap）区分：盘分让分按盘数结算（如 -1.5 盘 =
     需 2-0 取胜），局数让分按整场总局数结算，两者锁定模型完全不同。
-    slug 出现 "set handicap" / "set spread" / "sets handicap" 视为盘分让分。
+
+    首选 Polymarket Gamma 的 ``sportsMarketType``（``tennis_set_handicap``）——
+    这是可靠的类型信号，slug 拼写若与预期不符仍能正确识别；该字段为空时
+    回退 slug 关键字（"set handicap" / "set spread" / "sets handicap"）。
     """
 
+    if (market.sports_market_type or "").strip().lower() == "tennis_set_handicap":
+        return True
     text = normalized_market_slug(market)
     return "set handicap" in text or "set spread" in text or "sets handicap" in text
 

@@ -41,9 +41,16 @@ def _game(*, best_of: int | None, home_sets_won: int, away_sets_won: int):
     })
 
 
-def _handicap_market(side: SportsMarketSide, line: str) -> SportsMarketSnapshot:
+def _handicap_market(
+    side: SportsMarketSide,
+    line: str,
+    *,
+    slug: str | None = None,
+    sports_market_type: str | None = None,
+) -> SportsMarketSnapshot:
     sign = "minus" if line.startswith("-") else "plus"
     digits = line.lstrip("+-").replace(".", "pt")
+    default_slug = f"atp-rome-alcaraz-sinner-2026-05-22-set-handicap-{sign}-{digits}"
     return SportsMarketSnapshot(
         market_type=SportsMarketType.SPREADS,
         side=side,
@@ -51,7 +58,8 @@ def _handicap_market(side: SportsMarketSide, line: str) -> SportsMarketSnapshot:
         line=Decimal(line),
         best_ask=Decimal("0.90"),
         buyable_liquidity_usdc=Decimal("20"),
-        market_slug=f"atp-rome-alcaraz-sinner-2026-05-22-set-handicap-{sign}-{digits}",
+        market_slug=slug if slug is not None else default_slug,
+        sports_market_type=sports_market_type,
     )
 
 
@@ -169,6 +177,36 @@ def test_unsupported_line_precise_reject() -> None:
     ev = evaluate_tail_opportunity(game, m, policy=TailPolicy())
     assert not ev.accepted
     assert ev.reason == TailRejectReason.TENNIS_SET_HANDICAP_LINE_UNSUPPORTED.value
+
+
+# ---- sportsMarketType 首选识别 ---------------------------------------
+
+
+def test_set_handicap_recognized_via_sports_market_type_when_slug_misses() -> None:
+    # slug 无 "set handicap" 关键字，旧的纯 slug 逻辑会漏识别 → 落到网球
+    # SPREADS 通用拒绝；Gamma sportsMarketType=tennis_set_handicap 仍能精确
+    # 识别并走盘分让分锁定评估（best-of-3 home 2-0 → 锁定 YES）。
+    game = _game(best_of=3, home_sets_won=2, away_sets_won=0)
+    assert game is not None
+    m = _handicap_market(
+        SportsMarketSide.HOME,
+        "-1.5",
+        slug="atp-rome-alcaraz-sinner-2026-05-22-sh-away-1pt5",
+        sports_market_type="tennis_set_handicap",
+    )
+    ev = evaluate_tail_opportunity(game, m, policy=TailPolicy())
+    assert ev.accepted, ev.reason
+    assert ev.reason == "tennis_set_handicap_locked_yes"
+
+
+def test_set_handicap_recognized_via_slug_when_sports_market_type_null() -> None:
+    # sportsMarketType 为空时仍走 slug 关键字回退（"set handicap"）。
+    game = _game(best_of=3, home_sets_won=2, away_sets_won=0)
+    assert game is not None
+    m = _handicap_market(SportsMarketSide.HOME, "-1.5", sports_market_type=None)
+    ev = evaluate_tail_opportunity(game, m, policy=TailPolicy())
+    assert ev.accepted, ev.reason
+    assert ev.reason == "tennis_set_handicap_locked_yes"
 
 
 def test_non_handicap_tennis_spread_still_rejected() -> None:
