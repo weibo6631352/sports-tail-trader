@@ -1,8 +1,8 @@
-"""网球 set-winner 盘口未完成盘回归测试。
+"""网球 set-winner 评估回归测试。
 
-历史 bug（实盘亏损）：set_scores 里可能是进行中的局分（如 5-2），
-_evaluate_tennis_set_winner 把它当成"该盘已完成、领先方胜"→ 在未决出的盘上
-误判锁定并下单。current_set 错位（标 2 实为 1）会让评估走到这条分支。
+策略哲学是概率博弈，不要求 100% 锁定：当前盘强局分领先（5-x，净胜 ≥2）即
+可作为概率性提前入场。但 set_scores 里进行中的局分不能被当成"该盘已完成
+胜出"——Path B（数学锁定）必须确认该盘真的打完。
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from strategies.current.tail import (
 from strategies.current.tail.types import TailPolicy
 
 
-def _game(set_scores: list, current_set: int):
+def _game(tennis_state: dict):
     return live_game_state_from_metadata({
         "league": "WTA French Open Qualification",
         "sport": "tennis",
@@ -31,12 +31,7 @@ def _game(set_scores: list, current_set: int):
         "period": "Set 1",
         "status": "live",
         "observed_at": datetime.now(timezone.utc).isoformat(),
-        "tennis_state": {
-            "home_sets_won": 0,
-            "away_sets_won": 0,
-            "current_set": current_set,
-            "set_scores": set_scores,
-        },
+        "tennis_state": tennis_state,
     })
 
 
@@ -52,17 +47,45 @@ def _first_set_winner_market(side: SportsMarketSide) -> SportsMarketSnapshot:
     )
 
 
-def test_set_winner_rejected_on_incomplete_set() -> None:
-    # set_scores 首盘 5-2（未打完），current_set 错位为 2 → 必须拒绝，不能当锁定。
-    game = _game(set_scores=[[5, 2]], current_set=2)
+def test_set_winner_accepted_on_strong_lead_in_progress() -> None:
+    # 首盘进行中、Maristany 5-2 领先（current_set=1）→ 概率性提前入场接受。
+    game = _game({
+        "current_set": 1,
+        "set_scores": [[5, 2]],
+        "home_current_set_games": 5,
+        "away_current_set_games": 2,
+        "home_sets_won": 0,
+        "away_sets_won": 0,
+    })
     assert game is not None
     ev = evaluate_tail_opportunity(game, _first_set_winner_market(SportsMarketSide.HOME), policy=TailPolicy())
-    assert not ev.accepted, f"未完成的盘不能判定 set winner 锁定；reason={ev.reason}"
+    assert ev.accepted, f"5-2 强领先应作为概率性入场被接受；reason={ev.reason}"
+    assert ev.reason == "tennis_set_winner_current_set_near_locked"
+
+
+def test_set_winner_rejected_on_weak_lead() -> None:
+    # 首盘 3-2，领先不够强、盘也没打完 → 拒绝。
+    game = _game({
+        "current_set": 1,
+        "set_scores": [[3, 2]],
+        "home_current_set_games": 3,
+        "away_current_set_games": 2,
+        "home_sets_won": 0,
+        "away_sets_won": 0,
+    })
+    assert game is not None
+    ev = evaluate_tail_opportunity(game, _first_set_winner_market(SportsMarketSide.HOME), policy=TailPolicy())
+    assert not ev.accepted
 
 
 def test_set_winner_accepted_on_completed_set() -> None:
-    # 首盘 6-2 已打完、Maristany 胜 → first-set-winner Maristany 锁定。
-    game = _game(set_scores=[[6, 2]], current_set=2)
+    # 首盘 6-2 已打完、Maristany 胜 → Path B 数学锁定。
+    game = _game({
+        "current_set": 2,
+        "set_scores": [[6, 2]],
+        "home_sets_won": 1,
+        "away_sets_won": 0,
+    })
     assert game is not None
     ev = evaluate_tail_opportunity(game, _first_set_winner_market(SportsMarketSide.HOME), policy=TailPolicy())
     assert ev.accepted, ev.reason
@@ -70,8 +93,13 @@ def test_set_winner_accepted_on_completed_set() -> None:
 
 
 def test_set_winner_rejected_when_completed_set_lost() -> None:
-    # 首盘 2-6 已打完、Maristany 输 → first-set-winner Maristany 不锁定。
-    game = _game(set_scores=[[2, 6]], current_set=2)
+    # 首盘 2-6 已打完、Maristany 输 → 不锁定。
+    game = _game({
+        "current_set": 2,
+        "set_scores": [[2, 6]],
+        "home_sets_won": 0,
+        "away_sets_won": 1,
+    })
     assert game is not None
     ev = evaluate_tail_opportunity(game, _first_set_winner_market(SportsMarketSide.HOME), policy=TailPolicy())
     assert not ev.accepted

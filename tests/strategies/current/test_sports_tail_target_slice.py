@@ -2125,7 +2125,7 @@ def test_tennis_first_set_winner_current_set_near_locked_can_enter_before_set_en
     assert decision.metadata["tail_reason"] == "tennis_set_winner_current_set_near_locked"
 
 
-def test_tennis_first_set_winner_current_set_near_locked_requires_service_point_pressure() -> None:
+def test_tennis_first_set_winner_current_set_near_locked_accepts_strong_games_lead() -> None:
     now = datetime(2026, 4, 29, 9, 29, tzinfo=timezone.utc)
     market = Market(
         condition_id="tennis-first-set-condition-no-pressure",
@@ -2181,8 +2181,9 @@ def test_tennis_first_set_winner_current_set_near_locked_requires_service_point_
         ),
     )
 
-    assert decision.action.value == "skip"
-    assert decision.reason == "tennis_not_late_enough"
+    # 5-3 强局分领先即作为概率博弈提前入场——不再强求"发球且到 40/A"。
+    assert decision.action.value == "buy"
+    assert decision.metadata["tail_reason"] == "tennis_set_winner_current_set_near_locked"
 
 
 def test_tennis_first_set_winner_current_set_near_locked_rejects_ask_above_price_cap() -> None:

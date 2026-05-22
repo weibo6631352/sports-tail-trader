@@ -461,7 +461,13 @@ def _tennis_set_winner_tail_state_reached(state: TennisGameState, market: Sports
 
 
 def _tennis_current_set_side_near_locked(state: TennisGameState, side: SportsMarketSide) -> bool:
-    """判断当前盘指定方向是否接近拿下，服务 set winner 的提前入场。"""
+    """判断当前盘指定方向是否大概率拿下，服务 set winner 的概率性提前入场。
+
+    一方在当前盘 5+ 局且净胜 ≥2（5-0..5-3）→ 距拿下该盘仅 1 局、赢盘概率约
+    90%+。扫尾要的是概率博弈而非 100% 锁定，故不再强求"发球且到 40/A"那种
+    ~97% 才放行的过度保守条件——强局分领先本身就是足够的概率信号，叠加
+    Goalserve 赔率确认（_goalserve_strong_edge_signal）与价格门控即可。
+    """
 
     if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
         return False
@@ -473,19 +479,7 @@ def _tennis_current_set_side_near_locked(state: TennisGameState, side: SportsMar
         and other_games is not None
         and side_games >= 5
         and side_games - other_games >= 2
-        and _tennis_side_has_service_point_pressure(state, side)
     )
-
-
-def _tennis_side_has_service_point_pressure(state: TennisGameState, side: SportsMarketSide) -> bool:
-    """要求目标方发球且至少到 40/A，避免只凭 5-3 局分过早抢单。"""
-
-    if state.serving_side != side.value:
-        return False
-    point = state.home_point if side == SportsMarketSide.HOME else state.away_point
-    if point is None:
-        return False
-    return point.strip().upper() in {"40", "A", "AD", "ADV", "ADVANTAGE"}
 
 
 def _tennis_set_winner_completed_for_side(
