@@ -29,7 +29,6 @@ class SportsMarketType(StrEnum):
     MONEYLINE = "moneyline"
     SPREADS = "spreads"
     BINARY_PROP = "binary_prop"
-    PLAYER_PROP = "player_prop"
 
 
 class SportsMarketFamily(StrEnum):

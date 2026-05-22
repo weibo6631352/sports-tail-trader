@@ -54,16 +54,6 @@ def select_market(config: CurrentStrategyConfig, market: Market) -> UniverseDeci
         # single_game 必须命中体育 token 才进入策略 universe，避免泛体育候选噪音。
         if not set(config.tail_category_tokens) & category_tokens:
             return UniverseDecision.exclude(reason="category_not_matched")
-        # player prop 已识别、可审计，但尚无专用评估模型，仅 record-only 排除（§9）。
-        if descriptor.market_type == SportsMarketType.PLAYER_PROP:
-            return UniverseDecision.exclude(
-                reason="player_prop_record_only",
-                metadata={
-                    "market_type_label": descriptor.market_type.value,
-                    "market_line": str(descriptor.line) if descriptor.line is not None else None,
-                    "target_count": len(descriptor.targets),
-                },
-            )
         # 分节/分局/前N局 totals（如 1st half total、1st quarter total、
         # 1st inning total）无完整结算模型，提前排除避免浪费 sizing 计算。
         if descriptor.market_type == SportsMarketType.TOTALS and is_unsupported_period_total(

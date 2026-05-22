@@ -23,44 +23,6 @@ _LINE_MARKER_PATTERN = (
     r"(?:[\s:_/-]+(?:home|away))?"
 )
 
-# 球员 prop 盘口专有统计词——出现在 over/under 盘口文本中时，说明是球员个人表现盘，
-# 而非球队整体比赛 totals。顺序无关，任意命中即视为 player prop。
-_PLAYER_STAT_KEYWORDS: tuple[str, ...] = (
-    "points",
-    "rebounds",
-    "assists",
-    "steals",
-    "blocks",
-    "turnovers",
-    "three pointers",
-    "threes",
-    "field goals",
-    "free throws",
-    "minutes",
-    "strikeouts",
-    "hits",
-    "home runs",
-    "rbis",
-    "walks",
-    "innings",
-    "passing yards",
-    "rushing yards",
-    "receiving yards",
-    "touchdowns",
-    "receptions",
-    "completions",
-    "interceptions",
-    "sacks",
-    "tackles",
-    "goals",
-    "shots on target",
-    "saves",
-    "aces",
-    "double faults",
-    "first serves",
-)
-
-
 @dataclass(frozen=True, slots=True)
 class SportsTokenTarget:
     """一个可由体育扫尾策略管理的 token 方向。"""
@@ -120,11 +82,10 @@ def describe_sports_market(market: Market) -> SportsMarketDescriptor:
     if market_type is None:
         return SportsMarketDescriptor(accepted=False, reason="unsupported_market_type")
 
-    _line_required_types = {SportsMarketType.TOTALS, SportsMarketType.SPREADS, SportsMarketType.PLAYER_PROP}
+    _line_required_types = {SportsMarketType.TOTALS, SportsMarketType.SPREADS}
     line = _market_line(text) if market_type in _line_required_types else None
-    if market_type in {SportsMarketType.TOTALS, SportsMarketType.SPREADS} and line is None:
+    if market_type in _line_required_types and line is None:
         return SportsMarketDescriptor(accepted=False, reason="missing_market_line")
-    # player prop 缺少盘口线时仍然接受（线在 outcomes label 中），不阻断解析。
 
     targets = _token_targets(market, market_type)
     if not targets:
@@ -157,13 +118,6 @@ def _market_type(market: Market, text: str) -> SportsMarketType | None:
     has_over_under_outcomes = bool({"over", "under"} & outcome_tokens) or any(
         t.startswith("over ") or t.startswith("under ") for t in outcome_tokens
     )
-    # player prop 必须先于 totals 检测：over/under + 球员统计词 → PLAYER_PROP。
-    # 不把 "total" 文本当 player prop 触发条件，避免把 "total runs/points" 团队盘口误分类。
-    # 统计词可能出现在 market 文本或 outcome 标签（如 "Over 25.5 Points"）中。
-    if has_over_under_outcomes and (
-        _is_player_prop(text) or _is_player_prop_from_outcomes(market)
-    ):
-        return SportsMarketType.PLAYER_PROP
     if has_over_under_outcomes or "total" in text or "overunder" in text:
         return SportsMarketType.TOTALS
     if "spread" in text or "handicap" in text or _has_signed_number(text):
@@ -248,7 +202,7 @@ def _token_targets(
     market: Market,
     market_type: SportsMarketType,
 ) -> tuple[SportsTokenTarget, ...]:
-    if market_type in {SportsMarketType.TOTALS, SportsMarketType.PLAYER_PROP}:
+    if market_type == SportsMarketType.TOTALS:
         return _totals_targets(market)
     if market_type == SportsMarketType.BINARY_PROP:
         return _binary_targets(market)
@@ -389,26 +343,6 @@ def _market_line(text: str) -> Decimal | None:
         return Decimal(match.group(0))
     except InvalidOperation:
         return None
-
-
-def _is_player_prop(text: str) -> bool:
-    """判断 over/under 盘口是否为球员个人表现 prop 而非球队 totals。
-
-    只在已确认有 over/under outcomes 的前提下调用。逻辑：market 文本
-    （slug/question/name/event_title）含球员统计词则为 player prop，
-    否则视为团队 totals。
-    """
-
-    padded = f" {text} "
-    return any(f" {kw} " in padded for kw in _PLAYER_STAT_KEYWORDS)
-
-
-def _is_player_prop_from_outcomes(market: Market) -> bool:
-    """补充检测：outcome 标签本身含统计词（如 'Over 25.5 Points'）。"""
-
-    all_outcome_text = " ".join(_normalize_text(o.outcome) for o in market.outcomes)
-    padded = f" {all_outcome_text} "
-    return any(f" {kw} " in padded for kw in _PLAYER_STAT_KEYWORDS)
 
 
 def _has_signed_number(text: str) -> bool:
