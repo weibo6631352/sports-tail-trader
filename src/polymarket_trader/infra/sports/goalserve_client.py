@@ -50,6 +50,17 @@ logger = logging.getLogger(__name__)
 
 _TOKEN_URL = "http://live.goalserve.com/api/v1/auth/gettoken"
 _WS_BASE_URL = "ws://live.goalserve.com/ws"
+# 不带浏览器 UA 的 gettoken 请求会被边缘 WAF 拦成 401（空 body）；带上后才进到
+# 真正的鉴权/限流逻辑。必须发送类浏览器请求头。
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Origin": "https://live.goalserve.com",
+    "Referer": "https://live.goalserve.com/",
+}
 _TOKEN_REFRESH_MARGIN_S = 300   # 过期前 5 分钟刷新
 # gettoken 失败（401/429 等）后的共享冷却：冷却期内所有 sport 直接跳过 gettoken，
 # 不再各自重试。没有这个冷却，8 个 sport 各自每 60s 重试会持续打爆 gettoken 配额。
@@ -143,8 +154,13 @@ class GoalserveClient:
 
     async def _fetch_token(self) -> tuple[str, float]:
         # trust_env=False 屏蔽系统 SOCKS 代理；proxy 显式走配置的 HTTP 代理。
+        # 必带浏览器请求头，否则被边缘 WAF 拦成 401。
         async with httpx.AsyncClient(trust_env=False, timeout=15, proxy=self._proxy) as client:
-            r = await client.post(_TOKEN_URL, json={"apiKey": self._api_key})
+            r = await client.post(
+                _TOKEN_URL,
+                json={"apiKey": self._api_key},
+                headers=_BROWSER_HEADERS,
+            )
             r.raise_for_status()
             token = r.json()["token"]
         payload_b64 = token.split(".")[1]
@@ -262,7 +278,12 @@ class GoalserveClient:
                 # live.goalserve.com 需走代理；proxy=None 时 websockets 用默认行为。
                 ws_kwargs = {"proxy": self._proxy} if self._proxy else {}
                 async with websockets.connect(
-                    url, open_timeout=15, ping_interval=30, ping_timeout=10, **ws_kwargs
+                    url,
+                    open_timeout=15,
+                    ping_interval=30,
+                    ping_timeout=10,
+                    user_agent_header=_BROWSER_HEADERS["User-Agent"],
+                    **ws_kwargs,
                 ) as ws:
                     delay = _RECONNECT_BASE_S
                     self._consecutive_errors[sport] = 0
