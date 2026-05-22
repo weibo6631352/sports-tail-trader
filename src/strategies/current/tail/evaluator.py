@@ -41,8 +41,10 @@ from .core import (
 )
 from .mlb import (
     _evaluate_mlb_moneyline,
+    _evaluate_mlb_nrfi,
     _evaluate_mlb_spreads,
     _evaluate_mlb_totals,
+    is_nrfi_market,
 )
 from .slug import _is_tennis_set_winner_market, _market_scope_reject_reason
 from .tennis import (
@@ -109,6 +111,8 @@ def evaluate_tail_opportunity(
             return _evaluate_mlb_moneyline(candidate, policy)
         if market.market_type == SportsMarketType.SPREADS:
             return _evaluate_mlb_spreads(candidate, policy)
+        if market.market_type == SportsMarketType.BINARY_PROP and is_nrfi_market(market):
+            return _evaluate_mlb_nrfi(candidate, policy)
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
 
     if is_nfl_game(game):

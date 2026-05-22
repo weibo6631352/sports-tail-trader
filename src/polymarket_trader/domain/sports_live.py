@@ -113,7 +113,11 @@ class Participant:
 
 @dataclass(frozen=True, slots=True)
 class BaseballGameState:
-    """棒球比赛当前局面。"""
+    """棒球比赛当前局面。
+
+    home_inning_runs / away_inning_runs：各局得分，下标 0 = 第 1 局。值为 None
+    表示该局尚未开始或数据缺失。供分局总分（首局、前 5 局 F5 等）盘口判定。
+    """
 
     current_inning: int | None = None
     inning_half: str | None = None
@@ -121,6 +125,8 @@ class BaseballGameState:
     offense_team: str | None = None
     defense_team: str | None = None
     occupied_bases: tuple[int, ...] = ()
+    home_inning_runs: tuple[int | None, ...] = ()
+    away_inning_runs: tuple[int | None, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

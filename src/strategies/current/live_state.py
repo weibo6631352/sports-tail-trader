@@ -179,6 +179,8 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
             "offense_team": event.baseball_state.offense_team,
             "defense_team": event.baseball_state.defense_team,
             "occupied_bases": event.baseball_state.occupied_bases,
+            "home_inning_runs": list(event.baseball_state.home_inning_runs),
+            "away_inning_runs": list(event.baseball_state.away_inning_runs),
         },
         "tennis_state": _tennis_state_metadata(event.tennis_state),
         "soccer_state": None if event.soccer_state is None else {

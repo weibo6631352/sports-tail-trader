@@ -65,6 +65,8 @@ def _candidate(game: LiveGameState, market: SportsMarketSnapshot) -> SportsTailC
                 "offense_team": game.baseball_state.offense_team,
                 "defense_team": game.baseball_state.defense_team,
                 "occupied_bases": game.baseball_state.occupied_bases,
+                "home_inning_runs": list(game.baseball_state.home_inning_runs),
+                "away_inning_runs": list(game.baseball_state.away_inning_runs),
             },
             "tennis_state": None if game.tennis_state is None else {
                 "home_sets_won": game.tennis_state.home_sets_won,

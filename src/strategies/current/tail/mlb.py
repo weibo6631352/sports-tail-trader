@@ -85,6 +85,61 @@ def _evaluate_mlb_spreads(
     return _accept(candidate, "mlb_spreads_late_cover", policy.spreads_execution_permission)
 
 
+def is_nrfi_market(market: SportsMarketSnapshot) -> bool:
+    """识别 NRFI（No Runs First Inning，首局无得分）盘口。"""
+
+    return "nrfi" in (market.market_slug or "").lower()
+
+
+def _evaluate_mlb_nrfi(
+    candidate: SportsTailCandidate,
+    policy: TailPolicy,
+) -> TailEvaluation:
+    """评估 NRFI（首局无得分）二元盘口。
+
+    NRFI=Yes：首局双方均 0 分。首局结束且确认 0 分才锁定。
+    NRFI=No：首局有任意得分。一旦某队首局得分 ≥1 即锁定（可早于首局结束）。
+    binary_prop 在通用门禁里跳过了 ask/流动性检查，这里自查入场价。
+    """
+
+    game = candidate.game
+    market = candidate.market
+    if market.side not in {SportsMarketSide.YES, SportsMarketSide.NO}:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
+    state = game.baseball_state
+    if state is None:
+        return _reject(candidate, TailRejectReason.MISSING_BASEBALL_STATE.value)
+    if market.best_ask is None:
+        return _reject(candidate, TailRejectReason.MISSING_BEST_ASK.value)
+    if market.best_ask < policy.min_entry_price:
+        return _reject(candidate, TailRejectReason.PRICE_BELOW_MIN.value)
+    if market.best_ask > policy.totals_max_entry_price:
+        return _reject(candidate, TailRejectReason.PRICE_ABOVE_MAX.value)
+    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
+        return _reject(candidate, TailRejectReason.LIQUIDITY_BELOW_MIN.value)
+
+    home1 = state.home_inning_runs[0] if state.home_inning_runs else None
+    away1 = state.away_inning_runs[0] if state.away_inning_runs else None
+    first_inning_complete = (state.current_inning or 0) > 1
+
+    # NRFI No：确认有得分即锁定（数据须真实存在，缺失不算）。
+    scored = (home1 is not None and home1 >= 1) or (away1 is not None and away1 >= 1)
+    if scored:
+        if market.side == SportsMarketSide.NO:
+            return _accept(candidate, "mlb_nrfi_no_locked", policy.totals_execution_permission)
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+    # NRFI Yes：首局结束 + 双方首局得分数据齐全且均为 0 才锁定。
+    if first_inning_complete:
+        if home1 is None or away1 is None:
+            return _reject(candidate, TailRejectReason.MISSING_BASEBALL_STATE.value)
+        if market.side == SportsMarketSide.YES:
+            return _accept(candidate, "mlb_nrfi_yes_locked", policy.totals_execution_permission)
+        return _reject(candidate, TailRejectReason.OUTCOME_NOT_LOCKED.value)
+
+    return _reject(candidate, TailRejectReason.BASEBALL_FIRST_INNING_NOT_COMPLETE.value)
+
+
 def _mlb_tail_state_reached(
     game: LiveGameState,
     market: SportsMarketSnapshot,

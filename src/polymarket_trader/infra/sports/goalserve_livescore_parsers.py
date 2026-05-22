@@ -1076,6 +1076,19 @@ def _parse_hockey_with_cats(scores: dict[str, Any], observed_at: datetime) -> li
 # ---------------------------------------------------------------------------
 
 
+def _baseball_inning_runs(team: dict[str, Any]) -> tuple[int | None, ...]:
+    """从 localteam/awayteam 的 in1..in9 属性提取各局得分。
+
+    空字符串（该局未开始）→ None。供分局盘口（NRFI 等）判定。
+    """
+    runs: list[int | None] = []
+    for i in range(1, 10):
+        raw = team.get(f"in{i}")
+        text = "" if raw is None else str(raw).strip()
+        runs.append(int(text) if text.lstrip("-").isdigit() else None)
+    return tuple(runs)
+
+
 def _baseball_state_from_match(match: dict[str, Any]) -> BaseballGameState:
     """从 XML 转换后的 dict 提取 BaseballGameState。
 
@@ -1099,9 +1112,13 @@ def _baseball_state_from_match(match: dict[str, Any]) -> BaseballGameState:
         half = "top"
     elif "bot" in status_raw or "bottom" in status_raw:
         half = "bottom"
+    home_team = match.get("localteam") or match.get("hometeam") or {}
+    away_team = match.get("awayteam") or {}
     return BaseballGameState(
         current_inning=inning,
         inning_half=half,
+        home_inning_runs=_baseball_inning_runs(home_team if isinstance(home_team, dict) else {}),
+        away_inning_runs=_baseball_inning_runs(away_team if isinstance(away_team, dict) else {}),
     )
 
 

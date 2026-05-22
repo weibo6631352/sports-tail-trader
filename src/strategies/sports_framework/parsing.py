@@ -103,7 +103,16 @@ def _baseball_state(value: object) -> BaseballGameState | None:
         offense_team=_opt_str(value, "offense_team"),
         defense_team=_opt_str(value, "defense_team"),
         occupied_bases=occupied_bases,
+        home_inning_runs=_inning_runs(value.get("home_inning_runs")),
+        away_inning_runs=_inning_runs(value.get("away_inning_runs")),
     )
+
+
+def _inning_runs(value: object) -> tuple[int | None, ...]:
+    """从 metadata 重建各局得分元组；非列表返回空元组。"""
+    if not isinstance(value, (tuple, list)):
+        return ()
+    return tuple(_optional_int(item) for item in value)
 
 
 def _tennis_state(value: object) -> TennisGameState | None:

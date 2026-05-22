@@ -73,6 +73,7 @@ class TailRejectReason(StrEnum):
     BASEBALL_NOT_LATE_ENOUGH = "baseball_not_late_enough"
     BASEBALL_THREAT_ON_BASE = "baseball_threat_on_base"
     BASEBALL_OFFENSE_NOT_TRAILING = "baseball_offense_not_trailing"
+    BASEBALL_FIRST_INNING_NOT_COMPLETE = "baseball_first_inning_not_complete"
     MISSING_TENNIS_STATE = "missing_tennis_state"
     TENNIS_NOT_LATE_ENOUGH = "tennis_not_late_enough"
     TENNIS_TOTALS_UNDER_NOT_SUPPORTED = "tennis_totals_under_not_supported"
