@@ -9,7 +9,7 @@ race 走 leader_driver / top-3 driver / event_name 关键字命中。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 import re
 import unicodedata
@@ -611,7 +611,24 @@ def best_live_match(
     if not matches:
         return None
     # 按 confidence 排序：team-pair 优先，但高 confidence 的 race 也能击败低 confidence team。
-    return max(matches, key=lambda item: (item.confidence, item.score))
+    best = max(matches, key=lambda item: (item.confidence, item.score))
+    # 胜出事件常来自 livescore（无盘中赔率）。inplay WS 事件带 goalserve_odds，但
+    # 两源名字格式不同（全名 vs 缩写名）在 aggregate 融合时分不到一组。这里用
+    # "同样匹配到该 market" 这一事实把 inplay 赔率接到胜出事件上——不放松任何
+    # 匹配门槛，只复用已匹配同一 market 的 inplay 事件的赔率。
+    if not best.event.source_payload.get("goalserve_odds"):
+        for candidate in matches:
+            odds = candidate.event.source_payload.get("goalserve_odds")
+            if odds:
+                best = replace(
+                    best,
+                    event=replace(
+                        best.event,
+                        source_payload={**best.event.source_payload, "goalserve_odds": odds},
+                    ),
+                )
+                break
+    return best
 
 
 def build_live_state_match(
