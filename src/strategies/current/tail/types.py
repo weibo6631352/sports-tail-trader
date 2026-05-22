@@ -101,6 +101,14 @@ class TailRejectReason(StrEnum):
     RUGBY_MARKET_NOT_SUPPORTED = "rugby_market_not_supported"
     MISSING_ESPORTS_STATE = "missing_esports_state"
     ESPORTS_BEST_OF_UNKNOWN = "esports_best_of_unknown"
+    # 利基事件型 prop 的精确拒绝原因（CLAUDE.md §17：每个被拒市场都要能
+    # 回答"为什么不做"，泛化的 OUTCOME_NOT_LOCKED 对未建模 prop 不可审计）。
+    # 总分奇偶：每进一分奇偶翻转，永不可扫尾锁定。
+    UNSUPPORTED_ODD_EVEN = "unsupported_odd_even"
+    # 精确净胜分桶：终场前净胜分仍可变，不可干净锁定。
+    UNSUPPORTED_WINNING_MARGIN = "unsupported_winning_margin"
+    # 首个得分方：归一化直播模型不携带首得分方/进球时间线，缺数据不臆测。
+    UNSUPPORTED_TO_SCORE_FIRST = "unsupported_to_score_first"
     # 既不构成扫尾锁定、也没有可入场的赔率差价。
     NO_ODDS_GAP = "no_odds_gap"
     # totals/spread 赔率差价：Goalserve 盘口线/范围与 Polymarket 市场不一致，

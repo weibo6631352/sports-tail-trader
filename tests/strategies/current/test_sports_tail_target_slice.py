@@ -209,7 +209,9 @@ def test_single_game_binary_props_are_rejected_until_specific_model_exists() -> 
         best_ask=Decimal("0.20"),
         buyable_liquidity_usdc=Decimal("20"),
         market_family=SportsMarketFamily.SINGLE_GAME,
-        market_slug="soccer-ars-che-2026-04-30-first-goal-yes-no",
+        # 未被任何专用模型/精确识别覆盖的 binary prop——验证 tail evaluator
+        # 仍显式 reject 而非 pass-through（保留泛化 fallback 分支）。
+        market_slug="soccer-ars-che-2026-04-30-red-card-shown-yes-no",
         market_end_date=datetime(2026, 4, 27, 0, 30, tzinfo=timezone.utc),
     )
 

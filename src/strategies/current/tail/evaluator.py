@@ -61,6 +61,11 @@ from .mlb import (
 )
 from .odds_gap import evaluate_odds_gap_opportunity
 from .esports import _evaluate_esports_moneyline, is_esports_game
+from .event_props import (
+    evaluate_event_prop,
+    event_prop_reject_reason,
+    is_modeled_event_prop_market,
+)
 from .rugby import _evaluate_rugby_moneyline, is_rugby_game
 from .slug import (
     _is_tennis_set_handicap_market,
@@ -180,6 +185,19 @@ def _dispatch_tail_lock(
         )
         return _reject(candidate, reason.value)
 
+    # 利基事件型 prop（零封/race-to-N/平局退款/双重机会/总分奇偶/净胜分桶/
+    # 首得分方）跨运动通用（race-to-N 见于篮球、odd/even 见于棒球等）。先于
+    # MLB / rugby 等体育专属 binary_prop 分支识别，避免被它们的
+    # UNSUPPORTED_MARKET_TYPE 兜底吞掉具体的可审计原因（CLAUDE.md §17）。
+    # NRFI / 足球 BTTS / 半场赛果 / 精确比分 / 胜负盘的 slug 标记与本组互不
+    # 重叠，不受影响。
+    if market.market_type == SportsMarketType.BINARY_PROP:
+        precise_reject = event_prop_reject_reason(market)
+        if precise_reject is not None:
+            return _reject(candidate, precise_reject.value)
+        if is_modeled_event_prop_market(market):
+            return evaluate_event_prop(candidate, policy)
+
     if is_mlb_game(game):
         if market.market_type == SportsMarketType.TOTALS:
             return _evaluate_mlb_totals(candidate, policy)
@@ -217,6 +235,9 @@ def _dispatch_tail_lock(
         return _evaluate_soccer_exact_score(candidate, policy)
 
     if market.market_type == SportsMarketType.BINARY_PROP:
+        # 利基事件型 prop 已在分派开头识别处理；走到这里的 binary_prop 既不属于
+        # 任何体育专属 prop（NRFI/BTTS/半场/精确比分/胜负盘），也不属于已建模
+        # 或精确拒绝的事件 prop——仍无专用模型，给泛化兜底原因。
         return _reject(candidate, "binary_prop_no_tail_model")
 
     # esports 胜负盘是 2-way MONEYLINE，但锁定模型是 best-of 局数而非比分/剩余时间——
@@ -327,6 +348,14 @@ def _evaluate_ended_not_closed(
         return _evaluate_ended_moneyline(candidate, policy)
     if market.market_type == SportsMarketType.SPREADS:
         return _evaluate_ended_spreads(candidate, policy)
+    # 利基事件型 prop 多在比赛结束才锁定（零封 YES / 平局退款 / 双重机会）——
+    # ENDED 路径同样要分派到事件 prop 评估器，否则会被泛化原因误拒。
+    if market.market_type == SportsMarketType.BINARY_PROP:
+        precise_reject = event_prop_reject_reason(market)
+        if precise_reject is not None:
+            return _reject(candidate, precise_reject.value)
+        if is_modeled_event_prop_market(market):
+            return evaluate_event_prop(candidate, policy)
     return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
 
 
@@ -390,6 +419,11 @@ def _market_data_reject_reason(
 
     if _has_score_conflict(game):
         return TailRejectReason.LIVE_SOURCE_CONFLICT
+    # BINARY_PROP 无传统盘口价格结构（_max_entry_price 对其返回 0），与
+    # _common_reject_reason 保持一致跳过 ask/流动性检查；价格门禁由事件
+    # prop 评估器用 _binary_prop_price_reject 自查。
+    if market.market_type == SportsMarketType.BINARY_PROP:
+        return None
     if market.best_ask is None:
         return TailRejectReason.MISSING_BEST_ASK
     if market.best_ask < policy.min_entry_price:
