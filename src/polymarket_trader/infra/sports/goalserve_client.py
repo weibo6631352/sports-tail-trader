@@ -67,6 +67,8 @@ _TOKEN_REFRESH_MARGIN_S = 300   # 过期前 5 分钟刷新
 _TOKEN_FAILURE_COOLDOWN_S = 600
 _RECONNECT_BASE_S = 5.0
 _RECONNECT_MAX_S = 60.0
+# 某运动 WS 返回 403（inplay 未授权该运动）后的长退避：重试无用，避免刷屏。
+_SPORT_FORBIDDEN_BACKOFF_S = 1800.0
 _STALE_THRESHOLD_S = 30.0       # 超过此时间无消息视为源失活
 
 # stp 终态：ENDED=3, POSTPONED=4, CANCELLED=5
@@ -309,6 +311,18 @@ class GoalserveClient:
                             # 仍能看到历史 gettoken 次数与失败。
                             self._persist_token_record()
                     logger.warning("goalserve: WS 401 for %s, forcing token refresh", sport)
+                elif exc.response.status_code == 403:
+                    # 403 = 该运动 inplay 未授权（per-sport 订阅）。重试无用，
+                    # 长退避避免每 60s 刷屏；若日后开通订阅会自动恢复。
+                    err = self._consecutive_errors.get(sport, 0) + 1
+                    self._consecutive_errors[sport] = err
+                    logger.warning(
+                        "goalserve: WS 403 for %s — sport not authorized for inplay; "
+                        "backing off %ds (err#%d)",
+                        sport, _SPORT_FORBIDDEN_BACKOFF_S, err,
+                    )
+                    await asyncio.sleep(_SPORT_FORBIDDEN_BACKOFF_S)
+                    continue
                 else:
                     err = self._consecutive_errors.get(sport, 0) + 1
                     self._consecutive_errors[sport] = err
