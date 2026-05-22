@@ -350,11 +350,17 @@ def _market_end_too_far(
     优先用比赛剩余时间估算实际结算窗口：Polymarket end_date 对季后赛/系列赛
     市场经常是系列结算日期，不等于单场封盘时间。已结束的比赛只等结算缓冲，
     不受 end_date 限制。无比赛状态时才退回 end_date 兜底。
+
+    网球无固定时长：end_date 是赛事轮次截止日（通常数天后），与单场比赛何时
+    结束无关；match-level 时间窗由网球评估器的尾盘条件（set/game 进度）决定，
+    此处直接放行。
     """
     if policy.max_market_end_seconds <= 0:
         return False
     if game is not None:
         if game.status == LiveGameStatus.ENDED:
+            return False
+        if is_tennis_game(game):
             return False
         if game.status == LiveGameStatus.LIVE and game.seconds_remaining is not None:
             return game.seconds_remaining > policy.max_market_end_seconds
