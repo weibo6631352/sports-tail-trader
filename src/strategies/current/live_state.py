@@ -1052,7 +1052,10 @@ def _normalize_sport_code(value: str) -> str:
     normalized = value.replace("_", "-").replace(" ", "-")
     if normalized in {"soccer"}:
         return "football"
-    if normalized in {"icehockey"}:
+    # Goalserve livescore parser 用 "hockey" 标记冰球；规范码统一为 "ice-hockey"
+    # （_market_sport_codes 也用 "ice-hockey"）。漏掉这一映射会让所有 NHL 市场的
+    # 冰球直播事件在运动类型预过滤中被丢弃，整类比赛拿不到 live state。
+    if normalized in {"icehockey", "hockey"}:
         return "ice-hockey"
     if normalized in {"tabletennis"}:
         return "table-tennis"
