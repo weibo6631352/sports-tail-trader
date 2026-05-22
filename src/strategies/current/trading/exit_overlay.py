@@ -31,18 +31,18 @@ _MIN_HOLD_HOURS = Decimal("0.05")  # 3 分钟
 # 模块级状态：进程内跨决策周期累积；测试用 reset_dynamic_exit_peaks() 清空。
 _dynamic_exit_peaks: dict[tuple[str, str], Decimal] = {}
 
-# 每个持仓的 bid 深度峰值跟踪：键 (condition_id, token_id) → 历史最高 bid depth。
-# bid depth = best_bid 下方一个带宽区间内所有 bid 档位的 USDC 名义额之和，
-# 代表买方力量。当前深度从峰值显著坍缩 → 买方撤离 → 触发提前止盈。
+# 每个持仓的双侧深度失衡比峰值跟踪：键 (condition_id, token_id) → 历史最高
+# 失衡比。失衡比 = bid depth /（bid depth + ask depth），>0.5 买方占优。
+# 当前失衡比从峰值向卖方倾斜显著下降 → 买方撤离 + 卖方堆单 → 风向逆转。
 # 模块级状态：进程内跨决策周期累积；测试用 reset_dynamic_exit_peaks() 清空。
-_dynamic_exit_depth_peaks: dict[tuple[str, str], Decimal] = {}
+_dynamic_exit_imbalance_peaks: dict[tuple[str, str], Decimal] = {}
 
 
 def reset_dynamic_exit_peaks() -> None:
-    """清空 best bid 与 bid 深度峰值跟踪表。仅供测试隔离用——均为模块级累积状态。"""
+    """清空 best bid 与失衡比峰值跟踪表。仅供测试隔离用——均为模块级累积状态。"""
 
     _dynamic_exit_peaks.clear()
-    _dynamic_exit_depth_peaks.clear()
+    _dynamic_exit_imbalance_peaks.clear()
 
 
 def previous_peak(key: tuple[str, str]) -> Decimal | None:
@@ -60,18 +60,18 @@ def observe_peak(key: tuple[str, str], bid: Decimal) -> Decimal:
     return peak
 
 
-def previous_depth_peak(key: tuple[str, str]) -> Decimal | None:
-    """读取该持仓此前观察到的 bid 深度峰值；从未观察过返回 None。"""
+def previous_imbalance_peak(key: tuple[str, str]) -> Decimal | None:
+    """读取该持仓此前观察到的双侧深度失衡比峰值；从未观察过返回 None。"""
 
-    return _dynamic_exit_depth_peaks.get(key)
+    return _dynamic_exit_imbalance_peaks.get(key)
 
 
-def observe_depth_peak(key: tuple[str, str], depth: Decimal) -> Decimal:
-    """记录一次 bid 深度观察，返回更新后的峰值 = max(此前峰值, 本次 depth)。"""
+def observe_imbalance_peak(key: tuple[str, str], imbalance: Decimal) -> Decimal:
+    """记录一次失衡比观察，返回更新后的峰值 = max(此前峰值, 本次失衡比)。"""
 
-    prev = _dynamic_exit_depth_peaks.get(key)
-    peak = depth if prev is None or depth > prev else prev
-    _dynamic_exit_depth_peaks[key] = peak
+    prev = _dynamic_exit_imbalance_peaks.get(key)
+    peak = imbalance if prev is None or imbalance > prev else prev
+    _dynamic_exit_imbalance_peaks[key] = peak
     return peak
 
 
@@ -125,6 +125,26 @@ def _bid_depth_within_band(
     floor_price = best_bid * (Decimal("1") - band_fraction)
     return sum(
         (level.price * level.size for level in bids if level.price >= floor_price),
+        Decimal("0"),
+    )
+
+
+def _ask_depth_within_band(
+    asks: tuple[PriceLevel, ...],
+    best_ask: Decimal | None,
+    band_fraction: Decimal,
+) -> Decimal:
+    """统计 best_ask 上方 ``band_fraction`` 价格区间内所有 ask 档位的 USDC 名义额。
+
+    名义额 = Σ price × size，作为"卖方力量"代理：区间内挂单越多，卖方越厚。
+    无 ask（best_ask 为 None）时返回 0——卖方力量为 0。
+    """
+
+    if best_ask is None:
+        return Decimal("0")
+    ceil_price = best_ask * (Decimal("1") + band_fraction)
+    return sum(
+        (level.price * level.size for level in asks if level.price <= ceil_price),
         Decimal("0"),
     )
 
@@ -224,12 +244,16 @@ def evaluate_dynamic_exit(
     is_new_high = prev_peak is None or realized_avg >= prev_peak
     peak = observe_peak(peak_key, realized_avg)
 
-    # bid 深度跟踪：统计 best_bid 下方带宽内 bid 名义额，记录其峰值。
-    bid_depth = _bid_depth_within_band(
-        orderbook.bids, best_bid, config.tail_dynamic_exit_depth_band_fraction
-    )
-    prev_depth_peak = previous_depth_peak(peak_key)
-    depth_peak = observe_depth_peak(peak_key, bid_depth)
+    # 双侧深度跟踪：统计最优价上下带宽内 bid / ask 名义额，算失衡比并记录峰值。
+    # 失衡比 = bid /（bid+ask），>0.5 买方占优、<0.5 卖方占优；双侧皆空时取
+    # 0.5（中性，不产生信号）。
+    band = config.tail_dynamic_exit_depth_band_fraction
+    bid_depth = _bid_depth_within_band(orderbook.bids, best_bid, band)
+    ask_depth = _ask_depth_within_band(orderbook.asks, orderbook.best_ask, band)
+    total_depth = bid_depth + ask_depth
+    imbalance = bid_depth / total_depth if total_depth > Decimal("0") else Decimal("0.5")
+    prev_imbalance_peak = previous_imbalance_peak(peak_key)
+    imbalance_peak = observe_imbalance_peak(peak_key, imbalance)
 
     stop_loss_threshold = entry_price * config.tail_dynamic_exit_stop_loss_fraction
     metadata: dict[str, object] = {
@@ -240,7 +264,9 @@ def evaluate_dynamic_exit(
         "dynamic_exit_slippage_fraction": _decimal_metadata_text(slippage_fraction),
         "dynamic_exit_position_shares": str(position_shares),
         "dynamic_exit_bid_depth_usdc": _decimal_metadata_text(bid_depth),
-        "dynamic_exit_bid_depth_peak_usdc": _decimal_metadata_text(depth_peak),
+        "dynamic_exit_ask_depth_usdc": _decimal_metadata_text(ask_depth),
+        "dynamic_exit_depth_imbalance": _decimal_metadata_text(imbalance),
+        "dynamic_exit_depth_imbalance_peak": _decimal_metadata_text(imbalance_peak),
         "dynamic_exit_fair_value": str(fair_value),
         "dynamic_exit_fair_value_source": fair_value_source,
         "dynamic_exit_entry_price": str(entry_price),
@@ -341,21 +367,16 @@ def evaluate_dynamic_exit(
             },
         )
 
-    # 7. bid 深度坍缩：浮盈中且当前 bid depth 跌破峰值的 thinning_fraction →
-    #    买方正在撤离，抢在 bid 簿进一步枯竭前兑现浮盈。
+    # 7. 双侧深度失衡反转：浮盈中且失衡比从峰值向卖方倾斜下降达 reversal_drop
+    #    → 买方在撤、卖方在堆（风向逆转），抢在价格被砸下来前按逐档价兑现。
     in_profit = realized_avg > entry_price
-    depth_thinning_threshold = (
-        depth_peak * config.tail_dynamic_exit_depth_thinning_fraction
-        if prev_depth_peak is not None
-        else None
+    imbalance_reversal = (
+        prev_imbalance_peak is not None
+        and (imbalance_peak - imbalance) >= config.tail_dynamic_exit_imbalance_reversal_drop
     )
-    if (
-        in_profit
-        and depth_thinning_threshold is not None
-        and bid_depth < depth_thinning_threshold
-    ):
+    if in_profit and imbalance_reversal:
         if book_too_thin:
-            return _await_depth_decision("depth_thinning")
+            return _await_depth_decision("depth_imbalance_reversal")
         return DynamicExitDecision(
             should_exit=True,
             exit_price=clearing_price,
@@ -363,7 +384,7 @@ def evaluate_dynamic_exit(
             metadata={
                 **metadata,
                 "dynamic_exit_decision": "take_profit",
-                "dynamic_exit_trigger": "depth_thinning",
+                "dynamic_exit_trigger": "depth_imbalance_reversal",
             },
         )
 

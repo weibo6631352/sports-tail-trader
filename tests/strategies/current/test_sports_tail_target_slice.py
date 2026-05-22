@@ -4252,14 +4252,16 @@ def test_dynamic_exit_stop_loss_still_exits_on_thin_book() -> None:
     assert decision.price == Decimal("0.12")
 
 
-def test_dynamic_exit_takes_profit_when_bid_depth_collapses() -> None:
-    """深度坍缩止盈：浮盈中 bid depth 跌破峰值一半 → 抢在 bid 枯竭前兑现。"""
+def test_dynamic_exit_takes_profit_on_depth_imbalance_reversal() -> None:
+    """双侧深度失衡反转止盈：浮盈中失衡比从峰值向卖方倾斜下降 ≥0.20
+    （买方撤离 + 卖方堆单 = 风向逆转）→ 抢在价格被砸下来前兑现。"""
 
     reset_dynamic_exit_peaks()
     market = _totals_market().with_tick_size(Decimal("0.01"))
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
-    # 第一周期：best bid 0.85，顶档 100 股 → bid depth ≈ 85（峰值）。创新高 HOLD。
+    # 第一周期：bid 厚(100@0.85)、ask 薄(10@0.87) → 失衡比 ≈ 0.91（买方占优、
+    # 峰值）。realized_avg 0.85 创新高 → HOLD。
     strategy.decide_exit(
         _dynamic_exit_context(
             market,
@@ -4268,26 +4270,27 @@ def test_dynamic_exit_takes_profit_when_bid_depth_collapses() -> None:
                 best_bid=Decimal("0.85"),
                 best_ask=Decimal("0.87"),
                 bids=(PriceLevel(price=Decimal("0.85"), size=Decimal("100")),),
+                asks=(PriceLevel(price=Decimal("0.87"), size=Decimal("10")),),
             ),
-            trace_id="trace-dynamic-depth-1",
+            trace_id="trace-dynamic-imbalance-1",
             cost_usdc=Decimal("5.10"),
         )
     )
 
-    # 第二周期：best bid 0.84，顶档仅 20 股（吃 10 股无滑点，簿不薄）→
-    # bid depth = 0.84×20 = 16.8 < 峰值 85×0.5 = 42.5 → 买方撤离。
-    # 0.84 非新高、回撤 (0.85-0.84) 仅 1.2% < 4% 不触 trailing_reversal、
-    # 浮盈中 → depth_thinning 止盈。
+    # 第二周期：bid 转薄(20@0.84)、ask 转厚(100@0.85) → 失衡比 ≈ 0.16，较
+    # 峰值 0.91 下降 ≈0.75 ≥ 0.20 → 风向逆转。realized_avg 0.84 非新高、回撤
+    # 仅 1.2% < 4% 不触 trailing、浮盈中、簿不薄 → 失衡反转止盈。
     decision = strategy.decide_exit(
         _dynamic_exit_context(
             market,
             _dynamic_exit_orderbook(
                 market,
                 best_bid=Decimal("0.84"),
-                best_ask=Decimal("0.86"),
+                best_ask=Decimal("0.85"),
                 bids=(PriceLevel(price=Decimal("0.84"), size=Decimal("20")),),
+                asks=(PriceLevel(price=Decimal("0.85"), size=Decimal("100")),),
             ),
-            trace_id="trace-dynamic-depth-2",
+            trace_id="trace-dynamic-imbalance-2",
             cost_usdc=Decimal("5.10"),
         )
     )
@@ -4295,7 +4298,7 @@ def test_dynamic_exit_takes_profit_when_bid_depth_collapses() -> None:
     assert decision.action.value == "sell"
     assert decision.reason == "dynamic_exit_take_profit"
     assert decision.metadata["dynamic_exit_decision"] == "take_profit"
-    assert decision.metadata["dynamic_exit_trigger"] == "depth_thinning"
+    assert decision.metadata["dynamic_exit_trigger"] == "depth_imbalance_reversal"
     assert decision.price == Decimal("0.84")
 
 

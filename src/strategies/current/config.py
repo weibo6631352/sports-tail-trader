@@ -94,13 +94,16 @@ class CurrentStrategyConfig:
             此时非紧急止盈分支改为 HOLD 等深度回补，不把仓位砸进薄簿。
             止损紧急分支不受此约束（割肉优先于滑点）。默认 0.03。
         tail_dynamic_exit_depth_band_fraction:
-            bid 深度统计带宽。bid depth = best_bid 下方此比例区间内所有
-            bid 档位的 USDC 名义额之和，用作"买方力量"代理。默认 0.05
-            （统计 best_bid 下方 5% 价格区间内的 bid 名义额）。
-        tail_dynamic_exit_depth_thinning_fraction:
-            bid 深度坍缩阈值。持仓浮盈时，若当前 bid depth 跌到历史峰值的
-            此比例以下（买方在撤离），主动按逐档撮合价兑现浮盈，抢在 bid
-            进一步枯竭前锁定收益。默认 0.5（深度跌破峰值一半即兑现）。
+            双侧深度统计带宽。bid depth = best_bid 下方此比例区间内所有 bid
+            档位的 USDC 名义额之和（买方力量）；ask depth = best_ask 上方同
+            比例区间内所有 ask 档位名义额之和（卖方力量）。默认 0.05
+            （统计最优价上下 5% 价格区间内的双侧名义额）。
+        tail_dynamic_exit_imbalance_reversal_drop:
+            双侧深度失衡反转阈值。失衡比 = bid depth /（bid depth + ask
+            depth），∈[0,1]，>0.5 买方占优、<0.5 卖方占优。持仓浮盈时若失衡
+            比从历史峰值向卖方倾斜下降达此值（买方撤离 + 卖方堆单 = 风向
+            逆转），主动按逐档撮合价兑现浮盈，抢在价格被砸下来前锁定收益。
+            默认 0.20（失衡比从峰值跌 0.20 即判定风向逆转）。
         min_liquidity_usdc:
             允许入场前要求达到的最小盘口深度，单位是 USDC。
         max_spread:
@@ -360,12 +363,12 @@ class CurrentStrategyConfig:
     # (best_bid - realized_avg)/best_bid 超过此值或 bid 簿吃不完全部份额，
     # 非紧急止盈分支 HOLD 等深度回补，不把仓位砸进薄簿吃滑点（CLAUDE.md §17）。
     tail_dynamic_exit_max_slippage_fraction: Decimal = Decimal("0.03")
-    # bid 深度统计带宽：bid depth = best_bid 下方此比例区间内 bid 档位的 USDC
-    # 名义额之和，作为买方力量代理。0.05 = 统计 best_bid 下方 5% 价格区间。
+    # 双侧深度统计带宽：bid/ask depth = 最优价上下此比例区间内各档位 USDC
+    # 名义额之和，分别作买方/卖方力量代理。0.05 = 最优价上下 5% 价格区间。
     tail_dynamic_exit_depth_band_fraction: Decimal = Decimal("0.05")
-    # bid 深度坍缩阈值：持仓浮盈时 bid depth 跌破历史峰值的此比例即判定买方
-    # 撤离，主动按逐档撮合价兑现浮盈。0.5 = 深度跌破峰值一半即兑现。
-    tail_dynamic_exit_depth_thinning_fraction: Decimal = Decimal("0.5")
+    # 双侧深度失衡反转阈值：失衡比 = bid /（bid+ask）depth；持仓浮盈时失衡比
+    # 从峰值向卖方倾斜下降达此值即判风向逆转，按逐档撮合价兑现。0.20。
+    tail_dynamic_exit_imbalance_reversal_drop: Decimal = Decimal("0.20")
     tail_entry_maker_max_resting_seconds: int = 60
     tail_settlement_hold_minutes: int = 180
     # 比赛结束后等待 Polymarket 权威结算的缓冲时间（分钟）。
