@@ -396,3 +396,48 @@ def test_baseball_state_carried_from_secondary_source() -> None:
     assert fused.baseball_state.current_inning == 7
     assert fused.baseball_state.inning_half == "top"
     assert fused.baseball_state.outs == 2
+
+
+def test_goalserve_odds_carried_from_inplay_source() -> None:
+    """inplay 赔率（source_payload.goalserve_odds）必须在融合后保留，
+
+    即使带赔率的 inplay 事件不是主源——livescore 通常权重更高抢主源，但它无赔率。
+    """
+    from dataclasses import replace
+
+    odds = {"moneyline": {"home_implied_prob": "0.62", "away_implied_prob": "0.40"}}
+
+    gs = replace(
+        _make_event(
+            source="goalserve",
+            source_event_id="gs-1",
+            status=SportsLiveGameStatus.LIVE,
+            home_score=2,
+            away_score=1,
+            league="EPL",
+            sport="soccer",
+            home_name="Arsenal",
+            away_name="Chelsea",
+            home_short="Arsenal",
+            away_short="Chelsea",
+        ),
+        source_payload={"goalserve_odds": odds},
+    )
+    ls = _make_event(
+        source="goalserve_livescore",
+        source_event_id="ls-1",
+        status=SportsLiveGameStatus.LIVE,
+        home_score=2,
+        away_score=1,
+        league="EPL",
+        sport="soccer",
+        home_name="Arsenal",
+        away_name="Chelsea",
+        home_short="Arsenal",
+        away_short="Chelsea",
+    )
+
+    snapshot = asyncio.run(_run_two_sources(gs, ls))
+
+    fused = snapshot.events[0]
+    assert fused.source_payload.get("goalserve_odds") == odds

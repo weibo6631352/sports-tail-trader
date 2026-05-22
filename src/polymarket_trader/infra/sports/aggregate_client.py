@@ -277,6 +277,17 @@ class SportsLiveAggregateClient:
                     baseball_state = member.baseball_state
                     break
 
+        # 主源缺少 inplay 赔率（goalserve_odds 在 source_payload）时，从有该字段的
+        # 成员补充。inplay WS 源带赔率，但 livescore 源通常权重更高抢到主源——
+        # 融合时不补充会丢掉盘中赔率，使赔率差价/边际确认拿不到数据。
+        source_payload = primary.source_payload
+        if not source_payload.get("goalserve_odds"):
+            for member in sorted(members, key=lambda e: self._weight(e, league), reverse=True):
+                member_odds = member.source_payload.get("goalserve_odds")
+                if member_odds:
+                    source_payload = {**source_payload, "goalserve_odds": member_odds}
+                    break
+
         contributing = tuple(sorted({m.source for m in members}))
         all_conflicts = (*primary.source_conflicts, *status_conflicts, *score_conflicts)
 
@@ -289,6 +300,7 @@ class SportsLiveAggregateClient:
             external_ids=merged_ids,
             contributing_sources=contributing,
             source_conflicts=all_conflicts,
+            source_payload=source_payload,
         )
 
     def _fuse_status(
