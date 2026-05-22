@@ -60,13 +60,17 @@ _SPORT_FEEDS: dict[str, tuple[str, bool]] = {
     "horse_racing_hk":  ("racing/hk",             False),
     "f1":               ("f1/f1-live",             False),
     "motogp":           ("motors/motogp-live",     False),
+    # volleyball / amfootball 此前只有 inplay GZIP feed，无 livescore 兜底——
+    # inplay 无数据时整运动失明。getfeed 路径已对照 full_package_feed.txt 确认有效。
+    # Goalserve "football" 端点 = 美式橄榄球（CFL/UFL/AF1 等）。
+    "volleyball":       ("volleyball/home",         False),
+    "amfootball":       ("football/home",           False),
 }
 
 # 策略侧 _market_sport_codes 输出的规范运动码 → 本文件 _SPORT_FEEDS key 集合。
 # 用于 demand-driven 轮询：只有当某个规范码对应的 feed key 集合里至少有一个
 # 被 active_sports_provider 选中时，才真正发起该 sport 的 HTTP 抓取。
-# 没有 livescore feed 的运动（american-football / table-tennis / volleyball）
-# 映射到空集——它们不会触发任何 livescore 抓取。
+# 没有 livescore feed 的运动（table-tennis）映射到空集——不触发任何 livescore 抓取。
 SPORT_CODE_TO_FEED_KEYS: dict[str, frozenset[str]] = {
     "esports":          frozenset({"esports"}),
     "football":         frozenset({"soccer"}),
@@ -85,9 +89,9 @@ SPORT_CODE_TO_FEED_KEYS: dict[str, frozenset[str]] = {
     ),
     "formula1":         frozenset({"f1"}),
     "motogp":           frozenset({"motogp"}),
-    "american-football": frozenset(),
+    "american-football": frozenset({"amfootball"}),
+    "volleyball":       frozenset({"volleyball"}),
     "table-tennis":     frozenset(),
-    "volleyball":       frozenset(),
 }
 
 _BASE_URL = "https://www.goalserve.com/getfeed"

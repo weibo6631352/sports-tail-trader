@@ -768,3 +768,181 @@ def test_tennis_current_set_advances_after_set_complete() -> None:
         {"totalscore": "0", "s1": "2"},
     ])
     assert st2 is not None and st2.current_set == 2
+
+
+# ---------------------------------------------------------------------------
+# Volleyball — calibrated against real volleyball/home getfeed (2026-05-22)
+# 真实结构：scores.category[].match[]，localteam/awayteam 有 totalscore + s1..s5。
+# ---------------------------------------------------------------------------
+
+
+def _volleyball_scores(*matches: dict, name: str = "World: Friendly International") -> dict:
+    return {"scores": {"category": [{"name": name, "match": list(matches)}]}}
+
+
+def test_volleyball_live_match_set_status() -> None:
+    """真实 live 局：status "Set 2"，已打 1 盘（totalscore 1-0）+ 第 2 盘进行中。"""
+    data = _volleyball_scores(
+        {
+            "id": "469996",
+            "status": "Set 2",
+            "time": "17:00",
+            "localteam": {"name": "Croatia", "totalscore": "1", "s1": "26", "s2": "0",
+                          "s3": "", "s4": "", "s5": ""},
+            "awayteam": {"name": "Luxembourg", "totalscore": "0", "s1": "24", "s2": "0",
+                         "s3": "", "s4": "", "s5": ""},
+        }
+    )
+    events = parse_goalserve_livescore_sport("volleyball", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.sport == "volleyball"
+    assert ev.source == "goalserve_livescore"
+    assert ev.kind is LiveEventKind.TEAM_MATCH
+    assert ev.status is SportsLiveGameStatus.LIVE
+    assert ev.league == "World: Friendly International"
+    home, away = ev.participants
+    assert (home.name, home.score) == ("Croatia", 1)
+    assert (away.name, away.score) == ("Luxembourg", 0)
+    st = ev.volleyball_state
+    assert st is not None
+    assert st.home_sets_won == 1 and st.away_sets_won == 0
+    # 第 2 盘进行中（已打 2 盘 score，但只完成 1 盘）。
+    assert st.current_set == 2
+    assert st.set_scores == ((26, 24), (0, 0))
+
+
+def test_volleyball_finished_match() -> None:
+    """真实 finished 局：5 盘全打完，totalscore 3-2。"""
+    data = _volleyball_scores(
+        {
+            "id": "469995",
+            "status": "Finished",
+            "localteam": {"name": "Austria", "totalscore": "3", "s1": "23", "s2": "25",
+                          "s3": "25", "s4": "23", "s5": "15"},
+            "awayteam": {"name": "Cyprus", "totalscore": "2", "s1": "25", "s2": "23",
+                         "s3": "19", "s4": "25", "s5": "10"},
+        }
+    )
+    events = parse_goalserve_livescore_sport("volleyball", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.status is SportsLiveGameStatus.ENDED
+    assert ev.participants[0].score == 3 and ev.participants[1].score == 2
+    # ENDED 不构造 GameState（与其他 livescore parser 一致）。
+    assert ev.volleyball_state is None
+
+
+def test_volleyball_not_started() -> None:
+    data = _volleyball_scores(
+        {
+            "id": "469968",
+            "status": "Not Started",
+            "localteam": {"name": "Poland", "totalscore": "", "s1": "", "s2": "",
+                          "s3": "", "s4": "", "s5": ""},
+            "awayteam": {"name": "Ukraine", "totalscore": "", "s1": "", "s2": "",
+                         "s3": "", "s4": "", "s5": ""},
+        }
+    )
+    events = parse_goalserve_livescore_sport("volleyball", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    assert events[0].status is SportsLiveGameStatus.SCHEDULED
+    assert events[0].participants[0].score is None
+
+
+# ---------------------------------------------------------------------------
+# American Football — calibrated against real football/home getfeed (2026-05-22)
+# 真实结构：scores.category[].match（单场为 dict），localteam/awayteam.totalscore。
+# ---------------------------------------------------------------------------
+
+
+def test_amfootball_single_match_dict() -> None:
+    """真实 football/home：某 category 只有一场时 match 是 dict（非 list）。"""
+    data = {
+        "scores": {
+            "category": [
+                {
+                    "id": "1009",
+                    "name": "Canada: Cfl - Pre-Season",
+                    "match": {
+                        "id": "129279",
+                        "status": "Not Started",
+                        "time": "23:00",
+                        "timer": "",
+                        "localteam": {"name": "Montreal Alouettes", "totalscore": ""},
+                        "awayteam": {"name": "Ottawa Redblacks", "totalscore": ""},
+                        "events": {"firstquarter": {"score": ""}},
+                    },
+                }
+            ],
+            "sport": "football",
+        }
+    }
+    events = parse_goalserve_livescore_sport("amfootball", data, observed_at=_OBSERVED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.sport == "american-football"
+    assert ev.source == "goalserve_livescore"
+    assert ev.status is SportsLiveGameStatus.SCHEDULED
+    assert ev.league == "Canada: Cfl - Pre-Season"
+    assert ev.participants[0].name == "Montreal Alouettes"
+    assert ev.participants[0].score is None
+
+
+def test_amfootball_live_and_finished_scores() -> None:
+    data = {
+        "scores": {
+            "category": [
+                {
+                    "id": "1162",
+                    "name": "Usa: Af1",
+                    "match": [
+                        {
+                            "id": "1",
+                            "status": "3rd Quarter",
+                            "timer": "5",
+                            "localteam": {"name": "Minnesota Monsters", "totalscore": "17"},
+                            "awayteam": {"name": "Nashville Kats", "totalscore": "14"},
+                        },
+                        {
+                            "id": "2",
+                            "status": "Finished",
+                            "localteam": {"name": "DC Defenders", "totalscore": "28"},
+                            "awayteam": {"name": "Orlando Storm", "totalscore": "21"},
+                        },
+                    ],
+                }
+            ]
+        }
+    }
+    events = parse_goalserve_livescore_sport("amfootball", data, observed_at=_OBSERVED)
+    assert len(events) == 2
+    live, done = events
+    assert live.status is SportsLiveGameStatus.LIVE  # "3rd Quarter" → LIVE
+    assert (live.participants[0].score, live.participants[1].score) == (17, 14)
+    assert done.status is SportsLiveGameStatus.ENDED
+    assert (done.participants[0].score, done.participants[1].score) == (28, 21)
+
+
+def test_unknown_sport_returns_empty() -> None:
+    assert parse_goalserve_livescore_sport("badminton", {"scores": {}}, observed_at=_OBSERVED) == []
+
+
+# ---------------------------------------------------------------------------
+# Config wiring — volleyball/amfootball must be reachable end-to-end
+# ---------------------------------------------------------------------------
+
+
+def test_sport_feeds_and_code_map_include_new_sports() -> None:
+    """_SPORT_FEEDS 与 SPORT_CODE_TO_FEED_KEYS 都必须包含 volleyball/amfootball，
+    否则 demand-driven 轮询永不抓取这两个 livescore 兜底源。"""
+    from polymarket_trader.infra.sports.goalserve_livescore_client import (
+        _SPORT_FEEDS,
+        SPORT_CODE_TO_FEED_KEYS,
+    )
+
+    assert _SPORT_FEEDS["volleyball"] == ("volleyball/home", False)
+    assert _SPORT_FEEDS["amfootball"] == ("football/home", False)
+    # 规范运动码 → feed key 映射（american-football 是规范码，amfootball 是 feed key）。
+    assert "amfootball" in SPORT_CODE_TO_FEED_KEYS["american-football"]
+    assert "volleyball" in SPORT_CODE_TO_FEED_KEYS["volleyball"]

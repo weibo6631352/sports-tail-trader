@@ -340,3 +340,81 @@ def test_subperiod_market_name_not_normalized() -> None:
             if any(seg in name for seg in ("quarter", "half")):
                 # 分段盘不会被改名成裸 "money line"——原名保留段标识。
                 assert name != "money line"
+
+
+# ---------------------------------------------------------------------------
+# 未识别全场盘口名告警（Task ① — Goalserve 重命名/新运动检测）
+# ---------------------------------------------------------------------------
+
+
+def _feed_with_market(market_name: str) -> dict:
+    """构造含单个 odds 市场的最小 inplay feed dict。"""
+    return {
+        "events": {
+            "evt1": {
+                "core": {},
+                "info": {"id": "evt1", "name": "A vs B", "league": "L"},
+                "team_info": {"home": {"name": "A"}, "away": {"name": "B"}},
+                "odds": {
+                    "1": {
+                        "id": "1",
+                        "name": market_name,
+                        "suspend": "0",
+                        "participants": {
+                            "p1": {"name": "Home", "value_eu": "1.5"},
+                            "p2": {"name": "Away", "value_eu": "2.5"},
+                        },
+                    }
+                },
+            }
+        }
+    }
+
+
+def test_unrecognized_moneyline_like_name_warns_once(caplog) -> None:
+    """疑似全场 moneyline 但未识别的盘口名只 warn 一次，重复轮询去重不刷屏。"""
+    import logging
+
+    from polymarket_trader.infra.sports import goalserve_inplay_parsers as gip
+
+    gip._unrecognized_odds_market_names_seen.clear()
+    # "Match Outcome" 含 "outcome"——但本测试用确含启发词且下游不识别的名字。
+    unknown_name = "Series Winner Odds"  # 含 "winner"，下游无对应 pattern
+    feed = _feed_with_market(unknown_name)
+
+    with caplog.at_level(logging.WARNING, logger=gip.logger.name):
+        # 模拟多个轮询周期：解析三次。
+        for _ in range(3):
+            parse_goalserve_inplay("basket", feed, observed_at=_OBSERVED_AT)
+
+    matching = [
+        r for r in caplog.records
+        if "unrecognized odds market name" in r.getMessage() and unknown_name in r.getMessage()
+    ]
+    assert len(matching) == 1, f"expected exactly one warning, got {len(matching)}"
+
+
+def test_recognized_market_name_does_not_warn(caplog) -> None:
+    """已识别盘口名（含 'money line'）不触发未识别告警。"""
+    import logging
+
+    from polymarket_trader.infra.sports import goalserve_inplay_parsers as gip
+
+    gip._unrecognized_odds_market_names_seen.clear()
+    feed = _feed_with_market("Game Lines Money Line")
+    with caplog.at_level(logging.WARNING, logger=gip.logger.name):
+        parse_goalserve_inplay("basket", feed, observed_at=_OBSERVED_AT)
+    assert not any("unrecognized odds market name" in r.getMessage() for r in caplog.records)
+
+
+def test_subperiod_market_name_does_not_warn(caplog) -> None:
+    """分段盘（含 quarter 等）即便含启发词也不告警——不在全场盘口观测范围。"""
+    import logging
+
+    from polymarket_trader.infra.sports import goalserve_inplay_parsers as gip
+
+    gip._unrecognized_odds_market_names_seen.clear()
+    feed = _feed_with_market("1st Quarter Winner")
+    with caplog.at_level(logging.WARNING, logger=gip.logger.name):
+        parse_goalserve_inplay("basket", feed, observed_at=_OBSERVED_AT)
+    assert not any("unrecognized odds market name" in r.getMessage() for r in caplog.records)

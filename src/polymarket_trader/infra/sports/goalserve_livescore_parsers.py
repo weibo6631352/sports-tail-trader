@@ -42,6 +42,7 @@ from polymarket_trader.domain.sports_live import (
     SoccerGameState,
     SportsLiveGameStatus,
     TennisGameState,
+    VolleyballGameState,
 )
 from polymarket_trader.infra.sports.common import utc_now
 
@@ -1514,6 +1515,174 @@ def _parse_tennis_with_cats(scores: dict[str, Any], observed_at: datetime) -> li
 
 
 # ---------------------------------------------------------------------------
+# Volleyball（volleyball/home）
+# ---------------------------------------------------------------------------
+
+
+def _volleyball_state_from_match(match: dict[str, Any]) -> VolleyballGameState | None:
+    """从 volleyball/home 的 localteam/awayteam 提取 VolleyballGameState。
+
+    实测字段：totalscore=已赢盘数，s1..s5=各盘得分。未开始盘 s{i} 为空字符串。
+    current_set 用「已开始盘数」推断：已完成盘数（totalscore 之和）< 已开始盘数
+    → 最后一盘进行中；否则下一盘待开。与 tennis parser 同构。
+    """
+    home_team = match.get("localteam") or {}
+    away_team = match.get("awayteam") or {}
+    home_sets = _int_val(home_team.get("totalscore")) or 0
+    away_sets = _int_val(away_team.get("totalscore")) or 0
+    set_scores: list[tuple[int, int]] = []
+    for i in range(1, 6):
+        hs = _int_val(home_team.get(f"s{i}"))
+        as_ = _int_val(away_team.get(f"s{i}"))
+        if hs is None and as_ is None:
+            break
+        set_scores.append((hs or 0, as_ or 0))
+    started_sets = len(set_scores)
+    completed_sets = home_sets + away_sets
+    if started_sets == 0:
+        current_set: int | None = 1
+    elif completed_sets >= started_sets:
+        current_set = started_sets + 1
+    else:
+        current_set = started_sets
+    home_cur: int | None = None
+    away_cur: int | None = None
+    if current_set is not None and 1 <= current_set <= started_sets:
+        home_cur, away_cur = set_scores[current_set - 1]
+    return VolleyballGameState(
+        home_sets_won=home_sets,
+        away_sets_won=away_sets,
+        current_set=current_set if (current_set is not None and current_set <= 5) else None,
+        home_current_set_points=home_cur,
+        away_current_set_points=away_cur,
+        set_scores=tuple(set_scores),
+    )
+
+
+def _parse_volleyball(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
+    """解析 volleyball/home getfeed。
+
+    结构：scores.category[].match[]，category.name 作为 league。
+    status 文本 "Not Started"/"Set N"/"Finished" 由 _text_status 归一
+    （"Set N" 命中 "set " 关键词 → LIVE）。LiveEvent.score 用已赢盘数。
+    """
+    events: list[LiveEvent] = []
+    categories = scores.get("category") or []
+    if isinstance(categories, dict):
+        categories = [categories]
+    for cat in categories:
+        if not isinstance(cat, dict):
+            continue
+        cat_name = _str_val(cat.get("name"))
+        raw = cat.get("match") or []
+        if isinstance(raw, dict):
+            raw = [raw]
+        for match in raw:
+            if not isinstance(match, dict):
+                continue
+            event_id = _str_val(match.get("id") or match.get("matchid") or "")
+            if not event_id:
+                continue
+            status_raw = _str_val(match.get("status"))
+            status = _text_status(status_raw)
+            home_team = match.get("localteam") or {}
+            away_team = match.get("awayteam") or {}
+            home_name = _str_val(home_team.get("name"))
+            away_name = _str_val(away_team.get("name"))
+            if not home_name or not away_name:
+                continue
+            vb_state = (
+                _volleyball_state_from_match(match)
+                if status == SportsLiveGameStatus.LIVE
+                else None
+            )
+            home_sets = _int_val(home_team.get("totalscore"))
+            away_sets = _int_val(away_team.get("totalscore"))
+            events.append(
+                LiveEvent(
+                    source="goalserve_livescore",
+                    source_event_id=event_id,
+                    kind=LiveEventKind.TEAM_MATCH,
+                    league=cat_name,
+                    sport="volleyball",
+                    participants=(
+                        Participant(role="home", name=home_name, score=home_sets, external_ids={"goalserve": event_id}),
+                        Participant(role="away", name=away_name, score=away_sets, external_ids={"goalserve": event_id}),
+                    ),
+                    status=status,
+                    period=status_raw,
+                    raw_status=status_raw,
+                    observed_at=observed_at,
+                    external_ids={"goalserve": event_id},
+                    volleyball_state=vb_state,
+                )
+            )
+    return events
+
+
+# ---------------------------------------------------------------------------
+# American Football（football/home — Goalserve "football" = 美式橄榄球）
+# ---------------------------------------------------------------------------
+
+
+def _parse_amfootball(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
+    """解析 football/home getfeed（CFL/UFL/AF1 等美式橄榄球联赛）。
+
+    结构：scores.category[].match（单场为 dict，多场为 list），category.name 作 league。
+    localteam/awayteam.totalscore = 全场总分；status "Not Started"/"1st Quarter"/
+    "Finished" 由 _text_status 归一（"quarter" 命中 → LIVE）。
+    无 domain AmFootballGameState——只产出基础 LiveEvent（score+period+status）；
+    events.{firstquarter..overtime}.score 是分节比分，本兜底源暂不建分节模型。
+    """
+    events: list[LiveEvent] = []
+    categories = scores.get("category") or []
+    if isinstance(categories, dict):
+        categories = [categories]
+    for cat in categories:
+        if not isinstance(cat, dict):
+            continue
+        cat_name = _str_val(cat.get("name"))
+        raw = cat.get("match") or []
+        if isinstance(raw, dict):
+            raw = [raw]
+        for match in raw:
+            if not isinstance(match, dict):
+                continue
+            event_id = _str_val(match.get("id") or match.get("matchid") or "")
+            if not event_id:
+                continue
+            status_raw = _str_val(match.get("status"))
+            status = _text_status(status_raw)
+            home_team = match.get("localteam") or {}
+            away_team = match.get("awayteam") or {}
+            home_name = _str_val(home_team.get("name"))
+            away_name = _str_val(away_team.get("name"))
+            if not home_name or not away_name:
+                continue
+            home_score = _int_val(home_team.get("totalscore"))
+            away_score = _int_val(away_team.get("totalscore"))
+            events.append(
+                LiveEvent(
+                    source="goalserve_livescore",
+                    source_event_id=event_id,
+                    kind=LiveEventKind.TEAM_MATCH,
+                    league=cat_name,
+                    sport="american-football",
+                    participants=(
+                        Participant(role="home", name=home_name, score=home_score, external_ids={"goalserve": event_id}),
+                        Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
+                    ),
+                    status=status,
+                    period=status_raw,
+                    raw_status=status_raw,
+                    observed_at=observed_at,
+                    external_ids={"goalserve": event_id},
+                )
+            )
+    return events
+
+
+# ---------------------------------------------------------------------------
 # 顶层分派
 # ---------------------------------------------------------------------------
 
@@ -1556,6 +1725,10 @@ def parse_goalserve_livescore_sport(
             return _parse_handball(scores, ts)
         case "rugby":
             return _parse_rugby(scores, ts)
+        case "volleyball":
+            return _parse_volleyball(scores, ts)
+        case "amfootball":
+            return _parse_amfootball(scores, ts)
         case "boxing":
             return _parse_boxing(scores, ts)
         case "mma":

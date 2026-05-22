@@ -45,9 +45,13 @@ def test_feed_key_map_values_are_known_feed_keys() -> None:
 
 
 def test_feed_key_map_no_livescore_sports_map_empty() -> None:
-    """无 livescore feed 的运动映射为空集，不会触发任何抓取。"""
-    for code in ("american-football", "table-tennis", "volleyball"):
-        assert SPORT_CODE_TO_FEED_KEYS[code] == frozenset()
+    """仍无 livescore feed 的运动（table-tennis）映射为空集，不会触发抓取。
+
+    volleyball / american-football 已补 livescore getfeed 兜底源，映射到非空集。
+    """
+    assert SPORT_CODE_TO_FEED_KEYS["table-tennis"] == frozenset()
+    assert SPORT_CODE_TO_FEED_KEYS["volleyball"] == frozenset({"volleyball"})
+    assert SPORT_CODE_TO_FEED_KEYS["american-football"] == frozenset({"amfootball"})
 
 
 def test_provider_includes_live_market_sport() -> None:
@@ -119,8 +123,8 @@ def test_provider_empty_registry_returns_empty() -> None:
     assert provider() == frozenset()
 
 
-def test_provider_excludes_sports_without_livescore_feed() -> None:
-    """american-football 等无 livescore feed 的运动即使 live 也不产生 feed key。
+def test_provider_includes_amfootball_livescore_feed() -> None:
+    """american-football 已补 livescore getfeed 兜底源，live NFL 市场触发 amfootball 抓取。
 
     标签只用 "NFL"——_market_sport_codes 对 "american football" 文本会同时命中
     "football" 子串，导致额外的 soccer 误分类；这里隔离纯 american-football 场景。
@@ -131,6 +135,21 @@ def test_provider_excludes_sports_without_livescore_feed() -> None:
         _market(
             "nfl-live",
             tags=("NFL",),
+            game_start_time=now - timedelta(minutes=10),
+        )
+    )
+    provider = _build_livescore_active_sports_provider(registry)
+    assert "amfootball" in provider()
+
+
+def test_table_tennis_still_has_no_livescore_feed() -> None:
+    """table-tennis 仍无 livescore feed——live 市场也不产生 feed key。"""
+    registry = MarketRegistry()
+    now = datetime.now(timezone.utc)
+    registry.upsert(
+        _market(
+            "tt-live",
+            tags=("Table Tennis",),
             game_start_time=now - timedelta(minutes=10),
         )
     )

@@ -26,6 +26,7 @@ history / odds``，本 parser 只解释交易需要的字段：
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -45,6 +46,8 @@ from polymarket_trader.domain.sports_live import (
     VolleyballGameState,
 )
 from polymarket_trader.infra.sports.common import utc_now
+
+logger = logging.getLogger(__name__)
 
 SOURCE = "goalserve_inplay"
 
@@ -345,6 +348,64 @@ def _normalize_market_name(sport_code: str, raw_name: str) -> str:
     return raw_name
 
 
+# 已告警过的「疑似但未识别」盘口名——模块级 set 去重，避免每秒轮询刷屏。
+# key = (sport_code, lower(name))；进程生命周期内每个新名字只 warn 一次。
+_unrecognized_odds_market_names_seen: set[tuple[str, str]] = set()
+
+# 启发式：盘口名里出现这些词 → 看起来「应该」是全场 moneyline/totals/spread。
+# 命中下游可识别串（money line / over/under handicap 等）的不算未识别。
+_LOOKS_LIKE_MARKET_KEYWORDS = (
+    "money",
+    "line",
+    "winner",
+    "to win",
+    "total",
+    "handicap",
+    "spread",
+    "over/under",
+    "over / under",
+)
+# 下游 _extract_goalserve_* 已能识别的盘口名串，或本 parser 会归一成可识别名的串。
+_RECOGNIZED_MARKET_SUBSTRINGS = (
+    "money line",
+    "handicap",
+    "over/under",
+    "over / under",
+)
+
+
+def _warn_if_unrecognized_market(sport_code: str, raw_name: str, normalized_name: str) -> None:
+    """疑似全场 moneyline/totals/spread 但未匹配任何已知 pattern 时告警一次。
+
+    只做观测——不改任何匹配行为。Goalserve 重命名盘口或新运动用了不同命名时，
+    odds 会被下游静默丢弃；这里按 (sport, name) 去重 warn，使其可被发现排查。
+    廉价：parser 每秒/运动跑一次，命中去重 set 后是 O(1) 提前返回。
+    """
+    low = raw_name.strip().lower()
+    if not low:
+        return
+    # 分段盘不在「全场盘口」观测范围内——下游本就按全场语义过滤分段盘。
+    if any(seg in low for seg in ("half", "quarter", "set", "inning", "period", "minute", "map")):
+        return
+    if not any(kw in low for kw in _LOOKS_LIKE_MARKET_KEYWORDS):
+        return
+    # 已归一成 Money Line，或本身含下游可识别串 → 不算未识别。
+    norm_low = normalized_name.strip().lower()
+    if norm_low == "money line" or any(s in norm_low for s in _RECOGNIZED_MARKET_SUBSTRINGS):
+        return
+    key = (sport_code, low)
+    if key in _unrecognized_odds_market_names_seen:
+        return
+    _unrecognized_odds_market_names_seen.add(key)
+    logger.warning(
+        "goalserve_inplay: unrecognized odds market name (sport=%s, name=%r) — "
+        "looks like a full-game moneyline/totals/spread but matched no known pattern; "
+        "Goalserve rename or new sport — odds silently dropped downstream",
+        sport_code,
+        raw_name,
+    )
+
+
 def _parse_odds(
     sport_code: str, event_id: str, odds_raw: Any
 ) -> GoalserveOdds:
@@ -367,6 +428,7 @@ def _parse_odds(
         market_id = _int_val(market.get("id")) or 0
         raw_name = _str_val(market.get("name"))
         name = _normalize_market_name(sport_code, raw_name)
+        _warn_if_unrecognized_market(sport_code, raw_name, name)
         suspended = _flag(market.get("suspend"))
 
         participants = market.get("participants")
