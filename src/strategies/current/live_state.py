@@ -1056,6 +1056,17 @@ def _market_sport_codes(market: Market) -> set[str]:
         ("horse-racing", ("horse racing", "cheltenham", "kentucky derby", "grand national", "horse race")),
         ("formula1", ("formula 1", "formula1", "f1", "grand prix", "monaco gp")),
         ("motogp", ("motogp", "moto gp")),
+        # esports：不加运动码会让 CS2/Dota2/LoL/Valorant 市场在运动预过滤里
+        # 失去 sport 约束，被其它运动的低分别名（如足球预备队 "X 2" 的 "2"
+        # 命中 esports slug 里的 "cs2"/"2026"）跨运动错配。
+        (
+            "esports",
+            (
+                "esports", "e sports", "cs2", "csgo", "cs go", "counter strike",
+                "dota2", "dota 2", "dota", "lol", "league of legends",
+                "valorant", "rocket league", "overwatch",
+            ),
+        ),
     )
     return {sport for sport, tokens in mapping if any(f" {token} " in f" {text} " for token in tokens)}
 
