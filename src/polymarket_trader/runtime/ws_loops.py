@@ -26,10 +26,14 @@ _MARKET_WS_TAIL_WINDOW_SECONDS = 3600.0
 # 21 天覆盖 NHL/NBA 季后赛系列赛（通常 1-3 周）和冠军赛单场；200 订阅上限按
 # end_date 升序截断，确保最近到期市场优先拿到盘口流。
 _MARKET_WS_POLY_ACTIVE_WINDOW_SECONDS = 1_814_400.0  # 21 天：覆盖系列赛 / 季后赛（通常 1-3 周）
-# 订阅数上限：避免 polymarket WS 限流 / 队列爆炸。Sports tail 模式实际同时
-# 关注的 live market 通常 <50；200 留充裕余量但有硬护栏。超出时按 end_date 升序
-# 截断（最快结束的优先订阅）。
-_MARKET_WS_MAX_SUBSCRIPTIONS = 200
+# 订阅数上限（按 token 计）——纯安全护栏，防止失控时把全量 registry 压垮
+# Polymarket WS。订阅集已由 market_outside_trade_window（只跟踪开赛 [-6h,+30min]
+# 的近期赛事）+ _market_requires_market_ws（live/敞口/6h 窗口）双重收窄，实际
+# 近期相关市场 token 数典型 1500–4000；美国黄金时段多联赛叠加也远低于此上限。
+# 旧值 200 会把 ~7/8 的直播市场截断成 missing_best_ask、卡掉成交机会（违反
+# §17）。8000 给足余量，且远低于实测可用的 ~15000 token。超出时按 end_date
+# 升序截断（最快结束 / 正在直播的优先保留）。
+_MARKET_WS_MAX_SUBSCRIPTIONS = 8000
 # stream task 已启动后容忍订阅集的小幅变化，避免持续 cancel/reconnect。
 # 只有 added+removed > 此阈值才重建连接；新增 token 会在下次 reconnect 时补充。
 _MARKET_WS_RESUBSCRIBE_THRESHOLD = 10
@@ -91,7 +95,7 @@ def market_ws_subscription_token_ids(runtime: Any) -> tuple[str, ...]:
     3. **Polymarket 自身 active+open + endDate 在 6h 窗口内**（兜底——
        SofaScore 屏蔽 / ESPN 不覆盖 Challenger 时仍能订阅）
 
-    超 _MARKET_WS_MAX_SUBSCRIPTIONS=200 时按 end_date 升序截断（最近结束的优先）。
+    超 _MARKET_WS_MAX_SUBSCRIPTIONS 时按 end_date 升序截断（最近结束的优先）。
     """
 
     account_snapshot = _account_snapshot(runtime)

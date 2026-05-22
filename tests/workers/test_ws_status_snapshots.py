@@ -173,7 +173,7 @@ def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None
         account_state_store=account_store,
     )
 
-    # 顺序已变成"按 end_date 升序"——near-end 优先，因为 _MARKET_WS_MAX_SUBSCRIPTIONS=200
+    # 顺序已变成"按 end_date 升序"——near-end 优先，因为 _MARKET_WS_MAX_SUBSCRIPTIONS
     # 截断时要保留最快结束的。集合内容仍只覆盖有 live state 信号或持仓的 market。
     assert sorted(market_ws_subscription_token_ids(runtime)) == [
         "token-1-no",
