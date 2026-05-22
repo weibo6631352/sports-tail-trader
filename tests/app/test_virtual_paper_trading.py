@@ -28,26 +28,24 @@ def test_virtual_paper_trade_uses_real_runtime_and_only_virtualizes_final_submit
     assert result["execution"] == "paper_submit_only"
     assert result["virtual_boundary"] == "order_submission_payment"
     assert result["signing"]["source"] == "real_trading_client"
-    assert len(runtime.trading_client.signed_requests) == 2
+    # 退出统一由动态 ``decide_exit`` 负责，BUY 成交后不再由 follow_up 挂静态 SELL，
+    # 因此虚拟盘只签名/提交一笔 BUY。
+    assert len(runtime.trading_client.signed_requests) == 1
     assert [request["phase"] for request in result["order_requests"]] == [
-        "sign",
-        "submit",
         "sign",
         "submit",
     ]
     assert [request["virtual"] for request in result["order_requests"]] == [
         False,
         True,
-        False,
-        True,
     ]
     assert result["summary"]["entry_order_status"] == "full_fill"
-    assert result["summary"]["follow_up_count"] == 1
-    assert result["summary"]["follow_up_price"] == "0.99"
-    assert result["summary"]["follow_up_order_status"] == "live"
+    assert result["summary"]["follow_up_count"] == 0
+    assert result["summary"]["follow_up_price"] is None
+    assert result["summary"]["follow_up_order_status"] is None
     assert result["opportunity_funnel"]["auto_execute_count"] == 1
     assert result["rejection_summary"]["total"] == 0
-    assert result["paper_pnl"]["basis"] == "entry_fill_vs_follow_up_limit_net_after_taker_fees"
+    assert result["paper_pnl"]["basis"] == "entry_fill_waiting_for_settlement_net_after_taker_fees"
     assert result["paper_pnl"]["realized"] is False
     assert result["paper_pnl"]["profitable"] is True
     # Kelly sizing：bankroll=10, kelly_max_position_fraction=1.0 理论可全仓，但

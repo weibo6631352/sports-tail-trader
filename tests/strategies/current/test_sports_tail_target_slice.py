@@ -3638,7 +3638,9 @@ def test_follow_up_sell_is_not_created_after_buy_fill_in_settlement_only_mode() 
     assert decisions == ()
 
 
-def test_profit_take_follow_up_sell_is_created_after_tagged_buy_fill() -> None:
+def test_follow_up_does_not_place_exit_sell_after_profit_take_tagged_buy_fill() -> None:
+    """退出统一由动态 ``decide_exit`` 负责，follow_up 不再挂静态止盈 SELL。"""
+
     market = _totals_market().with_tick_size(Decimal("0.01"))
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
@@ -3676,15 +3678,12 @@ def test_profit_take_follow_up_sell_is_created_after_tagged_buy_fill() -> None:
         )
     )
 
-    assert len(decisions) == 1
-    assert decisions[0].action.value == "sell"
-    assert decisions[0].reason == "strategy_profit_take"
-    assert decisions[0].price == Decimal("0.99")
-    assert decisions[0].size_shares == Decimal("5.050505050505050505")
-    assert decisions[0].metadata["exit_mode"] == "profit_take"
+    assert decisions == ()
 
 
-def test_profit_take_overlay_follow_up_sell_is_created_after_settlement_buy_fill() -> None:
+def test_follow_up_does_not_place_exit_sell_after_settlement_buy_fill() -> None:
+    """带 profit-take overlay 的 settlement 买入成交后也不再由 follow_up 挂 SELL。"""
+
     market = _moneyline_market().with_tick_size(Decimal("0.01"))
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
 
@@ -3723,13 +3722,7 @@ def test_profit_take_overlay_follow_up_sell_is_created_after_settlement_buy_fill
         )
     )
 
-    assert len(decisions) == 1
-    assert decisions[0].action.value == "sell"
-    assert decisions[0].reason == "strategy_profit_take"
-    assert decisions[0].price == Decimal("0.94")
-    assert decisions[0].size_shares == Decimal("5.376342")
-    assert decisions[0].metadata["exit_mode"] == "settlement"
-    assert decisions[0].metadata["profit_take_overlay_enabled"] is True
+    assert decisions == ()
 
 
 def test_position_exit_waits_for_settlement_when_auto_exit_disabled() -> None:
@@ -4665,7 +4658,9 @@ def test_recovery_cancels_stale_open_entry_order_even_when_market_has_no_strateg
     ]
 
 
-def test_recovery_can_cover_position_when_auto_exit_is_explicitly_enabled() -> None:
+def test_recovery_does_not_place_static_exit_sell_for_uncovered_position() -> None:
+    """auto_exit 开启时，未覆盖持仓由动态 ``decide_exit`` 处理，恢复侧不挂静态 SELL。"""
+
     market = _moneyline_market()
     position = Position(
         strategy_id="sports_tail",
@@ -4686,9 +4681,7 @@ def test_recovery_can_cover_position_when_auto_exit_is_explicitly_enabled() -> N
         ),
     )
 
-    assert [(action.action.value, action.reason, action.token_id) for action in decision.actions] == [
-        ("sell", "recovery_exit_shortage", "away"),
-    ]
+    assert decision.actions == ()
 
 
 def _totals_market() -> Market:

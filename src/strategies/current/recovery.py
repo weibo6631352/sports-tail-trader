@@ -12,7 +12,7 @@ from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.extension_api import RecoveryDecision, ExtensionContext, ExtensionDecision
 
 from strategies.current.config import CurrentStrategyConfig
-from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata, exit_price_for_context
+from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata
 from strategies.current.outcomes import describe_sports_market, SportsMarketFamily, tail_token_targets
 from strategies.current.tail import LiveGameStatus, live_game_state_from_metadata
 from strategies.current.trading.helpers import resolve_tick_size
@@ -112,27 +112,12 @@ def decide_recovery(
         uncovered_shares = position.shares - open_exit_shares
         if uncovered_shares <= Decimal("0"):
             continue
+        # 未覆盖持仓不再由恢复侧挂静态价 SELL：动态退出引擎 ``decide_exit``
+        # 每个 reconcile 周期都会从实时盘口重估 HOLD/EXIT 并下单。恢复侧若
+        # 再挂静态退出单会覆盖持仓份额，使 ``decide_exit`` 因
+        # ``no_uncovered_shares`` 跳过、动态引擎被旁路。此处仅保留对历史遗留
+        # 高均价仓位的 settlement-only profit-take 补单（_recovery_profit_take_action）。
         if config.auto_exit_enabled and not missing_target:
-            exit_metadata = dict(recovery_metadata)
-            exit_metadata.update(
-                build_exit_plan_metadata(
-                    config,
-                    context,
-                    token_id=position.token_id,
-                    source_reason="recovery_exit_shortage",
-                    target_size_shares=uncovered_shares,
-                )
-            )
-            actions.append(
-                ExtensionDecision.sell(
-                    reason="recovery_exit_shortage",
-                    token_id=position.token_id,
-                    price=exit_price_for_context(config, context),
-                    size_shares=uncovered_shares,
-                    market_slug=position.market_slug or context.market.market_slug,
-                    metadata=exit_metadata,
-                )
-            )
             continue
         if missing_target and context.market.trading_status != TradingStatus.ELIGIBLE:
             continue
