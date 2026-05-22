@@ -15,7 +15,13 @@ from polymarket_trader.domain.market import Market
 from strategies.current.tail import SportsMarketFamily, SportsMarketSide, SportsMarketType
 
 _GENERIC_OUTCOMES = {"yes", "no"}
-_LINE_MARKER_PATTERN = r"(?:over|under|total(?:[\s:_/-]+games)?|spread|handicap)"
+# 盘口线标记词。"totals" 复数与 "handicap-home-1" 这类在标记词和数字之间夹
+# home/away 的 slug 都要覆盖，否则标记匹配落空后会退化到通用兜底，把 slug 里的
+# 年份（如 2026）误当成盘口线。
+_LINE_MARKER_PATTERN = (
+    r"(?:over|under|totals?(?:[\s:_/-]+games)?|spread|handicap)"
+    r"(?:[\s:_/-]+(?:home|away))?"
+)
 
 # 球员 prop 盘口专有统计词——出现在 over/under 盘口文本中时，说明是球员个人表现盘，
 # 而非球队整体比赛 totals。顺序无关，任意命中即视为 player prop。
@@ -365,7 +371,11 @@ def _market_line(text: str) -> Decimal | None:
         except InvalidOperation:
             return None
 
-    match = re.search(r"(?<![a-z0-9])[-+]?\d+(?:\.\d+)?(?![a-z0-9])", text)
+    # 兜底匹配无标记词的盘口线前，先剥除 slug 里的 YYYY-MM-DD 日期串，
+    # 否则日期中的年/月/日会被当成盘口线（历史 bug：line 误取 2026 / 05）。
+    # 同时限制整数部分为 1-3 位，真实盘口不会是 4 位数。
+    text_without_date = re.sub(r"\d{4}-\d{2}-\d{2}", " ", text)
+    match = re.search(r"(?<![a-z0-9])[-+]?\d{1,3}(?:\.\d+)?(?![a-z0-9])", text_without_date)
     if match is None:
         return None
     try:
