@@ -157,8 +157,10 @@ class CurrentStrategyConfig:
     # Kelly sizing 参数（策略层决策参数，不进框架 Settings）。
     # κ 默认 0.25 = quarter Kelly：模型不确定性下的工业标准（max drawdown 约半 full Kelly）。
     kelly_fraction: Decimal = Decimal("0.25")
-    # 单市场不超过 bankroll 的 fraction（隐式上限并发头寸数 ≈ 1/fraction）。
-    kelly_max_position_fraction: Decimal = Decimal("0.10")
+    # 单仓上限（占 bankroll 比例）。设为 1.0 = 不额外设单仓硬上限，严格按
+    # quarter-Kelly（kelly_fraction）公式定注——κ=0.25 本身即风险缓冲，
+    # 不再叠加一个会裁掉合理凯利仓位的 10% 硬顶。
+    kelly_max_position_fraction: Decimal = Decimal("1.0")
     # 最低 edge 阈值；实测 edge < 200 bps 时 Kelly 公式对 p 估计误差极敏感，不下单。
     kelly_min_edge: Decimal = Decimal("0.02")
     # 框架硬下限 USDC；实际 effective_min_stake = max(此值, market.min_order_size × price)。
