@@ -397,6 +397,21 @@ def _evaluate_ended_not_closed(
             return _reject(candidate, precise_reject.value)
         if is_modeled_event_prop_market(market):
             return evaluate_event_prop(candidate, policy)
+        # 终局态的 soccer/rugby 专属 binary_prop（精确比分/BTTS/半场赛果/
+        # 3-way 胜负/橄榄球胜负）也要分派——最终比分已定,本是最干净的锁定。
+        # 此前 ENDED 路径缺失这组分派,64+ 个 exact-score 终局市场落到兜底
+        # UNSUPPORTED_MARKET_TYPE,与 §17"每个被拒市场要能回答为什么"相符
+        # 但实际是可锁定机会被错失。
+        if is_soccer_exact_score_market(market):
+            return _evaluate_soccer_exact_score(candidate, policy)
+        if is_soccer_btts_market(market):
+            return _evaluate_soccer_btts(candidate, policy)
+        if is_soccer_halftime_market(market):
+            return _evaluate_soccer_halftime_result(candidate, policy)
+        if is_soccer_game(candidate.game) and is_soccer_moneyline_market(market):
+            return _evaluate_soccer_moneyline(candidate, policy)
+        if is_rugby_game(candidate.game):
+            return _evaluate_rugby_moneyline(candidate, policy)
     return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
 
 
