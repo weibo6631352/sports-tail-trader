@@ -349,6 +349,7 @@ class PolymarketOrderExecutionClient:
         if request.action == "replace":
             replacement_request = OrderExecutionRequest(
                 action="submit",
+                strategy_id=request.strategy_id,
                 trace_id=request.trace_id,
                 idempotency_key=request.idempotency_key,
                 condition_id=request.condition_id,
@@ -413,6 +414,7 @@ class PolymarketOrderExecutionClient:
         cancel_response = self._trading_client.cancel_order(request.order_id)
         replacement_request = OrderExecutionRequest(
             action="submit",
+            strategy_id=request.strategy_id,
             trace_id=request.trace_id,
             idempotency_key=request.idempotency_key,
             condition_id=request.condition_id,
