@@ -168,6 +168,19 @@ class DataPositionDTO:
         object.__setattr__(self, "raw_summary", summary)
 
     def to_position(self, *, strategy_id: str) -> Position:
+        """Data-api 持仓 → 内部 Position。
+
+        **关键：mark-to-market 字段（current_value / cur_price / cash_pnl /
+        percent_pnl）一律设 None，不从 data-api 写。** Polymarket data-api 返回
+        的 currentValue / curPrice 是缓存值（last_trade 或 stale settlement
+        computation），不反映当前 best_bid——会让 worker MTM 修正（cv=0 when
+        no_bid）被 reconcile 静默覆盖（task #35 根因）。
+
+        交易主链路上的 MTM 真相源唯一：worker `_handle_orderbook_snapshot_updated`
+        基于实时 orderbook + sell_actionable 守门写 current_value。reconcile 只
+        提供"账户事实"字段（shares / cost / 已结算 realized_pnl / avg_price），
+        不参与"当前可实现价值"计算。
+        """
         if not strategy_id:
             raise ValueError("to_position requires non-empty strategy_id")
         return Position(
@@ -187,12 +200,13 @@ class DataPositionDTO:
             updated_at=self.updated_at,
             avg_price=self.avg_price,
             initial_value=self.initial_value,
-            current_value=self.current_value,
-            cash_pnl=self.cash_pnl,
-            percent_pnl=self.percent_pnl,
+            # mark-to-market 字段不从 data-api 写（避免 stale curPrice 覆盖 worker MTM）
+            current_value=None,
+            cash_pnl=None,
+            percent_pnl=None,
+            cur_price=None,
             realized_pnl=self.realized_pnl,
             percent_realized_pnl=self.percent_realized_pnl,
-            cur_price=self.cur_price,
             redeemable=self.redeemable,
         )
 
