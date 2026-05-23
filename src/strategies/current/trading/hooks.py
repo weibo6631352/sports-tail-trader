@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from polymarket_trader.domain.allocation import Allocation, AllocationPlan
 from polymarket_trader.domain.kelly import implied_fair_value_from_price_cap
+from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.extension_api import EntrySizing, ExtensionContext, ExtensionDecision
 
 from strategies.current.allocation import (
@@ -82,7 +83,7 @@ def _maybe_reprice_stale_sell(
         return None
     open_sells = [
         o for o in (context.open_orders or ())
-        if o.side.value == "sell" and o.token_id == token_id and o.open and o.remaining_shares
+        if o.side == OrderSide.SELL and o.token_id == token_id and o.open and o.remaining_shares
     ]
     if not open_sells:
         logger.info(
