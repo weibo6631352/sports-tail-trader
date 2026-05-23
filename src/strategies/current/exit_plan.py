@@ -79,9 +79,34 @@ def build_exit_plan_metadata(
 
 
 def exit_price_for_context(config: CurrentStrategyConfig, context: ExtensionContext) -> Decimal:
-    """返回符合当前 market tick size 的退出挂单价格。"""
+    """返回符合当前 market tick size 的退出挂单价格。
 
-    return align_price_to_tick(config.exit_no_price, tick_size=_effective_tick_size(context))
+    优先级（§17 准量化提前止盈）：
+    1. 持仓有 cost/shares 且 ``tail_profit_take_offset`` 配置了 → 返回 ``avg + offset``
+       （盘中提前止盈可达：买 0.20 → 卖 0.27），不再死等结算
+    2. 兜底返回 ``exit_no_price`` 锁定结算价（0.995→tick 后 0.99，无持仓信息时退化）
+
+    超过 ``exit_no_price`` 的目标自动收敛到 ``exit_no_price``，避免越过 CLOB 上限或
+    错过实际市场可成交价。
+    """
+
+    tick_size = _effective_tick_size(context)
+    fallback = align_price_to_tick(config.exit_no_price, tick_size=tick_size)
+    offset = config.tail_profit_take_offset
+    if offset is None or offset <= Decimal("0"):
+        return fallback
+    position = context.position
+    if position is None or position.shares <= Decimal("0") or position.cost_usdc <= Decimal("0"):
+        return fallback
+    avg_price = position.cost_usdc / position.shares
+    target = avg_price + offset
+    if target >= config.exit_no_price:
+        return fallback
+    aligned = align_price_to_tick(target, tick_size=tick_size)
+    if aligned <= avg_price:
+        # tick 对齐后价格回退到不再领先 avg → 退化到结算价（避免锁定亏损）
+        return fallback
+    return aligned
 
 
 def align_price_to_tick(price: Decimal, *, tick_size: Decimal | None) -> Decimal:
