@@ -302,22 +302,32 @@ def evaluate_dynamic_exit(
     elif imbalance > Decimal("0.65"):
         bullish_vote += 2
         vote_reasons.append(f"orderbook_bullish:imbalance={imbalance:.3f}")
-    # 信号 2：Goalserve 赔率（博彩公司视角）
+    # 信号 2：Goalserve 赔率相对入场价偏离（绝对值无意义，必须看相对偏离）。
+    # 例：买价 0.20 + goalserve 0.30 = +0.10 偏离 → 博彩仍看好赢方；
+    # 买价 0.80 + goalserve 0.30 = -0.50 偏离 → 博彩认定输方向。
     if goalserve_implied is not None:
-        if goalserve_implied < entry_price * Decimal("0.5"):
+        gs_deviation = goalserve_implied - entry_price
+        if gs_deviation < -Decimal("0.1"):
             bearish_vote += 1
-            vote_reasons.append(f"goalserve_pessimistic:{goalserve_implied:.3f}<entry*0.5")
-        elif goalserve_implied > entry_price * Decimal("0.85"):
+            vote_reasons.append(f"goalserve_deviation_neg:{gs_deviation:+.3f}")
+        elif gs_deviation > Decimal("0.05"):
             bullish_vote += 1
-            vote_reasons.append(f"goalserve_optimistic:{goalserve_implied:.3f}>entry*0.85")
-    # 信号 3：math_lock（数学锁定）— veto 权重 2 当强锁定时
+            vote_reasons.append(f"goalserve_deviation_pos:{gs_deviation:+.3f}")
+    # 信号 3：math_lock 相对入场价偏离（同理，绝对锁定概率无意义）。
+    # 买价 0.20 + math 0.50 = +0.30 偏离 → 数学上严重低估，强 HOLD；
+    # 买价 0.80 + math 0.30 = -0.50 偏离 → 数学上已劣势，bearish。
+    # 偏离 +0.15 以上视为强 bullish（veto 强度 2），偏离 -0.15 以下 bearish。
     if math_lock_prob is not None:
-        if math_lock_prob >= Decimal("0.5"):
+        ml_deviation = math_lock_prob - entry_price
+        if ml_deviation >= Decimal("0.15"):
             bullish_vote += 2
-            vote_reasons.append(f"math_locked:{math_lock_prob:.3f}>=0.5")
-        elif math_lock_prob < Decimal("0.3"):
+            vote_reasons.append(f"math_deviation_strong_pos:{ml_deviation:+.3f}")
+        elif ml_deviation >= Decimal("0"):
+            bullish_vote += 1
+            vote_reasons.append(f"math_deviation_pos:{ml_deviation:+.3f}")
+        elif ml_deviation < -Decimal("0.15"):
             bearish_vote += 1
-            vote_reasons.append(f"math_pessimistic:{math_lock_prob:.3f}<0.3")
+            vote_reasons.append(f"math_deviation_neg:{ml_deviation:+.3f}")
     # fair_value 仍作辅助门禁（轻微波动不触发止损）
     fair_value_bearish = fair_value <= entry_price * Decimal("0.7")
     metadata.update({
