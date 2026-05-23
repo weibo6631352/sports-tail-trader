@@ -10,7 +10,9 @@ router = APIRouter(prefix="/audit-events", tags=["audit-events"])
 
 @router.get("")
 async def list_audit_events(
-    limit: int = Query(default=100, ge=1, le=500),
+    # 上限 500 → 5000: reconcile 每 30s 产 2 条,500 条只覆盖 ~4h 复盘,
+    # 跨多事件类型聚合时被 reconcile 占满。5000 给操盘复盘足够空间。
+    limit: int = Query(default=100, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
     trace_id: str | None = Query(default=None),
     event_title: str | None = Query(default=None),
