@@ -121,10 +121,15 @@ def _entry_math_lock_veto(candidate: SportsTailCandidate) -> str | None:
     )
     if lock.method == "unsupported":
         return None
+    # 只 veto 语义无歧义的"输"keyword——避免误杀。"结算性"keyword
+    # （halftime_settled / first_inning_completed / quarter_ended / match_ended /
+    # already_exceeded_line_lose / already_over_lose 等）同时出现在赢方与输方
+    # reason 中，依赖公式正确把赢方算到 lock_prob=1、输方算到 lock_prob=0；
+    # 一旦公式 bug 或 sub-scope dispatch 错走整场公式（task #38），赢方也会
+    # 落到 lock_prob=0 而被错杀。这类 keyword 改由各 evaluator 的 ENDED/lockin
+    # 分支自己处理，veto 不重复兜底，宁可漏放也不能误杀已锁定的赢方。
     LOSER_KEYWORDS = (
         "already_lost",
-        "already_exceeded_line_lose",
-        "already_over_lose",
         "match_already_lost",
         "set_already_lost",
         "no_remaining_half_innings",
@@ -132,12 +137,6 @@ def _entry_math_lock_veto(candidate: SportsTailCandidate) -> str | None:
         "no_remaining_balls_or_wickets",
         "chase_target_reached",
         "run_already_scored_in_first",
-        "halftime_settled",
-        "first_inning_completed",
-        "quarter_ended",
-        "match_ended",
-        "game_ended",
-        "game_already_ended",
     )
     if (
         lock.lock_probability <= Decimal("0.05")

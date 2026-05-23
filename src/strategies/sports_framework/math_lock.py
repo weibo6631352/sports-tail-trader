@@ -518,7 +518,7 @@ def _soccer_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResu
     简化：lead = h - a，需要对手净进 ≥ lead+1（HOME 视角）。
     双方剩余进球独立 Poisson，差服从 Skellam，用正态近似 std ≈ sqrt(λ_h+λ_a)。
     """
-    if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY, SportsMarketSide.DRAW}:
+    if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
         return MathLockResult(_ZERO, "soccer_ml", "unsupported_side", {})
     home = game.home_score
     away = game.away_score
@@ -526,10 +526,8 @@ def _soccer_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResu
     if remaining is None or remaining <= 0:
         if side == SportsMarketSide.HOME:
             won = home > away
-        elif side == SportsMarketSide.AWAY:
-            won = away > home
         else:
-            won = home == away
+            won = away > home
         return MathLockResult(_ONE if won else _ZERO, "soccer_ml", "no_remaining_time",
                               {"home": home, "away": away})
     # 剩余进球期望 = 单边率 × 剩余秒
