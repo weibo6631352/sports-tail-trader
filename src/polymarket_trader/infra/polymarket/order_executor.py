@@ -254,7 +254,19 @@ class PolymarketOrderExecutor:
 
     async def replace(self, intent: ReplaceOrderIntent) -> OrderResult:
         request = self._build_replace_request(intent)
-        return await self._execute(request, intent)
+        result = await self._execute(request, intent)
+        # cancel + 立即 submit replacement 可能因 Polymarket 服务端 share allowance
+        # 同步延迟（~1-2s）触发 "not enough balance / allowance"。这里异步 retry：
+        # asyncio.sleep 不阻塞 thread pool worker（不像 client 内部 time.sleep），
+        # asyncio 主事件循环也不阻塞 — 其他订单 / 盘口事件继续处理。
+        if (
+            result.status == OrderResultStatus.REJECTED
+            and result.reason is not None
+            and "not enough balance" in result.reason.lower()
+        ):
+            await asyncio.sleep(1.5)
+            result = await self._execute(request, intent)
+        return result
 
     async def aclose(self) -> None:
         # 先 drain 后台 lifecycle 发布任务，确保审计事件落 outbox 后再关线程池；
