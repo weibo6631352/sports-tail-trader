@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_FLOOR
 
 from polymarket_trader.domain.allocation import Allocation, AllocationPlan
 from polymarket_trader.domain.kelly import implied_fair_value_from_price_cap
@@ -568,13 +568,21 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
         uncovered_shares = context.position.shares - context.position.open_sell_shares
     else:
         return ExtensionDecision.skip(reason="missing_position_state")
-    if uncovered_shares <= Decimal("0"):
-        # 全量 size 已被 open SELL 覆盖。但 SELL 价位可能 stale (挂 $0.99 等结算,
-        # 而当前 fair_value 已跌穿)→ 检查是否需要 cancel-replace 到更现实价位。
+    # position.shares 4 位小数 vs chain open_sell 2 位小数：差值常 < 0.01 视为已覆盖。
+    # 这种 sliver 没法挂有效 SELL（min_order_size=5），但旧 SELL 价仍可能 stale 需要
+    # reprice，所以走 reprice 检查而非"挂新 SELL"路径。
+    min_meaningful_uncovered = Decimal("0.1")
+    if uncovered_shares < min_meaningful_uncovered:
+        # 全量 size 已被 open SELL 覆盖（或差值过小无法挂新 SELL）。
+        # 但 SELL 价位可能 stale (挂 $0.99 等结算，而当前 fair_value 已跌穿)→
+        # 检查是否需要 cancel-replace 到 fair_value × 0.97 + entry+offset 取大。
         replace_decision = _maybe_reprice_stale_sell(config, context, now=now)
         if replace_decision is not None:
             return replace_decision
-        return ExtensionDecision.skip(reason="no_uncovered_shares")
+        return ExtensionDecision.skip(
+            reason="no_uncovered_shares",
+            metadata={"uncovered_shares": str(uncovered_shares)},
+        )
 
     # 跳过已结算/关闭市场中的僵尸仓位：当前值为 0 且盘口不存在，
     # 说明市场已结束且无流动性，此时挂 SELL 只会被立即拒绝。
