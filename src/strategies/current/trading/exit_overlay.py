@@ -317,32 +317,24 @@ def evaluate_dynamic_exit(
     elif fair_value >= entry_price * Decimal("1.1"):
         bullish_vote += 1
         vote_reasons.append(f"fair_value_strong:{fair_value:.3f}>=entry*1.1")
-    # 信号 1a：盘口方向（imbalance）— 双侧深度对比，按流动性分层降权。
-    # 薄盘里 imbalance 一笔小单就翻转，bid_signal_weight 控制信任度。
-    if imbalance < Decimal("0.4"):
-        bearish_vote += 2 * bid_signal_weight
-        vote_reasons.append(f"orderbook_bearish:imbalance={imbalance:.3f}*w={bid_signal_weight}")
-    elif imbalance > Decimal("0.6"):
-        bullish_vote += 2 * bid_signal_weight
-        vote_reasons.append(f"orderbook_bullish:imbalance={imbalance:.3f}*w={bid_signal_weight}")
-    # 信号 1b：best_bid 相对入场价归一化偏离 — 当下立即可成交价。
-    # 薄盘里 best_bid 一砸就到地板，必须按 bid_signal_weight 降权。
-    bid_deviation = best_bid - entry_price
-    if bid_deviation < -Decimal("0.15"):
-        bearish_vote += 2 * bid_signal_weight
-        vote_reasons.append(f"bid_deviation_strong_neg:{bid_deviation:+.3f}*w={bid_signal_weight}")
-    elif bid_deviation < -Decimal("0.05"):
-        bearish_vote += 1 * bid_signal_weight
-        vote_reasons.append(f"bid_deviation_neg:{bid_deviation:+.3f}*w={bid_signal_weight}")
-    elif bid_deviation >= Decimal("0.15"):
-        bullish_vote += 2 * bid_signal_weight
-        vote_reasons.append(f"bid_deviation_strong_pos:{bid_deviation:+.3f}*w={bid_signal_weight}")
-    elif bid_deviation >= Decimal("0.05"):
-        bullish_vote += 1 * bid_signal_weight
-        vote_reasons.append(f"bid_deviation_pos:{bid_deviation:+.3f}*w={bid_signal_weight}")
-    # 信号 2：Goalserve 赔率相对入场价偏离（绝对值无意义，必须看相对偏离）。
-    # 例：买价 0.20 + goalserve 0.30 = +0.10 偏离 → 博彩仍看好赢方；
-    # 买价 0.80 + goalserve 0.30 = -0.50 偏离 → 博彩认定输方向。
+    # **价格/概率信号**（主导投票）：math_lock + goalserve_implied + best_bid_dev
+    # 这三个都是真实概率/价格，可直接归一化与 entry 比较。
+    #
+    # 信号 1：math_lock 相对入场价偏离 — 最硬的概率信号（公式硬算）。
+    # 买价 0.20 + math 0.50 = +0.30 偏离 → 数学严重低估，veto+2 强 HOLD；
+    # 买价 0.80 + math 0.30 = -0.50 偏离 → 数学已劣势，bearish。
+    if math_lock_prob is not None:
+        ml_deviation = math_lock_prob - entry_price
+        if ml_deviation >= Decimal("0.15"):
+            bullish_vote += 2  # veto 强度
+            vote_reasons.append(f"math_deviation_strong_pos:{ml_deviation:+.3f}")
+        elif ml_deviation >= Decimal("0"):
+            bullish_vote += 1
+            vote_reasons.append(f"math_deviation_pos:{ml_deviation:+.3f}")
+        elif ml_deviation < -Decimal("0.15"):
+            bearish_vote += 2  # 数学硬亏，权重提升
+            vote_reasons.append(f"math_deviation_strong_neg:{ml_deviation:+.3f}")
+    # 信号 2：Goalserve 赔率相对入场价偏离 — 博彩市场视角。
     if goalserve_implied is not None:
         gs_deviation = goalserve_implied - entry_price
         if gs_deviation < -Decimal("0.1"):
@@ -351,21 +343,31 @@ def evaluate_dynamic_exit(
         elif gs_deviation > Decimal("0.05"):
             bullish_vote += 1
             vote_reasons.append(f"goalserve_deviation_pos:{gs_deviation:+.3f}")
-    # 信号 3：math_lock 相对入场价偏离（同理，绝对锁定概率无意义）。
-    # 买价 0.20 + math 0.50 = +0.30 偏离 → 数学上严重低估，强 HOLD；
-    # 买价 0.80 + math 0.30 = -0.50 偏离 → 数学上已劣势，bearish。
-    # 偏离 +0.15 以上视为强 bullish（veto 强度 2），偏离 -0.15 以下 bearish。
-    if math_lock_prob is not None:
-        ml_deviation = math_lock_prob - entry_price
-        if ml_deviation >= Decimal("0.15"):
-            bullish_vote += 2
-            vote_reasons.append(f"math_deviation_strong_pos:{ml_deviation:+.3f}")
-        elif ml_deviation >= Decimal("0"):
-            bullish_vote += 1
-            vote_reasons.append(f"math_deviation_pos:{ml_deviation:+.3f}")
-        elif ml_deviation < -Decimal("0.15"):
-            bearish_vote += 1
-            vote_reasons.append(f"math_deviation_neg:{ml_deviation:+.3f}")
+    # 信号 3：best_bid 相对入场价偏离 — 当下立即可成交价。
+    # 薄盘里 best_bid 一砸就到地板，bid_signal_weight 控制信任度。
+    bid_deviation = best_bid - entry_price
+    if bid_deviation < -Decimal("0.15"):
+        bearish_vote += 1 * bid_signal_weight  # 价格信号权重 1（不 2）— 价格 vs 概率有差异
+        vote_reasons.append(f"bid_deviation_strong_neg:{bid_deviation:+.3f}*w={bid_signal_weight}")
+    elif bid_deviation < -Decimal("0.05"):
+        bearish_vote += Decimal("0.5") * bid_signal_weight
+        vote_reasons.append(f"bid_deviation_neg:{bid_deviation:+.3f}*w={bid_signal_weight}")
+    elif bid_deviation >= Decimal("0.15"):
+        bullish_vote += 1 * bid_signal_weight
+        vote_reasons.append(f"bid_deviation_strong_pos:{bid_deviation:+.3f}*w={bid_signal_weight}")
+    elif bid_deviation >= Decimal("0.05"):
+        bullish_vote += Decimal("0.5") * bid_signal_weight
+        vote_reasons.append(f"bid_deviation_pos:{bid_deviation:+.3f}*w={bid_signal_weight}")
+    # **趋势 filter**（修饰，不主导）：imbalance 是供需方向 ratio，不能直接当价格/
+    # 概率投票（一笔小单就能翻转）。当前作弱修饰：仅在跟 bearish_vote 同向时加 0.5
+    # 强化（"价格信号说要止损 + 盘口方向也支持" 才算确认），单独 imbalance 不投票。
+    # 旧逻辑 imbalance ±2 权重等同 math_lock 是概念混淆，已纠正。
+    if bearish_vote > Decimal("0") and imbalance < Decimal("0.35"):
+        bearish_vote += Decimal("0.5") * bid_signal_weight
+        vote_reasons.append(f"trend_confirm_bearish:imbalance={imbalance:.3f}*w={bid_signal_weight}")
+    elif bullish_vote > Decimal("0") and imbalance > Decimal("0.65"):
+        bullish_vote += Decimal("0.5") * bid_signal_weight
+        vote_reasons.append(f"trend_confirm_bullish:imbalance={imbalance:.3f}*w={bid_signal_weight}")
     # fair_value 辅助门禁：跌 20% 即触发评估（旧 30%）。盘口风向反应快，
     # 早识别 fair_value 走弱 + orderbook 卖方一致 → 立即止损少亏 10%。
     fair_value_bearish = fair_value <= entry_price * Decimal("0.8")
