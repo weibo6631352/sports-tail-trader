@@ -129,12 +129,10 @@ class OrderbookDeltaStore:
         token_id = snapshot.token_id
         if not token_id:
             return
-        microprice = _microprice(
-            snapshot.best_bid,
-            snapshot.best_ask,
-            snapshot.best_bid_size,
-            snapshot.best_ask_size,
-        )
+        # microprice 复用 OrderbookSnapshot.microprice @property（domain 层）——
+        # 它已经识别 NO_BID / CEILING_ONLY / NO_ASK / FLOOR_ONLY 边界并返回
+        # None，与"算术加权"的旧 _microprice 函数计算公式一致但更严谨。
+        microprice = snapshot.microprice
         real_bid, real_ask = _real_price_band_depth(snapshot, microprice)
         sample = OrderbookSample(
             received_at=snapshot.received_at,
@@ -207,34 +205,6 @@ def _samples_equal(a: OrderbookSample, b: OrderbookSample) -> bool:
         and a.microprice == b.microprice
         and a.real_bid_depth_usdc == b.real_bid_depth_usdc
         and a.real_ask_depth_usdc == b.real_ask_depth_usdc
-    )
-
-
-def _microprice(
-    best_bid: Decimal | None,
-    best_ask: Decimal | None,
-    best_bid_size: Decimal | None,
-    best_ask_size: Decimal | None,
-) -> Decimal | None:
-    """流动性加权 mid:microprice = (bb × ask_size + ba × bid_size) / (bid_size + ask_size)。
-
-    Polymarket 两端集中订单簿(地板单 + 真挂单)下,算术 mid 严重失真;microprice 用
-    对手侧 size 做权重(对手侧 size 越大 = 该侧 push 越强 = 公允价越偏对手侧)。
-    任一字段缺失返回 None。
-    """
-
-    if (
-        best_bid is None
-        or best_ask is None
-        or best_bid_size is None
-        or best_ask_size is None
-    ):
-        return None
-    total = best_bid_size + best_ask_size
-    if total <= Decimal("0"):
-        return None
-    return ((best_bid * best_ask_size + best_ask * best_bid_size) / total).quantize(
-        Decimal("0.000001")
     )
 
 
