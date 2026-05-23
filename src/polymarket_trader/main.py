@@ -1200,6 +1200,7 @@ def _register_runtime_workers(runtime: RuntimeComponents) -> None:
         runtime.supervisor.register_worker("sports_pregame_odds_sync", priority="P2")
     runtime.supervisor.register_worker("persistence", priority="P3")
     runtime.supervisor.register_worker("audit_retention_purge", priority="P3", state=WorkerLifecycleState.RUNNING, detail="scheduler-driven; first run after interval")
+    runtime.supervisor.register_worker("dead_records_purge", priority="P3", state=WorkerLifecycleState.RUNNING, detail="scheduler-driven; first run after interval")
 
 
 def _seed_default_metrics(runtime: RuntimeComponents) -> None:
@@ -1443,6 +1444,17 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         priority="P3",
         interval_seconds=float(runtime.settings.audit_retention_interval_seconds),
         tags=("audit", "retention", "persistence"),
+        start=True,
+        run_immediately=False,
+    )
+    # 死记录(终态 orders / 已结算空 positions / 老 fills)清理 — 每天跑一次,
+    # 防止 reconcile 用历史 fills/orders 反复推无意义 market refs 拖慢启动。
+    runtime.scheduler.register_job(
+        "dead_records_purge",
+        lambda: _run_dead_records_purge(runtime),
+        priority="P3",
+        interval_seconds=float(runtime.settings.dead_records_retention_interval_seconds),
+        tags=("dead_records", "retention", "persistence"),
         start=True,
         run_immediately=False,
     )
@@ -1777,6 +1789,36 @@ async def _record_account_snapshot(runtime: RuntimeComponents) -> None:
             "account snapshot recorder failed",
             extra={"reason": str(exc)},
         )
+
+
+async def _run_dead_records_purge(runtime: RuntimeComponents) -> None:
+    """每天跑一次,按 condition_id 关联清死市场的 orders/fills/positions/
+    audit/outbox 全部 trail,加时间兜底清无 cid 事件 + account_snapshots。"""
+
+    from polymarket_trader.app.dead_records_retention import purge_dead_records_once
+
+    summary = await purge_dead_records_once(
+        runtime.db_session_factory,
+        dead_records_retention_days=runtime.settings.dead_records_retention_days,
+        fills_retention_days=runtime.settings.fills_retention_days,
+        outbox_retention_days=runtime.settings.outbox_retention_days,
+        decision_records_retention_days=runtime.settings.decision_records_retention_days,
+        account_snapshots_retention_days=runtime.settings.account_snapshots_retention_days,
+    )
+    runtime.supervisor.heartbeat_worker(
+        "dead_records_purge",
+        detail=(
+            f"live_cids={summary['live_cids_count']} "
+            f"orders={summary['deleted_orders']} "
+            f"fills={summary['deleted_fills']} "
+            f"positions={summary['deleted_positions']} "
+            f"audit={summary['deleted_audit_events']} "
+            f"outbox={summary['deleted_outbox_events']} "
+            f"decisions={summary['deleted_decision_records']} "
+            f"snapshots={summary['deleted_account_snapshots']} "
+            f"err={'!' if summary['error'] else '-'}"
+        ),
+    )
 
 
 async def _run_audit_retention_purge(runtime: RuntimeComponents) -> None:

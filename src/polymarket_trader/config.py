@@ -98,10 +98,28 @@ class Settings(BaseSettings):
     # 每天累积百万级 row，长期运行会让查询变慢且占用大量磁盘。retention job 每天跑
     # 一次 ``DELETE WHERE created_at < now() - interval N days``，让 audit 表稳态
     # 在 ~14 天数据量内。改 0 关闭 retention（不推荐——仅用于离线分析临时保留）。
-    audit_retention_days: int = Field(default=14, ge=0, le=365)
+    # 注:trading_decision_worker 每秒 ~100 条 allocation_decision_recorded,
+    # 每天 ~370 万行 audit_events。3 天 retention ≈ 1100 万行,DB 体积可控;
+    # 想长保留要先做写源抽样(只在 accepted/拒绝原因变化时记)。
+    audit_retention_days: int = Field(default=3, ge=0, le=365)
     audit_retention_interval_seconds: int = Field(default=86_400, ge=300)
     # 单次 purge 的批量上限——避免一次 DELETE 锁表过久。10k 在 PG 上约几百 ms。
     audit_retention_purge_batch_size: int = Field(default=10_000, ge=100, le=200_000)
+
+    # 死记录清理 — 默认 2 天。终态 orders + shares=0 的空 positions 是 reconcile
+    # 反复查 gamma 的源头,缩到 2 天足够保留近期复盘窗口。
+    dead_records_retention_days: int = Field(default=2, ge=0, le=365)
+    dead_records_retention_interval_seconds: int = Field(default=86_400, ge=300)
+    # 各审计表 retention — 默认按事件密度选:
+    # - outbox 1 天(transient queue,消费后即过期,无长期审计价值);
+    # - fills 14 天(成交存档,有审计价值);
+    # - decision_records 7 天(决策审计,每秒一条产生);
+    # - account_snapshots 14 天(60s 一条净值快照,14 天 = 2 万行可控)。
+    # 想长保留 → 先做写源抽样(只在变化点 emit),否则 DB 体积爆炸。
+    fills_retention_days: int = Field(default=14, ge=0, le=730)
+    outbox_retention_days: int = Field(default=1, ge=0, le=365)
+    decision_records_retention_days: int = Field(default=7, ge=0, le=365)
+    account_snapshots_retention_days: int = Field(default=14, ge=0, le=365)
 
     # 外部体育直播状态源只提供入场前事实，不承载策略阈值或交易参数。
     # 默认 ``True``：strategies/current 的入场链路依赖直播状态，关闭后整个 funnel

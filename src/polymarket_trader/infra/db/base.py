@@ -219,11 +219,15 @@ class Base(DeclarativeBase):
 
 
 class TimestampMixin:
+    # created_at / updated_at 都加索引——所有 retention 清理 job 按
+    # WHERE created_at < cutoff / WHERE updated_at < cutoff 走索引 range scan,
+    # 不加索引时大表(outbox/audit 千万级)DELETE 会 Seq Scan 全表扫几分钟。
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=_utc_now,
         server_default=func.now(),
+        index=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -231,6 +235,7 @@ class TimestampMixin:
         default=_utc_now,
         server_default=func.now(),
         onupdate=func.now(),
+        index=True,
     )
 
 

@@ -734,6 +734,11 @@ def _market_has_account_exposure(account_snapshot: Any, market: Market) -> bool:
 
 
 def _account_exposure_market_refs(account_snapshot: Any) -> tuple[tuple[str, str, str | None], ...]:
+    # 只从 active positions(非 settled_zero、有 shares/open_orders)+ open_orders
+    # derive market refs。fills 是历史成交审计存档,不代表当前账户暴露——
+    # 用 fills 推会让 reconcile 反复查 N 条历史 fill 涉及的死孤儿市场
+    # (实测 38 条 fills 让 startup reconcile 多查 111 次 not_found,占启动 ~10s)。
+    # 真有 active exposure 的 condition_id 必然出现在 positions/open_orders 里。
     refs: dict[tuple[str, str], str | None] = {}
     for position in account_snapshot.positions:
         if position.settled_zero_value:
@@ -749,12 +754,6 @@ def _account_exposure_market_refs(account_snapshot: Any) -> tuple[tuple[str, str
     for order in account_snapshot.open_orders:
         refs[(order.condition_id, order.token_id)] = order.market_slug or refs.get(
             (order.condition_id, order.token_id)
-        )
-    for fill in account_snapshot.fills:
-        if fill.condition_id is None or fill.token_id is None:
-            continue
-        refs[(fill.condition_id, fill.token_id)] = fill.market_slug or refs.get(
-            (fill.condition_id, fill.token_id)
         )
     return tuple((condition_id, token_id, market_slug) for (condition_id, token_id), market_slug in refs.items())
 
