@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -50,6 +51,8 @@ from .helpers import _metadata_text
 from .pricing import _tail_locked_outcome_signal, _tail_price_cap
 from .risk_limits import _apply_tail_risk_limits
 
+logger = logging.getLogger(__name__)
+
 
 def _maybe_reprice_stale_sell(
     config: CurrentStrategyConfig,
@@ -75,15 +78,34 @@ def _maybe_reprice_stale_sell(
         or (context.position.token_id if context.position is not None else None)
     )
     if token_id is None:
+        logger.info("reprice_skip", extra={"reason": "no_token_id"})
         return None
     open_sells = [
         o for o in (context.open_orders or ())
         if o.side.value == "sell" and o.token_id == token_id and o.open and o.remaining_shares
     ]
     if not open_sells:
+        logger.info(
+            "reprice_skip",
+            extra={
+                "reason": "no_open_sells",
+                "token_id": token_id,
+                "open_orders_count": len(context.open_orders or ()),
+                "open_orders_sides": [o.side.value for o in (context.open_orders or ())],
+            },
+        )
         return None
     orderbook = _exit_orderbook(context, token_id)
     if orderbook is None or orderbook.best_bid is None:
+        logger.info(
+            "reprice_skip",
+            extra={
+                "reason": "no_orderbook" if orderbook is None else "no_best_bid",
+                "token_id": token_id,
+                "open_sells_count": len(open_sells),
+                "open_sells_prices": [str(s.price) for s in open_sells],
+            },
+        )
         return None
     fair_value, fair_source = _estimate_fair_value(
         context,
@@ -121,6 +143,19 @@ def _maybe_reprice_stale_sell(
         # 路径 2：SELL 高于 fair_value × 1.5 → 改到 max(best_bid+tick, fair×0.95)
         stale_by_fair_value = sell_price > fair_value * reprice_ratio
         if not stale_by_profit_take and not stale_by_fair_value:
+            logger.info(
+                "reprice_skip",
+                extra={
+                    "reason": "thresholds_not_met",
+                    "token_id": token_id,
+                    "sell_price": str(sell_price),
+                    "profit_take_target": (
+                        str(profit_take_target) if profit_take_target is not None else None
+                    ),
+                    "fair_value": str(fair_value),
+                    "best_bid": str(orderbook.best_bid),
+                },
+            )
             continue
         if stale_by_profit_take:
             assert profit_take_target is not None  # 守门已确认
