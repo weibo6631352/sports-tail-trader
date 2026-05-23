@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -412,6 +413,11 @@ class PolymarketOrderExecutionClient:
         if not request.order_id:
             raise ValueError("replace_order requires order_id")
         cancel_response = self._trading_client.cancel_order(request.order_id)
+        # Polymarket cancel API 返回 OK 后服务端 balance/share allowance 同步需 1-2s。
+        # 立即 post replacement 会因为旧 SELL 仍占用 share allowance → 新 SELL 报
+        # "not enough balance / allowance"。1.5s 是实测安全余量。
+        # 这是 sync thread-pool 调用，time.sleep 不阻塞 asyncio 主循环。
+        time.sleep(1.5)
         replacement_request = OrderExecutionRequest(
             action="submit",
             strategy_id=request.strategy_id,
