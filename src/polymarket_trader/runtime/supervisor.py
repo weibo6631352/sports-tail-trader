@@ -117,6 +117,11 @@ class Supervisor:
         self._db_ready = False
         self._trading_client_ready = False
         self._worker_health: dict[str, WorkerHealth] = {}
+        # 防毛刺: latency 超阈值要连续 N 次才触发 pause_low_priority。冷启动签名/
+        # httpx 连接池冷/首单 RiskManager 计算冷 都可能产生单次 2s+ 毛刺,但稳态
+        # 通常 200-400ms。单次超阈值就 pause 等于把毛刺当 backpressure,死循环根因。
+        self._latency_breach_count = 0
+        self._latency_breach_threshold = 3
 
     def register_worker(
         self,
@@ -374,24 +379,39 @@ class Supervisor:
         queue_depths: Mapping[str, Any],
         metrics: Mapping[str, Any],
     ) -> bool:
+        # trading queue 深度超阈是确定信号(P0 在堆积),立刻 pause、不要 N 次确认。
         trading_depth = _int(queue_depths, "trading_queue_depth")
         if trading_depth >= self._trading_queue_warn_depth:
+            self._latency_breach_count = self._latency_breach_threshold
             return True
+        # latency gauge 是单值 instantaneous,易被冷启动毛刺误触。要求连续 N 次
+        # 超阈才 pause;一次回到正常立刻 reset counter。
+        latency_breached = False
         latency_ms = _extract_metric_value(
             metrics,
             "entry_signal_to_submit_ms",
             max_age_seconds=_BACKPRESSURE_GAUGE_STALE_AFTER_SECONDS,
         )
         if latency_ms is not None and latency_ms >= self._entry_signal_to_submit_warn_ms:
-            return True
-        for key in ("trading_lock_wait_ms", "executor_queue_wait_ms"):
-            value = _extract_metric_value(
-                metrics,
-                key,
-                max_age_seconds=_BACKPRESSURE_GAUGE_STALE_AFTER_SECONDS,
+            latency_breached = True
+        else:
+            for key in ("trading_lock_wait_ms", "executor_queue_wait_ms"):
+                value = _extract_metric_value(
+                    metrics,
+                    key,
+                    max_age_seconds=_BACKPRESSURE_GAUGE_STALE_AFTER_SECONDS,
+                )
+                if value is not None and value >= self._entry_signal_to_submit_warn_ms:
+                    latency_breached = True
+                    break
+
+        if latency_breached:
+            self._latency_breach_count = min(
+                self._latency_breach_threshold,
+                self._latency_breach_count + 1,
             )
-            if value is not None and value >= self._entry_signal_to_submit_warn_ms:
-                return True
+            return self._latency_breach_count >= self._latency_breach_threshold
+        self._latency_breach_count = 0
         return False
 
     @staticmethod
