@@ -22,7 +22,13 @@ from strategies.current.tail.types import TailPolicy
 def _game(ht_home: int | None, ht_away: int | None):
     soccer_state = None
     if ht_home is not None and ht_away is not None:
-        soccer_state = {"home_halftime_score": ht_home, "away_halftime_score": ht_away}
+        # period=second_half 必须在 soccer_state 内(parser 1st half 默认填 0 + period
+        # 区分);evaluator 已守卫:必须 period 进入 second_half/ended 才认半场锁定。
+        soccer_state = {
+            "home_halftime_score": ht_home,
+            "away_halftime_score": ht_away,
+            "period": "second_half",
+        }
     return live_game_state_from_metadata({
         "league": "J1 League",
         "sport": "soccer",

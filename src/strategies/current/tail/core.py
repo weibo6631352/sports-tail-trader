@@ -417,6 +417,19 @@ def _evaluate_soccer_halftime_result(
     state = game.soccer_state
     if state is None or state.home_halftime_score is None or state.away_halftime_score is None:
         return _reject(candidate, TailRejectReason.SOCCER_HALFTIME_NOT_COMPLETE.value)
+    # Parser bug 守卫: goalserve 数据源可能在 1st_half 中提供 home/away_halftime_score
+    # 数值 (而非 None),导致 1st_half 第 6 分钟就被误判"半场 0-0 已锁定 Draw"。
+    # 实盘案例: THE-SAG 1st Half 第 6min 时被误判 Draw 锁定,买入后 Thespa 进球 → 巨亏。
+    #
+    # 半场结果真锁定 = period 进入 second_half/ended/full_time;或 1st_half clock >= 45
+    # (进入伤停,半场即将结束,数学锁定)。前两者由 parser 显式区分,后者放宽允许末段进场。
+    period = (state.period or "").lower()
+    if period in {"second_half", "ended", "full_time"}:
+        pass  # 半场已结束,halftime_score 真值
+    elif period == "first_half" and (state.clock_minutes or 0) >= 45:
+        pass  # 1st half 进入伤停时间,接近半场结束,接受数学锁定场景
+    else:
+        return _reject(candidate, TailRejectReason.SOCCER_HALFTIME_NOT_COMPLETE.value)
     if market.best_ask is None:
         return _reject(candidate, TailRejectReason.MISSING_BEST_ASK.value)
     if market.best_ask < policy.min_entry_price:
