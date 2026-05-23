@@ -109,9 +109,11 @@ async def positions_liquidity(
         token_id = p.get("token_id")
         liq = liq_by_token.get(token_id)
         if isinstance(liq, Exception) or liq is None:
-            mid = None; sell_p = None
+            mid = None
+            sell_p = None
         else:
-            mid = liq.get("midpoint"); sell_p = liq.get("best_sell_price")
+            mid = liq.get("midpoint")
+            sell_p = liq.get("best_sell_price")
         shares = p.get("shares") or 0
         try:
             mid_d = Decimal(str(mid)) if mid is not None else None
