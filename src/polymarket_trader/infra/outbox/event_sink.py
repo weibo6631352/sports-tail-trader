@@ -49,6 +49,9 @@ _PERSISTABLE_EVENT_TYPES = {
     DomainEventType.RECONCILE_DIFF_DETECTED.value,
     DomainEventType.RECONCILE_APPLIED.value,
     DomainEventType.TRADING_PAUSED_FOR_MARKET.value,
+    # 盘口风向 delta 查询审计:让操盘事后能复盘"这一刻判断买/卖压所依据的窗口
+     # delta + score 是什么",避免黑箱决策。每次 admin/strategy 调用都落一次。
+    DomainEventType.ORDERBOOK_DIRECTION_QUERIED.value,
 }
 
 _MARKET_EVENT_TYPES = {

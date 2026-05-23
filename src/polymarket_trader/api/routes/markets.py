@@ -99,6 +99,22 @@ async def get_market_midpoint(
     return payload
 
 
+@router.get("/orderbook-direction")
+async def get_orderbook_direction(
+    token_id: str = Query(min_length=1),
+    window_seconds: float = Query(default=10.0, ge=0.5, le=120.0),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """读盘口多时点 delta 信号(best bid/ask price + size 变化)。
+
+    单时点 bid/ask 深度比会被 MM 远端"墙"骗;真买卖压来自窗口内 best 价位移 +
+    size 消耗。返回 direction_score [-1,+1] + raw deltas + confidence + samples。
+    每次查询落 audit(ORDERBOOK_DIRECTION_QUERIED),供事后复盘。
+    """
+
+    return await service.get_orderbook_direction(token_id=token_id, window_seconds=window_seconds)
+
+
 @router.get("/orderbook-history")
 async def list_orderbook_history(
     limit: int = Query(default=200, ge=1, le=2000),

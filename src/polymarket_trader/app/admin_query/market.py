@@ -237,6 +237,75 @@ class AdminMarketQueryMixin:
             fidelity=fidelity,
         )
 
+    async def get_orderbook_direction(
+        self,
+        *,
+        token_id: str,
+        window_seconds: float = 10.0,
+    ) -> dict[str, Any]:
+        """读 OrderbookDeltaStore 多时点 delta 信号 + 落审计。
+
+        score [-1,+1] (基于 mid 价位移归一);direction_label='yes'/'no'/'neutral';
+        raw bid/ask price/size delta;confidence 反映 sample 数和数据完整性。
+        每次查询都写 ORDERBOOK_DIRECTION_QUERIED 审计,事后可复盘"为什么这一刻判断方向"。
+        """
+
+        from uuid import uuid4
+
+        from polymarket_trader.domain.events import DomainEvent, DomainEventType
+        from polymarket_trader.domain.events import OutboxPriority
+
+        store = self.runtime.orderbook_delta_store if self.runtime else None
+        if store is None:
+            payload: dict[str, Any] = {
+                "token_id": token_id,
+                "window_seconds": window_seconds,
+                "signal": None,
+                "reason": "store_unavailable",
+            }
+            return payload
+
+        signal = store.direction_signal(token_id, window_seconds=window_seconds)
+        if signal is None:
+            payload = {
+                "token_id": token_id,
+                "window_seconds": window_seconds,
+                "signal": None,
+                "reason": "insufficient_samples",
+                "tracked_tokens": len(store.tracked_tokens()),
+            }
+        else:
+            payload = {
+                "token_id": token_id,
+                "window_seconds": signal.window_seconds,
+                "sample_count": signal.sample_count,
+                "first_observed_at": signal.first_observed_at.isoformat(),
+                "last_observed_at": signal.last_observed_at.isoformat(),
+                "bid_price_delta": str(signal.bid_price_delta) if signal.bid_price_delta is not None else None,
+                "ask_price_delta": str(signal.ask_price_delta) if signal.ask_price_delta is not None else None,
+                "mid_price_delta": str(signal.mid_price_delta) if signal.mid_price_delta is not None else None,
+                "bid_size_delta": str(signal.bid_size_delta) if signal.bid_size_delta is not None else None,
+                "ask_size_delta": str(signal.ask_size_delta) if signal.ask_size_delta is not None else None,
+                "direction_score": str(signal.direction_score),
+                "direction_label": signal.direction_label,
+                "confidence": str(signal.confidence),
+            }
+
+        # 异步落 audit。失败不阻塞查询 (§7 主链路不被反向阻塞)。
+        if self.runtime is not None and getattr(self.runtime, "event_bus", None) is not None:
+            try:
+                event = DomainEvent(
+                    trace_id=uuid4().hex,
+                    event_type=DomainEventType.ORDERBOOK_DIRECTION_QUERIED,
+                    event_id=uuid4().hex,
+                    reason="admin_query",
+                    payload=dict(payload),
+                )
+                self.runtime.event_bus.publish_nowait(OutboxPriority.P3, event)
+            except Exception:
+                pass
+        return payload
+
     async def list_orderbook_history(
         self,
         *,

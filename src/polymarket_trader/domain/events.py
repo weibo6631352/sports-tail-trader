@@ -91,6 +91,9 @@ class DomainEventType(StrEnum):
     # 而不需要从 risk_check_failed reason 字段过滤。
     DRAWDOWN_LOCKOUT_TRIGGERED = "drawdown_lockout_triggered"
     DRAWDOWN_LOCKOUT_CLEARED = "drawdown_lockout_cleared"
+    # 操盘读 OrderbookDeltaStore.direction_signal 时落审计,记录窗口内 best bid/ask
+    # delta + direction_score。供事后复盘"为什么这一刻判断买/卖压 → 决定加仓/退场"。
+    ORDERBOOK_DIRECTION_QUERIED = "orderbook_direction_queried"
     RETRY = "retry"
     SKIPPED = "skipped"
     ERROR = "error"
