@@ -286,6 +286,18 @@ class AdminSerializer:
         import datetime as _dt
         now_ms = int(_dt.datetime.now(_dt.timezone.utc).timestamp() * 1000)
         received_ms = int(orderbook.received_at.timestamp() * 1000)
+        # bids 按价位降序、asks 按升序排好后取 top-5：方便盯盘看"真深度阶梯"
+        # 区分 MM 假墙（远端 0.99/0.01 单档极大 size）和真买卖压（近端多档梯度）。
+        sorted_bids = sorted(orderbook.bids, key=lambda l: l.price, reverse=True)
+        sorted_asks = sorted(orderbook.asks, key=lambda l: l.price)
+        top_5_bids = [
+            {"price": decimal_text(level.price), "size": decimal_text(level.size)}
+            for level in sorted_bids[:5]
+        ]
+        top_5_asks = [
+            {"price": decimal_text(level.price), "size": decimal_text(level.size)}
+            for level in sorted_asks[:5]
+        ]
         return {
             "token_id": orderbook.token_id,
             "condition_id": orderbook.condition_id,
@@ -297,13 +309,34 @@ class AdminSerializer:
             "last_trade_price": decimal_text(orderbook.last_trade_price),
             "tick_size": decimal_text(orderbook.tick_size),
             "spread": decimal_text(orderbook.spread),
+            "microprice": decimal_text(orderbook.microprice),
+            "bid_liquidity_state": orderbook.bid_liquidity_state.value,
+            "ask_liquidity_state": orderbook.ask_liquidity_state.value,
+            "sell_actionable": orderbook.sell_actionable,
+            "buy_actionable": orderbook.buy_actionable,
             "received_at": jsonable(orderbook.received_at),
             "snapshot_age_ms": now_ms - received_ms,
+            "top_5_bids": top_5_bids,
+            "top_5_asks": top_5_asks,
             "bids": [{"price": decimal_text(level.price), "size": decimal_text(level.size)} for level in orderbook.bids],
             "asks": [{"price": decimal_text(level.price), "size": decimal_text(level.size)} for level in orderbook.asks],
         }
 
     def position(self, position: Position) -> dict[str, Any]:
+        # 实时取 orderbook 算流动性状态，让盯盘端一眼识别"被困持仓"：
+        # FLOOR_BID_ONLY / NO_BID / DUST_BID = 当前无真实退出通道（cv 应 ≈ 0），
+        # OK = 有真买盘可挂 SELL 兑现。
+        liquidity_state: str | None = None
+        microprice_text: str | None = None
+        if position.token_id:
+            try:
+                ob = self.market_ws_snapshot(position.token_id)
+            except Exception:
+                ob = None
+            if ob is not None:
+                liquidity_state = ob.bid_liquidity_state.value
+                if ob.microprice is not None:
+                    microprice_text = decimal_text(ob.microprice)
         return {
             "condition_id": position.condition_id,
             "token_id": position.token_id,
@@ -343,6 +376,8 @@ class AdminSerializer:
                 open_sell_shares=position.open_sell_shares,
                 confirmed_shares=position.confirmed_shares,
             ).value,
+            "bid_liquidity_state": liquidity_state,
+            "microprice": microprice_text,
         }
 
     def order(self, order: Order) -> dict[str, Any]:
