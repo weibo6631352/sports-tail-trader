@@ -243,12 +243,20 @@ class CurrentStrategyConfig:
     tail_locked_outcome_max_entry_price: Decimal = Decimal("0.98")
     tail_spreads_max_entry_price: Decimal = Decimal("0.96")
     tail_min_liquidity_usdc: Decimal = Decimal("1")
-    tail_max_game_state_age_seconds: int = 10
+    # default 兜底阈值：basketball/volleyball/amfootball/hockey 等走 inplay GZIP 的运动
+    # 用此值。ESPN/Goalserve inplay 主路径 1-3s 推送，但比赛暂停（timeout / quarter break /
+    # 换人时段）会出现 30-60s 间隙；10s 太紧会在暂停时段误标 sports_live_state_stale
+    # → reconcile pause market → entry_planner 短路。60s 覆盖正常暂停间隙。
+    tail_max_game_state_age_seconds: int = 60
     # MLB/KBO baseball livescore feed 实测 30-90s 才推新比分（局间/换投手时段更慢），
     # 45s 阈值经常误标 sports_live_state_stale → reconcile pause market → 即使
     # candidate accepted（odds_gap_entry / 扫尾锁定）也被 entry_planner 短路下不了单。
     # 调到 120s 给 KBO/MLB 比赛足够 buffer，与 soccer 同口径。
     tail_baseball_max_game_state_age_seconds: int = 120
+    # cricket/rugby/handball 等纯 livescore-only 运动（Goalserve inplay 不覆盖，
+    # 只能走 getfeed/{key}/{sport}/home livescore），feed 周期与 soccer 同级（30-90s）。
+    # 不专门加 cricket/rugby/handball 字段会回落 default 60s，仍可能不够；统一 120s。
+    tail_livescore_only_max_game_state_age_seconds: int = 120
     tail_tennis_max_game_state_age_seconds: int = 35
     # J1/J2/Australia/各次级足球联赛 livescore feed 更新周期 60-90s(实测重启后
     # 仍有 sports_live_state_stale pause 触发);设 120s 给足 buffer,避免 reconcile

@@ -392,6 +392,11 @@ def _max_live_state_age_seconds(config: CurrentStrategyConfig, game: LiveEvent) 
     # 也下不了单。
     if game.soccer_state is not None or (game.sport or "").strip().lower() == "soccer" or league in {"j1", "j2", "j1100", "j2100"} or any(k in league for k in ("soccer","football","liga","league","serie")):
         return config.tail_soccer_max_game_state_age_seconds
+    # cricket/rugby/handball：Goalserve inplay 不覆盖，仅 livescore getfeed，feed
+    # 周期 30-90s。走专属 livescore_only 阈值避免 default 60s 仍然偶发误标 stale。
+    sport_text = (game.sport or "").strip().lower()
+    if game.cricket_state is not None or game.handball_state is not None or sport_text in {"cricket", "rugby", "handball", "rugbyleague"} or "rugby" in league or "cricket" in league or "handball" in league:
+        return config.tail_livescore_only_max_game_state_age_seconds
     return config.tail_max_game_state_age_seconds
 
 
