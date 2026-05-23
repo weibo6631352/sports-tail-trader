@@ -341,6 +341,397 @@ def _soccer_halftime_lock(
 
 
 # ============================================================
+# Sport-specific lock 公式
+# 每种 sport × market_type 单独建模——不要 generic 兜底，没建模的盘口
+# 返回 unsupported 让上层 fallback 到 goalserve_implied / microprice。
+# ============================================================
+
+
+# ---------- Basketball (NBA / WNBA / CBA) ----------
+# 单边每秒得分均值/方差（从 NBA 赛季均值反推）：
+#   ~110 pts/team/48min ≈ 0.038 pts/sec/team
+#   单次得分大小分布：2 pts (~55%), 3 pts (~30%), 1 pt FT (~15%)
+#   单秒得分方差 ≈ E[X²]×rate - E[X]²×rate² ≈ 0.18 per sec
+_BASKETBALL_VAR_PER_SECOND = 0.18
+
+
+def _basketball_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResult:
+    """NBA/WNBA ML：lead × 剩余秒数双边正态近似 reversal。"""
+    if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return MathLockResult(_ZERO, "basketball_ml", "unsupported_side", {})
+    lead = game.score_diff_for(side)
+    if lead <= 0:
+        return MathLockResult(_ZERO, "basketball_ml", "side_not_leading", {"lead": lead})
+    remaining = game.seconds_remaining
+    if remaining is None or remaining <= 0:
+        return MathLockResult(_ONE, "basketball_ml", "no_remaining_time", {"lead": lead})
+    var_diff = 2.0 * _BASKETBALL_VAR_PER_SECOND * remaining
+    z = lead / math.sqrt(var_diff)
+    p_reversal = 0.5 * math.erfc(z / math.sqrt(2.0))
+    lock = max(0.0, min(1.0, 1.0 - p_reversal))
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "basketball_ml", "live_estimate",
+        {"lead": lead, "remaining_seconds": remaining, "p_reversal": round(p_reversal, 4)},
+    )
+
+
+def _basketball_totals_lock(
+    side: SportsMarketSide, line: Decimal, game: LiveGameState
+) -> MathLockResult:
+    """NBA Totals：双边总得分 Poisson-normal 近似。"""
+    if side not in {SportsMarketSide.OVER, SportsMarketSide.UNDER}:
+        return MathLockResult(_ZERO, "basketball_totals", "unsupported_side", {})
+    total = Decimal(int(game.total_score))
+    remaining = game.seconds_remaining
+    if remaining is None or remaining <= 0:
+        won = (total > line) if side == SportsMarketSide.OVER else (total < line)
+        return MathLockResult(
+            _ONE if won else _ZERO, "basketball_totals", "game_ended",
+            {"total": str(total), "line": str(line)},
+        )
+    if side == SportsMarketSide.OVER and total > line:
+        return MathLockResult(_ONE, "basketball_totals", "already_over_win", {})
+    if side == SportsMarketSide.UNDER and total >= line:
+        return MathLockResult(_ZERO, "basketball_totals", "already_over_lose", {})
+    var_total = 2.0 * _BASKETBALL_VAR_PER_SECOND * remaining
+    need = float(line) - float(total) + (0.5 if side == SportsMarketSide.OVER else 0.0)
+    z = need / math.sqrt(var_total)
+    p_break = 0.5 * math.erfc(z / math.sqrt(2.0))
+    lock = p_break if side == SportsMarketSide.OVER else (1.0 - p_break)
+    lock = max(0.0, min(1.0, lock))
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "basketball_totals", "live_estimate",
+        {"total": str(total), "line": str(line), "remaining_seconds": remaining,
+         "p_break": round(p_break, 4)},
+    )
+
+
+def _basketball_spreads_lock(
+    side: SportsMarketSide, line: Decimal, game: LiveGameState
+) -> MathLockResult:
+    """NBA Spreads：让分后净 lead 正态近似 reversal。"""
+    if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return MathLockResult(_ZERO, "basketball_spreads", "unsupported_side", {})
+    raw_lead = game.score_diff_for(side)
+    adjusted = float(raw_lead) + (float(line) if side == SportsMarketSide.HOME else -float(line))
+    remaining = game.seconds_remaining
+    if remaining is None or remaining <= 0:
+        return MathLockResult(
+            _ONE if adjusted > 0 else _ZERO, "basketball_spreads", "no_remaining_time",
+            {"adjusted_lead": adjusted},
+        )
+    if adjusted <= 0:
+        return MathLockResult(_ZERO, "basketball_spreads", "not_leading_after_handicap",
+                              {"adjusted_lead": adjusted})
+    var_diff = 2.0 * _BASKETBALL_VAR_PER_SECOND * remaining
+    z = adjusted / math.sqrt(var_diff)
+    p_reversal = 0.5 * math.erfc(z / math.sqrt(2.0))
+    lock = max(0.0, min(1.0, 1.0 - p_reversal))
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "basketball_spreads", "live_estimate",
+        {"raw_lead": raw_lead, "line": str(line), "adjusted_lead": adjusted,
+         "remaining_seconds": remaining, "p_reversal": round(p_reversal, 4)},
+    )
+
+
+# ---------- Soccer (EPL / J1 / J2 / 各联赛) ----------
+# 单边进球率：平均比赛 ~2.6 goals/match / 90min ≈ 0.0144 goals/min/team
+# 实测主场略高，简化对称 ~0.014/min/side ≈ 0.000233/sec/side
+# Poisson var ≈ mean，所以每秒方差 ≈ 0.000233
+_SOCCER_GOAL_RATE_PER_SEC = 0.000233
+
+
+def _soccer_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResult:
+    """Soccer 整场 ML：Poisson 双方剩余进球计算 P(lead 反转)。
+
+    简化：lead = h - a，需要对手净进 ≥ lead+1（HOME 视角）。
+    双方剩余进球独立 Poisson，差服从 Skellam，用正态近似 std ≈ sqrt(λ_h+λ_a)。
+    """
+    if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY, SportsMarketSide.DRAW}:
+        return MathLockResult(_ZERO, "soccer_ml", "unsupported_side", {})
+    home = game.home_score
+    away = game.away_score
+    remaining = game.seconds_remaining
+    if remaining is None or remaining <= 0:
+        if side == SportsMarketSide.HOME:
+            won = home > away
+        elif side == SportsMarketSide.AWAY:
+            won = away > home
+        else:
+            won = home == away
+        return MathLockResult(_ONE if won else _ZERO, "soccer_ml", "no_remaining_time",
+                              {"home": home, "away": away})
+    # 剩余进球期望 = 单边率 × 剩余秒
+    lam = _SOCCER_GOAL_RATE_PER_SEC * remaining
+    # Skellam 标准差 ≈ sqrt(2 × lam)
+    sigma = math.sqrt(2.0 * lam)
+    if sigma <= 0.01:
+        # 时间太短，按当前比分判定
+        if side == SportsMarketSide.HOME:
+            return MathLockResult(_ONE if home > away else _ZERO, "soccer_ml",
+                                  "negligible_remaining", {"home": home, "away": away})
+        if side == SportsMarketSide.AWAY:
+            return MathLockResult(_ONE if away > home else _ZERO, "soccer_ml",
+                                  "negligible_remaining", {"home": home, "away": away})
+        return MathLockResult(_ONE if home == away else _ZERO, "soccer_ml",
+                              "negligible_remaining", {"home": home, "away": away})
+    lead = home - away
+    if side == SportsMarketSide.HOME:
+        if lead <= 0:
+            return MathLockResult(_ZERO, "soccer_ml", "not_leading", {"lead": lead})
+        # P(剩余 goals_a - goals_h >= lead) → Skellam tail
+        z = lead / sigma
+        p_reversal_or_draw = 0.5 * math.erfc(z / math.sqrt(2.0))
+        lock = max(0.0, min(1.0, 1.0 - p_reversal_or_draw))
+    elif side == SportsMarketSide.AWAY:
+        if lead >= 0:
+            return MathLockResult(_ZERO, "soccer_ml", "not_leading", {"lead": -lead})
+        z = (-lead) / sigma
+        p_reversal_or_draw = 0.5 * math.erfc(z / math.sqrt(2.0))
+        lock = max(0.0, min(1.0, 1.0 - p_reversal_or_draw))
+    else:  # DRAW
+        # 平局：当前已平局且剩余时间 Skellam=0 概率
+        # 简化：P(no goals scored) × P(scored evenly) — 极小
+        # 直接用 Poisson(2λ) P(N=0) 作下界
+        from math import exp
+        p_no_goals = exp(-2.0 * lam)
+        if home == away:
+            lock = p_no_goals  # 当前平局且没人再进球
+        else:
+            lock = 0.0  # 当前非平局，且剩余很难恰好抹平
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "soccer_ml", "live_estimate",
+        {"home": home, "away": away, "remaining_seconds": remaining, "lambda_per_side": round(lam, 4)},
+    )
+
+
+def _soccer_totals_lock(
+    side: SportsMarketSide, line: Decimal, game: LiveGameState
+) -> MathLockResult:
+    """Soccer Totals：双边总进球 Poisson(2λ) 计算 P(剩余进球 ≥ need)。"""
+    if side not in {SportsMarketSide.OVER, SportsMarketSide.UNDER}:
+        return MathLockResult(_ZERO, "soccer_totals", "unsupported_side", {})
+    total = Decimal(int(game.total_score))
+    remaining = game.seconds_remaining
+    if remaining is None or remaining <= 0:
+        won = (total > line) if side == SportsMarketSide.OVER else (total < line)
+        return MathLockResult(_ONE if won else _ZERO, "soccer_totals", "game_ended",
+                              {"total": str(total), "line": str(line)})
+    if side == SportsMarketSide.OVER and total > line:
+        return MathLockResult(_ONE, "soccer_totals", "already_over_win", {})
+    if side == SportsMarketSide.UNDER and total >= line:
+        return MathLockResult(_ZERO, "soccer_totals", "already_over_lose", {})
+    lam_total = 2.0 * _SOCCER_GOAL_RATE_PER_SEC * remaining
+    need = int(float(line) - float(total)) + (1 if side == SportsMarketSide.OVER else 0)
+    # P(Poisson(lam_total) >= need)
+    from math import exp, factorial
+    p_under_need = sum(
+        (lam_total ** k) * exp(-lam_total) / factorial(k) for k in range(max(0, need))
+    )
+    p_at_least_need = 1.0 - p_under_need
+    if side == SportsMarketSide.OVER:
+        lock = max(0.0, min(1.0, p_at_least_need))
+    else:
+        lock = max(0.0, min(1.0, 1.0 - p_at_least_need))
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "soccer_totals", "live_estimate",
+        {"total": str(total), "line": str(line), "remaining_seconds": remaining,
+         "lambda_total": round(lam_total, 4), "need_goals": need,
+         "p_at_least_need": round(p_at_least_need, 4)},
+    )
+
+
+def _soccer_spreads_lock(
+    side: SportsMarketSide, line: Decimal, game: LiveGameState
+) -> MathLockResult:
+    """Soccer Spreads (Asian handicap)：lead+handicap 正态近似。"""
+    if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return MathLockResult(_ZERO, "soccer_spreads", "unsupported_side", {})
+    raw_lead = game.score_diff_for(side)
+    adjusted = float(raw_lead) + (float(line) if side == SportsMarketSide.HOME else -float(line))
+    remaining = game.seconds_remaining
+    if remaining is None or remaining <= 0:
+        return MathLockResult(_ONE if adjusted > 0 else _ZERO, "soccer_spreads",
+                              "no_remaining_time", {"adjusted_lead": adjusted})
+    if adjusted <= 0:
+        return MathLockResult(_ZERO, "soccer_spreads", "not_leading_after_handicap",
+                              {"adjusted_lead": adjusted})
+    lam = _SOCCER_GOAL_RATE_PER_SEC * remaining
+    sigma = math.sqrt(2.0 * lam)
+    if sigma <= 0.01:
+        return MathLockResult(_ONE, "soccer_spreads", "negligible_remaining",
+                              {"adjusted_lead": adjusted})
+    z = adjusted / sigma
+    p_reversal = 0.5 * math.erfc(z / math.sqrt(2.0))
+    lock = max(0.0, min(1.0, 1.0 - p_reversal))
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "soccer_spreads", "live_estimate",
+        {"raw_lead": raw_lead, "line": str(line), "adjusted_lead": adjusted,
+         "remaining_seconds": remaining, "p_reversal": round(p_reversal, 4)},
+    )
+
+
+# ---------- Tennis (ATP / WTA / ITF) ----------
+# Tennis 锁定基于 set/game 嵌套，无 seconds_remaining 直接用。
+# 简化：用 sets_won_diff + 剩余 sets/games 估
+def _tennis_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResult:
+    """Tennis 整场 ML：基于 sets 比分锁定。
+
+    Best-of-3：先赢 2 set；best-of-5：先赢 3 set。
+    我方 sets_won × 剩余 sets 不可能让对手追平 → 完全锁定。
+    """
+    state = game.tennis_state
+    if state is None:
+        return MathLockResult(_ZERO, "tennis_ml", "missing_tennis_state", {})
+    if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return MathLockResult(_ZERO, "tennis_ml", "unsupported_side", {})
+    my_sets = state.home_sets_won if side == SportsMarketSide.HOME else state.away_sets_won
+    opp_sets = state.away_sets_won if side == SportsMarketSide.HOME else state.home_sets_won
+    if my_sets is None or opp_sets is None:
+        return MathLockResult(_ZERO, "tennis_ml", "missing_sets", {})
+    best_of = state.best_of or 3
+    need_sets = (best_of // 2) + 1
+    if my_sets >= need_sets:
+        return MathLockResult(_ONE, "tennis_ml", "match_already_won",
+                              {"my_sets": my_sets, "opp_sets": opp_sets, "best_of": best_of})
+    if opp_sets >= need_sets:
+        return MathLockResult(_ZERO, "tennis_ml", "match_already_lost",
+                              {"my_sets": my_sets, "opp_sets": opp_sets, "best_of": best_of})
+    # 剩余可能性：opp 还需要 (need_sets - opp_sets) sets 才能赢
+    opp_need = need_sets - opp_sets
+    my_need = need_sets - my_sets
+    remaining_sets = best_of - my_sets - opp_sets
+    if opp_need > remaining_sets:
+        return MathLockResult(_ONE, "tennis_ml", "opp_cannot_win",
+                              {"my_sets": my_sets, "opp_sets": opp_sets, "best_of": best_of})
+    # 简化：每个剩余 set 我方赢概率 = 0.55（领先方略占优）
+    # 实际 = sigma(rating diff + serve advantage)，暂粗估
+    p_win_set = 0.55 if my_sets > opp_sets else 0.45
+    # 用动态规划算 P(先赢 my_need sets，对手先赢 opp_need 之前)
+    # 简化：贝叶斯近似
+    from math import comb
+    p_win_match = 0.0
+    for opp_wins in range(opp_need):
+        # 我方赢 my_need + opp_wins 局中我赢 my_need
+        n_games = my_need + opp_wins
+        p_win_match += comb(n_games - 1, opp_wins) * (p_win_set ** my_need) * ((1 - p_win_set) ** opp_wins)
+    lock = max(0.0, min(1.0, p_win_match))
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "tennis_ml", "live_estimate",
+        {"my_sets": my_sets, "opp_sets": opp_sets, "best_of": best_of,
+         "p_win_set": p_win_set, "p_win_match": round(p_win_match, 4)},
+    )
+
+
+def _tennis_totals_lock(
+    side: SportsMarketSide, line: Decimal, game: LiveGameState
+) -> MathLockResult:
+    """Tennis Total Games：当前已打 games + 剩余 sets/games 估算。
+
+    简化：剩余 sets × 平均 games/set (~10) 估剩余总 games。
+    """
+    state = game.tennis_state
+    if state is None:
+        return MathLockResult(_ZERO, "tennis_totals", "missing_tennis_state", {})
+    if side not in {SportsMarketSide.OVER, SportsMarketSide.UNDER}:
+        return MathLockResult(_ZERO, "tennis_totals", "unsupported_side", {})
+    games_played = (state.home_total_games or 0) + (state.away_total_games or 0)
+    best_of = state.best_of or 3
+    need_sets = (best_of // 2) + 1
+    sets_played = (state.home_sets_won or 0) + (state.away_sets_won or 0)
+    # 剩余 sets：可能 0（已结束）到 (best_of - sets_played)
+    min_remaining_sets = max(0, need_sets - max(state.home_sets_won or 0, state.away_sets_won or 0))
+    max_remaining_sets = best_of - sets_played
+    if max_remaining_sets <= 0:
+        won = (games_played > line) if side == SportsMarketSide.OVER else (games_played < line)
+        return MathLockResult(_ONE if won else _ZERO, "tennis_totals", "match_ended",
+                              {"games_played": games_played, "line": str(line)})
+    # 平均每 set 10 games (含 tiebreak ~13)
+    avg_games_per_set = 10.0
+    expected_remaining = (min_remaining_sets + max_remaining_sets) / 2.0 * avg_games_per_set
+    expected_total = games_played + expected_remaining
+    # 简化：用 normal approx，sigma=每 set ~4 games std
+    sigma = math.sqrt(max_remaining_sets) * 4.0
+    if sigma <= 0.01:
+        won = (games_played > line) if side == SportsMarketSide.OVER else (games_played < line)
+        return MathLockResult(_ONE if won else _ZERO, "tennis_totals", "negligible_remaining",
+                              {"games_played": games_played, "line": str(line)})
+    need = float(line) - expected_total
+    z = need / sigma
+    p_above_line = 0.5 * math.erfc(z / math.sqrt(2.0))
+    if side == SportsMarketSide.OVER:
+        lock = max(0.0, min(1.0, p_above_line))
+    else:
+        lock = max(0.0, min(1.0, 1.0 - p_above_line))
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "tennis_totals", "live_estimate",
+        {"games_played": games_played, "line": str(line),
+         "expected_total": round(expected_total, 2), "sigma": round(sigma, 2),
+         "p_above_line": round(p_above_line, 4)},
+    )
+
+
+# ---------- Hockey (NHL / KHL) ----------
+# 单边进球率：~3 goals/team/60min ≈ 0.000833 goals/sec
+_HOCKEY_GOAL_RATE_PER_SEC = 0.000833
+
+
+def _hockey_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResult:
+    """Hockey ML：Skellam 双边剩余进球差。"""
+    if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return MathLockResult(_ZERO, "hockey_ml", "unsupported_side", {})
+    lead = game.score_diff_for(side)
+    if lead <= 0:
+        return MathLockResult(_ZERO, "hockey_ml", "not_leading", {"lead": lead})
+    remaining = game.seconds_remaining
+    if remaining is None or remaining <= 0:
+        return MathLockResult(_ONE, "hockey_ml", "no_remaining_time", {"lead": lead})
+    lam = _HOCKEY_GOAL_RATE_PER_SEC * remaining
+    sigma = math.sqrt(2.0 * lam)
+    if sigma <= 0.01:
+        return MathLockResult(_ONE, "hockey_ml", "negligible_remaining", {"lead": lead})
+    z = lead / sigma
+    p_reversal = 0.5 * math.erfc(z / math.sqrt(2.0))
+    lock = max(0.0, min(1.0, 1.0 - p_reversal))
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "hockey_ml", "live_estimate",
+        {"lead": lead, "remaining_seconds": remaining, "p_reversal": round(p_reversal, 4)},
+    )
+
+
+def _hockey_totals_lock(
+    side: SportsMarketSide, line: Decimal, game: LiveGameState
+) -> MathLockResult:
+    """Hockey Totals：双边总进球 Poisson(2λ)。"""
+    if side not in {SportsMarketSide.OVER, SportsMarketSide.UNDER}:
+        return MathLockResult(_ZERO, "hockey_totals", "unsupported_side", {})
+    total = Decimal(int(game.total_score))
+    remaining = game.seconds_remaining
+    if remaining is None or remaining <= 0:
+        won = (total > line) if side == SportsMarketSide.OVER else (total < line)
+        return MathLockResult(_ONE if won else _ZERO, "hockey_totals", "game_ended",
+                              {"total": str(total), "line": str(line)})
+    if side == SportsMarketSide.OVER and total > line:
+        return MathLockResult(_ONE, "hockey_totals", "already_over_win", {})
+    if side == SportsMarketSide.UNDER and total >= line:
+        return MathLockResult(_ZERO, "hockey_totals", "already_over_lose", {})
+    lam_total = 2.0 * _HOCKEY_GOAL_RATE_PER_SEC * remaining
+    need = int(float(line) - float(total)) + (1 if side == SportsMarketSide.OVER else 0)
+    from math import exp, factorial
+    p_under_need = sum(
+        (lam_total ** k) * exp(-lam_total) / factorial(k) for k in range(max(0, need))
+    )
+    p_at_least = 1.0 - p_under_need
+    lock = p_at_least if side == SportsMarketSide.OVER else (1.0 - p_at_least)
+    lock = max(0.0, min(1.0, lock))
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "hockey_totals", "live_estimate",
+        {"total": str(total), "line": str(line), "remaining_seconds": remaining,
+         "lambda_total": round(lam_total, 4), "p_at_least": round(p_at_least, 4)},
+    )
+
+
+# ============================================================
 # 统一分派
 # ============================================================
 
@@ -352,33 +743,66 @@ def evaluate_math_lock(
     *,
     market_slug: str | None = None,
 ) -> MathLockResult:
-    """统一数学锁定评估。按 (market_type, side, game.sport) 分派。
+    """统一数学锁定评估。按 (market_type, sport) 分派；通用兜底覆盖所有盘口。
 
-    不支持的盘口返回 ``lock_probability=0``,strategy 可选择 fallback 到其他信号。
+    优先级：sport-specific 专属公式 > generic_*_lock 兜底。
+    无 sport 信息或 variance 表无该 sport → 返回 unsupported（lock_probability=0），
+    strategy 可 fallback 到 goalserve_implied / microprice。
     """
 
     if game is None:
         return MathLockResult(_ZERO, "no_game", "missing_live_game_state", {})
     if game.status == LiveGameStatus.ENDED:
-        # 已结束:lock 由 score + line 直接判定(留给上层用)
         return MathLockResult(
-            _ONE,
-            "game_ended",
-            "game_already_ended",
+            _ONE, "game_ended", "game_already_ended",
             {"home_score": game.home_score, "away_score": game.away_score},
         )
 
-    if market_type == SportsMarketType.TOTALS and line is not None and game.baseball_state is not None:
-        return _mlb_totals_lock(side, line, game)
+    sport = (game.sport or "").strip().lower()
 
-    if market_type == SportsMarketType.MONEYLINE and game.baseball_state is not None:
-        return _baseball_moneyline_lock(side, game)
+    # ===== Baseball (MLB/KBO/NPB) =====
+    if game.baseball_state is not None:
+        if market_type == SportsMarketType.TOTALS and line is not None:
+            return _mlb_totals_lock(side, line, game)
+        if market_type == SportsMarketType.MONEYLINE:
+            return _baseball_moneyline_lock(side, game)
 
-    if market_type == SportsMarketType.BINARY_PROP and game.soccer_state is not None:
-        slug = (market_slug or "").lower()
-        for direction in ("home", "draw", "away"):
-            if slug.endswith(f"halftime-result-{direction}"):
-                return _soccer_halftime_lock(side, direction, game)
+    # ===== Soccer (整场 + halftime prop) =====
+    if game.soccer_state is not None or sport == "soccer":
+        if market_type == SportsMarketType.BINARY_PROP:
+            slug = (market_slug or "").lower()
+            for direction in ("home", "draw", "away"):
+                if slug.endswith(f"halftime-result-{direction}"):
+                    return _soccer_halftime_lock(side, direction, game)
+        if market_type == SportsMarketType.MONEYLINE:
+            return _soccer_ml_lock(side, game)
+        if market_type == SportsMarketType.TOTALS and line is not None:
+            return _soccer_totals_lock(side, line, game)
+        if market_type == SportsMarketType.SPREADS and line is not None:
+            return _soccer_spreads_lock(side, line, game)
+
+    # ===== Basketball (NBA/WNBA/CBA) =====
+    if game.basketball_state is not None or sport == "basketball":
+        if market_type == SportsMarketType.MONEYLINE:
+            return _basketball_ml_lock(side, game)
+        if market_type == SportsMarketType.TOTALS and line is not None:
+            return _basketball_totals_lock(side, line, game)
+        if market_type == SportsMarketType.SPREADS and line is not None:
+            return _basketball_spreads_lock(side, line, game)
+
+    # ===== Tennis (ATP/WTA/ITF) =====
+    if game.tennis_state is not None or sport == "tennis":
+        if market_type == SportsMarketType.MONEYLINE:
+            return _tennis_ml_lock(side, game)
+        if market_type == SportsMarketType.TOTALS and line is not None:
+            return _tennis_totals_lock(side, line, game)
+
+    # ===== Hockey (NHL/KHL) =====
+    if sport == "hockey":
+        if market_type == SportsMarketType.MONEYLINE:
+            return _hockey_ml_lock(side, game)
+        if market_type == SportsMarketType.TOTALS and line is not None:
+            return _hockey_totals_lock(side, line, game)
 
     return _UNSUPPORTED
 

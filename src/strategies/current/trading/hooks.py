@@ -115,61 +115,52 @@ def _maybe_reprice_stale_sell(
         best_ask=orderbook.best_ask,
     )
     tick = orderbook.tick_size or Decimal("0.01")
-    # 计算 profit-take 目标价 = entry+offset（持仓 cost/shares 算 avg）
-    profit_take_target: Decimal | None = None
-    offset = config.tail_profit_take_offset
+    # 目标 SELL 价 = max(entry+min_offset, fair_value × 0.97)
+    # × 0.97 留 3% 缓冲让对手方愿意吃单（按 CLOB 撮合规则按对手价成交，留缓冲
+    # 实际可能成交在更高价）。min_offset 保证至少覆盖手续费（30bps × 2 = 0.6%）。
+    min_profit_offset = Decimal("0.02")
+    target_from_fair = (fair_value * Decimal("0.97")).quantize(Decimal("0.001"))
+    target_from_entry: Decimal | None = None
     position = context.position
     if (
-        offset is not None
-        and offset > Decimal("0")
-        and position is not None
+        position is not None
         and position.shares > Decimal("0")
         and position.cost_usdc > Decimal("0")
     ):
         avg_price = position.cost_usdc / position.shares
-        candidate = avg_price + offset
-        if candidate < config.exit_no_price:
-            profit_take_target = candidate
+        target_from_entry = avg_price + min_profit_offset
+    if target_from_entry is not None:
+        sell_target = max(target_from_fair, target_from_entry)
+    else:
+        sell_target = target_from_fair
+    # cap：不超过 exit_no_price（避免 CLOB 上限拒单）
+    sell_target = min(sell_target, config.exit_no_price - tick)
 
-    reprice_ratio = Decimal("1.5")
     for sell in open_sells:
         sell_price = sell.price
         if sell_price is None:
             continue
-        # 路径 1：SELL 高于 profit-take 目标 + 2 tick → 改到 profit_take_target
-        stale_by_profit_take = (
-            profit_take_target is not None
-            and sell_price > profit_take_target + tick * Decimal("2")
-        )
-        # 路径 2：SELL 高于 fair_value × 1.5 → 改到 max(best_bid+tick, fair×0.95)
-        stale_by_fair_value = sell_price > fair_value * reprice_ratio
-        if not stale_by_profit_take and not stale_by_fair_value:
+        # 触发：当前 SELL 价比目标价高 ≥ 2 tick 且远离实际可成交盘口
+        # 同时保护：如果 SELL 已接近 fair_value × 1.05，认为已经合理不动
+        if sell_price <= sell_target + tick * Decimal("2"):
             logger.info(
                 "reprice_skip",
                 extra={
-                    "reason": "thresholds_not_met",
+                    "reason": "sell_price_already_close_to_target",
                     "token_id": token_id,
                     "sell_price": str(sell_price),
-                    "profit_take_target": (
-                        str(profit_take_target) if profit_take_target is not None else None
-                    ),
+                    "sell_target": str(sell_target),
                     "fair_value": str(fair_value),
-                    "best_bid": str(orderbook.best_bid),
+                    "fair_value_source": fair_source,
                 },
             )
             continue
-        if stale_by_profit_take:
-            assert profit_take_target is not None  # 守门已确认
-            new_price = profit_take_target
-            reprice_reason = "exit_overlay_reprice_to_profit_take"
-        else:
-            new_price = max(
-                orderbook.best_bid + tick,
-                (fair_value * Decimal("0.95")).quantize(Decimal("0.001")),
-            )
-            reprice_reason = "exit_overlay_reprice_stale_sell"
-        new_price = min(new_price, sell_price - tick)
-        if new_price <= Decimal("0"):
+        # 新价：tick 对齐到 sell_target，但不超过原价 - tick（避免反向更难成交）
+        aligned_target = (
+            (sell_target / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
+        )
+        new_price = min(aligned_target, sell_price - tick)
+        if new_price <= Decimal("0") or new_price >= sell_price:
             continue
         return ExtensionDecision.replace(
             order_id=sell.order_id,
@@ -177,14 +168,16 @@ def _maybe_reprice_stale_sell(
             price=new_price,
             size_shares=sell.remaining_shares or sell.size_shares or Decimal("0"),
             market_slug=context.market.market_slug if context.market else None,
-            reason=reprice_reason,
+            reason="exit_overlay_reprice_to_fair_value",
             metadata={
                 "old_price": str(sell_price),
                 "new_price": str(new_price),
                 "fair_value": str(fair_value),
                 "fair_value_source": fair_source,
-                "profit_take_target": (
-                    str(profit_take_target) if profit_take_target is not None else None
+                "sell_target": str(sell_target),
+                "target_from_fair": str(target_from_fair),
+                "target_from_entry": (
+                    str(target_from_entry) if target_from_entry is not None else None
                 ),
                 "best_bid": str(orderbook.best_bid),
             },

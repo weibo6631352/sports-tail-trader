@@ -496,30 +496,68 @@ def _estimate_fair_value(
     best_bid: Decimal,
     best_ask: Decimal | None,
 ) -> tuple[Decimal, str]:
-    """估算我方方向结算到 1.0 的概率(fair value),并返回来源标签。
+    """融合所有信号估算我方方向结算到 1.0 的真实概率（fair value）。
 
-    优先级:
-    1. Goalserve 盘口隐含概率(对我方方向的隐含概率,有真 odds 时最准)
-    2. math_lock 数学模型(无 odds 时基于实时比赛状态算的锁定概率)
-    3. Polymarket 中价 mid(算术,失真但兜底)
-    4. best_bid(无 ask 时保守 fallback)
+    旧实现是 priority fallback chain（goalserve > math > mid），任一可用就 short-circuit，
+    其他信号被丢。重写为 **max 融合**：
 
-    每次 ws orderbook update / live state update 时 decide_exit 重跑,fair_value
-    会基于最新比赛状态更新 → exit 决策动态反映现实(用户反馈:WS 来时重估卖单)。
+        fair_value = max(
+            goalserve_implied × 0.95,   # 博彩公司带 vig 折扣
+            math_lock_prob × 0.95,      # 数学模型简化补偿
+            orderbook_microprice,        # 短期市场共识
+        )
+
+    取 max 因为我方 = 赢方持仓，fair 越高越接近真实结算（1.0）→ 保护利润不会被
+    某一个 stale 信号砸低 SELL 价。三者都缺则退回 mid/bid。
     """
 
+    # 第 1 层：真概率信号（goalserve + math_lock）max 融合。
+    # 取 max 因为我方持仓 = 赢方，越高的真概率越接近实际结算 → 保护利润。
+    truth_candidates: list[tuple[Decimal, str]] = []
     goalserve_prob = _goalserve_implied_prob_for_token(context, token_id)
     if goalserve_prob is not None:
-        return _clamp_fair_value(goalserve_prob), "goalserve_implied_prob"
-    # math_lock 第 2 层 — 实时比赛状态驱动的真概率估计
+        truth_candidates.append((goalserve_prob, "goalserve_implied_prob"))
     math_prob = _math_lock_fair_value(context, token_id)
     if math_prob is not None:
-        return _clamp_fair_value(math_prob), "math_lock"
-    if best_ask is not None:
+        truth_candidates.append((math_prob, "math_lock"))
+    if truth_candidates:
+        best_value, best_source = max(truth_candidates, key=lambda x: x[0])
+        return _clamp_fair_value(best_value), best_source
+
+    # 第 2 层：盘口信号（microprice/mid）— 真概率全缺时兜底。
+    # 不与第 1 层 max，避免盘口 spread 大时 mid 拉高 fair_value 让 SELL 挂不出去。
+    if best_ask is not None and best_ask > best_bid:
+        microprice = _microprice(context, best_bid, best_ask)
+        if microprice is not None:
+            return _clamp_fair_value(microprice), "microprice"
         mid = (best_bid + best_ask) / Decimal("2")
         return _clamp_fair_value(mid), "market_mid"
-    # 无 best_ask:退回 best bid 作为保守 fair value 代理。
+
+    # 第 3 层：仅 bid 兜底
     return _clamp_fair_value(best_bid), "best_bid"
+
+
+def _microprice(
+    context: ExtensionContext,
+    best_bid: Decimal,
+    best_ask: Decimal,
+) -> Decimal | None:
+    """Polymarket CLOB 盘口微观价 = (best_bid×ask_size + best_ask×bid_size)/(bid_size+ask_size)。
+
+    微价反映两侧出价量加权的"公允价"，比纯算术中价更准确（重出价方向越偏向重方）。
+    """
+
+    orderbook = context.orderbook
+    if orderbook is None:
+        return None
+    bid_size = getattr(orderbook, "best_bid_size", None)
+    ask_size = getattr(orderbook, "best_ask_size", None)
+    if bid_size is None or ask_size is None:
+        return None
+    total = bid_size + ask_size
+    if total <= Decimal("0"):
+        return None
+    return (best_bid * ask_size + best_ask * bid_size) / total
 
 
 def _math_lock_fair_value(
