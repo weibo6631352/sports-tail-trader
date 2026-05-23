@@ -35,8 +35,6 @@ from polymarket_trader.infra.db import (
     AccountSnapshotRepository,
     AuditEventRepository,
     DatabasePersistenceRepository,
-    FillRepository,
-    OrderRepository,
     PositionRepository,
     RepositoryPage,
     build_engine,
@@ -1242,19 +1240,21 @@ async def _handle_market_ws_message(runtime, message) -> None:
 
 
 async def _load_reference_state(runtime: RuntimeComponents) -> dict[str, int]:
-    # 启动只从 DB 恢复账户/peak_bankroll/positions/orders/fills,**不再恢复 markets**——
-    # discovery 几秒内会用 Polymarket gamma live=true API 拉全量真相,DB 里 9000+
-    # 条 market 快照重放 + 每条走 universe 校验是 lifespan 启动的最大头(测得 ~5-10s),
-    # 价值很低(reconcile 第一轮就用权威源覆盖)。CLAUDE.md §3 也明确"DB 只用于审计/
-    # 复盘/恢复参考,不是状态真相"。账户侧 peak_bankroll 仍必须恢复(否则
-    # drawdown lockout 误判)。
+    # 启动**只从 DB 恢复账户 peak_bankroll**(drawdown lockout 依赖,Polymarket 不存这个)。
+    # positions / orders / fills / markets **都不从 DB 加载** —— reconcile 第一轮(秒级)
+    # 用 polymarket 官方 API 拉权威值,DB 加载是冗余且常导致 stale:
+    #   - DB orders 含 failed/matched/cancelled 终态行,加载进 in-memory 会让
+    #     decide_exit 看到错误 open_sell_shares,引发双挂 bug(实测 18 个 stale SELL
+    #     启动瞬间出现,30s 后被 reconcile 覆盖到链上真值 2 个)
+    #   - DB positions/fills 同理可能 stale,reconcile 之前 in-memory 显示错的
+    # CLAUDE.md §3 明确"DB 只用于审计/复盘/恢复参考,不是状态真相"。
+    # exit overlay 已加 reconcile_freshness gate(`6120c9e`),配合此改动,启动期
+    # in-memory=空 → freshness 检查 last_reconcile_at=None → decide_exit skip
+    # 等 reconcile 完成 → 拿到链上真值再决策,杜绝 stale 误判。
     loaded = {"markets": 0, "positions": 0, "open_orders": 0, "fills": 0, "account_snapshots": 0}
     try:
         async with runtime.db_session_factory() as session:
             account_snapshot = await AccountSnapshotRepository(session).get_current_snapshot()
-            positions = await PositionRepository(session).list_positions_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
-            open_orders = await OrderRepository(session).list_open_orders_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
-            fills = await FillRepository(session).list_fills_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
         if account_snapshot is not None:
             # peak 必须先恢复——否则 update_balances 触发的 publish 会用 in-memory 0
             # 当 baseline，把"重启前历史 peak 1500，当前 600"误算成 peak=600，drawdown
@@ -1265,16 +1265,7 @@ async def _load_reference_state(runtime: RuntimeComponents) -> dict[str, int]:
                 balance_usdc=account_snapshot.balance_usdc,
                 allowance_usdc=account_snapshot.allowance_usdc,
             )
-        runtime.account_state_store.replace_positions(positions.items)
-        runtime.account_state_store.replace_open_orders(open_orders.items)
-        runtime.account_state_store.replace_fills(fills.items)
-        loaded = {
-            "account_snapshots": 0 if account_snapshot is None else 1,
-            "markets": 0,
-            "positions": len(positions.items),
-            "open_orders": len(open_orders.items),
-            "fills": len(fills.items),
-        }
+            loaded["account_snapshots"] = 1
     except Exception as exc:  # pragma: no cover - depends on external db
         logger.warning("failed to load reference state from database", extra={"reason": str(exc)})
     return loaded
