@@ -180,12 +180,44 @@ def extract_token_candidates(message: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def best_price(levels: tuple[PriceLevel, ...]) -> Decimal | None:
+    """bids 中"真实"best_bid: 排除 MM 天花板单 $0.99 (极远端接 SELL 的挂单)。
+
+    实盘 case: 同名 fuj-iwa bids 含 $0.99 size=大量 天花板单 → max(price)
+    取 $0.99 错。真 best_bid 应排除 > 0.95 的高位 bids (远端 MM 挂单)。
+
+    与 worst_ask 对称: best_bid 在 0.01-0.95 区间合理范围。
+    """
+
     if not levels:
         return None
-    return max(level.price for level in levels)
+    # 排除 ≥ 1-tick 的天花板单(MM 机器人 $0.99 接 SELL 的远端挂单)。
+    # Polymarket tick 0.01,真 best_bid 在 (0.01, 0.99) 区间(含端点取实际数据)。
+    real_prices = [level.price for level in levels if level.price < Decimal("0.99")]
+    if not real_prices:
+        # 所有 bid 都 ≥ 0.99? 退到 max (极接近 settle 状态)。
+        return max(level.price for level in levels)
+    return max(real_prices)
 
 
 def worst_ask(levels: tuple[PriceLevel, ...]) -> Decimal | None:
+    """asks 中"真实"best_ask: 排除地板/天花板挂单($0.01-$0.02 极远端 MM 单)。
+
+    实盘 bug case: j2100-fuj-iwa Fuj-YES asks 数组含 $0.01 size=4207 地板单 +
+    真挂单 $0.97-$0.99 各 5-30 万 size。`min(price)` 取到 $0.01 (天花板单),
+    导致 best_ask=$0.01 严重错,污染 microprice / odds_gap edge / reprice
+    等所有下游决策。
+
+    实际 best_ask 应为 asks 中**最低且不是地板单**的价位。简单守卫:
+    排除 < 0.05 的价 (Polymarket tick 0.01,< 0.05 几乎都是 MM 地板单)。
+    所有真实 best_ask 在 0.05-0.99 区间。
+    """
+
     if not levels:
         return None
-    return min(level.price for level in levels)
+    # 排除 ≤ tick_size 的极端地板单(MM 机器人 $0.001-$0.01 兜底单,
+    # 实际不该当作真 best_ask)。Polymarket tick 0.01 是常见值,$0.02 起算真挂单。
+    real_prices = [level.price for level in levels if level.price > Decimal("0.01")]
+    if not real_prices:
+        # 所有 ask 都 ≤ 0.01? 退到 min 保守(可能真极冷市场)。
+        return min(level.price for level in levels)
+    return min(real_prices)
