@@ -51,6 +51,49 @@ from .pricing import _tail_locked_outcome_signal, _tail_price_cap
 from .risk_limits import _apply_tail_risk_limits
 
 
+def _math_lock_prob_view(
+    snap: AllocationMarketSnapshot,
+    context: ExtensionContext,
+) -> "ProbView | None":
+    """math_lock fallback: 没 odds 源时用统一数学模型估真概率作 Kelly p。
+
+    返回 ProbView with prob_p = lock_probability,confidence=0.7(数学模型置信度
+    比真实赔率低,补偿模型简化导致的估计误差)。method=unsupported / lock_p=0 时
+    返回 None,让 caller fallback 到下一层(implied 反推等)。
+    """
+
+    from strategies.sports_framework.math_lock import evaluate_math_lock
+    from strategies.sports_framework.parsing import live_game_state_from_metadata
+    from strategies.current.outcomes import describe_sports_market, target_for_token
+
+    market = snap.market
+    descriptor = describe_sports_market(market)
+    if not descriptor.accepted or descriptor.market_type is None:
+        return None
+    target = target_for_token(market, snap.token_id)
+    if target is None:
+        return None
+    game = live_game_state_from_metadata(context.metadata)
+    if game is None:
+        return None
+    lock_result = evaluate_math_lock(
+        descriptor.market_type,
+        target.side,
+        descriptor.line,
+        game,
+        market_slug=market.market_slug,
+    )
+    if lock_result.method == "unsupported" or lock_result.lock_probability <= Decimal("0"):
+        return None
+    # math_lock 输出 [0,1] 锁定概率 = 我方持仓胜率近似。用作 Kelly prob_p。
+    # confidence=0.7: 数学模型基于 base rate 估计,不如真实 odds 准,留缓冲。
+    return ProbView(
+        prob_p=lock_result.lock_probability,
+        prob_confidence=Decimal("0.7"),
+        source=f"math_lock:{lock_result.method}",
+    )
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -185,10 +228,24 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
     spread_widening = config.tail_implied_conf_spread_widening
 
     def _prob_provider(snap: AllocationMarketSnapshot) -> ProbView:
-        # 赔率差价候选用去抽水 true_p；扫尾锁定候选退回 price_cap 反推的 implied_p。
+        """Kelly probability source 优先级:
+        1. Goalserve devig true_p (有 odds 源时,confidence=1.0)
+        2. math_lock 数学模型(无 odds 时归一化锁定概率, confidence=0.7)
+        3. implied_fair_value_from_price_cap 反推(最后 fallback,confidence 已 depth/spread 缩水)
+
+        新增第 2 层 math_lock — 用户要求:"没有赔率源的市场,用数学模型"。
+        math_lock 用统一 evaluate_math_lock 算出锁定概率,作为 Kelly p 输入。
+        """
+
         odds_gap_view = odds_gap_prob_views.get((snap.condition_id, snap.token_id))
         if odds_gap_view is not None:
             return odds_gap_view
+
+        # math_lock fallback: 缺 odds 时用统一数学模型估真概率。
+        math_view = _math_lock_prob_view(snap, context)
+        if math_view is not None:
+            return math_view
+
         cap = snapshot_price_cap.get((snap.condition_id, snap.token_id))
         if cap is None:
             cap = _tail_price_cap(
