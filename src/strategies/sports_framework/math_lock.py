@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Mapping
@@ -180,6 +181,84 @@ def _mlb_totals_lock(
 
 
 # ============================================================
+# Baseball Moneyline (MLB / KBO / NPB,任何 baseball league)
+# ============================================================
+
+# 单半局得分 variance ≈ 1.0(均值 0.55,泊松近似)。reversal 需要 opponent 净
+# 得分超过 lead,用正态近似 P(reversal) = exp(-lead² / (2 × var_total))。
+_BASEBALL_HALF_INNING_VAR = 1.0
+
+
+def _baseball_moneyline_lock(
+    side: SportsMarketSide,
+    game: LiveGameState,
+) -> MathLockResult:
+    """Baseball Moneyline 数学锁定: 基于 lead × 剩余半局 normal-approx reversal 概率。"""
+
+    state = game.baseball_state
+    if state is None or state.current_inning is None:
+        return MathLockResult(_ZERO, "baseball_ml", "missing_baseball_state", {})
+    home = int(game.home_score or 0)
+    away = int(game.away_score or 0)
+
+    if side == SportsMarketSide.HOME:
+        lead = home - away
+        side_name = "home"
+    elif side == SportsMarketSide.AWAY:
+        lead = away - home
+        side_name = "away"
+    else:
+        return MathLockResult(_ZERO, "baseball_ml", "unsupported_side", {})
+
+    if lead <= 0:
+        # 我方落后或平局,不锁定(实际胜率 < 50%,不用 math_lock 作进场信号)
+        return MathLockResult(
+            _ZERO,
+            "baseball_ml",
+            "side_not_leading",
+            {"lead": lead, "home": home, "away": away, "side": side_name},
+        )
+
+    n_half = _mlb_remaining_half_innings(state)
+    if n_half <= 0:
+        # 已无剩余半局 → 锁定
+        return MathLockResult(
+            _ONE,
+            "baseball_ml",
+            "no_remaining_half_innings",
+            {"lead": lead, "side": side_name, "outcome": "win"},
+        )
+
+    # 差异随机变量 X = (对手剩余得分 - 我方剩余得分): mean=0, var = 2 × var_per_half × n_half
+    # 双方各打约 n_half/2 半局,合并 variance:
+    var_diff = 2.0 * _BASEBALL_HALF_INNING_VAR * (n_half / 2.0)
+    # P(reversal) = P(X >= lead + 1) ≈ Φ(-lead/sqrt(var_diff))(1-tail 正态 CDF)
+    # 用 erfc 表达: Φ(-z) = 0.5 × erfc(z/sqrt(2))
+    if var_diff <= 0.0001:
+        p_reversal = 0.0
+    else:
+        z = lead / math.sqrt(var_diff)
+        p_reversal = 0.5 * math.erfc(z / math.sqrt(2.0))
+    lock_p = max(0.0, min(1.0, 1.0 - p_reversal))
+    lock_dec = Decimal(str(round(lock_p, 4)))
+
+    return MathLockResult(
+        lock_dec,
+        "baseball_ml",
+        "live_estimate",
+        {
+            "lead": lead,
+            "home": home,
+            "away": away,
+            "side": side_name,
+            "remaining_half_innings": n_half,
+            "var_diff": var_diff,
+            "p_reversal": round(p_reversal, 4),
+        },
+    )
+
+
+# ============================================================
 # Soccer Halftime Result (home / draw / away)
 # ============================================================
 
@@ -291,6 +370,9 @@ def evaluate_math_lock(
 
     if market_type == SportsMarketType.TOTALS and line is not None and game.baseball_state is not None:
         return _mlb_totals_lock(side, line, game)
+
+    if market_type == SportsMarketType.MONEYLINE and game.baseball_state is not None:
+        return _baseball_moneyline_lock(side, game)
 
     if market_type == SportsMarketType.BINARY_PROP and game.soccer_state is not None:
         slug = (market_slug or "").lower()
