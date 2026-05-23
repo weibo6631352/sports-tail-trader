@@ -217,6 +217,13 @@ class AccountStateStore:
             last_reconcile_at=self._last_reconcile_at,
         )
         current_equity = provisional.available_usdc
+        # peak sanity cap：available_usdc 计算路径偶发返回异常高值（实测 $1286 vs
+        # balance $79 - 怀疑 reserved/chain query race condition），让 drawdown
+        # lockout 永久误锁。cap 到 balance × 2 保证 peak 不能远超实际现金。
+        if self._balance_usdc > Decimal("0"):
+            sanity_cap = self._balance_usdc * Decimal("2")
+            if current_equity > sanity_cap:
+                current_equity = sanity_cap
         if current_equity > self._peak_bankroll_usdc:
             # 追踪 peak_bankroll 异常推高的根因——18 行栈让定位调用方变得容易。
             prev_peak = self._peak_bankroll_usdc

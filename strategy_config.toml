@@ -13,7 +13,10 @@ kelly_min_edge = "0.01"
 kelly_min_stake_usdc = "0.30"
 kelly_allow_round_up_to_market_min = true
 kelly_round_up_max_overbet_ratio = "10.0"
-kelly_drawdown_halt_fraction = "0.4"
+# drawdown_halt 0.4 → 0.2：跌穿 80% peak 才停（更宽容），跟 §17 + [[feedback-aggressive-retry]]
+# 哲学一致。peak sanity cap 已经把 peak ≤ balance × 2，0.2 让 lockout 几乎只在
+# 真大幅亏损 + 实际跌穿 80% balance 才触发。
+kelly_drawdown_halt_fraction = "0.2"
 
 # 扫尾入场时间窗口：最后5分钟（300s）涵盖篮球4Q更多机会；
 # 价格更低（0.78-0.88 vs 0.88-0.93）→ 每次进场盈利空间更大。
