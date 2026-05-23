@@ -12,6 +12,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.infra.polymarket import market_ws_adapter
 from polymarket_trader.runtime.event_bus import EventBus
+from polymarket_trader.runtime.orderbook_delta import OrderbookDeltaStore
 from polymarket_trader.runtime.registry import MarketRegistry
 from .book_projector import BookState as _BookState
 from .book_projector import MarketBookProjector
@@ -109,10 +110,12 @@ class MarketWsWorker:
             Awaitable[OrderbookSnapshot | Mapping[str, Any]],
         ]
         | None = None,
+        orderbook_delta_store: OrderbookDeltaStore | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._registry = registry
         self._rest_snapshot_loader = rest_snapshot_loader
+        self._orderbook_delta_store = orderbook_delta_store
         self._book_projector = MarketBookProjector()
         self._states: dict[str, _BookState] = {}
         self._tracked_markets: dict[str, Market] = {}
@@ -629,6 +632,10 @@ class MarketWsWorker:
     ) -> list[DomainEvent]:
         events: list[DomainEvent] = []
         snapshot = state.snapshot
+        # P0 路径 sync only: observe 内只是 deque.append + frozen dataclass 构造,
+        # 无 await/IO/lock。喂 OrderbookDeltaStore 用于盘口风向 delta 信号。
+        if self._orderbook_delta_store is not None:
+            self._orderbook_delta_store.observe(snapshot)
         event = MarketWsEvent(
             trace_id=uuid4().hex,
             event_type=DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED,

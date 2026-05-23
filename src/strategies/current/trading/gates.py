@@ -33,7 +33,6 @@ from strategies.current.tail import (
 )
 
 from .helpers import (
-    _metadata_decimal,
     bid_plus_tick_fallback_ask,
     bid_plus_tick_fallback_metadata,
 )
@@ -215,14 +214,7 @@ def _tail_entry_gate(
         )
     risk_decision = check_tail_entry_risk(
         config,
-        market=context.market,
-        token_id=token_id,
-        buy_budget_usdc=_metadata_decimal(context, "amount_usdc", "buy_budget_usdc") or Decimal("0"),
-        candidate_snapshots=_candidate_snapshots_for_gate(context),
         metadata={**context.metadata, **metadata},
-        account_snapshot=context.account_snapshot,
-        now=context.now,
-        bankroll_usdc=context.bankroll_usdc or Decimal("0"),
     )
     metadata.update(risk_decision.metadata or {})
     if not risk_decision.passed:
@@ -579,15 +571,6 @@ def _ask_depth_notional(orderbook, *, price_cap: Decimal | None = None) -> Decim
         if price_cap is None or level.price <= price_cap:
             depth_usdc += level.price * level.size
     return depth_usdc
-
-
-def _candidate_snapshots_for_gate(
-    context: ExtensionContext,
-) -> tuple[AllocationMarketSnapshot, ...]:
-    """供入场 gate 调用 risk 时使用的候选快照（局部 import 避免循环依赖）。"""
-
-    from .allocation import _candidate_snapshots
-    return _candidate_snapshots(context)
 
 
 def _goalserve_strong_edge_signal(

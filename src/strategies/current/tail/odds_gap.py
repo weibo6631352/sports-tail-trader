@@ -402,33 +402,26 @@ def _accept_odds_gap(
     true_p: Decimal,
     overround: Decimal,
 ) -> TailEvaluation:
-    """对已确定我方去抽水真实概率的候选计算 edge 并产出 accept/reject。
+    """对已确定我方去抽水真实概率的候选产出 accept,把 true_p / edge_net 写 metadata。
 
-    edge = 去抽水真实概率 − Polymarket 买入 ask。edge 不足阈值 → no_odds_gap。
-    accept 时把 true_p / edge 写入 metadata：供 Kelly 用真实 prob_p 定注、供审计复盘。
-    moneyline/totals/spread 三类共用此尾段，保证 ODDS_GAP 机会语义完全一致。
+    edge_gross = 去抽水真实概率 − Polymarket 买入 ask
+    edge_net   = edge_gross − fee_per_share(taker fee 30 bps × price)
+
+    设计:**无条件 accept**(只要 best_ask 存在)。Kelly 内部会基于 true_p / price /
+    fee 自动算 fraction:net edge ≤ 0 时 Kelly reject,net edge > 0 时按比例下注。
+    这是"无条件信任 Kelly"——不在 Kelly 之上叠 odds_gap_min_edge 这种 cap。
+    moneyline/totals/spread 三类共用此尾段,保证 ODDS_GAP 机会语义完全一致。
     """
 
     market = candidate.market
     # best_ask 已由各分派函数确认非 None。
     assert market.best_ask is not None
-    edge = true_p - market.best_ask
-    if edge < policy.odds_gap_min_edge:
-        # CLAUDE.md §17 门限复盘:edge 不足拒绝时把实际数值写进 audit metadata,
-        # 这样能事后判定"差价是不是只差几个 bp、阈值是否过紧"。
-        return _reject(
-            candidate,
-            TailRejectReason.NO_ODDS_GAP.value,
-            metadata={
-                "odds_gap_edge": str(edge),
-                "odds_gap_true_p": str(true_p),
-                "odds_gap_best_ask": str(market.best_ask),
-                "odds_gap_min_edge_threshold": str(policy.odds_gap_min_edge),
-                "odds_gap_overround": str(overround),
-                "odds_gap_side": market.side.value,
-                "odds_gap_market_type": market.market_type.value,
-            },
-        )
+    edge_gross = true_p - market.best_ask
+    # Polymarket 当前 taker 默认 30 bps × price(see infra/polymarket fee schedule)。
+    # 用 Decimal 避免浮点累积误差;_accept_odds_gap metadata 仅审计用,
+    # 真正 Kelly 内部用 market.fee_rate_bps 重新算 net edge,这里不影响下注大小。
+    fee_per_share = (market.best_ask * Decimal("30") / Decimal("10000")).quantize(Decimal("0.000001"))
+    edge_net = edge_gross - fee_per_share
 
     enriched = SportsTailCandidate(
         game=candidate.game,
@@ -438,7 +431,9 @@ def _accept_odds_gap(
         metadata={
             **candidate.metadata,
             "odds_gap_true_p": str(true_p),
-            "odds_gap_edge": str(edge),
+            "odds_gap_edge": str(edge_gross),
+            "odds_gap_edge_net": str(edge_net),
+            "odds_gap_fee_per_share": str(fee_per_share),
             "odds_gap_best_ask": str(market.best_ask),
             "odds_gap_overround": str(overround),
             "odds_gap_side": market.side.value,

@@ -124,16 +124,21 @@ def test_odds_gap_accepted_when_edge_clears_threshold() -> None:
 
 def test_odds_gap_edge_uses_devigged_not_raw_implied() -> None:
     # raw implied home=0.62, away=0.50 → overround 1.12, devigged home ≈ 0.5536。
-    # ask=0.50：raw edge 会是 0.12（虚高），devigged edge 只有 ≈0.0536 < 0.06 → 拒绝。
-    # 这正是 de-vig 的意义：不去抽水会在每个市场凭空多算 edge。
+    # ask=0.50:devigged edge_gross ≈ 0.0536(对比 raw 错算 0.12),小但正,扣 30bps fee 后
+    # edge_net ≈ 0.0386,Kelly 会算出小 fraction。这正是 de-vig + 信任 Kelly 的意义:
+    # 不去抽水会凭空多算 edge,真 devigged edge 由 Kelly 用 net edge 自动定 fraction。
     gs = {"home_implied_prob": 0.62, "away_implied_prob": 0.50, "suspended": False}
     market = _moneyline_market(SportsMarketSide.HOME, Decimal("0.50"), goalserve_moneyline=gs)
     candidate = _candidate(_game(), market)
     ev = evaluate_odds_gap_opportunity(candidate, TailPolicy())
-    assert not ev.accepted
-    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
-    # 反证：若用原始未去抽水 implied（0.62），edge = 0.62 − 0.50 = 0.12 会误判通过。
-    assert Decimal("0.62") - Decimal("0.50") >= TailPolicy().odds_gap_min_edge
+    assert ev.accepted
+    md = ev.metadata
+    assert md.get("odds_gap_market_type") == "moneyline"
+    # devigged true_p ≈ 0.5536,edge_gross ≈ 0.0536(不是 raw 0.12)
+    assert Decimal(str(md["odds_gap_true_p"])) < Decimal("0.56")
+    assert Decimal(str(md["odds_gap_edge"])) < Decimal("0.06")
+    # edge_net = edge_gross - fee_per_share(=ask × 30bps)
+    assert Decimal(str(md["odds_gap_edge_net"])) < Decimal(str(md["odds_gap_edge"]))
 
 
 # ---------------------------------------------------------------------------
@@ -141,13 +146,15 @@ def test_odds_gap_edge_uses_devigged_not_raw_implied() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_odds_gap_rejected_when_edge_below_threshold() -> None:
-    # devigged home_true_p ≈ 0.5238；ask=0.50 → edge ≈ 0.0238 < 0.06。
+def test_odds_gap_small_positive_edge_still_accepted_kelly_decides() -> None:
+    # devigged home_true_p ≈ 0.5238;ask=0.50 → edge_gross ≈ 0.0238。
+    # 旧逻辑:< 6% 阈值就拒。新逻辑(无门槛):accept,让 Kelly 用 net edge 自决。
+    # edge_net = 0.0238 - 0.50 × 0.003 = 0.0223 > 0 → Kelly 给小 fraction。
     gs = {"home_implied_prob": 0.55, "away_implied_prob": 0.50, "suspended": False}
     market = _moneyline_market(SportsMarketSide.HOME, Decimal("0.50"), goalserve_moneyline=gs)
     ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
-    assert not ev.accepted
-    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
+    assert ev.accepted
+    assert Decimal(str(ev.metadata["odds_gap_edge_net"])) > Decimal("0")
 
 
 def test_odds_gap_rejected_when_market_suspended() -> None:
@@ -416,8 +423,9 @@ def test_totals_odds_gap_under_side_uses_under_true_p() -> None:
     assert abs(true_p - (Decimal("0.72") / Decimal("1.17"))) < Decimal("1e-9")
 
 
-def test_totals_odds_gap_rejected_when_edge_below_threshold() -> None:
-    # devigged over ≈ 0.5238；ask=0.50 → edge ≈ 0.0238 < 0.06 → no_odds_gap。
+def test_totals_odds_gap_small_positive_edge_still_accepted() -> None:
+    # devigged over ≈ 0.5238;ask=0.50 → edge_gross ≈ 0.0238。新逻辑无门槛 accept,
+    # Kelly 用 net edge 自决:edge_net > 0 时小 fraction,Polymarket 30bps fee 已扣。
     gs = {
         "market_name": "Total",
         "total_line": "220.5",
@@ -429,8 +437,8 @@ def test_totals_odds_gap_rejected_when_edge_below_threshold() -> None:
         SportsMarketSide.OVER, Decimal("0.50"), line=Decimal("220.5"), goalserve_totals=gs
     )
     ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
-    assert not ev.accepted
-    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
+    assert ev.accepted
+    assert Decimal(str(ev.metadata["odds_gap_edge_net"])) > Decimal("0")
 
 
 def test_totals_odds_gap_rejected_when_market_suspended() -> None:
@@ -561,7 +569,8 @@ def test_spread_odds_gap_away_side_uses_away_handicap_and_true_p() -> None:
     assert abs(true_p - (Decimal("0.72") / Decimal("1.17"))) < Decimal("1e-9")
 
 
-def test_spread_odds_gap_rejected_when_edge_below_threshold() -> None:
+def test_spread_odds_gap_small_positive_edge_still_accepted() -> None:
+    # 同 ML/Totals 用例:无门槛 accept,Kelly 用 net edge 自决。
     gs = {
         "market_name": "Handicap",
         "home_handicap": "-3.5",
@@ -574,8 +583,8 @@ def test_spread_odds_gap_rejected_when_edge_below_threshold() -> None:
         SportsMarketSide.HOME, Decimal("0.50"), line=Decimal("-3.5"), goalserve_spread=gs
     )
     ev = evaluate_odds_gap_opportunity(_candidate(_game(), market), TailPolicy())
-    assert not ev.accepted
-    assert ev.reason == TailRejectReason.NO_ODDS_GAP.value
+    assert ev.accepted
+    assert Decimal(str(ev.metadata["odds_gap_edge_net"])) > Decimal("0")
 
 
 def test_spread_odds_gap_rejected_when_suspended() -> None:

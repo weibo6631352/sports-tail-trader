@@ -2667,103 +2667,6 @@ def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
     assert plan.summary.confirm_reason == "score_verified"
 
 
-def test_strategy_risk_blocks_event_exposure_before_buy_intent() -> None:
-    market = _totals_market()
-    orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
-    service = TradingDecisionService(
-        strategy_id="sports_tail",
-        extension_hooks=CurrentStrategy(config=CurrentStrategyConfig()).hooks,
-        orderbook_reader=lambda token_id: _orderbook(token_id=token_id, best_ask=Decimal("0.02"))
-        if token_id == "under"
-        else None,
-    )
-
-    plan = service.build_entry_plan(
-        market=market,
-        orderbook=orderbook,
-        token_id="over",
-        trace_id="trace-event-risk",
-        portfolio_budget_usdc=Decimal("10"),
-        available_usdc=Decimal("10"),
-        kelly_fraction=Decimal("0.25"),
-        kelly_max_position_fraction=Decimal("1"),
-        kelly_min_edge=Decimal("0"),
-        kelly_min_stake_usdc=Decimal("1"),
-        positions=(
-            Position(
-                strategy_id="sports_tail",
-                condition_id=market.condition_id,
-                token_id="under",
-                shares=Decimal("24"),
-                cost_usdc=Decimal("24"),
-                market_slug=market.market_slug,
-            ),
-        ),
-        metadata={"live_game": _totals_live_game()},
-    )
-
-    assert plan.intent is None
-    assert plan.allocation is not None
-    assert plan.allocation.buy_budget_usdc == Decimal("0")
-    assert plan.allocation.reason == "event_exposure_limit"
-    assert plan.metadata is not None
-    assert plan.metadata["risk_reason"] == "event_exposure_limit"
-
-
-def test_strategy_risk_uses_account_fills_for_daily_entry_limit() -> None:
-    """daily_entry cap = max(bankroll × fraction, min_floor_usdc)；
-    bankroll=10、fraction=0、min_floor=12.5 → cap=12.5。已成交 12 + 本笔 → 超 cap 拒。
-    """
-
-    market = _totals_market()
-    orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
-    service = TradingDecisionService(
-        strategy_id="sports_tail",
-        extension_hooks=CurrentStrategy(
-            config=CurrentStrategyConfig(
-                tail_max_daily_entry_fraction=Decimal("0"),
-                tail_max_daily_entry_min_floor_usdc=Decimal("12.5"),
-            )
-        ).hooks,
-    )
-
-    plan = service.build_entry_plan(
-        market=market,
-        orderbook=orderbook,
-        account_snapshot=AccountSnapshot(
-            balance_usdc=Decimal("100"),
-            allowance_usdc=Decimal("100"),
-            allow_new_entries=True,
-            fills=(
-                Fill(
-                    strategy_id="sports_tail",
-                    trace_id="old-buy",
-                    condition_id=market.condition_id,
-                    token_id="over",
-                    side="BUY",
-                    notional_usdc=Decimal("12"),
-                    confirmed_at=datetime(2026, 4, 27, 1, tzinfo=timezone.utc),
-                ),
-            ),
-        ),
-        token_id="over",
-        trace_id="trace-daily-risk",
-        portfolio_budget_usdc=Decimal("10"),
-        available_usdc=Decimal("100"),
-        kelly_fraction=Decimal("0.25"),
-        kelly_max_position_fraction=Decimal("1"),
-        kelly_min_edge=Decimal("0"),
-        kelly_min_stake_usdc=Decimal("1"),
-        metadata={"live_game": _totals_live_game()},
-    )
-
-    assert plan.intent is None
-    assert plan.allocation is not None
-    assert plan.allocation.buy_budget_usdc == Decimal("0")
-    assert plan.allocation.reason == "daily_entry_limit"
-    assert plan.metadata is not None
-    assert plan.metadata["daily_entry_usdc"] == "12"
-
 
 def test_strategy_risk_blocks_consecutive_loss_pause() -> None:
     market = _totals_market()
@@ -2880,13 +2783,9 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
     service = TradingDecisionService(
         strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(
-            # bankroll=20，要把 event_exposure cap 顶到 40 USDC（旧 tail_max_event_exposure_usdc=40 等价）：
-            # cap = max(bankroll × fraction, min_floor) → fraction=0、min_floor=40 → cap=40。
             # settlement-only：本用例验证结算模式下加仓不被未覆盖持仓阻断。
             config=CurrentStrategyConfig(
                 auto_exit_enabled=False,
-                tail_max_event_exposure_fraction=Decimal("0"),
-                tail_max_event_exposure_min_floor_usdc=Decimal("40"),
             )
         ).hooks,
     )
@@ -2980,12 +2879,7 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
     service = TradingDecisionService(
         strategy_id="sports_tail",
         extension_hooks=CurrentStrategy(
-            # bankroll=20，要把 event_exposure cap 顶到 40 USDC（旧 tail_max_event_exposure_usdc=40 等价）：
-            # cap = max(bankroll × fraction, min_floor) → fraction=0、min_floor=40 → cap=40。
-            config=CurrentStrategyConfig(
-                tail_max_event_exposure_fraction=Decimal("0"),
-                tail_max_event_exposure_min_floor_usdc=Decimal("40"),
-            )
+            config=CurrentStrategyConfig()
         ).hooks,
     )
 

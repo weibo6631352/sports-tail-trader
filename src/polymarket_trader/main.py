@@ -86,6 +86,7 @@ from polymarket_trader.app.parameter_store import ParameterStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
 from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics as _sync_runtime_metrics
+from polymarket_trader.runtime.orderbook_delta import OrderbookDeltaStore
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.runtime.ws_loops import (
     handle_market_ws_message,
@@ -169,6 +170,7 @@ class RuntimeComponents:
     entry_metadata_store: EntryMetadataStore
     order_executor: PolymarketOrderExecutor
     market_ws_worker: MarketWsWorker
+    orderbook_delta_store: OrderbookDeltaStore
     user_ws_worker: UserWsWorker
     market_service: MarketService
     market_discovery_worker: MarketDiscoveryWorker
@@ -715,10 +717,12 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         orderbook = await clob_client.get_orderbook(token_id)
         return orderbook.to_snapshot()
 
+    orderbook_delta_store = OrderbookDeltaStore()
     market_ws_worker = MarketWsWorker(
         event_bus=event_bus,
         registry=registry,
         rest_snapshot_loader=load_market_rest_snapshot,
+        orderbook_delta_store=orderbook_delta_store,
     )
     bind_extension_orderbook_reader(extension_ports, market_ws_worker.snapshot)
     market_service = MarketService(
@@ -983,6 +987,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         entry_metadata_store=entry_metadata_store,
         order_executor=order_executor,
         market_ws_worker=market_ws_worker,
+        orderbook_delta_store=orderbook_delta_store,
         user_ws_worker=user_ws_worker,
         market_service=market_service,
         market_discovery_worker=market_discovery_worker,

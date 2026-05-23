@@ -271,18 +271,12 @@ class CurrentStrategyConfig:
     # 赔率差价入场（odds-gap，CLAUDE.md §17 第二条入场路径）：当 Goalserve 盘中
     # 去抽水真实概率高出 Polymarket ask 至少此差值时入场。0.06 需覆盖约 3% taker
     # 手续费 + 安全余量；低于此差价不下单。操盘手可经 ParameterStore override 调整。
-    tail_odds_gap_min_edge: Decimal = Decimal("0.06")
+    # 0 = 无门槛: 只要 Goalserve 有 devig 真概率就视为 odds_gap 候选(Kelly 自决)。
+    # Kelly 内部用 net edge 算 fraction; net edge ≤ 0 时 Kelly reject, 否则按比例下注。
+    # 不在 Kelly 之上叠加额外阈值 cap。保留字段以便审计/A-B test;实测倾向永久 0。
+    tail_odds_gap_min_edge: Decimal = Decimal("0")
     # 赔率差价候选执行权限；默认 AUTO_EXECUTE，与扫尾锁定一致走完整入场链路。
     tail_odds_gap_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
-    # 相关性硬上限（与 Kelly 单市场 cap 互补）：单一事件 / 联赛 / 日新增 限额
-    # = bankroll × fraction。bankroll 涨大时 cap 同步放大；bankroll 极小时 cap
-    # 接近 0 但是用绝对 USDC floor 兜底，避免极小 bankroll 阶段每个 cap 都拒。
-    tail_max_event_exposure_fraction: Decimal = Decimal("0.25")
-    tail_max_league_exposure_fraction: Decimal = Decimal("0.75")
-    tail_max_daily_entry_fraction: Decimal = Decimal("1.5")
-    tail_max_event_exposure_min_floor_usdc: Decimal = Decimal("5")
-    tail_max_league_exposure_min_floor_usdc: Decimal = Decimal("10")
-    tail_max_daily_entry_min_floor_usdc: Decimal = Decimal("25")
     # 单场景 (single-game tail) implied fair value 公式：``cap = fair × (1 - edge_required)``
     # 解出 fair。500 bps = 5% 表示策略相信"fair 比 cap 至少高 5%"。
     # 用于 Kelly sizing 的 prob_p。outright path 直接用 the-odds-api 真概率。
