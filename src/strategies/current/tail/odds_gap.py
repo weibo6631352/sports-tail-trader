@@ -416,6 +416,66 @@ def _spread_scope_matches(market: SportsMarketSnapshot, goalserve_market_name: A
     return _goalserve_is_full_game_segment(goalserve_market_name)
 
 
+def _math_lock_veto(
+    candidate: SportsTailCandidate,
+    true_p: Decimal,
+) -> tuple[Decimal, str | None]:
+    """math_lock 一票否决 + true_p ceiling。
+
+    Goalserve odds 可能 stale（pre-game 数据没在末段更新），odds_gap evaluator
+    会算出 true_p=0.86 给已经数学上输掉的 token（实测 Kalinina first-set-winner
+    第一盘已输但 Goalserve 仍显示 0.86 → 买 0.01 × 624 shares 全损 cost \$6.24）。
+
+    引入 math_lock 作为 entry-side 双重检查：
+    - math_lock_prob 算出来 = 0 (lead<=0/已结束输方/没剩余时间已输) → veto，
+      返回 (Decimal(0), 'math_lock_veto_lost')
+    - math_lock_prob < 0.2 → 同 veto（数学上 80%+ 输方）
+    - 否则用 math_lock_prob 作 true_p 上限：min(odds_true_p, math_lock_prob)，
+      因为 math_lock 是公式硬概率，odds 可能误差大，取保守。
+
+    返回 (effective_true_p, veto_reason or None)。
+    """
+    from strategies.sports_framework.math_lock import evaluate_math_lock
+
+    market = candidate.market
+    lock = evaluate_math_lock(
+        market.market_type, market.side, market.line, candidate.game,
+        market_slug=market.market_slug,
+    )
+    if lock.method == "unsupported":
+        return true_p, None  # 不支持的盘口直接放行 Goalserve odds
+    # 只对"明确已输"才 veto（lock=0 + reason 含输方关键词）。
+    # "side_not_leading"（当下未领先但仍可能赢）/ "not_leading_after_handicap"
+    # （让分后未领先）/ "missing_*" 等不算输方，放行让 Kelly 用 Goalserve odds。
+    veto_reasons = (
+        "already_lost",
+        "already_exceeded_line_lose",
+        "already_over_lose",
+        "match_already_lost",
+        "set_already_lost",
+        "no_remaining_half_innings",  # 已无剩余 + lock=0 = 输方
+        "no_remaining_time",
+        "no_remaining_balls_or_wickets",
+        "chase_target_reached",  # 反方向已锁定
+        "run_already_scored_in_first",  # NRFI 已输
+        "halftime_settled",  # halftime 已决出输方
+        "first_inning_completed",  # NRFI inning 1 已结束输方
+        "quarter_ended",  # 该节已结束输方
+        "match_ended",
+        "game_ended",
+        "game_already_ended",
+    )
+    if (
+        lock.lock_probability <= Decimal("0.05")
+        and any(kw in lock.reason for kw in veto_reasons)
+    ):
+        return Decimal("0"), f"math_lock_veto_lost:{lock.method}:{lock.reason}:lock={lock.lock_probability}"
+    # math_lock 作 true_p 上限（取保守，但不强制 veto）
+    if lock.lock_probability > Decimal("0") and lock.lock_probability < true_p:
+        return lock.lock_probability, None
+    return true_p, None
+
+
 def _accept_odds_gap(
     candidate: SportsTailCandidate,
     policy: TailPolicy,
@@ -436,6 +496,18 @@ def _accept_odds_gap(
     market = candidate.market
     # best_ask 已由各分派函数确认非 None。
     assert market.best_ask is not None
+    # math_lock 一票否决：Goalserve odds 可能 stale，math_lock 是公式硬概率，
+    # 数学上已输（lock<=0.2）时即使 odds 显示高 true_p 也 veto。Kalinina case
+    # 第一盘已输 lock=0 但 Goalserve odds 显示 0.86，差点全损。
+    effective_true_p, veto_reason = _math_lock_veto(candidate, true_p)
+    if veto_reason is not None:
+        return _reject(
+            candidate, TailRejectReason.NO_ODDS_GAP.value,
+            metadata={"odds_gap_reject_reason": veto_reason,
+                      "odds_gap_raw_true_p": str(true_p),
+                      "odds_gap_math_lock_capped_p": str(effective_true_p)},
+        )
+    true_p = effective_true_p
     edge_gross = true_p - market.best_ask
     # Polymarket 当前 taker 默认 30 bps × price(see infra/polymarket fee schedule)。
     # 用 Decimal 避免浮点累积误差;_accept_odds_gap metadata 仅审计用,
