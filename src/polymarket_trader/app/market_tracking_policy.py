@@ -106,11 +106,16 @@ def market_end_date_elapsed(market: Market, *, now: datetime) -> bool:
 
 
 def market_has_exposure(account_snapshot: AccountSnapshot, market: Market) -> bool:
-    """判断账户在某个 market 上是否仍有持仓、挂单或 pending buy。"""
+    """判断账户在某个 market 上是否仍有持仓、挂单或 pending buy。
+
+    settled_zero_value 持仓视为已结算归零,即便残留 open_sell_shares(Polymarket
+    清单前窗口的孤儿挂单)也不算 exposure——和 authority_refresher 内部版本对齐,
+    防止已死市场因孤儿 SELL 永不 prune、WS 永久占用订阅槽位。
+    """
 
     for token_id in market.token_ids:
         position = account_snapshot.get_position(market.condition_id, token_id)
-        if position is not None and (
+        if position is not None and not position.settled_zero_value and (
             position.shares > 0
             or position.open_buy_shares > 0
             or position.open_sell_shares > 0
