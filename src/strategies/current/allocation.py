@@ -196,7 +196,50 @@ def kelly_plan(
 
     eligible.sort(key=lambda item: item.estimate_f_star, reverse=True)
 
+    # 互斥盘口去重 — 同 event_slug + 同 outcome label("Yes" 等) 的多 candidate 互斥
+    # (3-way prop 如 halftime home/draw/away 三选一只一个赢),只留 f_star 最高的。
+    # 实盘 case: THE-SAG halftime Home-YES @ $0.76 + Draw-YES @ $0.44 同时进场,
+    # 合并 -EV。Kelly 单笔正 EV 但 correlated 时合并失败 → 去重防双买。
+    excluded_by_mutex: dict[int, str] = {}
+    seen_mutex_groups: dict[tuple[str, str], "_Candidate"] = {}
     for candidate in eligible:
+        market = candidate.snapshot.market
+        if not market.event_slug:
+            continue
+        outcome = market.get_outcome_by_token_id(candidate.snapshot.token_id)
+        if outcome is None:
+            continue
+        outcome_label = outcome.outcome.strip().lower()
+        # 只对"事件发生"side(YES, 数值化的队名等)做互斥;NO 不互斥(home-NO +
+        # away-NO 可同时成立)。常见标签: "yes" / 队名(MLB ML)。
+        if outcome_label in {"no"}:
+            continue
+        key = (market.event_slug, outcome_label) if outcome_label == "yes" else (market.event_slug, "_team_yes")
+        existing = seen_mutex_groups.get(key)
+        if existing is None:
+            seen_mutex_groups[key] = candidate
+        elif candidate.estimate_f_star > existing.estimate_f_star:
+            excluded_by_mutex[id(existing)] = (
+                f"mutually_exclusive_loser:{market.event_slug}"
+            )
+            seen_mutex_groups[key] = candidate
+        else:
+            excluded_by_mutex[id(candidate)] = (
+                f"mutually_exclusive_loser:{market.event_slug}"
+            )
+
+    for candidate in eligible:
+        if id(candidate) in excluded_by_mutex:
+            allocations.append(
+                _reject_allocation(
+                    candidate.snapshot,
+                    exposure_usdc=candidate.exposure_usdc,
+                    reason=excluded_by_mutex[id(candidate)],
+                    prob_view=candidate.prob_view,
+                    price_c=candidate.price_c,
+                )
+            )
+            continue
         snapshot = candidate.snapshot
         prob_view = candidate.prob_view
         price_c = candidate.price_c
