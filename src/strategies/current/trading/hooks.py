@@ -57,14 +57,15 @@ def _maybe_reprice_stale_sell(
     *,
     now: datetime,
 ) -> ExtensionDecision | None:
-    """检查 token 下现有 SELL 单是否价位 stale(挂 $0.99 但 fair_value 已跌穿)。
+    """检查 token 下现有 SELL 单是否价位 stale，需 cancel-replace 到 entry+offset。
 
-    旧 exit overlay 在持仓刚买入时挂 $0.99 GTC SELL(等结算 cur→1 自动成交锁
-    盈利)。但比赛 fair_value 中途跌穿时,这单永远不成交,损失被动锁定。
-    本逻辑: fair_value < SELL price × reprice_threshold (默认 0.5) 时 emit
-    REPLACE 决策,把价位降到 max(best_bid + 1 tick, fair_value × 0.95)。
+    两条触发路径（任一命中即 replace）：
+    1. **profit_take 路径**：SELL price > entry+offset + 2 tick → 替换到 entry+offset
+       （§17 准量化提前止盈，旧 $0.99 死等结算最大单一损失源）
+    2. **fair_value 路径**（原有）：SELL price > fair_value × 1.5 → 替换到
+       max(best_bid+tick, fair_value × 0.95)（防 fair value 大幅跌穿后死单）
 
-    每个 token 每 5 分钟最多 reprice 1 次(防止价格抖动来回 cancel-replace)。
+    替换价不超过原 SELL price - tick，避免 cancel-replace 价更高反而难成交。
     """
 
     from strategies.current.trading.exit_overlay import _estimate_fair_value, _exit_orderbook
@@ -75,7 +76,6 @@ def _maybe_reprice_stale_sell(
     )
     if token_id is None:
         return None
-    # 找该 token 的 open SELL 单
     open_sells = [
         o for o in (context.open_orders or ())
         if o.side.value == "sell" and o.token_id == token_id and o.open and o.remaining_shares
@@ -84,26 +84,54 @@ def _maybe_reprice_stale_sell(
         return None
     orderbook = _exit_orderbook(context, token_id)
     if orderbook is None or orderbook.best_bid is None:
-        return None  # 无盘口数据,无法判断 fair_value 合理性
+        return None
     fair_value, fair_source = _estimate_fair_value(
         context,
         token_id=token_id,
         best_bid=orderbook.best_bid,
         best_ask=orderbook.best_ask,
     )
-    # 阈值: SELL 价 > fair_value × 1.5 视为严重 stale
+    tick = orderbook.tick_size or Decimal("0.01")
+    # 计算 profit-take 目标价 = entry+offset（持仓 cost/shares 算 avg）
+    profit_take_target: Decimal | None = None
+    offset = config.tail_profit_take_offset
+    position = context.position
+    if (
+        offset is not None
+        and offset > Decimal("0")
+        and position is not None
+        and position.shares > Decimal("0")
+        and position.cost_usdc > Decimal("0")
+    ):
+        avg_price = position.cost_usdc / position.shares
+        candidate = avg_price + offset
+        if candidate < config.exit_no_price:
+            profit_take_target = candidate
+
     reprice_ratio = Decimal("1.5")
     for sell in open_sells:
         sell_price = sell.price
-        if sell_price is None or sell_price <= fair_value * reprice_ratio:
+        if sell_price is None:
             continue
-        # 替换价: 取 best_bid + 1 tick(实际可成交) 和 fair_value × 0.95(避免砸盘) 的较大值
-        tick = orderbook.tick_size or Decimal("0.01")
-        new_price = max(
-            orderbook.best_bid + tick,
-            (fair_value * Decimal("0.95")).quantize(Decimal("0.001")),
+        # 路径 1：SELL 高于 profit-take 目标 + 2 tick → 改到 profit_take_target
+        stale_by_profit_take = (
+            profit_take_target is not None
+            and sell_price > profit_take_target + tick * Decimal("2")
         )
-        # 价格不能超过原 SELL 价(否则更难成交)
+        # 路径 2：SELL 高于 fair_value × 1.5 → 改到 max(best_bid+tick, fair×0.95)
+        stale_by_fair_value = sell_price > fair_value * reprice_ratio
+        if not stale_by_profit_take and not stale_by_fair_value:
+            continue
+        if stale_by_profit_take:
+            assert profit_take_target is not None  # 守门已确认
+            new_price = profit_take_target
+            reprice_reason = "exit_overlay_reprice_to_profit_take"
+        else:
+            new_price = max(
+                orderbook.best_bid + tick,
+                (fair_value * Decimal("0.95")).quantize(Decimal("0.001")),
+            )
+            reprice_reason = "exit_overlay_reprice_stale_sell"
         new_price = min(new_price, sell_price - tick)
         if new_price <= Decimal("0"):
             continue
@@ -113,13 +141,15 @@ def _maybe_reprice_stale_sell(
             price=new_price,
             size_shares=sell.remaining_shares or sell.size_shares or Decimal("0"),
             market_slug=context.market.market_slug if context.market else None,
-            reason="exit_overlay_reprice_stale_sell",
+            reason=reprice_reason,
             metadata={
                 "old_price": str(sell_price),
                 "new_price": str(new_price),
                 "fair_value": str(fair_value),
                 "fair_value_source": fair_source,
-                "reprice_ratio": str(reprice_ratio),
+                "profit_take_target": (
+                    str(profit_take_target) if profit_take_target is not None else None
+                ),
                 "best_bid": str(orderbook.best_bid),
             },
         )
