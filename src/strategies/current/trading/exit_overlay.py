@@ -204,11 +204,13 @@ def evaluate_dynamic_exit(
     orderbook = _exit_orderbook(context, token_id)
     if orderbook is None or orderbook.best_bid is None:
         return None  # 无实时盘口：交回静态/结算退出路径，不产出动态决策。
-    # B3: 无真实退出通道（NO_BID 已被上面拦截，这里覆盖 CEILING_ONLY / DUST_BID）→
-    # 不挂 SELL（避免在地板上被秒吃或砸盘）；交回静态/结算路径，等流动性回来。
-    # 静态路径会按结算条件处理（盈方 hold 等结算 / 亏方等机会回归）。
-    if not orderbook.sell_actionable:
-        return None
+    # 关键：sell_actionable=False（FLOOR_BID_ONLY / DUST_BID）守门**只拦非紧急
+    # 路径**（take_profit / HOLD / 回撤）——这些路径在地板 bid 上挂 SELL 没意义。
+    # **但 stop_loss / settled 路径必须放行**：地板 bid 状态下不止损 = 等结算 =
+    # 全损；挂 SELL @ floor_price (entry × stop_loss_floor_fraction) 不会被地板
+    # 单秒吃（best_bid $0.01 < my ask $0.51 不成交），只等真买家出现。
+    # 实测 chi-shp-jin spread $23.55 → $0.01 没止损就是因为顶层一刀切守门误杀。
+    is_sell_actionable = orderbook.sell_actionable
 
     best_bid = orderbook.best_bid
 
@@ -229,10 +231,14 @@ def evaluate_dynamic_exit(
     slippage_fraction = Decimal("0")
     if best_bid > Decimal("0") and realized_avg < best_bid:
         slippage_fraction = (best_bid - realized_avg) / best_bid
-    # 簿太薄判定：吃不完全部份额，或滑点超容忍上限。
+    # 簿太薄判定：吃不完全部份额、滑点超容忍上限、或 sell_actionable=False
+    # (FLOOR_BID_ONLY / DUST_BID)。任一命中 → take_profit 分支降级 HOLD 等深度，
+    # 不在地板/dust bid 上挂 SELL 砸自己（B3）。stop_loss 不看 book_too_thin
+    # 直接执行（地板状态下不止损 = 等结算全损，必须挂 SELL @ floor_price 等真买家）。
     book_too_thin = (
         not fully_covered
         or slippage_fraction > config.tail_dynamic_exit_max_slippage_fraction
+        or not is_sell_actionable
     )
 
     fair_value, fair_value_source = _estimate_fair_value(
