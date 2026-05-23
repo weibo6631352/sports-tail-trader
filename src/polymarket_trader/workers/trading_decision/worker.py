@@ -78,6 +78,14 @@ POSITION_INCREASE_LIFECYCLES = {
 ENTRY_ATTEMPT_LIFECYCLES = {
     MarketLifecycle.WATCHING_ORDERBOOK,
     MarketLifecycle.ENTRY_READY,
+    # ENTRY_REJECTED 也允许重试：核心哲学是"失败积极重试"（§17），上一次失败后
+    # 不能永久死锁该 market——盘口/edge/账户敞口随时变化，新 ENTRY_SIGNAL 触发
+    # 时应让风控重新评估。trading_service.review_intent 每次都拉最新
+    # snapshot.open_orders，发现已存在 open BUY 会直接拒（避免重复下单副作用），
+    # 所以信任风控层防重入，不靠 lifecycle 死锁来"保护"。原"等 reconcile/人工"
+    # 设计让 KBO odds_gap 8 次 allocation accept $20-29 budget 0 单——把 ENTRY
+    # 路径堵死的代价远大于偶发额外评估开销。
+    MarketLifecycle.ENTRY_REJECTED,
 }
 
 
