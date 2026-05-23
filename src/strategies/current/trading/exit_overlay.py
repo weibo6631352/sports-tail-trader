@@ -297,14 +297,31 @@ def evaluate_dynamic_exit(
     elif fair_value >= entry_price * Decimal("1.1"):
         bullish_vote += 1
         vote_reasons.append(f"fair_value_strong:{fair_value:.3f}>=entry*1.1")
-    # 信号 1：盘口方向（imbalance）— 主信号最敏感，权重 2。
-    # 阈值收紧 0.35→0.40：bid 比例 ≤40% 即视为卖方明显，反应快。
+    # 信号 1a：盘口方向（imbalance）— 双侧深度对比给方向信号，权重 2。
+    # bid 比例 < 0.4 即卖方明显。
     if imbalance < Decimal("0.4"):
         bearish_vote += 2
         vote_reasons.append(f"orderbook_bearish:imbalance={imbalance:.3f}")
     elif imbalance > Decimal("0.6"):
         bullish_vote += 2
         vote_reasons.append(f"orderbook_bullish:imbalance={imbalance:.3f}")
+    # 信号 1b：best_bid 相对入场价归一化偏离 — 市场立即愿意接我方持仓的真实
+    # 可实现价值。这跟 fair_value 不同：fair_value 是融合估值（goalserve/math/
+    # microprice 取最大），best_bid 是当下立即可成交价。两个角度独立——融合估值
+    # 高但 bid 砸到底说明市场情绪反转，要重视。
+    bid_deviation = best_bid - entry_price
+    if bid_deviation < -Decimal("0.15"):  # 砸价 15pt 以上
+        bearish_vote += 2
+        vote_reasons.append(f"bid_deviation_strong_neg:{bid_deviation:+.3f}")
+    elif bid_deviation < -Decimal("0.05"):
+        bearish_vote += 1
+        vote_reasons.append(f"bid_deviation_neg:{bid_deviation:+.3f}")
+    elif bid_deviation >= Decimal("0.15"):
+        bullish_vote += 2
+        vote_reasons.append(f"bid_deviation_strong_pos:{bid_deviation:+.3f}")
+    elif bid_deviation >= Decimal("0.05"):
+        bullish_vote += 1
+        vote_reasons.append(f"bid_deviation_pos:{bid_deviation:+.3f}")
     # 信号 2：Goalserve 赔率相对入场价偏离（绝对值无意义，必须看相对偏离）。
     # 例：买价 0.20 + goalserve 0.30 = +0.10 偏离 → 博彩仍看好赢方；
     # 买价 0.80 + goalserve 0.30 = -0.50 偏离 → 博彩认定输方向。
