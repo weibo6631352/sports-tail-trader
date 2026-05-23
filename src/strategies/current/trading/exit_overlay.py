@@ -275,14 +275,32 @@ def evaluate_dynamic_exit(
         "dynamic_exit_is_new_high": is_new_high,
     }
 
-    # 1. 止损：公允价值跌破买入价 × stop_loss_fraction → 比赛/赔率逆转，立即离场。
-    #    紧急：割肉优先于滑点，即使簿薄也按逐档撮合价 clearing_price 卖出。
-    if fair_value <= stop_loss_threshold:
+    # 1. 止损守卫:**数学锁定时不止损**。MLB B9th + Under 持仓且总分尚未触及 line,
+    #    或比赛已进入结尾阶段(剩余得分窗口数学上无法让我方输)→ 即使 fair_value
+    #    被 Polymarket 末段流动性退潮+重定价拉穿,也 HOLD 等结算。
+    #
+    #    根因: U5.5 实盘案例 — Final 总分=5 ≤ 5.5(本应赢),但 B9th 时 microprice
+    #    跌到 $0.85 触发止损,$0.11 抛掉 11.25 shares,**vs 等结算亏损 ~$4**。
+    #    fair_value 在末段对薄簿 + 重定价噪音敏感,不是真概率反转信号。
+    math_locked = _is_math_locked_for_position(context)
+    if fair_value <= stop_loss_threshold and not math_locked:
         return DynamicExitDecision(
             should_exit=True,
             exit_price=clearing_price,
             reason="dynamic_exit_stop_loss",
             metadata={**metadata, "dynamic_exit_decision": "stop_loss"},
+        )
+    if fair_value <= stop_loss_threshold and math_locked:
+        # 数学锁定但 fair_value 仍跌穿 → 标记 metadata,HOLD 到结算。审计可查这一刻。
+        return DynamicExitDecision(
+            should_exit=False,
+            exit_price=None,
+            reason="dynamic_exit_hold_math_locked",
+            metadata={
+                **metadata,
+                "dynamic_exit_decision": "hold_math_locked",
+                "dynamic_exit_math_locked": True,
+            },
         )
 
     # 2. 水下但未触止损：best bid ≤ 买入价 → HOLD，等价格回到买入价之上再考虑止盈。
@@ -740,6 +758,87 @@ def _estimate_seconds_remaining_from_state(game: object) -> int | None:
     if game.volleyball_state is not None:
         return _volleyball_seconds_remaining(game.volleyball_state)
     return None
+
+
+def _is_math_locked_for_position(context: ExtensionContext) -> bool:
+    """判断当前持仓是否处于"数学锁定" — 即剩余比赛得分窗口已无法让我方输。
+
+    例: MLB B9th + Under 5.5 + 总分=5 → 即使 Dbacks B9th 得 1 分,总分=6 > 5.5 输,
+    但若总分已 ≥ 5.5 即输,无 lock。**lock 条件**:
+    - MLB Totals Under: 总分 < line 且剩余 ≤ 1 half-inning + 当前 inning 已结束 → lock
+    - MLB Totals Over: 总分 ≥ line → 已锁,但市场早已结算无需 hold
+    - MLB ML: 比分差距 > 剩余半局可能反转幅度 → lock(简化:不做,投出概率 hold)
+
+    保守起见,只对 **Totals Under + MLB Bottom 9th** 这种最常见场景做 lock 守卫;
+    其他 case 返回 False(止损路径维持原样)。
+    """
+
+    from strategies.sports_framework import LiveGameStatus
+    from strategies.sports_framework.parsing import live_game_state_from_metadata
+    from strategies.sports_framework.types import (
+        SportsMarketSide,
+        SportsMarketType,
+    )
+    from strategies.current.outcomes import describe_sports_market
+
+    market = context.market
+    if market is None:
+        return False
+    descriptor = describe_sports_market(market)
+    if not descriptor.accepted or descriptor.market_type is None:
+        return False
+    # 当前 token 对应的 side(Under / Over / Home / Away)
+    target = target_for_token(market, context.token_id or "")
+    if target is None:
+        return False
+
+    game = live_game_state_from_metadata(context.metadata)
+    if game is None or game.status != LiveGameStatus.LIVE:
+        return False
+
+    # 仅 MLB Totals Under 这一明确锁定场景。
+    if descriptor.market_type != SportsMarketType.TOTALS:
+        return False
+    if target.side != SportsMarketSide.UNDER:
+        return False
+    if descriptor.line is None:
+        return False
+    if game.baseball_state is None or game.baseball_state.current_inning is None:
+        return False
+
+    state = game.baseball_state
+    inning = state.current_inning
+    half = (state.inning_half or "top").lower()
+    # 当前总分
+    home_score = game.home.score if game.home else None
+    away_score = game.away.score if game.away else None
+    if home_score is None or away_score is None:
+        return False
+    total_score = Decimal(int(home_score) + int(away_score))
+    line = descriptor.line
+
+    # 已经达到/超过 line → Under 注定输,不该 hold(让止损正常生效抢回部分本金)
+    if total_score >= line:
+        return False
+
+    # 进入 Bottom 9th 且还在 Bottom 9th: 剩余 ≤ 1 half-inning,Dbacks 主场最后一击。
+    # 即使 Dbacks 击出 (line - total_score) 分,total 才达 line,Under 输;若不足则赢。
+    # 当 剩余得分窗口期望 < (line - total_score) 时 lock。MLB 单半局期望 ~1.0 分,
+    # 但**实际单半局 ≥ N 分的概率随 N 急剧下降**: P(half-inning ≥ 2)≈0.18,≥ 3≈0.07,
+    # ≥ 4≈0.025。差距 ≥ 2 分时 Under 胜率 ≥ 82%,可视为数学锁定守卫。
+    if inning >= 9 and half == "bottom":
+        # B9th Dbacks 主场,差距 ≥ 2 分时 hold(Under 大概率赢)
+        gap = line - total_score
+        if gap >= Decimal("2"):
+            return True
+
+    # 第 10+ 局加时 + bottom: 客队领先(score 差距 ≥ 1 已赢)、平局 + Under 差距充足 → hold
+    if inning >= 10 and half == "bottom":
+        gap = line - total_score
+        if gap >= Decimal("1.5"):
+            return True
+
+    return False
 
 
 # 棒球平均每半局约 10 分钟，标准比赛 9 局
