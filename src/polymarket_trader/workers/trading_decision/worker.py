@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections import OrderedDict
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -57,6 +58,8 @@ HeartbeatCallback = Callable[..., None]
 
 # Worker 长时间空闲等事件时，仍要定期触发 heartbeat 让 supervisor 区分「卡死」和「空等」。
 # 60s 在 N13 观测的"4 分钟无心跳"上下文里足够灵敏，又不会刷屏。
+logger = logging.getLogger(__name__)
+
 _TRADING_DECISION_IDLE_HEARTBEAT_SECONDS = 60.0
 # _lifecycle_timeline LRU 上限：跟踪市场数超过此值时淘汰最久未更新的条目。
 # 每个市场最多保留最近 _LIFECYCLE_HISTORY_PER_MARKET 次转换记录。
@@ -301,6 +304,25 @@ class TradingDecisionWorker:
         # 不选那个"。P3 异步，失败静默；策略层不感知。
         await self._publish_allocation_decision(event=event, plan=plan)
         if plan.market is None or plan.orderbook is None or event.token_id != plan.orderbook.token_id:
+            # silent skip 历史上让"candidate ready=True 却无 order_created"难诊断；
+            # 这里 INFO 日志带 plan 是否 ready_to_trade + buy_budget，下次排查时直接 grep
+            # entry_dispatch_skipped condition_id=<...> 就能区分是 plan 缺数据还是 token 不匹配。
+            logger.info(
+                "entry_dispatch_skipped",
+                extra={
+                    "skip_reason": (
+                        "plan_market_none" if plan.market is None
+                        else "plan_orderbook_none" if plan.orderbook is None
+                        else "event_token_mismatch"
+                    ),
+                    "condition_id": event.condition_id,
+                    "event_token_id": event.token_id,
+                    "plan_orderbook_token_id": plan.orderbook.token_id if plan.orderbook is not None else None,
+                    "plan_ready_to_trade": plan.ready_to_trade,
+                    "allocation_buy_budget_usdc": str(plan.allocation.buy_budget_usdc) if plan.allocation is not None else None,
+                    "plan_reason": plan.reason or "",
+                },
+            )
             return None
 
         state = self._state_for_market(plan.market)
@@ -310,6 +332,17 @@ class TradingDecisionWorker:
             state,
             plan,
         ):
+            logger.info(
+                "entry_dispatch_skipped",
+                extra={
+                    "skip_reason": "lifecycle_not_attemptable",
+                    "condition_id": plan.market.condition_id,
+                    "event_token_id": event.token_id,
+                    "lifecycle_state": state.value,
+                    "plan_ready_to_trade": plan.ready_to_trade,
+                    "allocation_buy_budget_usdc": str(plan.allocation.buy_budget_usdc) if plan.allocation is not None else None,
+                },
+            )
             return None
         return await self._execute_entry_plan(event=event, snapshot=snapshot, plan=plan)
 

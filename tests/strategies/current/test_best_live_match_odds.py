@@ -1,7 +1,7 @@
 """best_live_match 跨源赔率接入回归测试。
 
-inplay WS 事件带 goalserve_odds，livescore 事件不带；两源名字格式不同在
-aggregate 融合时分不到一组。best_live_match 选中 livescore 事件后，必须从
+inplay GZIP feed 事件带 goalserve_odds，livescore 事件不带；两源名字格式不同
+在 aggregate 融合时分不到一组。best_live_match 选中 livescore 事件后，必须从
 同样匹配到该 market 的 inplay 事件把赔率接上，否则策略拿不到盘中赔率。
 """
 

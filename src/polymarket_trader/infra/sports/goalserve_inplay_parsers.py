@@ -1,8 +1,7 @@
 """Goalserve inplay HTTP-GZIP feed per-sport parsers。
 
 数据源：``http://inplay.goalserve.com/inplay-{sport}.gz``——keyless（IP 白名单），
-gunzip 后为 JSON，服务端每 1 秒刷新一次。与已废弃的 inplay WebSocket 不同，
-此 feed 是完整快照而非增量推送。
+gunzip 后为 JSON，服务端每 1 秒刷新一次。feed 是完整快照而非增量推送。
 
 feed 顶层结构：``{bm, updated, updated_ts, events: {match_id: EVENT}}``。
 每个 EVENT 含 ``core / info / team_info / bonus / stream / sts / stats / extra /
@@ -412,8 +411,7 @@ def _parse_odds(
     """把 inplay feed 的 ``odds`` dict 解析成 GoalserveOdds。
 
     feed 的 odds 形态：``{market_id: {id, name, suspend, participants:
-    {pid: {name, value_eu, handicap, suspend}}}}``——与已废弃 WS 的 list 形态
-    不同（WS 市场无名字、用 o/v/n 短键）。这里市场带 name，无需推断。
+    {pid: {name, value_eu, handicap, suspend}}}}``。市场带 name，无需推断。
 
     隐含概率 = 1 / value_eu，量化到 4 位小数。value_eu <= 0（盘口关闭占位）
     的 outcome 跳过——0 赔率无定价意义。

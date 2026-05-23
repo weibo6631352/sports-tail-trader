@@ -444,7 +444,7 @@ def _parse_rugby(scores: dict[str, Any], observed_at: datetime) -> list[LiveEven
 # ---------------------------------------------------------------------------
 
 # esports getfeed 状态文字 → 归一状态。
-# inplay WS 不在套餐内（403），livescore getfeed esports/home 是唯一可用源。
+# inplay GZIP feed 不覆盖电竞，livescore getfeed esports/home 是唯一可用源。
 _ESPORTS_STATUS_MAP: dict[str, SportsLiveGameStatus] = {
     "not started": SportsLiveGameStatus.SCHEDULED,
     "started": SportsLiveGameStatus.LIVE,

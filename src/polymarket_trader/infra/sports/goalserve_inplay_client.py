@@ -2,7 +2,7 @@
 
 数据源：``http://inplay.goalserve.com/inplay-{sport}.gz``——keyless（IP 白名单，
 经 ``GOALSERVE_PROXY`` 代理出口），gunzip 后为 JSON，服务端每 1 秒刷新。
-取代已废弃的 inplay WebSocket（服务端 ~7 秒强制断流、basket/esports 403）。
+Goalserve 全部走 HTTP（官方 WebSocket 已弃用且对应客户端代码已删，不再尝试）。
 
 速率限制（实测）：**同一运动 ~1 请求/秒**——同 sport 快于 ~1/s 触发 HTTP 429；
 不同 sport 并发不共享预算。因此每个 sport 维护**独立后台轮询 Task**，各自按
