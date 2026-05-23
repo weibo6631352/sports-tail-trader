@@ -214,6 +214,10 @@ class MarketDiscoveryWorker:
             self._remember(raw_event)
         else:
             self._last_failure = None
+        if outcome.suppress_event:
+            # MarketService 已对同 (cid, reason) 的 MARKET_FILTERED_OUT 高频事件去重；
+            # 进入这里说明本次是冗余拒绝，直接静默，不再走首次审计路径。
+            return None
         if not outcome.should_publish_event:
             # 首次看到的目标盘口必须落审计——CLAUDE.md §10「拒绝原因必须可审计」。
             # subsequent 同样市场再次发现时走原有 dedup 路径不发噪音；非目标盘口

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from collections import OrderedDict
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -60,6 +62,11 @@ _TRADING_DECISION_IDLE_HEARTBEAT_SECONDS = 60.0
 # 每个市场最多保留最近 _LIFECYCLE_HISTORY_PER_MARKET 次转换记录。
 _LIFECYCLE_MARKET_CAP = 500
 _LIFECYCLE_HISTORY_PER_MARKET = 50
+# allocation_decision_recorded 高频事件 dedup 上限：(condition_id, token_id) → state-hash。
+# orderbook 每秒上百条更新都跑分配决策；同一市场 candidate 集合 + reason + 是否拿到
+# buy budget 没变时不再 emit，避免 audit_events 每天千万条。precise buy_budget_usdc
+# 随 bankroll/orderbook 每 tick 抖动，不进 hash——只看"是否真的拿到预算"这个布尔位。
+_ALLOCATION_DEDUPE_CAPACITY = 10_000
 
 POSITION_INCREASE_LIFECYCLES = {
     MarketLifecycle.POSITION_OPEN,
@@ -147,6 +154,10 @@ class TradingDecisionWorker:
         # condition_id → [(lifecycle, timestamp), …]，记录每次状态转换的时间点。
         # OrderedDict + cap = LRU 防止无限增长（见 _LIFECYCLE_MARKET_CAP）。
         self._lifecycle_timeline: OrderedDict[str, list[tuple[MarketLifecycle, datetime]]] = OrderedDict()
+        # allocation_decision_recorded dedup：(condition_id, token_id) → 上次 emit 的
+        # state-hash。同一 key 状态未变跳过 publish，依然计入 _suppressed_allocation_emits。
+        self._last_allocation_state_hash: OrderedDict[tuple[str | None, str | None], str] = OrderedDict()
+        self._suppressed_allocation_emits: int = 0
         self._order_result_processor = TradingOrderResultProcessor(
             host=self,
             trading_decision_service=self._trading_decision_service,
@@ -689,6 +700,43 @@ class TradingDecisionWorker:
             for allocation in allocation_plan.allocations
             if allocation.buy_budget_usdc > 0
         ]
+        # dedup hash：稳定字段集合
+        #   - 每条 allocation 的 (cid, token, reason, release_reason, buy_budget>0)
+        #     —— 精确 buy_budget_usdc 数值会随 bankroll/orderbook 每 tick 抖动，把它
+        #     纳入 hash 会让 dedup 永远不命中；只看是否拿到预算这个布尔位。
+        #   - 选中市场列表（排序）
+        #   - plan 顶层 reason
+        # 任何"决策本质"变化都会命中；纯数值抖动会被吸收。
+        candidate_state = sorted(
+            (
+                allocation.condition_id,
+                allocation.token_id,
+                allocation.reason,
+                allocation.release_reason,
+                allocation.buy_budget_usdc > 0,
+            )
+            for allocation in allocation_plan.allocations
+        )
+        hash_payload = json.dumps(
+            {
+                "candidates": candidate_state,
+                "selected": sorted(selected),
+                "plan_reason": allocation_plan.reason or "",
+            },
+            sort_keys=True,
+            default=str,
+        )
+        state_hash = hashlib.sha256(hash_payload.encode("utf-8")).hexdigest()
+        dedup_key = (event.condition_id, event.token_id)
+        previous_hash = self._last_allocation_state_hash.get(dedup_key)
+        if previous_hash == state_hash:
+            self._last_allocation_state_hash.move_to_end(dedup_key)
+            self._suppressed_allocation_emits += 1
+            return
+        self._last_allocation_state_hash[dedup_key] = state_hash
+        self._last_allocation_state_hash.move_to_end(dedup_key)
+        while len(self._last_allocation_state_hash) > _ALLOCATION_DEDUPE_CAPACITY:
+            self._last_allocation_state_hash.popitem(last=False)
         try:
             await self._event_bus.publish(
                 OutboxPriority.P3,
@@ -769,6 +817,12 @@ class TradingDecisionWorker:
         """Runtime 装配 supervisor.heartbeat_worker 的轻量适配点；测试可注入假回调。"""
 
         self._heartbeat = heartbeat
+
+    @property
+    def suppressed_allocation_emits(self) -> int:
+        """已被 dedup 抑制的 allocation_decision_recorded 事件数，供 observability/admin 观察。"""
+
+        return self._suppressed_allocation_emits
 
     def _emit_heartbeat(self, *, detail: str) -> None:
         """对外发心跳——supervisor 看不到心跳就视为 worker 卡死。

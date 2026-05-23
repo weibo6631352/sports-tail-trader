@@ -50,6 +50,11 @@ def _make_worker(bus: _SpyEventBus) -> Any:
 
     worker = TradingDecisionWorker.__new__(TradingDecisionWorker)
     worker._event_bus = bus
+    # dedup cache + counter 在 __init__ 里建；__new__ 测试旁路必须显式补齐。
+    from collections import OrderedDict
+
+    worker._last_allocation_state_hash = OrderedDict()
+    worker._suppressed_allocation_emits = 0
     return worker
 
 

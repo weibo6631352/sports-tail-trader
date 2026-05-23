@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Protocol
@@ -18,6 +19,11 @@ from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.extension_api import ExtensionHooks, UniverseDecision
 
 AccountSnapshotProvider = Callable[[], AccountSnapshot]
+
+# market_filtered_out 高频事件 dedup 上限：condition_id → 上次发出的 reason。
+# 同一市场反复以同一 reason 被拒（每次 discovery pass 都会扫到）会把 audit 表撑爆，
+# 用 LRU 缓存按 reason 去重；reason 变化、或市场转回 DISCOVERED/UPDATED 时清缓存。
+_FILTER_DEDUPE_CAPACITY = 50_000
 
 
 class MarketTracker(Protocol):
@@ -47,6 +53,11 @@ class MarketService:
         self._registry = registry
         self._market_tracker = market_tracker
         self._account_snapshot_provider = account_snapshot_provider
+        # MARKET_FILTERED_OUT dedup：仅在 (condition_id, reason) 与上次发出的不同时
+        # 才让 worker 落 audit。reason 改变或市场转为 DISCOVERED/UPDATED 时移除条目，
+        # 这样下次再被同一原因过滤会重新发出一次。
+        self._last_filter_reason: OrderedDict[str, str] = OrderedDict()
+        self._suppressed_filter_emits: int = 0
 
     @property
     def extension_hooks(self) -> ExtensionHooks:
@@ -170,6 +181,11 @@ class MarketService:
             tracking_retained=tracking_retained,
             universe_decision=universe_decision,
         )
+        suppress_event = self._apply_filter_dedupe(
+            parse_result=parse_result,
+            discovery_kind=discovery_kind,
+            reason=event.reason,
+        )
         return MarketDiscoveryOutcome(
             trace_id=trace_id,
             source=source,
@@ -189,7 +205,47 @@ class MarketService:
                 and not tracking_retained
             ),
             universe_decision=universe_decision,
+            suppress_event=suppress_event,
         )
+
+    def _apply_filter_dedupe(
+        self,
+        *,
+        parse_result: MarketParseResult,
+        discovery_kind: str,
+        reason: str,
+    ) -> bool:
+        """高频 MARKET_FILTERED_OUT 去重：同一 cid 同一 reason 静默；reason 变更或转回
+        DISCOVERED/UPDATED 时清缓存以保证后续可重新发出。
+
+        WHY：实盘里同一批被拒市场每个 discovery pass 都被扫到，逐条落审计会撑爆
+        audit_events 表。dedup 只关心 (condition_id, reason)，不影响首次/转换发出。
+        """
+
+        cid = parse_result.condition_id
+        if cid is None:
+            return False
+        if discovery_kind == DomainEventType.MARKET_FILTERED_OUT.value:
+            previous = self._last_filter_reason.get(cid)
+            if previous == reason:
+                self._last_filter_reason.move_to_end(cid)
+                self._suppressed_filter_emits += 1
+                return True
+            self._last_filter_reason[cid] = reason
+            self._last_filter_reason.move_to_end(cid)
+            while len(self._last_filter_reason) > _FILTER_DEDUPE_CAPACITY:
+                self._last_filter_reason.popitem(last=False)
+            return False
+        # discovery_kind 是 MARKET_DISCOVERED / MARKET_UPDATED 时清缓存，让下次重新被
+        # 过滤会再发出一次（"过滤状态恢复"也是有审计价值的事件）。
+        self._last_filter_reason.pop(cid, None)
+        return False
+
+    @property
+    def suppressed_filter_emits(self) -> int:
+        """已被 dedup 抑制的 MARKET_FILTERED_OUT 事件数，供 admin/observability 观察。"""
+
+        return self._suppressed_filter_emits
 
     def _lookup_existing_market(
         self,
@@ -317,6 +373,9 @@ class MarketDiscoveryOutcome:
     tracking_retained: bool = False
     tracking_removed: bool = False
     universe_decision: UniverseDecision | None = None
+    # 同一 cid 同一 reason 的 MARKET_FILTERED_OUT 在高频 discovery 里被 dedup 抑制；
+    # worker 看到 True 时跳过 publish。accept/tracking_* 路径不受影响。
+    suppress_event: bool = False
 
     @property
     def accepted(self) -> bool:
@@ -324,6 +383,8 @@ class MarketDiscoveryOutcome:
 
     @property
     def should_publish_event(self) -> bool:
+        if self.suppress_event:
+            return False
         return self.accepted or self.tracking_retained or self.tracking_removed
 
 
