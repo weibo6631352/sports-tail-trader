@@ -275,31 +275,88 @@ def evaluate_dynamic_exit(
         "dynamic_exit_is_new_high": is_new_high,
     }
 
-    # 1. 止损守卫:**数学锁定时不止损**。MLB B9th + Under 持仓且总分尚未触及 line,
-    #    或比赛已进入结尾阶段(剩余得分窗口数学上无法让我方输)→ 即使 fair_value
-    #    被 Polymarket 末段流动性退潮+重定价拉穿,也 HOLD 等结算。
-    #
-    #    根因: U5.5 实盘案例 — Final 总分=5 ≤ 5.5(本应赢),但 B9th 时 microprice
-    #    跌到 $0.85 触发止损,$0.11 抛掉 11.25 shares,**vs 等结算亏损 ~$4**。
-    #    fair_value 在末段对薄簿 + 重定价噪音敏感,不是真概率反转信号。
+    # 1. 多信号联立止损（用户设计：盘口优先 > 赔率 > math_lock，数据驱动）。
+    #    单一 fair_value < entry × 0.5 触发太粗暴；改成三信号投票，bearish_vote
+    #    显著超过 bullish_vote 才止损。math_lock 强（≥0.6）= veto 一票否决。
+    #    止损价位 floor = entry × 0.6 限制最大亏损 40%，不让 best_bid 砸到底。
     math_locked = _is_math_locked_for_position(context)
-    if fair_value <= stop_loss_threshold and not math_locked:
+    goalserve_implied = _goalserve_implied_prob_for_token(context, token_id)
+    math_lock_prob = _math_lock_fair_value(context, token_id)
+    bullish_vote = 0
+    bearish_vote = 0
+    vote_reasons: list[str] = []
+    # 信号 0：fair_value 跌幅本身（融合后）
+    if fair_value <= entry_price * Decimal("0.5"):
+        bearish_vote += 2  # 跌穿 50% 强信号
+        vote_reasons.append(f"fair_value_collapse:{fair_value:.3f}<=entry*0.5")
+    elif fair_value <= entry_price * Decimal("0.7"):
+        bearish_vote += 1
+        vote_reasons.append(f"fair_value_weak:{fair_value:.3f}<=entry*0.7")
+    elif fair_value >= entry_price * Decimal("1.1"):
+        bullish_vote += 1
+        vote_reasons.append(f"fair_value_strong:{fair_value:.3f}>=entry*1.1")
+    # 信号 1：盘口方向（imbalance），主信号权重 2
+    if imbalance < Decimal("0.35"):
+        bearish_vote += 2
+        vote_reasons.append(f"orderbook_bearish:imbalance={imbalance:.3f}")
+    elif imbalance > Decimal("0.65"):
+        bullish_vote += 2
+        vote_reasons.append(f"orderbook_bullish:imbalance={imbalance:.3f}")
+    # 信号 2：Goalserve 赔率（博彩公司视角）
+    if goalserve_implied is not None:
+        if goalserve_implied < entry_price * Decimal("0.5"):
+            bearish_vote += 1
+            vote_reasons.append(f"goalserve_pessimistic:{goalserve_implied:.3f}<entry*0.5")
+        elif goalserve_implied > entry_price * Decimal("0.85"):
+            bullish_vote += 1
+            vote_reasons.append(f"goalserve_optimistic:{goalserve_implied:.3f}>entry*0.85")
+    # 信号 3：math_lock（数学锁定）— veto 权重 2 当强锁定时
+    if math_lock_prob is not None:
+        if math_lock_prob >= Decimal("0.5"):
+            bullish_vote += 2
+            vote_reasons.append(f"math_locked:{math_lock_prob:.3f}>=0.5")
+        elif math_lock_prob < Decimal("0.3"):
+            bearish_vote += 1
+            vote_reasons.append(f"math_pessimistic:{math_lock_prob:.3f}<0.3")
+    # fair_value 仍作辅助门禁（轻微波动不触发止损）
+    fair_value_bearish = fair_value <= entry_price * Decimal("0.7")
+    metadata.update({
+        "dynamic_exit_bullish_vote": bullish_vote,
+        "dynamic_exit_bearish_vote": bearish_vote,
+        "dynamic_exit_vote_reasons": vote_reasons,
+        "dynamic_exit_goalserve_implied": (
+            str(goalserve_implied) if goalserve_implied is not None else None
+        ),
+        "dynamic_exit_math_lock_prob": (
+            str(math_lock_prob) if math_lock_prob is not None else None
+        ),
+        "dynamic_exit_math_locked": math_locked,
+    })
+    # 止损触发：必须同时满足 fair_value bearish + bearish_vote ≥ 3 + 净 bearish
+    if fair_value_bearish and bearish_vote >= 3 and bearish_vote > bullish_vote:
+        # 价格 floor：限制单笔最大亏损 40%，避免薄簿砸到底
+        exit_floor = entry_price * Decimal("0.6")
+        safe_exit_price = max(clearing_price, exit_floor)
         return DynamicExitDecision(
             should_exit=True,
-            exit_price=clearing_price,
+            exit_price=safe_exit_price,
             reason="dynamic_exit_stop_loss",
-            metadata={**metadata, "dynamic_exit_decision": "stop_loss"},
+            metadata={
+                **metadata,
+                "dynamic_exit_decision": "stop_loss",
+                "dynamic_exit_floor_protected": safe_exit_price > clearing_price,
+                "dynamic_exit_clearing_vs_floor": str(clearing_price) + "/" + str(exit_floor),
+            },
         )
-    if fair_value <= stop_loss_threshold and math_locked:
-        # 数学锁定但 fair_value 仍跌穿 → 标记 metadata,HOLD 到结算。审计可查这一刻。
+    # bearish 信号有但未达阈值：标记 metadata HOLD（等下次 tick 重新评估）
+    if fair_value_bearish:
         return DynamicExitDecision(
             should_exit=False,
             exit_price=None,
-            reason="dynamic_exit_hold_math_locked",
+            reason="dynamic_exit_hold_insufficient_bearish_signals",
             metadata={
                 **metadata,
-                "dynamic_exit_decision": "hold_math_locked",
-                "dynamic_exit_math_locked": True,
+                "dynamic_exit_decision": "hold_insufficient_bearish",
             },
         )
 

@@ -3845,13 +3845,19 @@ def test_dynamic_exit_takes_profit_when_book_is_settled() -> None:
 
 
 def test_dynamic_exit_stops_loss_when_fair_value_collapses_below_entry_half() -> None:
-    """不利退出：fair value 跌破买入价 × 0.5 → 按 bid 止损离场。"""
+    """不利退出：fair value 跌破买入价 × 0.5 + 多信号联立 → 触发数据驱动止损。
+
+    新行为：exit_price = max(clearing_price, entry × 0.6) 用 floor 限制最大亏损 40%。
+    旧行为 exit_price = clearing_price 让薄簿一路砸到底（实测 -85% 损失），保护
+    设计是 §17"宁可输部分本金不全部归零"。
+    """
 
     reset_dynamic_exit_peaks()
     market = _totals_market().with_tick_size(Decimal("0.01"))
     strategy = CurrentStrategy(config=CurrentStrategyConfig())
-    # 买入均价 0.80；市场已逆转，best bid 0.20 / best ask 0.22 → mid 0.21，
-    # 低于 0.80 × 0.5 = 0.40 → 触发止损，按 best bid 0.20 卖出。
+    # 买入均价 0.80；market 逆转 best bid 0.20 (clearing≈0.20)，
+    # fair_value collapse (+2 vote) + orderbook 没明显偏向 → bearish_vote >= 2,
+    # floor=0.80×0.6=0.48, max(0.20, 0.48)=0.48。
     orderbook = OrderbookSnapshot(
         token_id="over",
         condition_id=market.condition_id,
@@ -3884,7 +3890,8 @@ def test_dynamic_exit_stops_loss_when_fair_value_collapses_below_entry_half() ->
 
     assert decision.action.value == "sell"
     assert decision.reason == "dynamic_exit_stop_loss"
-    assert decision.price == Decimal("0.20")
+    # entry × 0.6 = 0.48 floor 保护 (vs 旧 clearing_price 0.20)
+    assert decision.price == Decimal("0.48")
     assert decision.size_shares == Decimal("10")
     assert decision.metadata["dynamic_exit_decision"] == "stop_loss"
 
@@ -4145,8 +4152,10 @@ def test_dynamic_exit_stop_loss_still_exits_on_thin_book() -> None:
     assert decision.action.value == "sell"
     assert decision.reason == "dynamic_exit_stop_loss"
     assert decision.metadata["dynamic_exit_decision"] == "stop_loss"
-    # 止损按逐档撮合价 clearing_price 卖出（触达最深档 0.12）。
-    assert decision.price == Decimal("0.12")
+    # entry × 0.6 = 0.48 floor 保护止损价上限——薄簿 clearing_price 0.12 砸到底
+    # 是 -85% 亏损，floor 限制最大 -40%。floor_protected 标记可审计。
+    assert decision.price == Decimal("0.48")
+    assert decision.metadata["dynamic_exit_floor_protected"] is True
 
 
 def test_dynamic_exit_takes_profit_on_depth_imbalance_reversal() -> None:
