@@ -289,14 +289,45 @@ class TradingDecisionWorker:
         # 有 → 跑 decide_exit 让 _maybe_reprice_stale_sell 用最新 best_bid/fair_value
         # 评估是否 cancel-replace stale SELL。不依赖 60s reconcile 周期。
         # 在 entry 路径之前先 reprice，确保盘口快速反弹时 SELL 立即跟价。
-        if snapshot is not None and event.condition_id and event.token_id:
+        has_snapshot = snapshot is not None
+        has_cid = bool(event.condition_id)
+        has_tid = bool(event.token_id)
+        if has_snapshot and has_cid and has_tid:
             position = snapshot.get_position(event.condition_id, event.token_id)
             if position is not None and position.shares > Decimal("0"):
+                logger.info(
+                    "tick_reprice_triggered",
+                    extra={
+                        "condition_id": event.condition_id,
+                        "token_id": event.token_id,
+                        "position_shares": str(position.shares),
+                        "open_sell_shares": str(position.open_sell_shares),
+                    },
+                )
                 await self._execute_position_exit_if_needed(
                     event=event,
                     snapshot=snapshot,
                     position=position,
                 )
+            else:
+                logger.info(
+                    "tick_reprice_skip",
+                    extra={
+                        "reason": "no_position" if position is None else "zero_shares",
+                        "condition_id": event.condition_id,
+                        "token_id": event.token_id,
+                    },
+                )
+        else:
+            logger.info(
+                "tick_reprice_skip",
+                extra={
+                    "reason": "missing_event_fields",
+                    "has_snapshot": has_snapshot,
+                    "has_cid": has_cid,
+                    "has_tid": has_tid,
+                },
+            )
 
         if _entry_gate_closed_for_event(snapshot, event):
             return None
