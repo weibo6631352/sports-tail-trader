@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from contextlib import suppress
@@ -21,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from polymarket_trader.api.routes.stream import SseSubscriptionRegistry
 from polymarket_trader.app.market_service import MarketService
-from polymarket_trader.app.market_tracking_policy import market_outside_trade_window
 from polymarket_trader.app.ports import bind_extension_orderbook_reader, bind_extension_season_state, build_extension_ports
 from polymarket_trader.app.reconcile_service import ReconcileService
 from polymarket_trader.app.extension_host import load_extension
@@ -38,7 +36,6 @@ from polymarket_trader.infra.db import (
     AuditEventRepository,
     DatabasePersistenceRepository,
     FillRepository,
-    MarketRepository,
     OrderRepository,
     PositionRepository,
     RepositoryPage,
@@ -135,11 +132,9 @@ logger = logging.getLogger(__name__)
 _PROVIDER_TIMEOUT_MULTIPLIER = 3
 _PROVIDER_TIMEOUT_FLOOR_S = 12.0
 # 启动快照加载上限（positions/orders/fills），限制重启时的内存占用。
+# 启动快照加载上限（positions/orders/fills）,限制重启时的内存占用。
+# market 不再从 DB 恢复——见 _load_reference_state 注释。
 _STARTUP_SNAPSHOT_ITEM_LIMIT = 500
-# 市场单独用大上限：跟踪的市场可达数千，只恢复 500 会让重启后 discovery 现场
-# 重扫数百页（数分钟）才补齐，正在直播的赛事在此期间匹配不上。从 DB 一次性
-# 恢复全部市场（一条索引查询，远快于重新发现），让重启后 registry 立即就绪。
-_STARTUP_MARKET_SNAPSHOT_LIMIT = 50000
 # reconcile 批次上限，防止 maintenance 队列积压时单批过大阻塞主循环。
 _RECONCILE_BATCH_SIZE_LIMIT = 256
 
@@ -1219,36 +1214,8 @@ def _restore_account_reference_state(runtime: RuntimeComponents, *, balance_usdc
     )
 
 
-def _restore_trackable_markets(runtime: RuntimeComponents, markets: Iterable[Market]) -> int:
-    """按当前业务扩展重新校验数据库恢复出的 market。
-
-    数据库快照只作为恢复参考，不能把旧策略留下的 eligible 状态直接恢复成
-    运行时真相；启动时必须重新走当前策略的 universe 与保留规则。
-    """
-
-    restored = 0
-    now = datetime.now(timezone.utc)
-    account_snapshot = runtime.account_state_store.snapshot()
-    hooks = runtime.extension.hooks
-    for market in markets:
-        universe_decision = hooks.select_market(market)
-        # 时间窗口门禁：远期未开赛 / 早已结束的单场赛事不纳入 WS 跟踪——否则
-        # 启动会一次性 track 上万个远期市场、撑爆 market WS 订阅。
-        if universe_decision.selected and not market_outside_trade_window(market, now=now):
-            runtime.market_ws_worker.track_market(market)
-            restored += 1
-            continue
-        # 未选中 或 在交易窗口外：仅当有账户敞口才保留跟踪（持仓需监控退出）。
-        if not hooks.should_keep_tracking(market, account_snapshot):
-            continue
-        tracked_market = hooks.build_filtered_tracking_market(
-            market,
-            existing_market=market,
-            reason=universe_decision.reason or "game_outside_trade_window",
-        )
-        runtime.market_ws_worker.track_market(tracked_market)
-        restored += 1
-    return restored
+# _restore_trackable_markets 已删:启动不再从 DB 恢复 markets,完全靠 discovery
+# 第一轮的 Polymarket gamma live=true API 重建 registry(快几秒、用权威源)。
 
 
 async def _handle_market_ws_message(runtime, message) -> None:
@@ -1256,11 +1223,16 @@ async def _handle_market_ws_message(runtime, message) -> None:
 
 
 async def _load_reference_state(runtime: RuntimeComponents) -> dict[str, int]:
+    # 启动只从 DB 恢复账户/peak_bankroll/positions/orders/fills,**不再恢复 markets**——
+    # discovery 几秒内会用 Polymarket gamma live=true API 拉全量真相,DB 里 9000+
+    # 条 market 快照重放 + 每条走 universe 校验是 lifespan 启动的最大头(测得 ~5-10s),
+    # 价值很低(reconcile 第一轮就用权威源覆盖)。CLAUDE.md §3 也明确"DB 只用于审计/
+    # 复盘/恢复参考,不是状态真相"。账户侧 peak_bankroll 仍必须恢复(否则
+    # drawdown lockout 误判)。
     loaded = {"markets": 0, "positions": 0, "open_orders": 0, "fills": 0, "account_snapshots": 0}
     try:
         async with runtime.db_session_factory() as session:
             account_snapshot = await AccountSnapshotRepository(session).get_current_snapshot()
-            markets = await MarketRepository(session).list_markets_snapshot(limit=_STARTUP_MARKET_SNAPSHOT_LIMIT, offset=0)
             positions = await PositionRepository(session).list_positions_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
             open_orders = await OrderRepository(session).list_open_orders_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
             fills = await FillRepository(session).list_fills_snapshot(limit=_STARTUP_SNAPSHOT_ITEM_LIMIT, offset=0)
@@ -1277,10 +1249,9 @@ async def _load_reference_state(runtime: RuntimeComponents) -> dict[str, int]:
         runtime.account_state_store.replace_positions(positions.items)
         runtime.account_state_store.replace_open_orders(open_orders.items)
         runtime.account_state_store.replace_fills(fills.items)
-        restored_markets = _restore_trackable_markets(runtime, markets.items)
         loaded = {
             "account_snapshots": 0 if account_snapshot is None else 1,
-            "markets": restored_markets,
+            "markets": 0,
             "positions": len(positions.items),
             "open_orders": len(open_orders.items),
             "fills": len(fills.items),

@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import http.server
 import mimetypes
+import os
 import socketserver
 import sys
 from pathlib import Path
 from urllib import error, parse, request
+
+_FRONTEND_LOCK_HANDLE = None  # 模块级持有,直到进程退出 fd 释放自动解锁
 
 _HOP_BY_HOP_HEADERS = {
     "connection",
@@ -262,8 +266,35 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _acquire_singleton_lock() -> None:
+    """前端防多开:同 backend 锁(api/app.py)思路,绑定资源粒度而非端口。"""
+    global _FRONTEND_LOCK_HANDLE
+    runtime_dir = Path(os.environ.get("APP_RUNTIME_DIR") or ".dev-runtime")
+    if not runtime_dir.exists():
+        runtime_dir = Path(".runtime")
+        if not runtime_dir.exists():
+            runtime_dir = Path(".dev-runtime")
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = runtime_dir / "frontend.lock"
+    lock_fd = open(lock_path, "w")  # noqa: SIM115 - intentional process lifetime
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(
+            f"[serve_frontend] 另一个前端实例已持有锁 {lock_path}——拒绝启动",
+            file=sys.stderr,
+            flush=True,
+        )
+        lock_fd.close()
+        sys.exit(2)
+    lock_fd.write(str(os.getpid()))
+    lock_fd.flush()
+    _FRONTEND_LOCK_HANDLE = lock_fd
+
+
 def main() -> int:
     args = parse_args()
+    _acquire_singleton_lock()
     FrontendProxyHandler.static_dir = Path(args.static_dir).resolve()
     FrontendProxyHandler.backend_base_url = args.backend_base_url.rstrip("/")
     server = ThreadingHTTPServer((args.host, args.port), FrontendProxyHandler)

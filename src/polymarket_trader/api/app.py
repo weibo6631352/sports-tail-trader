@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import fcntl
 import logging
+import os
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -54,6 +58,44 @@ def _parse_cors_origins(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+_SINGLETON_LOCK_HANDLE: Any = None
+
+
+def _acquire_singleton_lock() -> Any | None:
+    """实盘防多开:两个 backend 同时连同一账户会双下单——OS 文件锁防御。
+
+    端口绑定本身已是天然单实例锁(uvicorn EADDRINUSE 报错),但用户可能
+    用 APP_BACKEND_PORT 改端口绕开;这里加一层 fcntl 文件锁兜底,绑定
+    资源粒度(账户)而非端口。锁文件 fd 一直持有到进程退出,自动释放。
+    runtime 路径:dev=.dev-runtime, package=.runtime,由 APP_RUNTIME_DIR
+    或当前工作目录派生——和 start_all.sh 保持一致。
+    """
+    runtime_dir = Path(os.environ.get("APP_RUNTIME_DIR") or ".dev-runtime")
+    if not runtime_dir.exists():
+        runtime_dir = Path(".runtime")
+        if not runtime_dir.exists():
+            runtime_dir = Path(".dev-runtime")
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+    global _SINGLETON_LOCK_HANDLE
+    if _SINGLETON_LOCK_HANDLE is not None:
+        return _SINGLETON_LOCK_HANDLE  # 同进程内重复 create_app 复用锁
+    lock_path = runtime_dir / "backend.lock"
+    lock_fd = open(lock_path, "w")  # noqa: SIM115 - intentional process lifetime
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        logger.error(
+            "另一个 backend 实例已持有锁 %s——拒绝启动,防止双下单(实盘安全)",
+            lock_path,
+        )
+        lock_fd.close()
+        sys.exit(2)
+    lock_fd.write(str(os.getpid()))
+    lock_fd.flush()
+    _SINGLETON_LOCK_HANDLE = lock_fd  # 模块级持有,直到进程退出 fd 释放自动解锁
+    return lock_fd
+
+
 def create_app(
     *,
     runtime: Any | None = None,
@@ -62,6 +104,10 @@ def create_app(
 ) -> FastAPI:
     owns_runtime = runtime is None
     resolved_settings = settings or Settings()
+    # 在 lifespan 之外(进程级)acquire 锁——uvicorn 启动期 import 阶段就拦截,
+    # 第二个实例直接 sys.exit 不会走到 lifespan。锁 fd 由模块全局持有到进程退出。
+    if owns_runtime:
+        _acquire_singleton_lock()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

@@ -206,11 +206,21 @@ wait_for_http() {
 start_background_process() {
   local command_text="$1"
   local pid_file="$2"
+  # 用 pid_file 派生日志名(backend.pid → backend.log),保留 stdout/stderr 到文件;
+  # 此前丢 /dev/null 让启动失败完全黑箱、无法 debug——startup 死了找不到原因。
+  local log_file="${pid_file%.pid}.log"
 
-  # 用 exec 替换 bash，使 PID 文件直接指向目标进程而非 shell 包装层；
-  # 去掉 -l 避免加载 login-shell 初始化文件（所有路径都用绝对路径传入）。
-  setsid bash -c "cd '$APP_DIR' && exec $command_text" </dev/null >/dev/null 2>&1 &
-  echo "$!" > "$pid_file"
+  # macOS 默认不带 setsid(Linux util-linux),用 nohup + disown 跨平台等价:
+  # nohup 忽略 SIGHUP(终端关闭信号),disown 从 shell 作业表移除,效果同 setsid
+  # 创建新会话——子进程在终端关闭后继续存活。
+  if command -v setsid >/dev/null 2>&1; then
+    setsid bash -c "cd '$APP_DIR' && exec $command_text" </dev/null >"$log_file" 2>&1 &
+  else
+    nohup bash -c "cd '$APP_DIR' && exec $command_text" </dev/null >"$log_file" 2>&1 &
+  fi
+  local launched_pid=$!
+  echo "$launched_pid" > "$pid_file"
+  disown "$launched_pid" 2>/dev/null || true
 }
 
 pid_is_running() {
@@ -319,6 +329,12 @@ stop_existing_services() {
   cleanup_pid_file_process "$BACKEND_PID_FILE"
   reclaim_managed_port "$FRONTEND_PORT" "前端服务" "serve_frontend.py" || return 1
   reclaim_managed_port "$BACKEND_PORT" "后端服务" "polymarket_trader.api.app:create_app" || return 1
+  # 兜底:按名再扫一遍,捕获 pid 文件丢失或端口已被释放但进程还在的僵尸——
+  # 这种残留进程会和新启动实例抢资源(DB 连接/账户位/WS slot),实盘可能双发。
+  # || true:pkill 无匹配返回 1,不算错误。
+  pkill -f "uvicorn polymarket_trader" 2>/dev/null || true
+  pkill -f "serve_frontend.py" 2>/dev/null || true
+  sleep 0.3
 }
 
 initialize_database_once() {
@@ -516,7 +532,9 @@ ensure_backend() {
     "'$PYTHON_BIN' -m uvicorn polymarket_trader.api.app:create_app --factory --host '$BACKEND_HOST' --port '$BACKEND_PORT' --timeout-graceful-shutdown 5" \
     "$BACKEND_PID_FILE"
 
-  wait_for_http "后端服务" "$BACKEND_HEALTH_URL" 30
+  # 后端 lifespan startup 含 DB connect + 同步 reconcile_once,冷启动接近 30s 上限,
+  # 偶发触发 wait_for_http 超时报"启动失败"虽然后端仍在跑——提到 60s 留充裕余量。
+  wait_for_http "后端服务" "$BACKEND_HEALTH_URL" 60
   log "后端已启动: $BACKEND_HEALTH_URL"
 }
 

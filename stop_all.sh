@@ -166,9 +166,19 @@ stop_local_postgres() {
 }
 
 main() {
-  stop_service "前端服务" "$FRONTEND_PID_FILE" 5173
-  stop_service "后端服务" "$BACKEND_PID_FILE" 8000
-  stop_local_postgres
+  # 前端 / 后端 / PG 三者无依赖关系,并行停可省去串行 wait 时间。
+  # 后端 SIGTERM 后会触发 lifespan shutdown,PG 在跑/已停都不影响后端关闭。
+  stop_service "前端服务" "$FRONTEND_PID_FILE" 5173 &
+  local pid_frontend=$!
+  stop_service "后端服务" "$BACKEND_PID_FILE" 8000 &
+  local pid_backend=$!
+  stop_local_postgres &
+  local pid_pg=$!
+  wait "$pid_frontend" "$pid_backend" "$pid_pg"
+  # 兜底按名再扫一遍——pid 文件可能丢失/陈旧、端口可能已被释放但进程仍在跑;
+  # 实盘场景两个 backend 同时连同一账户会导致双下单。pkill 无匹配返回非 0 不算错误。
+  pkill -f "uvicorn polymarket_trader" 2>/dev/null || true
+  pkill -f "serve_frontend.py" 2>/dev/null || true
   log "清理完成"
 }
 
