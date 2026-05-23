@@ -424,7 +424,7 @@ def _math_lock_veto(
 
     Goalserve odds 可能 stale（pre-game 数据没在末段更新），odds_gap evaluator
     会算出 true_p=0.86 给已经数学上输掉的 token（实测 Kalinina first-set-winner
-    第一盘已输但 Goalserve 仍显示 0.86 → 买 0.01 × 624 shares 全损 cost \$6.24）。
+    第一盘已输但 Goalserve 仍显示 0.86 → 买 0.01 × 624 shares 全损 cost $6.24）。
 
     引入 math_lock 作为 entry-side 双重检查：
     - math_lock_prob 算出来 = 0 (lead<=0/已结束输方/没剩余时间已输) → veto，
@@ -442,8 +442,11 @@ def _math_lock_veto(
         market.market_type, market.side, market.line, candidate.game,
         market_slug=market.market_slug,
     )
+    # math_lock unsupported → 放行（§17 不放过任何可盈利市场）。
+    # 子段/特殊 prop / 球员 props 等没有专用公式的盘口仍可尝试用 Goalserve odds
+    # 入场——edge 判定与 Kelly fraction 仍能起作用，不一刀切拒绝。
     if lock.method == "unsupported":
-        return true_p, None  # 不支持的盘口直接放行 Goalserve odds
+        return true_p, None
     # 只对"明确已输"才 veto（lock=0 + reason 含输方关键词）。
     # "side_not_leading"（当下未领先但仍可能赢）/ "not_leading_after_handicap"
     # （让分后未领先）/ "missing_*" 等不算输方，放行让 Kelly 用 Goalserve odds。

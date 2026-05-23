@@ -100,6 +100,53 @@ from .types import (
 )
 
 
+def _entry_math_lock_veto(candidate: SportsTailCandidate) -> str | None:
+    """所有 entry path 的最终一道闸门：math_lock 一票否决"已输方向"。
+
+    任何 evaluator（lockin / odds_gap / event_prop / 体育专属）在 ACCEPT 前都必须
+    经过这道闸门——只要 math_lock 公式判定当前 token 是"已输方向"
+    （lock_probability ≤ 0.05 且 reason 含"输方"关键词），统一 veto。
+
+    设计原则：
+    - unsupported（公式未覆盖的盘口）→ 放行，遵守 §17 不放过可盈利市场
+    - math_lock 覆盖且明确为输方 → veto，避免重蹈 Kalinina first-set-winner 损失
+    - 其它情况（leading / 未结 / 缺数据）→ 放行
+    """
+    from strategies.sports_framework.math_lock import evaluate_math_lock
+
+    market = candidate.market
+    lock = evaluate_math_lock(
+        market.market_type, market.side, market.line, candidate.game,
+        market_slug=market.market_slug,
+    )
+    if lock.method == "unsupported":
+        return None
+    LOSER_KEYWORDS = (
+        "already_lost",
+        "already_exceeded_line_lose",
+        "already_over_lose",
+        "match_already_lost",
+        "set_already_lost",
+        "no_remaining_half_innings",
+        "no_remaining_time",
+        "no_remaining_balls_or_wickets",
+        "chase_target_reached",
+        "run_already_scored_in_first",
+        "halftime_settled",
+        "first_inning_completed",
+        "quarter_ended",
+        "match_ended",
+        "game_ended",
+        "game_already_ended",
+    )
+    if (
+        lock.lock_probability <= Decimal("0.05")
+        and any(kw in lock.reason for kw in LOSER_KEYWORDS)
+    ):
+        return f"math_lock_veto_loser_side:{lock.method}:{lock.reason}"
+    return None
+
+
 def evaluate_tail_opportunity(
     game: LiveGameState | None,
     market: SportsMarketSnapshot,
@@ -152,12 +199,18 @@ def evaluate_tail_opportunity(
     # 先评估扫尾锁定（结果数学锁定的确定性入场）；未命中再评估赔率差价。
     locked_evaluation = _dispatch_tail_lock(game, market, candidate, policy)
     if locked_evaluation.accepted:
+        veto_reason = _entry_math_lock_veto(candidate)
+        if veto_reason is not None:
+            return _reject(candidate, veto_reason)
         return locked_evaluation
     # 扫尾锁定未命中 → 尝试赔率差价入场（CLAUDE.md §17 的第二条入场路径）。
     # 价格/流动性/价差门禁已在 _common_reject_reason 通过，odds-gap 直接复用——
     # 概率性入场必须保留这些门禁以保证有退出通道。
     odds_gap_evaluation = evaluate_odds_gap_opportunity(candidate, policy)
     if odds_gap_evaluation.accepted:
+        veto_reason = _entry_math_lock_veto(candidate)
+        if veto_reason is not None:
+            return _reject(candidate, veto_reason)
         return odds_gap_evaluation
     # 两条路径都未命中：返回扫尾锁定的拒绝原因（信息量更大，含具体未锁定原因）。
     # 仅当锁定原因是泛化的 OUTCOME_NOT_LOCKED 时，换成赔率差价的拒绝原因
@@ -382,17 +435,24 @@ def evaluate_scale_in_opportunity(
         return _reject(candidate, common_reject_reason.value)
 
     if is_tennis_game(game):
-        return _evaluate_tennis_scale_in(candidate, policy)
-    # esports 胜负盘只在系列赛锁定后入场，无渐进加仓窗口——不支持 scale-in。
-    if is_esports_game(game):
+        scale_eval = _evaluate_tennis_scale_in(candidate, policy)
+    elif is_esports_game(game):
+        # esports 胜负盘只在系列赛锁定后入场，无渐进加仓窗口——不支持 scale-in。
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
-    if market.market_type == SportsMarketType.TOTALS:
-        return _evaluate_totals_scale_in(candidate, policy)
-    if market.market_type == SportsMarketType.MONEYLINE:
-        return _evaluate_moneyline_scale_in(candidate, _sport_moneyline_policy(game, policy))
-    if market.market_type == SportsMarketType.SPREADS:
-        return _evaluate_spreads_scale_in(candidate, policy)
-    return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+    elif market.market_type == SportsMarketType.TOTALS:
+        scale_eval = _evaluate_totals_scale_in(candidate, policy)
+    elif market.market_type == SportsMarketType.MONEYLINE:
+        scale_eval = _evaluate_moneyline_scale_in(candidate, _sport_moneyline_policy(game, policy))
+    elif market.market_type == SportsMarketType.SPREADS:
+        scale_eval = _evaluate_spreads_scale_in(candidate, policy)
+    else:
+        return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_TYPE.value)
+    # scale-in ACCEPT 前同样跑 math_lock veto——加仓不能加在已输方向。
+    if scale_eval.accepted:
+        veto_reason = _entry_math_lock_veto(candidate)
+        if veto_reason is not None:
+            return _reject(candidate, veto_reason)
+    return scale_eval
 
 
 # ---- 内部工具 -------------------------------------------------------
