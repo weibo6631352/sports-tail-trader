@@ -506,7 +506,10 @@ async def stream_user_ws_messages(
 
 
 async def run_market_ws(runtime: Any) -> None:
-    queue: asyncio.Queue[Mapping[str, Any]] = asyncio.Queue(maxsize=512)
+    # maxsize 4096 = 上下文:每条 orderbook 推送几百 bytes,4096 entries ~2MB 内存。
+    # 此前 512 实测在 968 token 订阅下 ~30 次/秒 drop oldest(spam log);改 4096
+    # 给 8× 缓冲,突发流量进队列而非立即 drop。trader 消费跟上后清空,无残留风险。
+    queue: asyncio.Queue[Mapping[str, Any]] = asyncio.Queue(maxsize=4096)
     stream_task: asyncio.Task[None] | None = None
     subscribed_token_ids: tuple[str, ...] = ()
     next_subscription_refresh_at = 0.0
@@ -617,7 +620,7 @@ async def run_market_ws(runtime: Any) -> None:
 
 
 async def run_user_ws(runtime: Any) -> None:
-    queue: asyncio.Queue[Mapping[str, Any]] = asyncio.Queue(maxsize=512)
+    queue: asyncio.Queue[Mapping[str, Any]] = asyncio.Queue(maxsize=4096)
     stream_task: asyncio.Task[None] | None = None
     subscribed_condition_ids: tuple[str, ...] = ()
     subscribed_auth: dict[str, str] | None = None
