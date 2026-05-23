@@ -369,7 +369,10 @@ class ReconcileService:
                     },
                 )
             )
-            if decision.action == ExtensionAction.SELL:
+            # SELL 直接挂；REPLACE 是 _maybe_reprice_stale_sell 把 stale $0.99 SELL
+            # cancel-replace 到 entry+offset 的核心路径，原来只接 SELL 会让 reprice
+            # 静默丢弃——实盘所有死等结算 $0.99 SELL 永远不被更新即是此因。
+            if decision.action in {ExtensionAction.SELL, ExtensionAction.REPLACE}:
                 decisions.append(decision)
         return tuple(decisions)
 
