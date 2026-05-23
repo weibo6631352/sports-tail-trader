@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from polymarket_trader.domain.allocation import Allocation, AllocationPlan
@@ -48,6 +49,10 @@ from .gates import (
 from .helpers import _metadata_text
 from .pricing import _tail_locked_outcome_signal, _tail_price_cap
 from .risk_limits import _apply_tail_risk_limits
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> EntrySizing:
@@ -324,6 +329,26 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
 
     if not config.auto_exit_enabled:
         return ExtensionDecision.skip(reason="settlement_only_exit_disabled")
+
+    # 实盘双挂 bug 根因:backend 重启后 in-memory open_orders=[] (未加载),
+    # exit overlay 看 position.open_sell_shares=0 算 uncovered=shares 全量,
+    # 又挂一笔 SELL → 链上已经有的 SELL(用户手动或前一次实例挂的)被重复。
+    # 等 reconcile 完成把链上 open_orders 同步进内存后 open_sell_shares 才对。
+    # 这里硬性要求 last_reconcile_at 在 reconcile_freshness_seconds 窗口内才允许
+    # 挂 SELL,否则 skip 等下一周期。reconcile 周期 ~30s,给 2x 余量 60s。
+    now = context.now or _utc_now()
+    if context.account_snapshot is not None:
+        last_reconcile = context.account_snapshot.last_reconcile_at
+        if last_reconcile is None:
+            return ExtensionDecision.skip(reason="reconcile_never_completed")
+        if last_reconcile.tzinfo is None:
+            last_reconcile = last_reconcile.replace(tzinfo=timezone.utc)
+        age = (now.astimezone(timezone.utc) - last_reconcile.astimezone(timezone.utc)).total_seconds()
+        if age > 60.0:
+            return ExtensionDecision.skip(
+                reason="reconcile_stale_skip_exit",
+                metadata={"reconcile_age_seconds": str(age)},
+            )
 
     size_shares = context.size_shares
     if size_shares is not None and size_shares > Decimal("0"):
