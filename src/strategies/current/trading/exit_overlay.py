@@ -249,10 +249,14 @@ def evaluate_dynamic_exit(
     )
 
     # best bid 峰值跟踪改为跟踪 realized_avg：用真实可实现价判断"是否创新高"。
+    # 严格大于（>）而非 >=：价位持平不算创新高——否则浮盈持仓在稳定价位上
+    # 永远落入"riding_uptrend" HOLD 分支，永不进入 trailing_reversal / take_profit
+    # 路径（实测 atp-nedic first-set-total 11232 shares cv +185% 没卖正是此 bug）。
+    # 首次观察（prev_peak=None）仍走 HOLD 让 peak 初始化。
     condition_id = _resolve_condition_id(context, orderbook)
     peak_key = (condition_id or "", token_id or "")
     prev_peak = previous_peak(peak_key)
-    is_new_high = prev_peak is None or realized_avg >= prev_peak
+    is_new_high = prev_peak is None or realized_avg > prev_peak
     peak = observe_peak(peak_key, realized_avg)
 
     # 双侧深度跟踪：统计最优价上下带宽内 bid / ask 名义额，算失衡比并记录峰值。
