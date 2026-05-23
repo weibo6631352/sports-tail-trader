@@ -341,6 +341,75 @@ def _soccer_halftime_lock(
 
 
 # ============================================================
+# 通用辅助：剩余秒数估算
+# ============================================================
+
+
+def _estimate_remaining_seconds(game: LiveGameState) -> int | None:
+    """按 sport + period + clock 估算剩余秒数，兜底 game.seconds_remaining=None 的场景。
+
+    livescore feed 经常只给 "Inning 5" / "1st Half 32min" 这种文本，不给精确秒数。
+    用经验时长估算让 math_lock 仍可基于"剩余时间"算 reversal 概率，而不是因为
+    seconds_remaining=None 就误返 lock=1.0（"无剩余时间 = 锁定"）。
+
+    返回 None 表示无法估算（无 period/clock 数据）→ 上层应 fallback。
+    """
+
+    sport = (game.sport or "").strip().lower()
+    if game.seconds_remaining is not None and game.seconds_remaining > 0:
+        return game.seconds_remaining
+
+    # ----- Soccer (标准 90min: 1H 45 + 半场 15 + 2H 45 + injury ~3-5) -----
+    if game.soccer_state is not None or sport == "soccer":
+        ss = game.soccer_state
+        if ss is None:
+            return None
+        period = (ss.period or "").lower()
+        clock = ss.clock_minutes or 0
+        if period == "first_half":
+            # 剩 1H + 半场 + 2H + injury = (45-clock)*60 + 15*60 + 48*60
+            return max(0, (108 - clock)) * 60
+        if period == "halftime":
+            return (45 + 3) * 60  # 半场+整个2H+injury
+        if period == "second_half":
+            return max(0, (48 - clock)) * 60  # 2H+injury
+        if period in {"extra_time", "extra_time_first_half", "extra_time_second_half"}:
+            return 15 * 60  # 加时单 half
+        if period == "penalties":
+            return 5 * 60
+        return None
+
+    # ----- Basketball (NBA 48min, 4 quarters × 12min; 加时 5min) -----
+    if game.basketball_state is not None or sport == "basketball":
+        bs = game.basketball_state
+        if bs is None or bs.current_period is None:
+            return None
+        period = bs.current_period
+        if period >= 5:  # OT
+            return 5 * 60  # 单 OT 期，无法估剩余更细，给整 OT
+        # 估当前节剩 6 分钟（节中间），后续节 12min/节
+        remaining_quarters = 4 - period
+        return (remaining_quarters * 12 + 6) * 60
+
+    # ----- Hockey (NHL 60min, 3 periods × 20min; OT 5min) -----
+    if sport == "hockey":
+        # 暂用 game.period 文本（domain 无 hockey_state）
+        period_str = (game.period or "").lower()
+        if "overtime" in period_str or "ot" in period_str:
+            return 5 * 60
+        if "1st" in period_str or "first" in period_str:
+            return (10 + 20 + 20) * 60  # 当节中间 + 后 2 节
+        if "2nd" in period_str or "second" in period_str:
+            return (10 + 20) * 60
+        if "3rd" in period_str or "third" in period_str or "final" in period_str:
+            return 10 * 60  # 当节中间
+        return None
+
+    # ----- Cricket/Rugby/AmFootball/Volleyball/Handball: 当前 generic 不支持 -----
+    return None
+
+
+# ============================================================
 # Sport-specific lock 公式
 # 每种 sport × market_type 单独建模——不要 generic 兜底，没建模的盘口
 # 返回 unsupported 让上层 fallback 到 goalserve_implied / microprice。
@@ -362,8 +431,10 @@ def _basketball_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathLock
     lead = game.score_diff_for(side)
     if lead <= 0:
         return MathLockResult(_ZERO, "basketball_ml", "side_not_leading", {"lead": lead})
-    remaining = game.seconds_remaining
-    if remaining is None or remaining <= 0:
+    remaining = _estimate_remaining_seconds(game)
+    if remaining is None:
+        return MathLockResult(_ZERO, "basketball_ml", "missing_remaining_time", {"lead": lead})
+    if remaining <= 0:
         return MathLockResult(_ONE, "basketball_ml", "no_remaining_time", {"lead": lead})
     var_diff = 2.0 * _BASKETBALL_VAR_PER_SECOND * remaining
     z = lead / math.sqrt(var_diff)
@@ -382,7 +453,7 @@ def _basketball_totals_lock(
     if side not in {SportsMarketSide.OVER, SportsMarketSide.UNDER}:
         return MathLockResult(_ZERO, "basketball_totals", "unsupported_side", {})
     total = Decimal(int(game.total_score))
-    remaining = game.seconds_remaining
+    remaining = _estimate_remaining_seconds(game)
     if remaining is None or remaining <= 0:
         won = (total > line) if side == SportsMarketSide.OVER else (total < line)
         return MathLockResult(
@@ -414,7 +485,7 @@ def _basketball_spreads_lock(
         return MathLockResult(_ZERO, "basketball_spreads", "unsupported_side", {})
     raw_lead = game.score_diff_for(side)
     adjusted = float(raw_lead) + (float(line) if side == SportsMarketSide.HOME else -float(line))
-    remaining = game.seconds_remaining
+    remaining = _estimate_remaining_seconds(game)
     if remaining is None or remaining <= 0:
         return MathLockResult(
             _ONE if adjusted > 0 else _ZERO, "basketball_spreads", "no_remaining_time",
@@ -451,7 +522,7 @@ def _soccer_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResu
         return MathLockResult(_ZERO, "soccer_ml", "unsupported_side", {})
     home = game.home_score
     away = game.away_score
-    remaining = game.seconds_remaining
+    remaining = _estimate_remaining_seconds(game)
     if remaining is None or remaining <= 0:
         if side == SportsMarketSide.HOME:
             won = home > away
@@ -512,7 +583,7 @@ def _soccer_totals_lock(
     if side not in {SportsMarketSide.OVER, SportsMarketSide.UNDER}:
         return MathLockResult(_ZERO, "soccer_totals", "unsupported_side", {})
     total = Decimal(int(game.total_score))
-    remaining = game.seconds_remaining
+    remaining = _estimate_remaining_seconds(game)
     if remaining is None or remaining <= 0:
         won = (total > line) if side == SportsMarketSide.OVER else (total < line)
         return MathLockResult(_ONE if won else _ZERO, "soccer_totals", "game_ended",
@@ -549,7 +620,7 @@ def _soccer_spreads_lock(
         return MathLockResult(_ZERO, "soccer_spreads", "unsupported_side", {})
     raw_lead = game.score_diff_for(side)
     adjusted = float(raw_lead) + (float(line) if side == SportsMarketSide.HOME else -float(line))
-    remaining = game.seconds_remaining
+    remaining = _estimate_remaining_seconds(game)
     if remaining is None or remaining <= 0:
         return MathLockResult(_ONE if adjusted > 0 else _ZERO, "soccer_spreads",
                               "no_remaining_time", {"adjusted_lead": adjusted})
@@ -683,7 +754,7 @@ def _hockey_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResu
     lead = game.score_diff_for(side)
     if lead <= 0:
         return MathLockResult(_ZERO, "hockey_ml", "not_leading", {"lead": lead})
-    remaining = game.seconds_remaining
+    remaining = _estimate_remaining_seconds(game)
     if remaining is None or remaining <= 0:
         return MathLockResult(_ONE, "hockey_ml", "no_remaining_time", {"lead": lead})
     lam = _HOCKEY_GOAL_RATE_PER_SEC * remaining
@@ -706,7 +777,7 @@ def _hockey_totals_lock(
     if side not in {SportsMarketSide.OVER, SportsMarketSide.UNDER}:
         return MathLockResult(_ZERO, "hockey_totals", "unsupported_side", {})
     total = Decimal(int(game.total_score))
-    remaining = game.seconds_remaining
+    remaining = _estimate_remaining_seconds(game)
     if remaining is None or remaining <= 0:
         won = (total > line) if side == SportsMarketSide.OVER else (total < line)
         return MathLockResult(_ONE if won else _ZERO, "hockey_totals", "game_ended",
