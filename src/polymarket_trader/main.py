@@ -28,7 +28,7 @@ from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.config import ConfigIssue, ConfigLoadError, Settings, StartupReadiness, load_settings
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.allocation import current_exposure_usdc
-from polymarket_trader.domain.events import AuditEvent, DomainEvent, OutboxPriority
+from polymarket_trader.domain.events import AuditEvent, DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.market import Market
 from polymarket_trader.infra.db import (
@@ -1351,6 +1351,18 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         start=True,
         run_immediately=False,
     )
+    # 持仓周期评估：5s 一次主动 trigger decide_exit，覆盖薄盘场景（orderbook
+    # 长期不更新但比赛/赔率/math_lock 仍在变）。复用 _handle_orderbook_snapshot_updated
+    # 路径包括 MTM 刷新 + 多信号投票止损/止盈 reprice。
+    runtime.scheduler.register_job(
+        "position_exit_evaluator",
+        lambda: _publish_position_exit_evaluator_tick(runtime),
+        priority="P1",
+        interval_seconds=5.0,
+        tags=("position", "exit"),
+        start=True,
+        run_immediately=False,
+    )
     if runtime.sports_live_state_worker is not None:
         runtime.scheduler.register_job(
             "sports_live_state_sync",
@@ -1493,6 +1505,37 @@ async def _run_supervised_loop(
 
 async def _run_market_discovery_scan(runtime: RuntimeComponents) -> None:
     await run_market_discovery_scan(runtime, sync_runtime_metrics=_sync_runtime_metrics)
+
+
+async def _publish_position_exit_evaluator_tick(runtime: RuntimeComponents) -> None:
+    """周期性合成 ORDERBOOK_SNAPSHOT_UPDATED 事件 trigger 持仓评估。
+
+    薄盘场景：orderbook 可能数十秒没新 push（无人挂单），订阅触发的 reprice
+    路径完全静默。但比赛比分/Goalserve 赔率/math_lock 仍在变——必须主动 trigger
+    decide_exit 才能基于最新非盘口数据决策止损/止盈。
+
+    5s 周期：每个 token 合成一个 event publish 到 trading queue，复用现有
+    _handle_orderbook_snapshot_updated 路径（包括 MTM 刷新 + reprice）。
+    """
+
+    snapshot = runtime.account_state_store.snapshot()
+    if snapshot is None:
+        return
+    for position in snapshot.positions:
+        if position.shares <= Decimal("0"):
+            continue
+        await runtime.event_bus.publish(
+            OutboxPriority.P2,
+            DomainEvent(
+                trace_id=_runtime_trace_id("position-tick", source=position.condition_id),
+                event_type=DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED.value,
+                event_id=uuid4().hex,
+                condition_id=position.condition_id,
+                token_id=position.token_id,
+                reason="position_exit_evaluator_tick",
+                payload={"source": "position_exit_evaluator", "synthetic": True},
+            ),
+        )
 
 
 async def _publish_reconcile_trigger(

@@ -160,6 +160,10 @@ class TradingDecisionWorker:
         # 单测可以设 < 1s 让 idle heartbeat 路径快速触发；运行时仍用 60s 默认。
         self._idle_heartbeat_seconds = max(0.001, float(idle_heartbeat_seconds))
         self._market_lifecycle: dict[str, MarketLifecycle] = {}
+        # token_id → 上次 *真实* ORDERBOOK_SNAPSHOT_UPDATED 事件处理时间戳。
+        # main.py position_exit_evaluator 5s 周期 publish 合成 event，但合成
+        # 事件处理时检查：该 token 5s 内已有真实 event 就 skip，避免重复评估。
+        self._token_last_real_orderbook_at: dict[str, datetime] = {}
         # (strategy_id, reason) → count，供 admin/observability 查询哪个策略因何跳过了多少次。
         self._skip_reason_histogram: dict[tuple[str, str], int] = {}
         # condition_id → [(lifecycle, timestamp), …]，记录每次状态转换的时间点。
@@ -285,6 +289,20 @@ class TradingDecisionWorker:
         event: DomainEvent,
         snapshot: AccountSnapshot | None,
     ) -> "TradingDecisionWorkerResult | None":
+        # 合成事件 dedupe：position_exit_evaluator 每 5s 发合成 event 兜底薄盘
+        # 没人推 orderbook 的场景。但同 token 5s 内已有真实 orderbook event 处理过
+        # → 该 token 不缺数据，跳过合成 event 避免重复评估。
+        is_synthetic = (event.payload or {}).get("synthetic") is True
+        if (
+            is_synthetic
+            and event.token_id
+            and event.token_id in self._token_last_real_orderbook_at
+        ):
+            last_real = self._token_last_real_orderbook_at[event.token_id]
+            if (_utc_now() - last_real).total_seconds() < 5.0:
+                return None
+        if not is_synthetic and event.token_id:
+            self._token_last_real_orderbook_at[event.token_id] = _utc_now()
         # 订阅驱动 reprice：每个 orderbook tick 检查该 token 是否有持仓，
         # 有 → 跑 decide_exit 让 _maybe_reprice_stale_sell 用最新 best_bid/fair_value
         # 评估是否 cancel-replace stale SELL。不依赖 60s reconcile 周期。
@@ -295,6 +313,18 @@ class TradingDecisionWorker:
         if has_snapshot and has_cid and has_tid:
             position = snapshot.get_position(event.condition_id, event.token_id)
             if position is not None and position.shares > Decimal("0"):
+                # 订阅驱动 MTM 刷新：从 hot orderbook 拿 best_bid 即时更新
+                # position.current_value / cash_pnl，不等 reconcile 60s 周期。
+                # 这让 portfolio / admin / drawdown 实时看到当前价值。
+                orderbook = self._trading_decision_service.lookup_orderbook(event.token_id)
+                if (
+                    orderbook is not None
+                    and orderbook.best_bid is not None
+                    and orderbook.best_bid > Decimal("0")
+                ):
+                    refreshed = position.with_mark_to_market(orderbook.best_bid)
+                    self._account_state_store.upsert_position(refreshed)
+                    position = refreshed
                 logger.info(
                     "tick_reprice_triggered",
                     extra={
@@ -302,6 +332,7 @@ class TradingDecisionWorker:
                         "token_id": event.token_id,
                         "position_shares": str(position.shares),
                         "open_sell_shares": str(position.open_sell_shares),
+                        "current_value": str(position.current_value) if position.current_value is not None else None,
                     },
                 )
                 await self._execute_position_exit_if_needed(

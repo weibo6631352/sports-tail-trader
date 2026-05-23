@@ -3889,11 +3889,12 @@ def test_dynamic_exit_stops_loss_when_fair_value_collapses_below_entry_half() ->
     )
 
     assert decision.action.value == "sell"
-    assert decision.reason == "dynamic_exit_stop_loss"
-    # entry × 0.6 = 0.48 floor 保护 (vs 旧 clearing_price 0.20)
-    assert decision.price == Decimal("0.48")
+    # bid×size=$10 USDC 是极薄盘 → thin_book 分支；fair × 0.95 vs floor 取大。
+    # entry 0.80 × 0.75 (极薄盘 floor) = 0.60 vs fair 0.21 × 0.95 = 0.20 → 0.60
+    assert decision.reason == "dynamic_exit_stop_loss_thin_book"
+    assert decision.price == Decimal("0.600")
     assert decision.size_shares == Decimal("10")
-    assert decision.metadata["dynamic_exit_decision"] == "stop_loss"
+    assert decision.metadata["dynamic_exit_decision"] == "stop_loss_thin_book"
 
 
 def test_dynamic_exit_holds_below_entry_when_not_stop_loss() -> None:
@@ -4150,12 +4151,11 @@ def test_dynamic_exit_stop_loss_still_exits_on_thin_book() -> None:
     )
 
     assert decision.action.value == "sell"
-    assert decision.reason == "dynamic_exit_stop_loss"
-    assert decision.metadata["dynamic_exit_decision"] == "stop_loss"
-    # entry × 0.6 = 0.48 floor 保护止损价上限——薄簿 clearing_price 0.12 砸到底
-    # 是 -85% 亏损，floor 限制最大 -40%。floor_protected 标记可审计。
-    assert decision.price == Decimal("0.48")
-    assert decision.metadata["dynamic_exit_floor_protected"] is True
+    # bid_depth=$3 是极薄盘 → thin_book 分支；不砸 best_bid，挂 fair × 0.95 或 floor。
+    # entry 0.80 × 0.75 (极薄盘 floor 25% 限亏) = 0.60 vs fair × 0.95 → 0.60
+    assert decision.reason == "dynamic_exit_stop_loss_thin_book"
+    assert decision.metadata["dynamic_exit_decision"] == "stop_loss_thin_book"
+    assert decision.price == Decimal("0.600")
 
 
 def test_dynamic_exit_takes_profit_on_depth_imbalance_reversal() -> None:

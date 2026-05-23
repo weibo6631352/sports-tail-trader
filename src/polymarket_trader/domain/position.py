@@ -52,6 +52,26 @@ class Position:
     def with_open_sell_shares(self, shares: Decimal) -> "Position":
         return replace(self, open_sell_shares=shares)
 
+    def with_mark_to_market(self, cur_price: Decimal) -> "Position":
+        """按当前 best_bid 即时更新 current_value / cur_price / cash_pnl。
+
+        订阅触发 reprice 路径调用：每个 orderbook tick 把 position MTM 刷新到
+        实际可成交价，避免依赖 reconcile 60s 周期。
+        """
+
+        current_value = (self.shares * cur_price) if self.shares > Decimal("0") else Decimal("0")
+        cash_pnl = current_value - self.cost_usdc if self.cost_usdc > Decimal("0") else None
+        percent_pnl = (
+            (cash_pnl / self.cost_usdc * Decimal("100")) if cash_pnl is not None and self.cost_usdc > Decimal("0") else None
+        )
+        return replace(
+            self,
+            current_value=current_value,
+            cur_price=cur_price,
+            cash_pnl=cash_pnl,
+            percent_pnl=percent_pnl,
+        )
+
     def with_pending_buy_shares(self, shares: Decimal) -> "Position":
         return replace(self, pending_buy_shares=shares)
 

@@ -91,7 +91,11 @@ class Settings(BaseSettings):
     # portfolio_budget_usdc)。设 0 时 Kelly 拒新仓（启动安全态）。Kelly 引擎在
     # ``domain/kelly.py``——见该模块 docstring 公式。
     portfolio_budget_usdc: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
-    market_sync_interval_seconds: int = Field(default=60, ge=1)
+    # reconcile 周期：从 60 → 20s，让 chain balance/shares 同步更接近实时。
+    # 订阅驱动 reprice + MTM 刷新已经覆盖大部分需求（毫秒级响应），但 chain
+    # balance 仍需周期 query（USDC 余额、share allowance、未追踪持仓）。
+    # 20s 平衡：太短 → CLOB API 限流压力；太长 → balance 显示滞后。
+    market_sync_interval_seconds: int = Field(default=20, ge=1)
     order_retry_limit: int = Field(default=2, ge=0)
 
     # audit_events 表保留期（天）。实测 sports_live_state_recorded + market_discovered

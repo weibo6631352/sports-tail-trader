@@ -276,14 +276,34 @@ def evaluate_dynamic_exit(
     }
 
     # 1. 多信号联立止损（用户设计：盘口优先 > 赔率 > math_lock，数据驱动）。
-    #    单一 fair_value < entry × 0.5 触发太粗暴；改成三信号投票，bearish_vote
-    #    显著超过 bullish_vote 才止损。math_lock 强（≥0.6）= veto 一票否决。
-    #    止损价位 floor = entry × 0.6 限制最大亏损 40%，不让 best_bid 砸到底。
+    #    流动性分层是基础信号：薄盘里 best_bid/imbalance 都不可信（一笔小单就翻转），
+    #    必须按 bid 簿总 USDC 深度分档信任：
+    #    - 极薄盘 (< $20)：bid 信号完全弃用，靠 math_lock 决策（HOLD 等结算 vs 主动放弃）
+    #    - 薄盘 (< $100)：bid 信号 0.5 权重，floor 收紧 (entry×0.7 限亏 30%)
+    #    - 健康盘 (≥ $100)：5 类信号完整投票，floor entry×0.6 (限亏 40%)
     math_locked = _is_math_locked_for_position(context)
     goalserve_implied = _goalserve_implied_prob_for_token(context, token_id)
     math_lock_prob = _math_lock_fair_value(context, token_id)
-    bullish_vote = 0
-    bearish_vote = 0
+    bid_depth_usdc = sum(
+        (level.price * level.size for level in orderbook.bids), Decimal("0")
+    )
+    # 流动性分层
+    LIQUIDITY_VERY_THIN = Decimal("20")
+    LIQUIDITY_THIN = Decimal("100")
+    if bid_depth_usdc < LIQUIDITY_VERY_THIN:
+        liquidity_tier = "very_thin"
+        bid_signal_weight = Decimal("0")  # bid 信号完全不可信
+        floor_fraction = Decimal("0.75")   # 极薄盘 floor 最紧 (限亏 25%)
+    elif bid_depth_usdc < LIQUIDITY_THIN:
+        liquidity_tier = "thin"
+        bid_signal_weight = Decimal("0.5")
+        floor_fraction = Decimal("0.7")    # 限亏 30%
+    else:
+        liquidity_tier = "healthy"
+        bid_signal_weight = Decimal("1")
+        floor_fraction = Decimal("0.6")    # 限亏 40%
+    bullish_vote = Decimal("0")
+    bearish_vote = Decimal("0")
     vote_reasons: list[str] = []
     # 信号 0：fair_value 跌幅（融合后）— 阈值收紧，反应快少亏。
     # 跌 30% 强信号（旧 50%）；跌 20% 弱信号（旧 30%）。盘口风向最敏感，
@@ -297,31 +317,29 @@ def evaluate_dynamic_exit(
     elif fair_value >= entry_price * Decimal("1.1"):
         bullish_vote += 1
         vote_reasons.append(f"fair_value_strong:{fair_value:.3f}>=entry*1.1")
-    # 信号 1a：盘口方向（imbalance）— 双侧深度对比给方向信号，权重 2。
-    # bid 比例 < 0.4 即卖方明显。
+    # 信号 1a：盘口方向（imbalance）— 双侧深度对比，按流动性分层降权。
+    # 薄盘里 imbalance 一笔小单就翻转，bid_signal_weight 控制信任度。
     if imbalance < Decimal("0.4"):
-        bearish_vote += 2
-        vote_reasons.append(f"orderbook_bearish:imbalance={imbalance:.3f}")
+        bearish_vote += 2 * bid_signal_weight
+        vote_reasons.append(f"orderbook_bearish:imbalance={imbalance:.3f}*w={bid_signal_weight}")
     elif imbalance > Decimal("0.6"):
-        bullish_vote += 2
-        vote_reasons.append(f"orderbook_bullish:imbalance={imbalance:.3f}")
-    # 信号 1b：best_bid 相对入场价归一化偏离 — 市场立即愿意接我方持仓的真实
-    # 可实现价值。这跟 fair_value 不同：fair_value 是融合估值（goalserve/math/
-    # microprice 取最大），best_bid 是当下立即可成交价。两个角度独立——融合估值
-    # 高但 bid 砸到底说明市场情绪反转，要重视。
+        bullish_vote += 2 * bid_signal_weight
+        vote_reasons.append(f"orderbook_bullish:imbalance={imbalance:.3f}*w={bid_signal_weight}")
+    # 信号 1b：best_bid 相对入场价归一化偏离 — 当下立即可成交价。
+    # 薄盘里 best_bid 一砸就到地板，必须按 bid_signal_weight 降权。
     bid_deviation = best_bid - entry_price
-    if bid_deviation < -Decimal("0.15"):  # 砸价 15pt 以上
-        bearish_vote += 2
-        vote_reasons.append(f"bid_deviation_strong_neg:{bid_deviation:+.3f}")
+    if bid_deviation < -Decimal("0.15"):
+        bearish_vote += 2 * bid_signal_weight
+        vote_reasons.append(f"bid_deviation_strong_neg:{bid_deviation:+.3f}*w={bid_signal_weight}")
     elif bid_deviation < -Decimal("0.05"):
-        bearish_vote += 1
-        vote_reasons.append(f"bid_deviation_neg:{bid_deviation:+.3f}")
+        bearish_vote += 1 * bid_signal_weight
+        vote_reasons.append(f"bid_deviation_neg:{bid_deviation:+.3f}*w={bid_signal_weight}")
     elif bid_deviation >= Decimal("0.15"):
-        bullish_vote += 2
-        vote_reasons.append(f"bid_deviation_strong_pos:{bid_deviation:+.3f}")
+        bullish_vote += 2 * bid_signal_weight
+        vote_reasons.append(f"bid_deviation_strong_pos:{bid_deviation:+.3f}*w={bid_signal_weight}")
     elif bid_deviation >= Decimal("0.05"):
-        bullish_vote += 1
-        vote_reasons.append(f"bid_deviation_pos:{bid_deviation:+.3f}")
+        bullish_vote += 1 * bid_signal_weight
+        vote_reasons.append(f"bid_deviation_pos:{bid_deviation:+.3f}*w={bid_signal_weight}")
     # 信号 2：Goalserve 赔率相对入场价偏离（绝对值无意义，必须看相对偏离）。
     # 例：买价 0.20 + goalserve 0.30 = +0.10 偏离 → 博彩仍看好赢方；
     # 买价 0.80 + goalserve 0.30 = -0.50 偏离 → 博彩认定输方向。
@@ -352,8 +370,8 @@ def evaluate_dynamic_exit(
     # 早识别 fair_value 走弱 + orderbook 卖方一致 → 立即止损少亏 10%。
     fair_value_bearish = fair_value <= entry_price * Decimal("0.8")
     metadata.update({
-        "dynamic_exit_bullish_vote": bullish_vote,
-        "dynamic_exit_bearish_vote": bearish_vote,
+        "dynamic_exit_bullish_vote": str(bullish_vote),
+        "dynamic_exit_bearish_vote": str(bearish_vote),
         "dynamic_exit_vote_reasons": vote_reasons,
         "dynamic_exit_goalserve_implied": (
             str(goalserve_implied) if goalserve_implied is not None else None
@@ -362,13 +380,43 @@ def evaluate_dynamic_exit(
             str(math_lock_prob) if math_lock_prob is not None else None
         ),
         "dynamic_exit_math_locked": math_locked,
+        "dynamic_exit_liquidity_tier": liquidity_tier,
+        "dynamic_exit_bid_signal_weight": str(bid_signal_weight),
+        "dynamic_exit_floor_fraction": str(floor_fraction),
     })
-    # 止损触发：fair_value bearish + bearish_vote ≥ 2 + 净 bearish。
+    # 极薄盘 stop_loss：bid 信号完全弃用，只在 math_lock/goalserve 强 bearish 时触发。
+    # 不砸 best_bid（薄盘砸单到地板），挂 fair × 0.95 让自然流动性接。
+    # 注意：极薄盘只 short-circuit stop_loss 决策，take_profit 仍走后续分支。
+    if (
+        liquidity_tier == "very_thin"
+        and bearish_vote >= 2
+        and bullish_vote == 0
+        and fair_value_bearish
+    ):
+        exit_price = max(
+            fair_value * Decimal("0.95"),
+            entry_price * floor_fraction,
+        )
+        return DynamicExitDecision(
+            should_exit=True,
+            exit_price=exit_price.quantize(Decimal("0.001")),
+            reason="dynamic_exit_stop_loss_thin_book",
+            metadata={
+                **metadata,
+                "dynamic_exit_decision": "stop_loss_thin_book",
+                "dynamic_exit_exit_price_source": "fair_x_0.95_or_floor",
+            },
+        )
+    # 薄盘 / 健康盘：完整投票 + 自适应 floor（极薄盘已上面处理）
     # 阈值 2 等价于"fair_value collapse 单独+2 已够"或"orderbook bearish+1 其他确认"。
     # math_lock>=0.5 (bullish+2) 自动 veto 因为 net bearish 不成立。
-    if fair_value_bearish and bearish_vote >= 2 and bearish_vote > bullish_vote:
-        # 价格 floor：限制单笔最大亏损 40%，避免薄簿砸到底
-        exit_floor = entry_price * Decimal("0.6")
+    if (
+        liquidity_tier != "very_thin"
+        and fair_value_bearish
+        and bearish_vote >= 2
+        and bearish_vote > bullish_vote
+    ):
+        exit_floor = entry_price * floor_fraction
         safe_exit_price = max(clearing_price, exit_floor)
         return DynamicExitDecision(
             should_exit=True,
@@ -381,8 +429,7 @@ def evaluate_dynamic_exit(
                 "dynamic_exit_clearing_vs_floor": str(clearing_price) + "/" + str(exit_floor),
             },
         )
-    # bearish 信号有但未达阈值：标记 metadata HOLD（等下次 tick 重新评估）
-    if fair_value_bearish:
+    if liquidity_tier != "very_thin" and fair_value_bearish:
         return DynamicExitDecision(
             should_exit=False,
             exit_price=None,
