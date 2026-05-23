@@ -318,10 +318,13 @@ class TradingDecisionWorker:
                 # 显示 cv=\$59 但实际 best_bid=None 全损 \$6.24 cost）。
                 orderbook = self._trading_decision_service.lookup_orderbook(event.token_id)
                 if orderbook is not None:
-                    if orderbook.best_bid is not None and orderbook.best_bid > Decimal("0"):
+                    # MTM 用 best_bid（立即可成交价上限），但用 sell_actionable
+                    # 守门：NO_BID / CEILING_ONLY / DUST_BID 都视为"无真实可实现
+                    # 价值"——CEILING_ONLY 是 MM 在 0.99 接 SELL 的天花板单（不算
+                    # 真买家），DUST_BID 是 best 一档 < $5 USDC（穿一笔就没）。
+                    if orderbook.sell_actionable and orderbook.best_bid is not None:
                         refreshed = position.with_mark_to_market(orderbook.best_bid)
                     else:
-                        # best_bid=None 强制 MTM=$0：没买家 = 没真实可实现价值。
                         refreshed = position.with_mark_to_market(Decimal("0"))
                     self._account_state_store.upsert_position(refreshed)
                     position = refreshed

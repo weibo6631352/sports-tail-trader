@@ -204,6 +204,11 @@ def evaluate_dynamic_exit(
     orderbook = _exit_orderbook(context, token_id)
     if orderbook is None or orderbook.best_bid is None:
         return None  # 无实时盘口：交回静态/结算退出路径，不产出动态决策。
+    # B3: 无真实退出通道（NO_BID 已被上面拦截，这里覆盖 CEILING_ONLY / DUST_BID）→
+    # 不挂 SELL（避免在地板上被秒吃或砸盘）；交回静态/结算路径，等流动性回来。
+    # 静态路径会按结算条件处理（盈方 hold 等结算 / 亏方等机会回归）。
+    if not orderbook.sell_actionable:
+        return None
 
     best_bid = orderbook.best_bid
 
@@ -665,38 +670,19 @@ def _estimate_fair_value(
 
     # 第 2 层：盘口信号（microprice/mid）— 真概率全缺时兜底。
     # 不与第 1 层 max，避免盘口 spread 大时 mid 拉高 fair_value 让 SELL 挂不出去。
-    if best_ask is not None and best_ask > best_bid:
-        microprice = _microprice(context, best_bid, best_ask)
+    # 用 OrderbookSnapshot.microprice @property：处理 NO_BID/CEILING_ONLY/
+    # NO_ASK/FLOOR_ONLY 边界返回 None，比纯算术更严谨。
+    orderbook = context.orderbook
+    if orderbook is not None:
+        microprice = orderbook.microprice
         if microprice is not None:
             return _clamp_fair_value(microprice), "microprice"
+    if best_ask is not None and best_ask > best_bid:
         mid = (best_bid + best_ask) / Decimal("2")
         return _clamp_fair_value(mid), "market_mid"
 
     # 第 3 层：仅 bid 兜底
     return _clamp_fair_value(best_bid), "best_bid"
-
-
-def _microprice(
-    context: ExtensionContext,
-    best_bid: Decimal,
-    best_ask: Decimal,
-) -> Decimal | None:
-    """Polymarket CLOB 盘口微观价 = (best_bid×ask_size + best_ask×bid_size)/(bid_size+ask_size)。
-
-    微价反映两侧出价量加权的"公允价"，比纯算术中价更准确（重出价方向越偏向重方）。
-    """
-
-    orderbook = context.orderbook
-    if orderbook is None:
-        return None
-    bid_size = getattr(orderbook, "best_bid_size", None)
-    ask_size = getattr(orderbook, "best_ask_size", None)
-    if bid_size is None or ask_size is None:
-        return None
-    total = bid_size + ask_size
-    if total <= Decimal("0"):
-        return None
-    return (best_bid * ask_size + best_ask * bid_size) / total
 
 
 def _math_lock_fair_value(

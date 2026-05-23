@@ -63,11 +63,17 @@ class TestBidLiquidityState:
         assert s.bid_liquidity_state == BidLiquidityState.NO_BID
         assert s.sell_actionable is False
 
-    def test_ceiling_only_when_best_bid_is_099(self) -> None:
-        # 只有 MM 在 0.99 接 SELL 的天花板单——不是真买盘
-        s = _snap(bids=[("0.99", "500")], asks=[("0.999", "10")])
-        assert s.bid_liquidity_state == BidLiquidityState.CEILING_ONLY
+    def test_floor_bid_only_when_best_bid_is_001(self) -> None:
+        # best_bid=0.01 是 MM 兜底吃 SELL 的地板单——SELL 进去成交价 $0.01 全损
+        s = _snap(bids=[("0.01", "5000")], asks=[("0.02", "10")])
+        assert s.bid_liquidity_state == BidLiquidityState.FLOOR_BID_ONLY
         assert s.sell_actionable is False
+
+    def test_high_bid_099_is_ok_not_blocked(self) -> None:
+        # best_bid=0.99 是真买家锁定胜方——绝佳 SELL 价，必须放行
+        s = _snap(bids=[("0.99", "500")], asks=[("1.0", "10")])
+        assert s.bid_liquidity_state == BidLiquidityState.OK
+        assert s.sell_actionable is True
 
     def test_dust_bid_when_best_size_below_5usdc(self) -> None:
         # best_bid=0.50, size=3 → 1.5 USDC < 5
@@ -88,11 +94,18 @@ class TestAskLiquidityState:
         assert s.ask_liquidity_state == AskLiquidityState.NO_ASK
         assert s.buy_actionable is False
 
-    def test_floor_only_when_best_ask_is_001(self) -> None:
-        # 0.01 ask = MM 兜底 BUY 单
-        s = _snap(bids=[("0.005", "10")], asks=[("0.01", "5000")])
-        assert s.ask_liquidity_state == AskLiquidityState.FLOOR_ONLY
+    def test_ceiling_ask_only_when_best_ask_is_099(self) -> None:
+        # best_ask=0.99 是 MM 接 SELL 的天花板单——BUY 进去成交价 $0.99 高风险
+        s = _snap(bids=[("0.98", "10")], asks=[("0.99", "5000")])
+        assert s.ask_liquidity_state == AskLiquidityState.CEILING_ASK_ONLY
         assert s.buy_actionable is False
+
+    def test_low_ask_001_is_ok_not_blocked(self) -> None:
+        # best_ask=0.01 是真便宜货（输方等结算）——绝佳 BUY 价，必须放行
+        s = _snap(bids=[("0.005", "10")], asks=[("0.01", "5000")])
+        # 注意：但 best_ask=0.01 × 5000 = 50 USDC > 5，不是 dust → OK
+        assert s.ask_liquidity_state == AskLiquidityState.OK
+        assert s.buy_actionable is True
 
     def test_dust_ask_when_best_size_below_5usdc(self) -> None:
         s = _snap(bids=[("0.50", "100")], asks=[("0.55", "5")])
@@ -107,20 +120,35 @@ class TestAskLiquidityState:
 
 
 class TestMicroprice:
-    def test_none_when_no_bid(self) -> None:
+    def test_fallback_to_ask_when_no_bid(self) -> None:
+        # 无 bid → fair_value 退化到 ask 真单
         s = _snap(asks=[("0.55", "50")])
-        assert s.microprice is None
+        assert s.microprice == Decimal("0.55")
 
-    def test_none_when_ceiling_only(self) -> None:
-        s = _snap(bids=[("0.99", "500")], asks=[("0.995", "10")])
-        assert s.microprice is None
+    def test_fallback_to_ask_when_floor_bid_only(self) -> None:
+        # bid 是地板单 → fair_value 退化到 ask 真单
+        s = _snap(bids=[("0.01", "5000")], asks=[("0.50", "10")])
+        assert s.microprice == Decimal("0.50")
 
-    def test_none_when_no_ask(self) -> None:
+    def test_high_bid_microprice_computed(self) -> None:
+        # bid 0.99 是真买家，应该算出 microprice 而非 None
+        s = _snap(bids=[("0.99", "500")], asks=[("0.999", "10")])
+        mp = s.microprice
+        assert mp is not None
+        assert Decimal("0.99") <= mp <= Decimal("0.999")
+
+    def test_fallback_to_bid_when_no_ask(self) -> None:
         s = _snap(bids=[("0.50", "100")])
-        assert s.microprice is None
+        assert s.microprice == Decimal("0.50")
 
-    def test_none_when_floor_only(self) -> None:
-        s = _snap(bids=[("0.005", "10")], asks=[("0.01", "5000")])
+    def test_fallback_to_bid_when_ceiling_ask_only(self) -> None:
+        # ask 是天花板单 → fair_value 退化到 bid 真单
+        s = _snap(bids=[("0.98", "10")], asks=[("0.99", "5000")])
+        assert s.microprice == Decimal("0.98")
+
+    def test_none_when_both_sides_virtual(self) -> None:
+        # 双边都虚（地板 bid + 天花板 ask）→ None
+        s = _snap(bids=[("0.01", "5000")], asks=[("0.99", "5000")])
         assert s.microprice is None
 
     def test_microprice_cross_weighted(self) -> None:
