@@ -246,9 +246,10 @@ class CurrentStrategyConfig:
     tail_max_game_state_age_seconds: int = 10
     tail_baseball_max_game_state_age_seconds: int = 45
     tail_tennis_max_game_state_age_seconds: int = 35
-    # J1/J2 等次级足球联赛 livescore feed 更新周期 30-60s,默认 10s 阈值会让 100+
-    # J2 candidate 被 stale 拒掉(实盘看到的 stale_game_state J2=80 误拒)。
-    tail_soccer_max_game_state_age_seconds: int = 60
+    # J1/J2/Australia/各次级足球联赛 livescore feed 更新周期 60-90s(实测重启后
+    # 仍有 sports_live_state_stale pause 触发);设 120s 给足 buffer,避免 reconcile
+    # 误把活跃 J2 market 标 not_tradable 导致 system 评估接受却下不了单。
+    tail_soccer_max_game_state_age_seconds: int = 120
     # esports livescore feed 服务端每 60s 刷新、锁定信号（已赢地图数）单调，
     # 90s 新鲜度窗口匹配其真实更新率。
     tail_esports_max_game_state_age_seconds: int = 90
