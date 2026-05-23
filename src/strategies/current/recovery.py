@@ -386,6 +386,12 @@ def _max_live_state_age_seconds(config: CurrentStrategyConfig, game: LiveEvent) 
         return config.tail_baseball_max_game_state_age_seconds
     if game.esports_state is not None or (game.sport or "").strip().lower() == "esports":
         return config.tail_esports_max_game_state_age_seconds
+    # 足球(J1/J2/各联赛)livescore feed 更新慢(30-60s),用单独 soccer 阈值;
+    # 之前缺这个分支导致 recovery 用 default 10s,reconcile 把所有 J2 market 标
+    # sports_live_state_stale → pause_trading_for_market → 即使 candidate accepted
+    # 也下不了单。
+    if game.soccer_state is not None or (game.sport or "").strip().lower() == "soccer" or league in {"j1", "j2", "j1100", "j2100"} or any(k in league for k in ("soccer","football","liga","league","serie")):
+        return config.tail_soccer_max_game_state_age_seconds
     return config.tail_max_game_state_age_seconds
 
 

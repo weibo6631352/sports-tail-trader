@@ -685,12 +685,26 @@ def _evaluate_ended_spreads(
     candidate: SportsTailCandidate,
     policy: TailPolicy,
 ) -> TailEvaluation:
+    """ended spread:Final 比分锁定后才考虑买 spread。
+
+    Bug 历史: 旧公式 `score_diff + line > 0` 等价于 "home +line(underdog)cover",
+    但 polymarket spread market question 通常是 "Team (-line)" favorite — line 字段
+    是绝对值,真方向是 side 需要赢 +line+ 才 cover。实盘验证:
+    Polymarket "Spread: Hokkaidō Consadole Sapporo (-2.5)" Final 0-1(home 输1) →
+    旧公式 -1 + 2.5 = 1.5 > 0 错 accept,实际 home 没 cover -2.5 直接锁定输。
+
+    正确公式: side 视角 score_diff >= line+1 才严格 cover (即 score_diff > line)。
+    Final 0-1, line=2.5: score_diff(home)=-1, -1 > 2.5 = False → reject ✓
+    Final 3-0, line=2.5: score_diff(home)=3, 3 > 2.5 = True → accept ✓
+    """
+
     market = candidate.market
     if market.side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
     if market.line is None:
         return _reject(candidate, TailRejectReason.MISSING_MARKET_LINE.value)
-    if Decimal(candidate.game.score_diff_for(market.side)) + market.line > Decimal("0"):
+    score_diff = Decimal(candidate.game.score_diff_for(market.side))
+    if score_diff > market.line:
         return _accept(
             candidate,
             "ended_not_closed_spreads",
