@@ -108,16 +108,12 @@ class CurrentStrategyConfig:
             允许入场前要求达到的最小盘口深度，单位是 USDC。
         max_spread:
             允许的最大买一卖一价差；为 ``None`` 表示不限制。
-        discovery_title_searches:
-            远端 discovery 的标题搜索词。策略会把这些词暴露为
-            ``DiscoveryQuery``，框架负责分页、限流和 cursor。
         discovery_tag_slugs:
-            可选的远端 discovery tag slug 粗筛。填写后会和
-            ``discovery_title_searches`` 组合成 Gamma API 查询参数
-            ``tag_slug``。例如 ``("sports",)`` 会请求
-            ``/events/keyset?title_search=nba&tag_slug=sports``。
-            如果不确定 Gamma tag 是否覆盖目标市场，保持为空，并让
-            ``select_market()`` 做本地最终过滤。
+            远端 discovery 的 tag slug。当前实现(``build_configured_discovery_queries``)
+            为每个 tag slug 发 3 个定向查询:① ``live=true``;② ``start_time``
+            在 ``[now-12h, now+1h]``(进行中+临近开赛);③ ``start_time`` 在
+            ``[now+1h, now+24h]``(未来 24h)。基于 Polymarket 自己的数据
+            完整覆盖、零名字匹配。默认 ``("sports",)`` 已够用。
         tail_category_tokens:
             本地 universe 精筛时用于识别已接入直播源的体育联赛 token。
             识别文本以 category/tags 为优先信号，并用 market/event slug、
@@ -192,7 +188,6 @@ class CurrentStrategyConfig:
     auto_exit_enabled: bool = True
     min_liquidity_usdc: Decimal = Decimal("1")
     max_spread: Decimal | None = Decimal("0.10")
-    discovery_title_searches: tuple[str, ...] = ("nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
     discovery_tag_slugs: tuple[str, ...] = ("sports",)
     # CLAUDE.md §9：所有目标盘口必须纳入诊断，不得 silent 忽略。universe 接受的
     # 运动现已全部具备直播源——KBO 走 baseball/home livescore，table-tennis/WTT

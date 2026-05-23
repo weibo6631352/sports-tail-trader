@@ -46,7 +46,6 @@ def test_validate_config_passes_with_defaults() -> None:
 def test_validate_config_flags_empty_discovery_inputs() -> None:
     config = replace(
         CurrentStrategyConfig(),
-        discovery_title_searches=(),
         discovery_tag_slugs=(),
     )
 
@@ -90,7 +89,6 @@ def test_validate_config_flags_invalid_scale_in_budget_fraction() -> None:
 def test_validate_config_returns_all_issues_at_once() -> None:
     config = replace(
         CurrentStrategyConfig(),
-        discovery_title_searches=(),
         discovery_tag_slugs=(),
         tail_enabled_market_types=(),
     )

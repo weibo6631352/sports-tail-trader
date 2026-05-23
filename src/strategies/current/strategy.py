@@ -250,12 +250,12 @@ class CurrentStrategy:
 
         issues: list[ConfigIssue] = []
 
-        if not self._config.discovery_title_searches and not self._config.discovery_tag_slugs:
+        if not self._config.discovery_tag_slugs:
             issues.append(
                 ConfigIssue(
-                    field="discovery_title_searches",
+                    field="discovery_tag_slugs",
                     code="empty_strategy_discovery",
-                    message="策略未配置任何 discovery 搜索词或 tag slug，远端 discovery 将拿不到候选市场",
+                    message="策略未配置任何 discovery tag slug，远端 discovery 将拿不到候选市场",
                 )
             )
 

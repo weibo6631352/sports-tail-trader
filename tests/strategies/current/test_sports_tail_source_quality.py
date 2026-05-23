@@ -440,7 +440,7 @@ def test_default_discovery_scope_matches_live_source_coverage() -> None:
     config = CurrentStrategyConfig()
     settings = Settings(_env_file=None)
 
-    assert config.discovery_title_searches == ("nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
+    assert config.discovery_tag_slugs == ("sports",)
     assert "sports" not in config.tail_category_tokens
     assert {"nba", "nhl", "nfl", "mlb", "basketball", "hockey", "football", "baseball"} <= set(
         config.tail_category_tokens
