@@ -770,6 +770,56 @@ def _hockey_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResu
     )
 
 
+def _cricket_chase_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResult:
+    """Cricket 第二局 chase ML：剩余 balls + wickets + 目标差。
+
+    板球追分场景：batting side 需要 runs ≥ target。简化模型——剩余球数 × 平均
+    run rate (1 run/ball T20 保守) 估期望额外 runs，wickets_left 作降权。
+    """
+    state = game.cricket_state
+    if state is None or state.target is None:
+        return MathLockResult(_ZERO, "cricket_ml", "missing_cricket_target", {})
+    if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return MathLockResult(_ZERO, "cricket_ml", "unsupported_side", {})
+    runs = state.runs or 0
+    target = state.target
+    need = target - runs
+    rem_balls = state.required_balls or 0
+    wickets_left = max(0, 10 - (state.wickets or 0))
+    batting_side = (state.batting_side or "").lower()
+    side_is_batting = (
+        (side == SportsMarketSide.HOME and batting_side == "home")
+        or (side == SportsMarketSide.AWAY and batting_side == "away")
+    )
+    if need <= 0:
+        return MathLockResult(
+            _ONE if side_is_batting else _ZERO,
+            "cricket_ml", "chase_target_reached",
+            {"runs": runs, "target": target, "side": side.value},
+        )
+    if rem_balls <= 0 or wickets_left <= 0:
+        return MathLockResult(
+            _ZERO if side_is_batting else _ONE,
+            "cricket_ml", "no_remaining_balls_or_wickets",
+            {"runs": runs, "target": target, "rem_balls": rem_balls, "wickets_left": wickets_left},
+        )
+    avg_runs_per_ball = 1.0
+    var_per_ball = 2.0
+    projected = rem_balls * avg_runs_per_ball
+    std = math.sqrt(rem_balls * var_per_ball)
+    z = (projected - need) / std if std > 0 else 0
+    p_chase = 0.5 * (1 + math.erf(z / math.sqrt(2)))
+    wicket_factor = min(1.0, wickets_left / 5.0)
+    p_batting_win = max(0.0, min(1.0, p_chase * wicket_factor))
+    lock = p_batting_win if side_is_batting else (1.0 - p_batting_win)
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "cricket_ml", "live_estimate",
+        {"runs": runs, "target": target, "rem_balls": rem_balls,
+         "wickets_left": wickets_left, "p_chase": round(p_chase, 4),
+         "wicket_factor": round(wicket_factor, 4)},
+    )
+
+
 def _hockey_totals_lock(
     side: SportsMarketSide, line: Decimal, game: LiveGameState
 ) -> MathLockResult:
@@ -867,6 +917,11 @@ def evaluate_math_lock(
             return _tennis_ml_lock(side, game)
         if market_type == SportsMarketType.TOTALS and line is not None:
             return _tennis_totals_lock(side, line, game)
+
+    # ===== Cricket (T20/ODI chase 模型) =====
+    if game.cricket_state is not None or sport == "cricket":
+        if market_type == SportsMarketType.MONEYLINE:
+            return _cricket_chase_lock(side, game)
 
     # ===== Hockey (NHL/KHL) =====
     if sport == "hockey":

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_FLOOR
-from typing import Mapping
+from typing import Any, Mapping
 
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.sports_live import BaseballGameState, TennisGameState, VolleyballGameState
@@ -701,7 +701,15 @@ def _math_lock_fair_value(
     context: ExtensionContext,
     token_id: str | None,
 ) -> Decimal | None:
-    """从 math_lock 模型拿我方方向的 lock_probability 作 fair_value。"""
+    """从 math_lock 模型拿我方方向的 lock_probability 作 fair_value。
+
+    覆盖三条路径（用户"所有盘口都必须有数学锁定"）：
+    1. sport_framework.evaluate_math_lock：sport-specific (baseball/soccer/
+       basketball/tennis/hockey/cricket) 公式
+    2. series winner family：调 series_win_probability(state, p_per_game)
+       用 best_of + games_won + 历史胜率算 best-of-N 系列赛 lock
+    3. 都缺 → 返回 None 让上层 fallback goalserve
+    """
 
     from strategies.sports_framework.math_lock import evaluate_math_lock
     from strategies.sports_framework.parsing import live_game_state_from_metadata
@@ -716,6 +724,11 @@ def _math_lock_fair_value(
     target = target_for_token(market, token_id)
     if target is None:
         return None
+    # 路径 2：series winner family 走专属模型
+    series_prob = _series_winner_lock_prob(context, target)
+    if series_prob is not None:
+        return series_prob
+    # 路径 1：单场 sport-specific
     game = live_game_state_from_metadata(context.metadata)
     if game is None:
         return None
@@ -729,6 +742,50 @@ def _math_lock_fair_value(
     if result.method == "unsupported" or result.lock_probability <= Decimal("0"):
         return None
     return result.lock_probability
+
+
+def _series_winner_lock_prob(
+    context: ExtensionContext,
+    target: Any,
+) -> Decimal | None:
+    """系列赛胜者 lock：用 best_of + games_won + 历史单场胜率算 P(我方赢系列赛)。
+
+    单场胜率 fallback = games_won / total_games_played (历史频率)；首场无历史
+    用 0.5 中性。best_of-N 用负二项分布累加。
+    """
+
+    from strategies.current.series.types import SeriesState
+    try:
+        from strategies.current.series.winner_model import series_win_probability
+    except ImportError:
+        return None
+    metadata = context.metadata or {}
+    series_payload = metadata.get("series_state") or metadata.get("series")
+    if not isinstance(series_payload, dict):
+        return None
+    best_of = series_payload.get("best_of")
+    wins_home = series_payload.get("home_wins") or series_payload.get("wins_a")
+    wins_away = series_payload.get("away_wins") or series_payload.get("wins_b")
+    if best_of is None or wins_home is None or wins_away is None:
+        return None
+    try:
+        best_of = int(best_of)
+        wins_home = int(wins_home)
+        wins_away = int(wins_away)
+    except (TypeError, ValueError):
+        return None
+    if target.side == SportsMarketSide.HOME:
+        my_wins, opp_wins = wins_home, wins_away
+    elif target.side == SportsMarketSide.AWAY:
+        my_wins, opp_wins = wins_away, wins_home
+    else:
+        return None
+    state = SeriesState(best_of=best_of, wins_a=my_wins, wins_b=opp_wins)
+    games_played = my_wins + opp_wins
+    p_per_game = (
+        Decimal(my_wins) / Decimal(games_played) if games_played > 0 else Decimal("0.5")
+    )
+    return series_win_probability(state, p_per_game)
 
 
 def _clamp_fair_value(value: Decimal) -> Decimal:
