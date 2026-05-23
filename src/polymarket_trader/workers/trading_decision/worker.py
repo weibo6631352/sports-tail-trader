@@ -1061,7 +1061,24 @@ class TradingDecisionWorker:
         if isinstance(intent, CancelOrderIntent):
             return await self._trading_service.cancel(intent)
         if isinstance(intent, ReplaceOrderIntent):
-            return await self._trading_service.replace(intent)
+            result = await self._trading_service.replace(intent)
+            logger.info(
+                "replace_intent_result",
+                extra={
+                    "order_id": intent.order_id,
+                    "new_price": str(intent.new_price),
+                    "size_shares": str(intent.size_shares),
+                    "submitted": result.submitted,
+                    "submission_error": result.submission_error,
+                    "order_result_status": (
+                        result.order_result.status.value if result.order_result is not None and result.order_result.status is not None else None
+                    ),
+                    "order_result_reason": (
+                        result.order_result.reason if result.order_result is not None else None
+                    ),
+                },
+            )
+            return result
         return await self._trading_service.review_intent(
             intent,
             market=market,
