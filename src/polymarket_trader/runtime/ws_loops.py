@@ -26,7 +26,10 @@ _MARKET_WS_TAIL_WINDOW_SECONDS = 3600.0
 #   - 更早 / 更晚都不占订阅名额。
 # 有持仓/挂单的市场在调用侧已提前放行，不受此窗口限制。
 _MARKET_WS_PREGAME_LEAD_SECONDS = 1_800.0   # 开赛前 30 分钟
-_MARKET_WS_INPLAY_GRACE_SECONDS = 21_600.0  # 开赛后 6 小时（覆盖比赛全程）
+# 开赛后 3 小时窗口:MLB ~3h、NBA ~2.5h、NFL ~3.5h、足球 ~2h、网球 BO3 ~2-3h
+# 已 cover 全场。原 6h 覆盖率过多冗余,WS 订阅量上去队列 saturate(实测 958 token
+# 的 WS 推送速率 > trader 消费速率 → queue 满 drop → 服务器关连接)。
+_MARKET_WS_INPLAY_GRACE_SECONDS = 10_800.0
 # 订阅数上限（按 token 计）——纯安全护栏，防止失控时把全量 registry 压垮
 # Polymarket WS。订阅集已由 market_outside_trade_window（只跟踪开赛 [-6h,+30min]
 # 的近期赛事）+ _market_requires_market_ws（live/敞口/6h 窗口）双重收窄，实际
@@ -194,7 +197,11 @@ def _market_requires_market_ws(
             return False
         phase = (record.live_state_phase or "").strip().lower()
         if phase == "ended":
-            return True
+            # 比赛已结束等结算的市场:无账户敞口不订 WS(line 176-178 已经放行
+            # 有敞口的)。ended 市场盘口推送对决策无价值——结算价已锁,exit
+            # overlay 也已挂好 SELL,WS 推送只徒增队列负担(实测一场 MLB ended
+            # 后 ~60 token 仍在推,4-5 场叠加 ~300 token 浪费)。
+            return False
         if phase in _MARKET_WS_LIVE_STATUSES:
             if record.live_state_signal_allowed is True:
                 return True
