@@ -186,9 +186,12 @@ class AccountStateStore:
 
     def _publish_snapshot_locked(self) -> AccountSnapshot:
         # peak_bankroll_usdc 单调上升——drawdown lockout 把 peak 当作历史最高水位。
-        # 锚定在 **equity = available_usdc + Σ(position MTM)** 而非纯 USDC，避免
-        # "高仓位利用率 + 部分亏损平仓 → available 跌穿 50% peak 误锁仓位"。仓位
-        # 缺 current_value 时按 cost_usdc 兜底（保守，宁高估 peak 也不低估）。
+        # 锚定在 **available_usdc**（实际可调用现金），不含 position MTM。
+        # 原设计加 Σposition.current_value 会把浮盈推上 peak（实测 balance $140 时
+        # peak 涨到 $296），等浮盈兑现成实际亏损后 balance 跌回 $112 但 peak 单调
+        # 不降 → equity < peak × halt_fraction 永久误锁新入场（drawdown_lockout_active），
+        # 与 §17 "宁可输一笔不要系统性放弃"哲学冲突。
+        # 真实"曾经拿到的钱"上沿只有 USDC 现金，浮盈不是已实现资金不应进 peak。
         provisional = AccountSnapshot(
             balance_usdc=self._balance_usdc,
             allowance_usdc=self._allowance_usdc,
@@ -201,10 +204,6 @@ class AccountStateStore:
             last_reconcile_at=self._last_reconcile_at,
         )
         current_equity = provisional.available_usdc
-        for position in provisional.positions:
-            mtm = position.current_value if position.current_value is not None else position.cost_usdc
-            if mtm > Decimal("0"):
-                current_equity += mtm
         if current_equity > self._peak_bankroll_usdc:
             self._peak_bankroll_usdc = current_equity
         snapshot = replace(provisional, peak_bankroll_usdc=self._peak_bankroll_usdc)
