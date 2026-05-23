@@ -278,8 +278,17 @@ def _soccer_halftime_lock(
     if state is None:
         return MathLockResult(_ZERO, "soccer_halftime", "missing_soccer_state", {})
     period = (state.period or "").lower()
-    home = int(game.home_score or 0)
-    away = int(game.away_score or 0)
+    # 关键：halftime 盘口结算条件是**半场比分**，不是全场比分。半场结束后全场
+    # 比分会继续变化（2H 进球），但 halftime-result 已锁定 = HT 那一刻的比分。
+    # 用 state.home_halftime_score / away_halftime_score（半场结束时定格的比分）；
+    # 仅在 first_half 进行中且尚无 halftime score 时退回 game.home_score 作近似。
+    in_first_half = period == "first_half"
+    if in_first_half:
+        home = int(game.home_score or 0)
+        away = int(game.away_score or 0)
+    else:
+        home = int(state.home_halftime_score or 0) if state.home_halftime_score is not None else int(game.home_score or 0)
+        away = int(state.away_halftime_score or 0) if state.away_halftime_score is not None else int(game.away_score or 0)
     home_lead = int(home) - int(away)
     actual = "home" if home_lead > 0 else ("away" if home_lead < 0 else "draw")
 
@@ -1208,6 +1217,65 @@ def _hockey_totals_lock(
 # 统一分派
 # ============================================================
 
+# 子段 scope slug 标记（首段 / 半场 / 分节 / 分局 / 特殊 prop）。命中即视为
+# 子段盘口，必须有专用公式才能跑 math_lock，否则返回 sub_scope_no_dedicated_lock。
+_SUB_SCOPE_TOKENS = (
+    "first-set", "second-set", "third-set", "fourth-set", "fifth-set",
+    "set-1", "set-2", "set-3", "set-4", "set-5",
+    "first-half", "second-half", "1st-half", "2nd-half",
+    "1h-", "2h-",  # nba/basketball 1H/2H 简写（如 "nba-...-1h-total-110pt5"）
+    "first-quarter", "second-quarter", "third-quarter", "fourth-quarter",
+    "1st-quarter", "2nd-quarter", "3rd-quarter", "4th-quarter",
+    "q1-", "q2-", "q3-", "q4-",  # NBA Q1/Q2/Q3/Q4 简写
+    "first-period", "second-period", "third-period",
+    "1st-period", "2nd-period", "3rd-period",
+    "first-inning", "second-inning", "third-inning", "fourth-inning",
+    "fifth-inning",
+    "exact-score", "correct-score", "exact-",
+    "anytime-goalscorer", "first-goalscorer", "last-goalscorer",
+    "player-", "to-score", "to-win-",
+    "halftime", "ht-",  # halftime / HT scope（不论 result/total/spread）
+)
+
+
+def _is_sub_scope_without_dedicated_lock(
+    slug_lc: str,
+    market_type: SportsMarketType,
+    sport: str,
+    game: LiveGameState | None,
+) -> bool:
+    """slug 是子段 scope 但当前没有专用 math_lock 公式 → True（视为 unsupported）。
+
+    已有专用公式的 sub-scope 不算 unsupported（让后续 dispatch 走专用 fn）：
+    - soccer + BINARY_PROP + halftime-result-{home,draw,away} → _soccer_halftime_lock
+    - soccer + BINARY_PROP + btts/both-teams-to-score → _soccer_btts_lock
+    - tennis + BINARY_PROP + set-winner → _tennis_set_winner_lock
+    - mlb + BINARY_PROP + nrfi → _baseball_nrfi_lock
+    """
+    if not slug_lc or not any(t in slug_lc for t in _SUB_SCOPE_TOKENS):
+        return False
+    # 已有专用公式的 sub-scope（dispatch 后会走专用 fn）放行
+    if market_type == SportsMarketType.BINARY_PROP:
+        if sport == "soccer" and (
+            "halftime-result-" in slug_lc
+            or "btts" in slug_lc
+            or "both-teams-to-score" in slug_lc
+            or "both-teams-score" in slug_lc
+        ):
+            return False
+        if sport == "tennis" and (
+            "set-winner" in slug_lc or "current-set" in slug_lc
+        ):
+            return False
+        if game is not None and game.baseball_state is not None and "nrfi" in slug_lc:
+            return False
+        if game is not None and game.baseball_state is not None and "first-inning-no-run" in slug_lc:
+            return False
+        if game is not None and game.baseball_state is not None and "no-runs-first-inning" in slug_lc:
+            return False
+    return True
+
+
 def evaluate_math_lock(
     market_type: SportsMarketType,
     side: SportsMarketSide,
@@ -1232,6 +1300,24 @@ def evaluate_math_lock(
         )
 
     sport = (game.sport or "").strip().lower()
+
+    # ===== 子段 scope 守门 =====
+    # 子段盘口（first-set-total / 1H total / quarter ML / first-inning prop 等）
+    # 必须走专用公式（基于子段比分 + 子段剩余时间）。若没有专用公式，绝不能落到
+    # 整场 _tennis_totals_lock / _basketball_ml_lock 等——它们用整场比分计算，对
+    # first-set 之类已结束子段会算出完全错误的 lock_prob，导致 entry math_lock veto
+    # 错杀已锁定赢方（或漏放过已锁定输方）。
+    # 已有专用公式的 sub-scope（slug 命中下方专属分派后会走专用 fn）：
+    #   - soccer halftime-result-{home,draw,away} → _soccer_halftime_lock
+    #   - soccer BTTS / draw-FT → _soccer_btts_lock / _soccer_draw_ft_lock
+    #   - tennis set-winner → _tennis_set_winner_lock
+    #   - mlb NRFI → _baseball_nrfi_lock
+    # 其余 sub-scope（tennis first-set-total / basketball 1H / quarter 等）尚无
+    # 专用 math_lock 公式 → 在分派前先返回 UNSUPPORTED，让上层 evaluator 自己
+    # 处理（odds_gap 顶层 _math_lock_veto 对 unsupported 放行，§17 不放过可盈利市场）。
+    slug_lc = (market_slug or "").lower()
+    if _is_sub_scope_without_dedicated_lock(slug_lc, market_type, sport, game):
+        return MathLockResult(_ZERO, "sub_scope", "sub_scope_no_dedicated_lock", {"slug": market_slug})
 
     # ===== Baseball (MLB/KBO/NPB) =====
     if game.baseball_state is not None:
