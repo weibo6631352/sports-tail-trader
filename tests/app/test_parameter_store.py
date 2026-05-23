@@ -43,7 +43,6 @@ def test_registry_contains_expected_specs() -> None:
     assert get_spec("settings", "kelly_max_position_fraction") is not None
     assert get_spec("settings", "kelly_min_edge") is not None
     assert get_spec("settings", "kelly_min_stake_usdc") is not None
-    assert get_spec("settings", "kelly_drawdown_halt_fraction") is not None
     assert get_spec("strategy", "tail_outright_min_edge_bps") is not None
     assert get_spec("strategy", "tail_outright_min_profit_per_share") is not None
     assert get_spec("settings", "wallet_private_key") is None  # 不在白名单

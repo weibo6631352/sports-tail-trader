@@ -70,15 +70,10 @@ class RiskManager:
         # Kelly 风控参数：bankroll 来自 ``min(account.available, settings.portfolio_budget)``；
         # max_position_fraction 替代旧 max_order/market/total_usdc 的三层硬上限；
         # round_up_max_overbet_ratio 同步放宽 RiskManager 的 effective cap，避免
-        # 与 Kelly 引擎的 round-up 路径不一致；peak / current_equity / drawdown_halt 实现
-        # §5 drawdown lockout——比较 **equity** 而非 bankroll，否则高仓位利用率 +
-        # 部分亏损平仓会误锁（详见 domain/account.py:equity_usdc）。
+        # 与 Kelly 引擎的 round-up 路径不一致。
         bankroll_usdc: Decimal | None = None,
         kelly_max_position_fraction: Decimal | None = None,
         kelly_round_up_max_overbet_ratio: Decimal | None = None,
-        current_equity_usdc: Decimal | None = None,
-        peak_bankroll_usdc: Decimal | None = None,
-        kelly_drawdown_halt_fraction: Decimal | None = None,
         min_order_size: Decimal | None = None,
     ) -> RiskDecision:
         # 这里只读本地快照和热状态；P0 路径不允许为了下单临时打 REST 或查数据库。
@@ -159,9 +154,6 @@ class RiskManager:
             bankroll_usdc=bankroll_usdc,
             kelly_max_position_fraction=kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
-            current_equity_usdc=current_equity_usdc,
-            peak_bankroll_usdc=peak_bankroll_usdc,
-            kelly_drawdown_halt_fraction=kelly_drawdown_halt_fraction,
         )
         if decision is not None:
             return decision
@@ -496,54 +488,17 @@ class RiskManager:
         bankroll_usdc: Decimal | None,
         kelly_max_position_fraction: Decimal | None,
         kelly_round_up_max_overbet_ratio: Decimal | None,
-        current_equity_usdc: Decimal | None,
-        peak_bankroll_usdc: Decimal | None,
-        kelly_drawdown_halt_fraction: Decimal | None,
     ) -> RiskDecision | None:
         """Kelly 框架风控：替代旧 max_order/market/total_usdc 三层硬上限。
 
-        三道闸：
-        1. drawdown lockout：bankroll < peak × halt_fraction 时拒任意新仓（含 BUY/SELL 不区分）。
-        2. single position cap：单笔 BUY notional ≤ bankroll × kelly_max_position_fraction。
-        3. total exposure：已开 + 本笔 ≤ bankroll。
+        两道闸：
+        1. single position cap：单笔 BUY notional ≤ bankroll × kelly_max_position_fraction。
+        2. total exposure：已开 + 本笔 ≤ bankroll。
 
         Kelly 自身的 (p,c,edge,f*,min_edge,round-up) 由 EntryPlanner / 策略侧 ``kelly_stake``
         实现并写入 ``Allocation``。RiskManager 只做 caller 已经服从 Kelly 公式的最终边界校验，
         防止策略侧旁路 Kelly 公式直接送 over-bet 的 intent。
         """
-
-        # drawdown lockout：比较 **equity** 与 peak equity，而非 bankroll vs peak。
-        # 高仓位利用率 + 部分亏损平仓 → free cash 跌穿 50% peak 但 equity 仍健康——
-        # 此时不应误锁。BUY/SELL 之前就要拒，否则 SELL 可能放大问题。
-        equity_for_check = (
-            current_equity_usdc
-            if current_equity_usdc is not None
-            else bankroll_usdc
-        )
-        if (
-            kelly_drawdown_halt_fraction is not None
-            and kelly_drawdown_halt_fraction > Decimal("0")
-            and peak_bankroll_usdc is not None
-            and peak_bankroll_usdc > Decimal("0")
-            and equity_for_check is not None
-        ):
-            halt_threshold = peak_bankroll_usdc * kelly_drawdown_halt_fraction
-            if equity_for_check < halt_threshold and intent.side == OrderSide.BUY:
-                return self._fail(
-                    trace_id=intent.trace_id,
-                    checks=checks,
-                    name="drawdown_lockout_gate",
-                    reason="drawdown_lockout_active",
-                    field="equity.drawdown",
-                    value={
-                        "current_equity_usdc": equity_for_check,
-                        "peak_bankroll_usdc": peak_bankroll_usdc,
-                        "halt_threshold": halt_threshold,
-                        "halt_fraction": kelly_drawdown_halt_fraction,
-                    },
-                    suggested_action="wait_recovery_or_manual_review",
-                    retryable=False,
-                )
 
         if intent.side != OrderSide.BUY:
             checks.append(

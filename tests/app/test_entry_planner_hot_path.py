@@ -47,7 +47,6 @@ def test_entry_plan_hot_path_does_not_read_orderbooks_for_entire_registry() -> N
         kelly_min_stake_usdc=Decimal("1"),
         kelly_allow_round_up_to_market_min=True,
         kelly_round_up_max_overbet_ratio=Decimal("1"),
-        kelly_drawdown_halt_fraction=Decimal("0.5"),
     )
 
     assert set(read_tokens).issubset(set(focus_market.token_ids))

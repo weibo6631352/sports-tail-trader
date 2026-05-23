@@ -260,9 +260,6 @@ class AdminControlsMixin:
             bankroll_usdc=_resolve_admin_bankroll(account, self._settings_value("portfolio_budget_usdc")),
             kelly_max_position_fraction=_kelly.kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=_kelly.kelly_round_up_max_overbet_ratio,
-            current_equity_usdc=account.equity_usdc,
-            peak_bankroll_usdc=account.peak_bankroll_usdc,
-            kelly_drawdown_halt_fraction=_kelly.kelly_drawdown_halt_fraction,
             order_retry_limit=self._settings_value("order_retry_limit"),
             operation="admin_confirm_entry",
         )
@@ -734,9 +731,6 @@ class AdminControlsMixin:
             bankroll_usdc=_resolve_admin_bankroll(account, self._settings_value("portfolio_budget_usdc")),
             kelly_max_position_fraction=_kelly.kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=_kelly.kelly_round_up_max_overbet_ratio,
-            current_equity_usdc=account.equity_usdc,
-            peak_bankroll_usdc=account.peak_bankroll_usdc,
-            kelly_drawdown_halt_fraction=_kelly.kelly_drawdown_halt_fraction,
             order_retry_limit=self._settings_value("order_retry_limit"),
         )
         result = review.order_result

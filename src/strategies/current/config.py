@@ -180,8 +180,6 @@ class CurrentStrategyConfig:
     # 凑齐金额上限 = position_cap × ratio。1.0=凑齐金额最多到 cap；> 1 时让 RiskManager
     # 的 effective position cap 同步放宽——bankroll 极小阶段唯一能下单的方式。
     kelly_round_up_max_overbet_ratio: Decimal = Decimal("10")
-    # drawdown lockout：bankroll 跌破 peak × halt_fraction 时拒新仓。0 关闭。
-    kelly_drawdown_halt_fraction: Decimal = Decimal("0")
 
     entry_no_price_max: Decimal = Decimal("0.99")
     exit_no_price: Decimal = Decimal("0.995")

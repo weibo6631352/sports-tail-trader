@@ -37,14 +37,12 @@ class _KellySizingState:
     """Kelly + bankroll 运行时参数包——替代 **kelly_kwargs 字典传递，让类型检查可以捕捉字段漂移。"""
 
     bankroll_usdc: Decimal
-    peak_bankroll_usdc: Decimal | None
     kelly_fraction: Decimal
     kelly_max_position_fraction: Decimal
     kelly_min_edge: Decimal
     kelly_min_stake_usdc: Decimal
     kelly_allow_round_up_to_market_min: bool
     kelly_round_up_max_overbet_ratio: Decimal
-    kelly_drawdown_halt_fraction: Decimal
 
 
 class EntryPlanner:
@@ -86,7 +84,6 @@ class EntryPlanner:
         kelly_min_stake_usdc: Decimal,
         kelly_allow_round_up_to_market_min: bool = True,
         kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
-        kelly_drawdown_halt_fraction: Decimal = Decimal("0"),
         positions: Iterable[Position] = (),
         open_orders: Iterable[Order] = (),
         metadata: Mapping[str, Any] | None = None,
@@ -157,21 +154,14 @@ class EntryPlanner:
             portfolio_budget_usdc=portfolio_budget_usdc,
             available_usdc=available_usdc,
         )
-        peak_bankroll_usdc = (
-            account_snapshot.peak_bankroll_usdc
-            if account_snapshot is not None
-            else None
-        )
         kelly_state = _KellySizingState(
             bankroll_usdc=bankroll_usdc,
-            peak_bankroll_usdc=peak_bankroll_usdc,
             kelly_fraction=kelly_fraction,
             kelly_max_position_fraction=kelly_max_position_fraction,
             kelly_min_edge=kelly_min_edge,
             kelly_min_stake_usdc=kelly_min_stake_usdc,
             kelly_allow_round_up_to_market_min=kelly_allow_round_up_to_market_min,
             kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
-            kelly_drawdown_halt_fraction=kelly_drawdown_halt_fraction,
         )
         sizing = self._extension_hooks.size_entry(
             self._sizing_context(
@@ -321,14 +311,12 @@ class EntryPlanner:
             portfolio_budget_usdc=portfolio_budget_usdc,
             available_usdc=effective_available_usdc,
             bankroll_usdc=kelly_state.bankroll_usdc,
-            peak_bankroll_usdc=kelly_state.peak_bankroll_usdc,
             kelly_fraction=kelly_state.kelly_fraction,
             kelly_max_position_fraction=kelly_state.kelly_max_position_fraction,
             kelly_min_edge=kelly_state.kelly_min_edge,
             kelly_min_stake_usdc=kelly_state.kelly_min_stake_usdc,
             kelly_allow_round_up_to_market_min=kelly_state.kelly_allow_round_up_to_market_min,
             kelly_round_up_max_overbet_ratio=kelly_state.kelly_round_up_max_overbet_ratio,
-            kelly_drawdown_halt_fraction=kelly_state.kelly_drawdown_halt_fraction,
             manual_confirmation=manual_confirmation,
             metadata=context_metadata,
         )
@@ -380,14 +368,12 @@ class EntryPlanner:
             portfolio_budget_usdc=portfolio_budget_usdc,
             available_usdc=available_usdc,
             bankroll_usdc=kelly_state.bankroll_usdc,
-            peak_bankroll_usdc=kelly_state.peak_bankroll_usdc,
             kelly_fraction=kelly_state.kelly_fraction,
             kelly_max_position_fraction=kelly_state.kelly_max_position_fraction,
             kelly_min_edge=kelly_state.kelly_min_edge,
             kelly_min_stake_usdc=kelly_state.kelly_min_stake_usdc,
             kelly_allow_round_up_to_market_min=kelly_state.kelly_allow_round_up_to_market_min,
             kelly_round_up_max_overbet_ratio=kelly_state.kelly_round_up_max_overbet_ratio,
-            kelly_drawdown_halt_fraction=kelly_state.kelly_drawdown_halt_fraction,
             allocation_plan=allocation_plan,
             allocation=allocation,
             amount_usdc=allocation.buy_budget_usdc,

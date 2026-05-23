@@ -5424,7 +5424,6 @@ async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
             kelly_min_stake_usdc=Decimal("1"),
             kelly_allow_round_up_to_market_min=True,
             kelly_round_up_max_overbet_ratio=Decimal("1"),
-            kelly_drawdown_halt_fraction=Decimal("0"),
         )
     )
     service = AdminService(
@@ -5507,7 +5506,6 @@ async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
             kelly_min_stake_usdc=Decimal("1"),
             kelly_allow_round_up_to_market_min=True,
             kelly_round_up_max_overbet_ratio=Decimal("1"),
-            kelly_drawdown_halt_fraction=Decimal("0"),
         )
     )
     service = AdminService(

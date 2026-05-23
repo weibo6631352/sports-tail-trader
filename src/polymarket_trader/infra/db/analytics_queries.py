@@ -81,7 +81,6 @@ REJECTION_REASON_CATEGORIES: dict[str, str] = {
     # 框架风控
     "kelly_position_cap_exceeded": "risk_framework",
     "bankroll_overspent": "risk_framework",
-    "drawdown_lockout_active": "risk_framework",
     "neg_risk_cross_token_open_order": "risk_framework",
     "neg_risk_cross_token_position": "risk_framework",
     # 账户 / 余额

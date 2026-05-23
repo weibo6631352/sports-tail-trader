@@ -143,7 +143,6 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             kelly_min_stake_usdc=strategy_config.kelly_min_stake_usdc,
             kelly_allow_round_up_to_market_min=strategy_config.kelly_allow_round_up_to_market_min,
             kelly_round_up_max_overbet_ratio=strategy_config.kelly_round_up_max_overbet_ratio,
-            kelly_drawdown_halt_fraction=strategy_config.kelly_drawdown_halt_fraction,
             positions=account.positions,
             open_orders=account.open_orders,
             metadata=metadata if metadata is not None else self._entry_metadata_for_market(market),

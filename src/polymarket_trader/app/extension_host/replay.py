@@ -78,7 +78,6 @@ def run_entry_replay(
         kelly_min_stake_usdc=_optional_decimal(budgets, "kelly_min_stake_usdc") or Decimal("1"),
         kelly_allow_round_up_to_market_min=bool(budgets.get("kelly_allow_round_up_to_market_min", True)),
         kelly_round_up_max_overbet_ratio=_optional_decimal(budgets, "kelly_round_up_max_overbet_ratio") or Decimal("1"),
-        kelly_drawdown_halt_fraction=_optional_decimal(budgets, "kelly_drawdown_halt_fraction") or Decimal("0"),
         account_snapshot=account_state_store.snapshot(),
         metadata=_mapping(fixture, "metadata"),
     )

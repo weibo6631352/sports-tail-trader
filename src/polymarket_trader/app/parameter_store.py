@@ -165,12 +165,6 @@ _register(ParameterSpec(
 ))
 _register(ParameterSpec(
     scope="settings",
-    key="kelly_drawdown_halt_fraction",
-    description="bankroll < peak × value 时拒新仓。0=关闭。",
-    coerce=_coerce_probability,
-))
-_register(ParameterSpec(
-    scope="settings",
     key="order_retry_limit",
     description="订单重试上限",
     coerce=_coerce_positive_int,

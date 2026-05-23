@@ -82,8 +82,6 @@ class ExtensionContext:
     kelly_min_stake_usdc: Decimal | None = None
     kelly_allow_round_up_to_market_min: bool | None = None
     kelly_round_up_max_overbet_ratio: Decimal | None = None
-    kelly_drawdown_halt_fraction: Decimal | None = None
-    peak_bankroll_usdc: Decimal | None = None
     allocation_plan: AllocationPlan | None = None
     allocation: Allocation | None = None
     amount_usdc: Decimal | None = None

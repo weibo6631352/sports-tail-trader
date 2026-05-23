@@ -659,9 +659,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     persistence_repository = DatabasePersistenceRepository(db_session_factory)
     account_state_store = AccountStateStore()
     # 不预填假 balance：reconcile worker 会在启动后立刻调
-    # ``clob_client.get_balance_allowance()`` 写入真实链上 USDC。预填会让
-    # ``peak_bankroll_usdc`` 被 placeholder 值锚住，等真实 balance 写入后立刻
-    # 触发 drawdown lockout（peak=placeholder >> 真实 balance）。在 reconcile
+    # ``clob_client.get_balance_allowance()`` 写入真实链上 USDC。在 reconcile
     # 拿到第一个权威值前，bankroll=0 → Kelly 全拒，正是安全态。
     lifecycle_bus = InProcessLifecycleBus()
     parameter_store = ParameterStore(event_bus=event_bus)
@@ -851,7 +849,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         kelly_min_stake_usdc=strategy_config.kelly_min_stake_usdc,
         kelly_allow_round_up_to_market_min=strategy_config.kelly_allow_round_up_to_market_min,
         kelly_round_up_max_overbet_ratio=strategy_config.kelly_round_up_max_overbet_ratio,
-        kelly_drawdown_halt_fraction=strategy_config.kelly_drawdown_halt_fraction,
         order_retry_limit=settings.order_retry_limit,
         entry_metadata_provider=entry_metadata_for_event,
         parameter_store=parameter_store,
@@ -1270,10 +1267,6 @@ async def _load_reference_state(runtime: RuntimeComponents) -> dict[str, int]:
         async with runtime.db_session_factory() as session:
             account_snapshot = await AccountSnapshotRepository(session).get_current_snapshot()
         if account_snapshot is not None:
-            # peak 必须先恢复——否则 update_balances 触发的 publish 会用 in-memory 0
-            # 当 baseline，把"重启前历史 peak 1500，当前 600"误算成 peak=600，drawdown
-            # lockout 永远不触发。先 restore 再 update_balances，publish 时取 max。
-            runtime.account_state_store.restore_peak_bankroll(account_snapshot.peak_bankroll_usdc)
             _restore_account_reference_state(
                 runtime,
                 balance_usdc=account_snapshot.balance_usdc,

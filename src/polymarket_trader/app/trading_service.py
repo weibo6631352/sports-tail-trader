@@ -126,9 +126,6 @@ class TradingService:
         bankroll_usdc: Decimal | None = None,
         kelly_max_position_fraction: Decimal | None = None,
         kelly_round_up_max_overbet_ratio: Decimal | None = None,
-        current_equity_usdc: Decimal | None = None,
-        peak_bankroll_usdc: Decimal | None = None,
-        kelly_drawdown_halt_fraction: Decimal | None = None,
         min_order_size: Decimal | None = None,
         operation: str = "review",
     ) -> "TradingReviewResult":
@@ -159,9 +156,6 @@ class TradingService:
             bankroll_usdc=bankroll_usdc,
             kelly_max_position_fraction=kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
-            current_equity_usdc=current_equity_usdc,
-            peak_bankroll_usdc=peak_bankroll_usdc,
-            kelly_drawdown_halt_fraction=kelly_drawdown_halt_fraction,
             min_order_size=min_order_size,
         )
         if risk_decision.passed:

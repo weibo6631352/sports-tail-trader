@@ -85,35 +85,6 @@ def test_buy_entry_rejected_when_bankroll_is_non_positive() -> None:
     assert decision.reason == "bankroll_non_positive"
 
 
-def test_buy_entry_rejected_under_drawdown_lockout() -> None:
-    """bankroll < peak × halt_fraction → drawdown_lockout_active。BUY 触发，SELL 不触发。
-
-    Drawdown lockout 在 BUY/SELL 校验前就要拒，避免亏损中继续放大新仓。
-    """
-
-    decision = RiskManager().check_order_intent(
-        BuyOrderIntent(
-            strategy_id="sports_tail",
-            trace_id="trace-buy-drawdown",
-            condition_id="condition",
-            token_id="yes",
-            price=Decimal("0.50"),
-            amount_usdc=Decimal("0.5"),
-        ),
-        market=_market(),
-        # peak=100、halt_fraction=0.5 → halt 阈值 50；当前 bankroll=40 < 50 → 锁仓。
-        bankroll_usdc=Decimal("40"),
-        peak_bankroll_usdc=Decimal("100"),
-        kelly_drawdown_halt_fraction=Decimal("0.5"),
-        kelly_max_position_fraction=Decimal("0.10"),
-        balance_usdc=Decimal("40"),
-        allowance_usdc=Decimal("40"),
-    )
-
-    assert decision.passed is False
-    assert decision.reason == "drawdown_lockout_active"
-
-
 def test_sell_exit_is_not_constrained_by_kelly_position_cap_or_bankroll() -> None:
     """SELL 不消耗 bankroll，Kelly 框架 (cap/bankroll) 只管 BUY；SELL 直接放行。
 

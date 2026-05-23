@@ -48,7 +48,6 @@ def test_entry_replay_fixture_metadata_drives_tail_plan(tmp_path: Path) -> None:
                     "kelly_min_stake_usdc": "1",
                     "kelly_allow_round_up_to_market_min": True,
                     "kelly_round_up_max_overbet_ratio": "1",
-                    "kelly_drawdown_halt_fraction": "0.5",
                 },
                 "target": {
                     "condition_id": "totals-condition",

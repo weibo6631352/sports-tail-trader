@@ -59,7 +59,6 @@ class KellyParams:
     避免直接依赖策略包配置类型。
 
     默认值是上线安全基准（拒绝交易而非下错单）：
-    - halt_fraction=0：不静默锁死所有买入，让策略侧自行决定是否熔断
     - round_up_ratio=1：不超额 round-up，防止小 bankroll 阶段意外满仓
     """
 
@@ -69,7 +68,6 @@ class KellyParams:
     kelly_min_stake_usdc: Decimal = Decimal("1")
     kelly_allow_round_up_to_market_min: bool = True
     kelly_round_up_max_overbet_ratio: Decimal = Decimal("1")
-    kelly_drawdown_halt_fraction: Decimal = Decimal("0")
 
 
 _KELLY_DEFAULTS = KellyParams()
@@ -82,7 +80,6 @@ _KELLY_FIELD_NAMES: tuple[str, ...] = (
     "kelly_min_stake_usdc",
     "kelly_allow_round_up_to_market_min",
     "kelly_round_up_max_overbet_ratio",
-    "kelly_drawdown_halt_fraction",
 )
 
 

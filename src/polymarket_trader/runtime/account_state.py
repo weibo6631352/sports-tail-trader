@@ -45,9 +45,6 @@ class AccountStateStore:
         self._fills: dict[str, Fill] = {}
         self._balance_usdc = Decimal("0")
         self._allowance_usdc = Decimal("0")
-        # peak_bankroll_usdc 单调维护：取 effective_bankroll = min(balance, allowance) -
-        # open_buy_reserved_usdc，每次刷新时取 max。Kelly drawdown lockout 用此基准。
-        self._peak_bankroll_usdc = Decimal("0")
         self._user_ws_connected = False
         self._allow_new_entries = False
         self._market_pauses: dict[str, MarketPause] = {}
@@ -56,18 +53,6 @@ class AccountStateStore:
 
     def snapshot(self) -> AccountSnapshot:
         return self._snapshot
-
-    def restore_peak_bankroll(self, peak_usdc: Decimal) -> None:
-        """重启时从最新 account_snapshots 行恢复历史 peak。
-
-        ``_publish_snapshot_locked`` 用 ``max(loaded_peak, current)`` 维护单调，
-        所以这里只设 in-memory 起始值；下一次 ``update_balances`` 会触发 publish
-        并重算 peak。仅在启动期被 main.py 调用一次。
-        """
-
-        with self._lock:
-            if peak_usdc > self._peak_bankroll_usdc:
-                self._peak_bankroll_usdc = peak_usdc
 
     def update_balances(
         self,
@@ -198,14 +183,7 @@ class AccountStateStore:
         return self._user_ws_connected and self._last_reconcile_at is not None
 
     def _publish_snapshot_locked(self) -> AccountSnapshot:
-        # peak_bankroll_usdc 单调上升——drawdown lockout 把 peak 当作历史最高水位。
-        # 锚定在 **available_usdc**（实际可调用现金），不含 position MTM。
-        # 原设计加 Σposition.current_value 会把浮盈推上 peak（实测 balance $140 时
-        # peak 涨到 $296），等浮盈兑现成实际亏损后 balance 跌回 $112 但 peak 单调
-        # 不降 → equity < peak × halt_fraction 永久误锁新入场（drawdown_lockout_active），
-        # 与 §17 "宁可输一笔不要系统性放弃"哲学冲突。
-        # 真实"曾经拿到的钱"上沿只有 USDC 现金，浮盈不是已实现资金不应进 peak。
-        provisional = AccountSnapshot(
+        snapshot = AccountSnapshot(
             balance_usdc=self._balance_usdc,
             allowance_usdc=self._allowance_usdc,
             positions=tuple(self._positions.values()),
@@ -216,34 +194,6 @@ class AccountStateStore:
             market_pauses=tuple(self._market_pauses.values()),
             last_reconcile_at=self._last_reconcile_at,
         )
-        current_equity = provisional.available_usdc
-        # peak sanity cap：available_usdc 计算路径偶发返回异常高值（实测 $1286 vs
-        # balance $79 - 怀疑 reserved/chain query race condition），让 drawdown
-        # lockout 永久误锁。cap 到 balance × 2 保证 peak 不能远超实际现金。
-        if self._balance_usdc > Decimal("0"):
-            sanity_cap = self._balance_usdc * Decimal("2")
-            if current_equity > sanity_cap:
-                current_equity = sanity_cap
-        if current_equity > self._peak_bankroll_usdc:
-            # 追踪 peak_bankroll 异常推高的根因——18 行栈让定位调用方变得容易。
-            prev_peak = self._peak_bankroll_usdc
-            self._peak_bankroll_usdc = current_equity
-            if current_equity > Decimal("150"):  # 历史最大 balance $140.85，超此值必有 bug
-                stack = "".join(traceback.format_stack(limit=18))
-                logger.warning(
-                    "peak_bankroll_inflated_writer",
-                    extra={
-                        "prev_peak": str(prev_peak),
-                        "new_peak": str(current_equity),
-                        "balance_usdc": str(self._balance_usdc),
-                        "allowance_usdc": str(self._allowance_usdc),
-                        "open_buy_reserved_usdc": str(provisional.open_buy_reserved_usdc),
-                        "open_orders_count": len(self._open_orders),
-                        "positions_count": len(self._positions),
-                        "stack": stack,
-                    },
-                )
-        snapshot = replace(provisional, peak_bankroll_usdc=self._peak_bankroll_usdc)
         self._snapshot = snapshot
         return snapshot
 

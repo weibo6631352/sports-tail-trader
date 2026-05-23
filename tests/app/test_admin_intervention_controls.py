@@ -315,7 +315,6 @@ def test_force_exit_position_uses_best_bid_and_calls_trading_service_sell() -> N
                 kelly_min_stake_usdc=Decimal("1"),
                 kelly_allow_round_up_to_market_min=True,
                 kelly_round_up_max_overbet_ratio=Decimal("1"),
-                kelly_drawdown_halt_fraction=Decimal("0.5"),
                 order_retry_limit=1,
             ),
         )

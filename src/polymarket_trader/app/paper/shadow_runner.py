@@ -104,7 +104,6 @@ async def run_shadow_session(
     kelly_min_stake_usdc: Decimal = Decimal("1"),
     kelly_allow_round_up_to_market_min: bool = True,
     kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
-    kelly_drawdown_halt_fraction: Decimal = Decimal("0"),
     order_retry_limit: int = 2,
     virtual_clock: VirtualClock | None = None,
     real_sign_client: Any = None,
@@ -169,7 +168,6 @@ async def run_shadow_session(
             kelly_min_stake_usdc=kelly_min_stake_usdc,
             kelly_allow_round_up_to_market_min=kelly_allow_round_up_to_market_min,
             kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
-            kelly_drawdown_halt_fraction=kelly_drawdown_halt_fraction,
             order_retry_limit=order_retry_limit,
             entry_metadata_provider=_entry_metadata_for_event,
         )

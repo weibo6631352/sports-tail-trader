@@ -125,7 +125,6 @@ async def run_virtual_paper_trade(
                 _settings_value(runtime, "kelly_allow_round_up_to_market_min", default=True)
             ),
             kelly_round_up_max_overbet_ratio=_settings_decimal(runtime, "kelly_round_up_max_overbet_ratio") or Decimal("1"),
-            kelly_drawdown_halt_fraction=_settings_decimal(runtime, "kelly_drawdown_halt_fraction") or Decimal("0"),
             order_retry_limit=_settings_value(runtime, "order_retry_limit"),
         )
         event = DomainEvent(
@@ -353,7 +352,6 @@ def _build_plan(
             _settings_value(runtime, "kelly_allow_round_up_to_market_min", default=True)
         ),
         kelly_round_up_max_overbet_ratio=_settings_decimal(runtime, "kelly_round_up_max_overbet_ratio") or Decimal("1"),
-        kelly_drawdown_halt_fraction=_settings_decimal(runtime, "kelly_drawdown_halt_fraction") or Decimal("0"),
         positions=account.positions,
         open_orders=account.open_orders,
         metadata=metadata,

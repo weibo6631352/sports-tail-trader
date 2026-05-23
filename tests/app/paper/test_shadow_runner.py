@@ -97,7 +97,6 @@ def _run(events: tuple[ShadowEvent, ...], *, ledger: PaperVirtualLedger | None =
             kelly_min_stake_usdc=Decimal("1"),
             kelly_allow_round_up_to_market_min=True,
             kelly_round_up_max_overbet_ratio=Decimal("1"),
-            kelly_drawdown_halt_fraction=Decimal("0.5"),
         )
     ), ledger
 

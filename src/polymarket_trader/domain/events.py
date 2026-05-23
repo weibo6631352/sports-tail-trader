@@ -87,10 +87,6 @@ class DomainEventType(StrEnum):
     RISK_REJECTION_RECORDED = "risk_rejection_recorded"
     MARKET_SETTLED = "market_settled"
     PARAMETER_OVERRIDE_APPLIED = "parameter_override_applied"
-    # Kelly drawdown lockout 触发 / 解除——独立事件类型，便于运维直接 grep
-    # 而不需要从 risk_check_failed reason 字段过滤。
-    DRAWDOWN_LOCKOUT_TRIGGERED = "drawdown_lockout_triggered"
-    DRAWDOWN_LOCKOUT_CLEARED = "drawdown_lockout_cleared"
     # 操盘读 OrderbookDeltaStore.direction_signal 时落审计,记录窗口内 best bid/ask
     # delta + direction_score。供事后复盘"为什么这一刻判断买/卖压 → 决定加仓/退场"。
     ORDERBOOK_DIRECTION_QUERIED = "orderbook_direction_queried"

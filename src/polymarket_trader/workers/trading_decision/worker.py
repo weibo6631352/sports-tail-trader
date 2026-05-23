@@ -127,7 +127,6 @@ class TradingDecisionWorker:
         kelly_min_stake_usdc: Decimal = Decimal("1"),
         kelly_allow_round_up_to_market_min: bool = True,
         kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
-        kelly_drawdown_halt_fraction: Decimal = Decimal("0.5"),
         order_retry_limit: int | None = None,
         entry_metadata_provider: EntryMetadataProvider | None = None,
         parameter_store: "ParameterStore | None" = None,
@@ -151,7 +150,6 @@ class TradingDecisionWorker:
         self._kelly_min_stake_usdc_default = kelly_min_stake_usdc
         self._kelly_allow_round_up_default = kelly_allow_round_up_to_market_min
         self._kelly_round_up_max_overbet_ratio_default = kelly_round_up_max_overbet_ratio
-        self._kelly_drawdown_halt_fraction_default = kelly_drawdown_halt_fraction
         self._order_retry_limit_default = order_retry_limit
         self._parameter_store = parameter_store
         self._entry_metadata_provider = entry_metadata_provider
@@ -226,12 +224,6 @@ class TradingDecisionWorker:
         return self._param_override(
             "kelly_round_up_max_overbet_ratio",
             self._kelly_round_up_max_overbet_ratio_default,
-        )
-
-    @property
-    def _kelly_drawdown_halt_fraction(self) -> Decimal:
-        return self._param_override(
-            "kelly_drawdown_halt_fraction", self._kelly_drawdown_halt_fraction_default
         )
 
     @property
@@ -380,7 +372,6 @@ class TradingDecisionWorker:
             kelly_min_stake_usdc=self._kelly_min_stake_usdc,
             kelly_allow_round_up_to_market_min=self._kelly_allow_round_up,
             kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
-            kelly_drawdown_halt_fraction=self._kelly_drawdown_halt_fraction,
             positions=(snapshot.positions if snapshot is not None else tuple(self._positions_provider())),
             open_orders=(
                 snapshot.open_orders if snapshot is not None else tuple(self._open_orders_provider())
@@ -489,9 +480,6 @@ class TradingDecisionWorker:
             ),
             kelly_max_position_fraction=self._kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
-            current_equity_usdc=(snapshot.equity_usdc if snapshot is not None else None),
-            peak_bankroll_usdc=(snapshot.peak_bankroll_usdc if snapshot is not None else None),
-            kelly_drawdown_halt_fraction=self._kelly_drawdown_halt_fraction,
             order_retry_limit=self._order_retry_limit,
             operation=plan.intent.side.value.lower(),
         )
@@ -514,27 +502,6 @@ class TradingDecisionWorker:
                 "review": serialize_review(review),
             },
         )
-        # drawdown lockout 专属事件：让运维直接 grep DRAWDOWN_LOCKOUT_TRIGGERED
-        # 而不需从 risk_check_failed reason 字段过滤。每次拒会重复 emit
-        # （非 edge-detection），下游 analytics 用 audit dedup。
-        if (
-            review.risk_decision is not None
-            and not review.risk_decision.passed
-            and review.risk_decision.reason == "drawdown_lockout_active"
-        ):
-            await self._publish(
-                DomainEventType.DRAWDOWN_LOCKOUT_TRIGGERED,
-                trace_id=plan.trace_id,
-                market_slug=plan.market.market_slug,
-                condition_id=plan.market.condition_id,
-                token_id=plan.intent.token_id,
-                reason="drawdown_lockout_active",
-                payload={
-                    "entry_event_id": event.event_id,
-                    "origin": TRADING_DECISION_WORKER_ORIGIN,
-                    "review": serialize_review(review),
-                },
-            )
         result = await self._handle_order_result(
             source_event=event,
             order_result=review.order_result,
@@ -1150,9 +1117,6 @@ class TradingDecisionWorker:
             ),
             kelly_max_position_fraction=self._kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
-            current_equity_usdc=(snapshot.equity_usdc if snapshot is not None else None),
-            peak_bankroll_usdc=(snapshot.peak_bankroll_usdc if snapshot is not None else None),
-            kelly_drawdown_halt_fraction=self._kelly_drawdown_halt_fraction,
             order_retry_limit=self._order_retry_limit,
             operation=intent.side.value.lower(),
         )
