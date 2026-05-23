@@ -98,6 +98,19 @@ runtime -> domain
 - Reconciler 不在批量扫描里长时间持有交易状态写锁。
 - 队列必须有容量上限、可观测性和降级路径。
 
+## 7.1 操盘和审计统一走后端 API（不绕过后端）
+
+**所有运行时观测、操盘动作、审计查询、账户审计都必须通过后端 admin API**，不允许 agent / 操盘脚本 / 前端绕过后端直接调链上 RPC、Polymarket data-api、Goalserve 等外部源。
+
+- **理由**：后端是统一的数据入口和审计源，绕过后端 → 状态不一致 + 审计断链 + 直接调用外部源没有 audit + 没有 retry/降级 + 鉴权脱管。
+- **缺接口怎么办**：不允许"临时绕过"——**直接在后端扩展接口或新增 endpoint**，把功能落到 `src/polymarket_trader/api/routes/` + `src/polymarket_trader/app/admin_*`，并保证：
+  - 涉及账户/持仓/资金状态：从 reconcile worker + account_state_store 的内存快照取，落 audit
+  - 涉及链上余额（USDC balance/allowance、合约 redeem 状态）：从 `clob_client.get_balance_allowance` 或 `data_client` 取，结果回写 account snapshot 并落 audit
+  - 涉及第三方外部数据（Goalserve odds/score、Polymarket orderbook）：通过对应 infra client 取，结果回写运行时 store
+  - 任何查询动作都要落对应 audit_event（如 `orderbook_direction_queried`、`account_balance_queried` 等），事后可复盘"agent 为什么这么做"
+- **agent / 操盘脚本**：调用统一前缀的 admin endpoints（`/runtime`, `/portfolio/*`, `/markets/*`, `/positions/*`, `/orders/*`, `/audit-events`, `/candidates/*`），不直接 import 内部 module 或调外部 URL
+- **例外**：仅在初始 bootstrap / lifecycle hook 调用框架自身实现的 client，业务路径不绕过
+
 ## 8. 设计与改造取向
 
 **目标永远是最优方案，不是最小改动，也不是兼容旧逻辑**。每次改动按目标形态实现，不在中间形态停留；遇到需要重构、重写、删除的旧代码或旧结构直接替换，不为了"减少改动"保留次优实现。
