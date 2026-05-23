@@ -77,21 +77,32 @@ def _to_decimal(value: Any) -> Decimal | None:
 def _devig_two_way(
     home_implied: Decimal,
     away_implied: Decimal,
+    *,
+    draw_implied: Decimal | None = None,
 ) -> _DevigResult | None:
-    """对 2-way 盘口的原始 implied 概率去抽水。
+    """对盘口的原始 implied 概率去抽水。
 
-    两侧 implied 必须均为正且和为正；任一不满足返回 None（赔率不可信）。
+    统一走 N-way power method（domain/devig.py）。三结果运动（足球整场）必须传
+    ``draw_implied``——否则 2-way devig 会丢掉 draw 的 vig 份额，导致 home/away
+    被高估 0.15-0.20（举例 home_eu=2.0 away_eu=4.0 draw_eu=3.0：2-way 给 home
+    true_p=0.667，3-way 给 0.462）。
+
+    任一 implied <= 0 或求和不可用时返回 None（赔率不可信）。
     """
+    from polymarket_trader.domain.devig import devig_implied, overround as _ovr
 
     if home_implied <= Decimal("0") or away_implied <= Decimal("0"):
         return None
-    overround = home_implied + away_implied
-    if overround <= Decimal("0"):
+    raw: dict[str, Decimal] = {"home": home_implied, "away": away_implied}
+    if draw_implied is not None and draw_implied > Decimal("0"):
+        raw["draw"] = draw_implied
+    fair = devig_implied(raw)
+    if not fair or fair["home"] <= Decimal("0") or fair["away"] <= Decimal("0"):
         return None
     return _DevigResult(
-        home_true_p=home_implied / overround,
-        away_true_p=away_implied / overround,
-        overround=overround,
+        home_true_p=fair["home"],
+        away_true_p=fair["away"],
+        overround=_ovr(raw),
     )
 
 
@@ -114,7 +125,10 @@ def _goalserve_moneyline_devig(
     away_implied = _to_decimal(gs.get("away_implied_prob"))
     if home_implied is None or away_implied is None:
         return None
-    return _devig_two_way(home_implied, away_implied)
+    # 3-way（含 draw）必须传 draw_implied 让 N-way devig 正确归一；soccer 整场
+    # ML 不修这个会被 2-way 错算高估 0.20。2-way 运动留 None 自动退化到 2 个结果。
+    draw_implied = _to_decimal(gs.get("draw_implied_prob"))
+    return _devig_two_way(home_implied, away_implied, draw_implied=draw_implied)
 
 
 def _moneyline_side_suspended(

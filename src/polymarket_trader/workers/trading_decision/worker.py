@@ -129,6 +129,7 @@ class TradingDecisionWorker:
         kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
         order_retry_limit: int | None = None,
         entry_metadata_provider: EntryMetadataProvider | None = None,
+        orderbook_direction_signal_reader: "Callable[[str, float], Any] | None" = None,
         parameter_store: "ParameterStore | None" = None,
         heartbeat: HeartbeatCallback | None = None,
         idle_heartbeat_seconds: float = _TRADING_DECISION_IDLE_HEARTBEAT_SECONDS,
@@ -153,6 +154,9 @@ class TradingDecisionWorker:
         self._order_retry_limit_default = order_retry_limit
         self._parameter_store = parameter_store
         self._entry_metadata_provider = entry_metadata_provider
+        # 注入 OrderbookDeltaStore.direction_signal callable（保留 layering：
+        # worker 不直接 import runtime/orderbook_delta 类型，仅通过 callable 取 dict）。
+        self._orderbook_direction_signal_reader = orderbook_direction_signal_reader
         # supervisor 注入的轻量回调；worker 不直接持有 Supervisor，避免 P0 模块反向耦合到 runtime。
         self._heartbeat = heartbeat
         # 单测可以设 < 1s 让 idle heartbeat 路径快速触发；运行时仍用 60s 默认。

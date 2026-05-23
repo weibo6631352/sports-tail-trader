@@ -4,7 +4,7 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Iterable
+from typing import Any, Iterable
 
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 
@@ -89,6 +89,22 @@ class OrderbookDirectionSignal:
     flow_imbalance: Decimal       # ask 消耗率 - bid 消耗率 归一(订单流向)
     direction_label: str          # "yes" | "no" | "neutral"(综合 score+momentum+flow)
     confidence: Decimal           # [0, 1]
+
+    def as_metadata(self) -> dict[str, Any]:
+        """序列化成 dict 注入 ExtensionContext.metadata['orderbook_direction']。
+
+        策略只消费归一化复合信号 + label + confidence；不暴露 raw deltas
+        （留给 admin 审计 endpoint）。Decimal 转 str 以保证 JSON 安全。
+        """
+        return {
+            "window_seconds": float(self.window_seconds),
+            "sample_count": self.sample_count,
+            "direction_score": str(self.direction_score),
+            "price_momentum": str(self.price_momentum),
+            "flow_imbalance": str(self.flow_imbalance),
+            "direction_label": self.direction_label,
+            "confidence": str(self.confidence),
+        }
 
 
 # direction_score 用 mid_delta 归一: 每 0.005 价格波动算 1 个标准单位,

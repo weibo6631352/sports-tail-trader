@@ -307,6 +307,10 @@ def _extract_goalserve_moneyline(event: LiveEvent) -> dict[str, Any] | None:
     outcomes = ml_market.get("outcomes", [])
     home_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("home", "1")), None)
     away_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("away", "2")), None)
+    # 3-way 运动（足球整场）必须把 draw outcome 也抽出来——否则 odds_gap 走
+    # 2-way devig 会丢掉 draw 的 vig 份额，高估 home/away 0.15-0.20。
+    # 2-way 运动（棒球/篮球/网球）outcomes 里没有 draw，自然为 None。
+    draw_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("draw", "x", "tie")), None)
     if home_outcome is None or away_outcome is None:
         return None
     try:
@@ -316,9 +320,16 @@ def _extract_goalserve_moneyline(event: LiveEvent) -> dict[str, Any] | None:
             return None
         home_implied = round(1.0 / home_eu, 6)
         away_implied = round(1.0 / away_eu, 6)
+        draw_eu: float | None = None
+        draw_implied: float | None = None
+        if draw_outcome is not None:
+            draw_eu_raw = float(draw_outcome.get("value_eu", 0) or 0)
+            if draw_eu_raw > 0:
+                draw_eu = draw_eu_raw
+                draw_implied = round(1.0 / draw_eu_raw, 6)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
-    return {
+    payload: dict[str, Any] = {
         "market_name": ml_market.get("name"),
         "home_eu": home_eu,
         "away_eu": away_eu,
@@ -328,6 +339,11 @@ def _extract_goalserve_moneyline(event: LiveEvent) -> dict[str, Any] | None:
         "home_suspended": bool(home_outcome.get("suspended")),
         "away_suspended": bool(away_outcome.get("suspended")),
     }
+    if draw_eu is not None and draw_implied is not None:
+        payload["draw_eu"] = draw_eu
+        payload["draw_implied_prob"] = draw_implied
+        payload["draw_suspended"] = bool(draw_outcome.get("suspended"))
+    return payload
 
 
 def _extract_goalserve_spread(event: LiveEvent) -> dict[str, Any] | None:

@@ -153,7 +153,7 @@ def parse_theoddsapi_outrights_payload(
         raw_probs[outcome] = Decimal(1) / mean_decimal
     if not raw_probs:
         return None
-    fair = _power_method_devig(raw_probs)
+    fair = _power_method_devig(dict(raw_probs))
     return SeasonOddsSnapshot(
         market_key=market_key,
         fair_probabilities=fair,
@@ -169,50 +169,11 @@ def parse_theoddsapi_outrights_payload(
 
 
 def _power_method_devig(raw_probs: Mapping[str, Decimal]) -> Mapping[str, Decimal]:
-    """Power method de-vig：用幂指数把 raw 概率求和归一到 1。
+    """Power method de-vig：透传到 domain/devig.py 共享实现。"""
 
-    定义 f(k) = sum_i raw[i]^k；目标找 k 使 f(k) = 1。市场无 vig 时 k=1，
-    有 vig 时 k>1。简单牛顿迭代 5 步即可收敛到 1e-6 量级；不收敛回退到比例
-    归一。
-    """
+    from polymarket_trader.domain.devig import devig_implied
 
-    raws = list(raw_probs.values())
-    if not raws:
-        return {}
-    total = sum(raws)
-    if total <= 0:
-        return {key: Decimal(0) for key in raw_probs}
-    # 牛顿迭代：用 float 近似收敛后再用 Decimal 精确归一。
-    floats = [float(value) for value in raws]
-    k = 1.0
-    for _ in range(20):
-        powered = [v**k for v in floats]
-        f = sum(powered) - 1.0
-        if abs(f) < 1e-8:
-            break
-        # f'(k) = sum_i raw_i^k * ln(raw_i)
-        df = sum(p * (float_log(v)) for v, p in zip(floats, powered))
-        if df == 0:
-            break
-        k -= f / df
-    if k <= 0:
-        k = 1.0
-    de_vig = {key: Decimal(str(float(value) ** k)) for key, value in raw_probs.items()}
-    # 最终用比例归一兜底，确保严格求和到 1。
-    s = sum(de_vig.values())
-    if s <= 0:
-        return {key: Decimal(0) for key in raw_probs}
-    return {key: value / s for key, value in de_vig.items()}
-
-
-def float_log(value: float) -> float:
-    """``math.log`` 但 v≤0 时退化为 0，避免 de-vig 数值崩溃。"""
-
-    import math
-
-    if value <= 0:
-        return 0.0
-    return math.log(value)
+    return devig_implied(raw_probs)
 
 
 def _conflicting_bookmakers(event: Mapping[str, Any]) -> bool:
