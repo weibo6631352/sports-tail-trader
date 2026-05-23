@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import traceback
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -9,6 +11,8 @@ from polymarket_trader.domain.account import AccountSnapshot, MarketPause, Marke
 from polymarket_trader.domain.events import Fill
 from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.position import Position
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -73,6 +77,15 @@ class AccountStateStore:
     ) -> AccountSnapshot:
         with self._lock:
             if balance_usdc is not None:
+                if balance_usdc > Decimal("150"):
+                    logger.warning(
+                        "balance_usdc_set_inflated",
+                        extra={
+                            "prev_balance": str(self._balance_usdc),
+                            "new_balance": str(balance_usdc),
+                            "stack": "".join(traceback.format_stack(limit=15)),
+                        },
+                    )
                 self._balance_usdc = balance_usdc
             if allowance_usdc is not None:
                 # Cap 到 NUMERIC(38, 18) 可表示的"effectively unlimited"——见模块顶部
@@ -205,7 +218,24 @@ class AccountStateStore:
         )
         current_equity = provisional.available_usdc
         if current_equity > self._peak_bankroll_usdc:
+            # 追踪 peak_bankroll 异常推高的根因——18 行栈让定位调用方变得容易。
+            prev_peak = self._peak_bankroll_usdc
             self._peak_bankroll_usdc = current_equity
+            if current_equity > Decimal("150"):  # 历史最大 balance $140.85，超此值必有 bug
+                stack = "".join(traceback.format_stack(limit=18))
+                logger.warning(
+                    "peak_bankroll_inflated_writer",
+                    extra={
+                        "prev_peak": str(prev_peak),
+                        "new_peak": str(current_equity),
+                        "balance_usdc": str(self._balance_usdc),
+                        "allowance_usdc": str(self._allowance_usdc),
+                        "open_buy_reserved_usdc": str(provisional.open_buy_reserved_usdc),
+                        "open_orders_count": len(self._open_orders),
+                        "positions_count": len(self._positions),
+                        "stack": stack,
+                    },
+                )
         snapshot = replace(provisional, peak_bankroll_usdc=self._peak_bankroll_usdc)
         self._snapshot = snapshot
         return snapshot

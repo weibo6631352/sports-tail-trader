@@ -457,6 +457,7 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
             context,
             token_id=token_id,
             source_reason=str(tail_metadata.get("tail_reason") or "strategy_entry"),
+            entry_price=entry_price,
         )
     )
     _apply_profit_take_exit_plan(decision_metadata)
