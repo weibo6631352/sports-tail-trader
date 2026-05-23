@@ -496,20 +496,64 @@ def _estimate_fair_value(
     best_bid: Decimal,
     best_ask: Decimal | None,
 ) -> tuple[Decimal, str]:
-    """估算我方方向结算到 1.0 的概率（fair value），并返回来源标签。
+    """估算我方方向结算到 1.0 的概率(fair value),并返回来源标签。
 
-    优先级：Goalserve 盘口（moneyline/totals/spread）对我方方向的隐含概率 >
-    Polymarket 市场中价。结果 clamp 到 [0.01, 0.99]。
+    优先级:
+    1. Goalserve 盘口隐含概率(对我方方向的隐含概率,有真 odds 时最准)
+    2. math_lock 数学模型(无 odds 时基于实时比赛状态算的锁定概率)
+    3. Polymarket 中价 mid(算术,失真但兜底)
+    4. best_bid(无 ask 时保守 fallback)
+
+    每次 ws orderbook update / live state update 时 decide_exit 重跑,fair_value
+    会基于最新比赛状态更新 → exit 决策动态反映现实(用户反馈:WS 来时重估卖单)。
     """
 
     goalserve_prob = _goalserve_implied_prob_for_token(context, token_id)
     if goalserve_prob is not None:
         return _clamp_fair_value(goalserve_prob), "goalserve_implied_prob"
+    # math_lock 第 2 层 — 实时比赛状态驱动的真概率估计
+    math_prob = _math_lock_fair_value(context, token_id)
+    if math_prob is not None:
+        return _clamp_fair_value(math_prob), "math_lock"
     if best_ask is not None:
         mid = (best_bid + best_ask) / Decimal("2")
         return _clamp_fair_value(mid), "market_mid"
-    # 无 best_ask：退回 best bid 作为保守 fair value 代理。
+    # 无 best_ask:退回 best bid 作为保守 fair value 代理。
     return _clamp_fair_value(best_bid), "best_bid"
+
+
+def _math_lock_fair_value(
+    context: ExtensionContext,
+    token_id: str | None,
+) -> Decimal | None:
+    """从 math_lock 模型拿我方方向的 lock_probability 作 fair_value。"""
+
+    from strategies.sports_framework.math_lock import evaluate_math_lock
+    from strategies.sports_framework.parsing import live_game_state_from_metadata
+    from strategies.current.outcomes import describe_sports_market, target_for_token
+
+    market = context.market
+    if market is None or token_id is None:
+        return None
+    descriptor = describe_sports_market(market)
+    if not descriptor.accepted or descriptor.market_type is None:
+        return None
+    target = target_for_token(market, token_id)
+    if target is None:
+        return None
+    game = live_game_state_from_metadata(context.metadata)
+    if game is None:
+        return None
+    result = evaluate_math_lock(
+        descriptor.market_type,
+        target.side,
+        descriptor.line,
+        game,
+        market_slug=market.market_slug,
+    )
+    if result.method == "unsupported" or result.lock_probability <= Decimal("0"):
+        return None
+    return result.lock_probability
 
 
 def _clamp_fair_value(value: Decimal) -> Decimal:
