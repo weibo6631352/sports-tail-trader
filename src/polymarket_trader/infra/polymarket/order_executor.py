@@ -236,6 +236,11 @@ class PolymarketOrderExecutor:
         self._idempotency_index: dict[str, _IdempotencyEntry] = {}
         self._completed: "OrderedDict[str, OrderResult]" = OrderedDict()
         self._inflight: dict[str, asyncio.Task[OrderResult]] = {}
+        # Fire-and-forget lifecycle 发布任务的强引用集合：Python asyncio 仅持有
+        # task 的弱引用，未保留强引用的 create_task 可能在 GC 时被回收导致审计
+        # 事件静默丢失（§7：审计副作用必须可靠承接，不阻塞主链路也不允许丢失）。
+        # add_done_callback 在任务完成时同步从集合 discard——O(1) 不涉及 IO。
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     async def submit(self, intent: OrderIntent) -> OrderResult:
         if not isinstance(intent, (BuyOrderIntent, SellOrderIntent)):
@@ -252,8 +257,46 @@ class PolymarketOrderExecutor:
         return await self._execute(request, intent)
 
     async def aclose(self) -> None:
+        # 先 drain 后台 lifecycle 发布任务，确保审计事件落 outbox 后再关线程池；
+        # 关停时仍保持 P0 不变量（同步入队不丢，关闭路径才允许 await drain）。
+        pending = list(self._background_tasks)
+        for task in pending:
+            if not task.done():
+                task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        self._background_tasks.clear()
         # wait=True 确保正在进行的 EIP-712 签名任务完成后再关闭线程池，避免签名中断导致订单状态不确定。
         await asyncio.to_thread(self._thread_pool.shutdown, wait=True, cancel_futures=False)
+
+    def _spawn_background(self, coro: Any, *, name: str) -> asyncio.Task[Any]:
+        """登记 fire-and-forget 任务到强引用集合，避免被 GC 静默回收。
+
+        §7：审计/lifecycle 是 P0 主链路允许 fire-and-forget 的副作用，但必须可靠
+        承接。set.add / add_done_callback 都是 O(1) 同步操作，不引入 await，不
+        破坏关键锁不变量。
+        """
+        task = asyncio.create_task(coro, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._log_task_exception)
+        return task
+
+    def _log_task_exception(self, task: asyncio.Task[Any]) -> None:
+        # 后台任务静默失败会让审计链路出现不可见缺口——主动通过模块 logger 上报，
+        # 而不是依赖 asyncio default exception handler。CancelledError 视为干净关闭信号。
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        if isinstance(exc, asyncio.CancelledError):
+            return
+        logger.warning(
+            "order_executor.background_task_failed name=%s",
+            task.get_name(),
+            exc_info=exc,
+        )
 
     def close(self) -> None:
         # 同步等待签名任务完成，防止关闭时中断进行中的订单签名。
@@ -367,7 +410,7 @@ class PolymarketOrderExecutor:
                 started_at=started_at,
                 reason="critical_lock_timeout",
             )
-            asyncio.create_task(
+            self._spawn_background(
                 self._publish_lifecycle_event(
                     "order_state_updated",
                     request,
@@ -376,7 +419,8 @@ class PolymarketOrderExecutor:
                     reason=result.reason,
                     raw_response=result.raw_response_summary,
                     timestamps=result.timestamps,
-                )
+                ),
+                name="order_executor.lifecycle.critical_lock_timeout",
             )
             return result
         try:
@@ -426,7 +470,7 @@ class PolymarketOrderExecutor:
             return await asyncio.wait_for(asyncio.shield(task), timeout=timeout_s)
         except asyncio.TimeoutError:
             result = self._timeout_result(request, intent, started_at=request.timestamps.queued_at)
-            asyncio.create_task(
+            self._spawn_background(
                 self._publish_lifecycle_event(
                     "order_state_updated",
                     request,
@@ -435,7 +479,8 @@ class PolymarketOrderExecutor:
                     reason=result.reason,
                     raw_response=result.raw_response_summary,
                     timestamps=result.timestamps,
-                )
+                ),
+                name="order_executor.lifecycle.await_timeout",
             )
             return result
 
@@ -563,7 +608,7 @@ class PolymarketOrderExecutor:
             return result
         except asyncio.TimeoutError:
             result = self._timeout_result(request, intent, started_at=timestamps.queued_at)
-            asyncio.create_task(
+            self._spawn_background(
                 self._publish_lifecycle_event(
                     "order_state_updated",
                     request,
@@ -572,7 +617,8 @@ class PolymarketOrderExecutor:
                     reason=result.reason,
                     raw_response=result.raw_response_summary,
                     timestamps=result.timestamps,
-                )
+                ),
+                name="order_executor.lifecycle.run_timeout",
             )
             return result
         except Exception as exc:

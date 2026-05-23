@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
@@ -58,6 +59,43 @@ class TradingService:
         # 不传也行；CLAUDE.md §3 要求 RiskManager 是强制门禁，但 §7 又要 P0 主
         # 链路只允许 put_nowait，所以投递失败不能反向阻塞 review_intent。
         self._event_bus = event_bus
+        # 风控拒绝在 bus 不支持 publish_nowait 时降级为 fire-and-forget；保留强
+        # 引用避免 asyncio 弱引用语义下任务被 GC 静默吞掉，导致审计事件丢失（§7）。
+        # 没有专属 aclose 入口时，集合在 done_callback 中自然 discard。
+        self._background_tasks: set[asyncio.Task[Any]] = set()
+
+    def _spawn_background(self, coro: Any, *, name: str) -> asyncio.Task[Any]:
+        """登记 fire-and-forget 任务到强引用集合，防止被 GC 中途吞掉。"""
+        task = asyncio.create_task(coro, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._log_task_exception)
+        return task
+
+    def _log_task_exception(self, task: asyncio.Task[Any]) -> None:
+        # 后台任务静默失败会让风控拒绝审计链路出现空洞——主动通过模块 logger 上报。
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        if isinstance(exc, asyncio.CancelledError):
+            return
+        logger.warning(
+            "trading_service.background_task_failed name=%s",
+            task.get_name(),
+            exc_info=exc,
+        )
+
+    async def aclose(self) -> None:
+        """drain fire-and-forget 任务，保证审计事件不在关停时丢失。"""
+        pending = list(self._background_tasks)
+        for task in pending:
+            if not task.done():
+                task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        self._background_tasks.clear()
 
     async def review_intent(
         self,
@@ -272,9 +310,12 @@ class TradingService:
             bus.publish_nowait(OutboxPriority.P3, event)
         except AttributeError:
             # event_bus 不支持 publish_nowait（如测试桩）——降级为 fire-and-forget task。
-            import asyncio
-
-            asyncio.ensure_future(bus.publish(OutboxPriority.P3, event))
+            # 必须保留强引用：Python asyncio 文档明确警告未保留引用的 task 可能在
+            # 执行中被 GC，从而静默吞掉风控拒绝审计事件（§7）。
+            self._spawn_background(
+                bus.publish(OutboxPriority.P3, event),
+                name="trading_service.publish_risk_event",
+            )
         except Exception:
             # 审计事件投递失败必须可见，但不能阻塞 P0 主链路（§7）。
             logger.warning(

@@ -1125,6 +1125,8 @@ async def shutdown_runtime(runtime: RuntimeComponents) -> None:
     runtime.background_tasks.clear()
 
     with suppress(Exception):
+        await runtime.trading_service.aclose()
+    with suppress(Exception):
         await runtime.order_executor.aclose()
     for client in (runtime.gamma_client, runtime.clob_client, runtime.data_client):
         with suppress(Exception):
