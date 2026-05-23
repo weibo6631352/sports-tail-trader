@@ -285,21 +285,24 @@ def evaluate_dynamic_exit(
     bullish_vote = 0
     bearish_vote = 0
     vote_reasons: list[str] = []
-    # 信号 0：fair_value 跌幅本身（融合后）
-    if fair_value <= entry_price * Decimal("0.5"):
-        bearish_vote += 2  # 跌穿 50% 强信号
-        vote_reasons.append(f"fair_value_collapse:{fair_value:.3f}<=entry*0.5")
-    elif fair_value <= entry_price * Decimal("0.7"):
-        bearish_vote += 1
-        vote_reasons.append(f"fair_value_weak:{fair_value:.3f}<=entry*0.7")
+    # 信号 0：fair_value 跌幅（融合后）— 阈值收紧，反应快少亏。
+    # 跌 30% 强信号（旧 50%）；跌 20% 弱信号（旧 30%）。盘口风向最敏感，
+    # 早识别 + early exit 比等大幅亏损后 dump 强。
+    if fair_value <= entry_price * Decimal("0.7"):
+        bearish_vote += 2  # 跌穿 30% 强信号
+        vote_reasons.append(f"fair_value_collapse:{fair_value:.3f}<=entry*0.7")
+    elif fair_value <= entry_price * Decimal("0.8"):
+        bearish_vote += 1  # 跌 20% 弱信号
+        vote_reasons.append(f"fair_value_weak:{fair_value:.3f}<=entry*0.8")
     elif fair_value >= entry_price * Decimal("1.1"):
         bullish_vote += 1
         vote_reasons.append(f"fair_value_strong:{fair_value:.3f}>=entry*1.1")
-    # 信号 1：盘口方向（imbalance），主信号权重 2
-    if imbalance < Decimal("0.35"):
+    # 信号 1：盘口方向（imbalance）— 主信号最敏感，权重 2。
+    # 阈值收紧 0.35→0.40：bid 比例 ≤40% 即视为卖方明显，反应快。
+    if imbalance < Decimal("0.4"):
         bearish_vote += 2
         vote_reasons.append(f"orderbook_bearish:imbalance={imbalance:.3f}")
-    elif imbalance > Decimal("0.65"):
+    elif imbalance > Decimal("0.6"):
         bullish_vote += 2
         vote_reasons.append(f"orderbook_bullish:imbalance={imbalance:.3f}")
     # 信号 2：Goalserve 赔率相对入场价偏离（绝对值无意义，必须看相对偏离）。
@@ -328,8 +331,9 @@ def evaluate_dynamic_exit(
         elif ml_deviation < -Decimal("0.15"):
             bearish_vote += 1
             vote_reasons.append(f"math_deviation_neg:{ml_deviation:+.3f}")
-    # fair_value 仍作辅助门禁（轻微波动不触发止损）
-    fair_value_bearish = fair_value <= entry_price * Decimal("0.7")
+    # fair_value 辅助门禁：跌 20% 即触发评估（旧 30%）。盘口风向反应快，
+    # 早识别 fair_value 走弱 + orderbook 卖方一致 → 立即止损少亏 10%。
+    fair_value_bearish = fair_value <= entry_price * Decimal("0.8")
     metadata.update({
         "dynamic_exit_bullish_vote": bullish_vote,
         "dynamic_exit_bearish_vote": bearish_vote,
