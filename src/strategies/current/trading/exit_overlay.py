@@ -332,8 +332,10 @@ def evaluate_dynamic_exit(
         ),
         "dynamic_exit_math_locked": math_locked,
     })
-    # 止损触发：必须同时满足 fair_value bearish + bearish_vote ≥ 3 + 净 bearish
-    if fair_value_bearish and bearish_vote >= 3 and bearish_vote > bullish_vote:
+    # 止损触发：fair_value bearish + bearish_vote ≥ 2 + 净 bearish。
+    # 阈值 2 等价于"fair_value collapse 单独+2 已够"或"orderbook bearish+1 其他确认"。
+    # math_lock>=0.5 (bullish+2) 自动 veto 因为 net bearish 不成立。
+    if fair_value_bearish and bearish_vote >= 2 and bearish_vote > bullish_vote:
         # 价格 floor：限制单笔最大亏损 40%，避免薄簿砸到底
         exit_floor = entry_price * Decimal("0.6")
         safe_exit_price = max(clearing_price, exit_floor)
