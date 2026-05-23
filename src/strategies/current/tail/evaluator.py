@@ -126,6 +126,15 @@ def evaluate_tail_opportunity(
     if game is None:
         return _reject(None, TailRejectReason.MISSING_LIVE_GAME_STATE.value)
 
+    # 不做电竞 (CLAUDE.md §7.0): Polymarket 电竞盘口流动性=0 + Goalserve 不提供
+    # LoL 赛点/经济/击杀/防御塔等核心指标 → Kelly 无真概率源 + 无退出通道。
+    if is_esports_game(game):
+        return _reject(
+            None,
+            TailRejectReason.ESPORTS_MARKET_NOT_AUTO_TRADABLE.value,
+            metadata={"esports_sport": game.sport, "reject_reason": "policy_no_esports"},
+        )
+
     candidate = _candidate(game, market)
     scope_reject_reason = _market_scope_reject_reason(market)
     if scope_reject_reason is not None:
@@ -340,6 +349,15 @@ def evaluate_scale_in_opportunity(
         )
     if game is None:
         return _reject(None, TailRejectReason.MISSING_LIVE_GAME_STATE.value)
+
+    # 不做电竞 (CLAUDE.md §7.0): Polymarket 电竞盘口流动性=0 + Goalserve 不提供
+    # LoL 赛点/经济/击杀/防御塔等核心指标 → Kelly 无真概率源 + 无退出通道。
+    if is_esports_game(game):
+        return _reject(
+            None,
+            TailRejectReason.ESPORTS_MARKET_NOT_AUTO_TRADABLE.value,
+            metadata={"esports_sport": game.sport, "reject_reason": "policy_no_esports"},
+        )
 
     candidate = _candidate(game, market)
     scope_reject_reason = _market_scope_reject_reason(market)
