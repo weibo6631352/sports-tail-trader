@@ -44,6 +44,9 @@ class OrderResultStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ExecutionTimestamps:
+    # signal_at = 策略 decision 时刻（信号产生时），用于 supervisor 测量
+    # entry_signal_to_submit_ms（信号→submit 整链路延迟）。
+    signal_at: datetime | None = None
     queued_at: datetime | None = None
     sign_started_at: datetime | None = None
     signed_at: datetime | None = None

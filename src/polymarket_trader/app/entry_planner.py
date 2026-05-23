@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Callable, Iterable, Mapping
+
+from polymarket_trader.serialization import utc_now
 
 from polymarket_trader.app.extension_intent_builder import decision_to_trade_intent
 from polymarket_trader.app.entry_plan import EntryPlan
@@ -221,7 +223,11 @@ class EntryPlanner:
                     metadata=base_metadata,
                     manual_confirmation=manual_confirmation,
                 )
+                # signal_at 在 decide_entry 返回后立即捕获——这是"策略信号产生"
+                # 的时刻；后续 risk→executor 的链路时延以此为基准，由 OrderExecutor
+                # 发布到 entry_signal_to_submit_ms gauge 供 supervisor 削载决策。
                 decision = self._extension_hooks.decide_entry(entry_context)
+                signal_at = utc_now()
                 self._record_decision(
                     hook_name="decide_entry",
                     context=entry_context,
@@ -230,12 +236,17 @@ class EntryPlanner:
                 plan_metadata.update(decision.metadata)
                 decision_kind = decision.decision_kind
                 summary = decision.summary
+                # 通过 decision.metadata 透传 signal_at 到 intent.metadata；
+                # decision_to_managed_intent 把 decision.metadata 原样赋给 intent.metadata。
+                merged_decision_metadata = dict(decision.metadata)
+                merged_decision_metadata["signal_at"] = signal_at
+                decision_with_signal = replace(decision, metadata=merged_decision_metadata)
                 intent = decision_to_trade_intent(
                     trace_id=trace_id,
                     strategy_id=self._strategy_id,
                     market=resolved_market,
                     default_token_id=focus_token_id,
-                    decision=decision,
+                    decision=decision_with_signal,
                 )
                 if intent is None and decision.reason:
                     reason = decision.reason

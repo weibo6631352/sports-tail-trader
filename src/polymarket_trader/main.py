@@ -715,6 +715,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         sign_timeout_ms=settings.order_sign_timeout_ms,
         submit_timeout_ms=settings.order_submit_timeout_ms,
         critical_lock_timeout_ms=settings.critical_lock_timeout_ms,
+        metrics=metrics,
     )
 
     async def load_market_rest_snapshot(token_id: str):

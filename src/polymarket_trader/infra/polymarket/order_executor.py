@@ -36,9 +36,24 @@ from polymarket_trader.infra.polymarket.order_result_builder import (
     normalize_execution_response,
 )
 from polymarket_trader.infra.outbox.event_sink import OutboxSink
+from polymarket_trader.observability.metrics import MetricsRegistry
 from polymarket_trader.serialization import utc_now
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_signal_at(intent: ManagedOrderIntent) -> datetime | None:
+    """从 intent.metadata 提取 signal_at（策略 decide_entry 时刻）。
+
+    只有 Buy/SellOrderIntent 有 metadata；Cancel/Replace 不携带 signal_at。
+    缺失返回 None——supervisor 的 entry_signal_to_submit_ms gauge 在 None 时不更新。
+    """
+    if not isinstance(intent, (BuyOrderIntent, SellOrderIntent)):
+        return None
+    value = intent.metadata.get("signal_at")
+    if isinstance(value, datetime):
+        return value
+    return None
 
 
 def _as_text(value: Any | None) -> str | None:
@@ -199,9 +214,14 @@ class PolymarketOrderExecutor:
         replace_timeout_ms: int | None = None,
         critical_lock_timeout_ms: int = 20,
         max_cached_results: int = 1024,
+        metrics: MetricsRegistry | None = None,
     ) -> None:
         self._client = client
         self._outbox = outbox
+        # metrics 用于发布 entry_signal_to_submit_ms / trading_lock_wait_ms /
+        # executor_queue_wait_ms 三个 P0 latency gauge——supervisor 读这三个值做
+        # 低优先级载荷削减。None 时跳过发布（测试场景），不影响交易主链路。
+        self._metrics = metrics
         self._thread_pool = thread_pool or ThreadPoolExecutor(
             max_workers=4,
             thread_name_prefix="trader-order-executor",
@@ -322,7 +342,14 @@ class PolymarketOrderExecutor:
         intent: ManagedOrderIntent,
     ) -> OrderResult:
         started_at = utc_now()
-        request = replace(request, timestamps=ExecutionTimestamps(queued_at=started_at))
+        # signal_at 从 intent.metadata 提取（由 entry_planner 在 decide_entry 前注入），
+        # 用来在 submit_started_at 时计算 entry_signal_to_submit_ms。intent 是 frozen
+        # dataclass，metadata 是只读 Mapping——读取不产生写副作用。
+        signal_at = _extract_signal_at(intent)
+        request = replace(
+            request,
+            timestamps=ExecutionTimestamps(signal_at=signal_at, queued_at=started_at),
+        )
         signature = request.fingerprint()
         task: asyncio.Task[OrderResult] | None = None
         existing_result: OrderResult | None = None
@@ -442,6 +469,7 @@ class PolymarketOrderExecutor:
             if request.action in {"submit", "cancel", "replace"}:
                 sign_started_at = utc_now()
                 timestamps = ExecutionTimestamps(
+                    signal_at=timestamps.signal_at,
                     queued_at=timestamps.queued_at,
                     sign_started_at=sign_started_at,
                 )
@@ -455,6 +483,7 @@ class PolymarketOrderExecutor:
                         timeout_s=self._sign_timeout_s,
                     )
                 timestamps = ExecutionTimestamps(
+                    signal_at=timestamps.signal_at,
                     queued_at=timestamps.queued_at,
                     sign_started_at=sign_started_at,
                     signed_at=utc_now(),
@@ -471,7 +500,18 @@ class PolymarketOrderExecutor:
                 )
 
             submit_started_at = utc_now()
+            # P0 latency gauges：发布 executor 内部队列等待时间，以及（若上游传了
+            # signal_at）信号→submit 整链路时延。set_gauge 是 sync 内存写，符合
+            # §7 P0 热路径"只允许同步副作用"约束。
+            if self._metrics is not None:
+                if timestamps.queued_at is not None:
+                    queue_wait_ms = (submit_started_at - timestamps.queued_at).total_seconds() * 1000.0
+                    self._metrics.set_gauge("executor_queue_wait_ms", queue_wait_ms)
+                if timestamps.signal_at is not None:
+                    signal_to_submit_ms = (submit_started_at - timestamps.signal_at).total_seconds() * 1000.0
+                    self._metrics.set_gauge("entry_signal_to_submit_ms", signal_to_submit_ms)
             timestamps = ExecutionTimestamps(
+                signal_at=timestamps.signal_at,
                 queued_at=timestamps.queued_at,
                 sign_started_at=timestamps.sign_started_at,
                 signed_at=timestamps.signed_at,
@@ -493,6 +533,7 @@ class PolymarketOrderExecutor:
                 intent=intent,
                 response=response_model,
                 timestamps=ExecutionTimestamps(
+                    signal_at=timestamps.signal_at,
                     queued_at=timestamps.queued_at,
                     sign_started_at=timestamps.sign_started_at,
                     signed_at=timestamps.signed_at,
@@ -701,10 +742,16 @@ class PolymarketOrderExecutor:
         )
 
     async def _acquire_lock(self) -> asyncio.Lock:
+        # 在 await 前后取 wall-clock 时差测量临界锁等待——测量发生在锁外，符合 §7
+        # （关键锁内禁止 IO/日志/序列化）。set_gauge 是 sync 的纯内存写。
+        start_at = utc_now()
         try:
             await asyncio.wait_for(self._idempotency_lock.acquire(), timeout=self._critical_lock_timeout_s)
         except asyncio.TimeoutError as exc:
             raise TimeoutError("order executor critical lock timeout") from exc
+        if self._metrics is not None:
+            wait_ms = (utc_now() - start_at).total_seconds() * 1000.0
+            self._metrics.set_gauge("trading_lock_wait_ms", wait_ms)
         return self._idempotency_lock
 
     def _store_task_result(self, key: str, task: asyncio.Task[OrderResult]) -> None:

@@ -349,3 +349,134 @@ def test_concurrent_submit_same_idempotency_key_deduplicates() -> None:
         )
     finally:
         executor.close()
+
+
+# ============================================================
+# P0 latency gauges：supervisor load-shedding 依赖三个 gauge 持续更新；
+# 任何一个缺失/全 0 → 削载信号死路一条。
+# ============================================================
+
+
+def _gauge_value(metrics, name: str) -> float | None:
+    snap = metrics.snapshot()
+    for gauge in snap.gauges:
+        if gauge.name == name:
+            return gauge.value
+    return None
+
+
+def test_metrics_none_does_not_break_executor() -> None:
+    """metrics=None（测试场景默认）必须正常下单——发布到 gauge 是可选副作用。"""
+    sink = _CollectingOutboxSink()
+    client = InMemoryPolymarketOrderClient()
+    executor = PolymarketOrderExecutor(client=client, outbox=sink, metrics=None)
+    try:
+        async def run() -> None:
+            result = await executor.submit(_build_buy_intent())
+            await asyncio.sleep(0)
+            assert result.status == OrderResultStatus.LIVE
+
+        _run(run())
+    finally:
+        executor.close()
+
+
+def test_trading_lock_wait_gauge_published() -> None:
+    """_acquire_lock 必须发布 trading_lock_wait_ms gauge（即使 wait ≈ 0 也要更新到非 None）。"""
+    from polymarket_trader.observability.metrics import MetricsRegistry
+
+    metrics = MetricsRegistry()
+    sink = _CollectingOutboxSink()
+    client = InMemoryPolymarketOrderClient()
+    executor = PolymarketOrderExecutor(client=client, outbox=sink, metrics=metrics)
+    try:
+        async def run() -> None:
+            await executor.submit(_build_buy_intent())
+            await asyncio.sleep(0)
+
+        _run(run())
+        value = _gauge_value(metrics, "trading_lock_wait_ms")
+        assert value is not None, "trading_lock_wait_ms 应被发布"
+        assert value >= 0.0
+    finally:
+        executor.close()
+
+
+def test_executor_queue_wait_gauge_published() -> None:
+    """submit_started_at - queued_at 必须发布到 executor_queue_wait_ms。"""
+    from polymarket_trader.observability.metrics import MetricsRegistry
+
+    metrics = MetricsRegistry()
+    sink = _CollectingOutboxSink()
+    client = InMemoryPolymarketOrderClient()
+    executor = PolymarketOrderExecutor(client=client, outbox=sink, metrics=metrics)
+    try:
+        async def run() -> None:
+            await executor.submit(_build_buy_intent())
+            await asyncio.sleep(0)
+
+        _run(run())
+        value = _gauge_value(metrics, "executor_queue_wait_ms")
+        assert value is not None, "executor_queue_wait_ms 应被发布"
+        assert value >= 0.0
+    finally:
+        executor.close()
+
+
+def test_entry_signal_to_submit_gauge_reflects_signal_at() -> None:
+    """intent.metadata['signal_at'] 存在时，executor 必须发布 entry_signal_to_submit_ms。
+
+    显式构造一个 100ms 前的 signal_at，验证 gauge 至少 ≥ 100ms。"""
+    from datetime import timedelta
+    from polymarket_trader.observability.metrics import MetricsRegistry
+    from polymarket_trader.serialization import utc_now
+
+    metrics = MetricsRegistry()
+    sink = _CollectingOutboxSink()
+    client = InMemoryPolymarketOrderClient()
+    executor = PolymarketOrderExecutor(client=client, outbox=sink, metrics=metrics)
+    try:
+        signal_at = utc_now() - timedelta(milliseconds=100)
+        intent = BuyOrderIntent(
+            strategy_id="sports_tail",
+            trace_id="trace-signal",
+            condition_id="cond-1",
+            token_id="tok-1",
+            price=Decimal("0.72"),
+            amount_usdc=Decimal("5"),
+            market_slug="slug-1",
+            order_type=OrderType.GTC,
+            metadata={"signal_at": signal_at},
+        )
+
+        async def run() -> None:
+            await executor.submit(intent)
+            await asyncio.sleep(0)
+
+        _run(run())
+        value = _gauge_value(metrics, "entry_signal_to_submit_ms")
+        assert value is not None, "entry_signal_to_submit_ms 应被发布"
+        assert value >= 100.0, f"signal_at 在 100ms 前，gauge 应 ≥ 100ms，实际 {value}"
+    finally:
+        executor.close()
+
+
+def test_entry_signal_to_submit_skipped_when_no_signal_at() -> None:
+    """没有 signal_at 时不应发布 entry_signal_to_submit_ms（保留旧值不污染信号）。"""
+    from polymarket_trader.observability.metrics import MetricsRegistry
+
+    metrics = MetricsRegistry()
+    sink = _CollectingOutboxSink()
+    client = InMemoryPolymarketOrderClient()
+    executor = PolymarketOrderExecutor(client=client, outbox=sink, metrics=metrics)
+    try:
+        async def run() -> None:
+            await executor.submit(_build_buy_intent())  # metadata 为空
+            await asyncio.sleep(0)
+
+        _run(run())
+        # gauge 不应被更新（snapshot 中不含该 metric）
+        value = _gauge_value(metrics, "entry_signal_to_submit_ms")
+        assert value is None, f"无 signal_at 时不应发布，得到 {value}"
+    finally:
+        executor.close()
