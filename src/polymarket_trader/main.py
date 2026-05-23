@@ -218,6 +218,10 @@ def _build_livescore_active_sports_provider(
     必须廉价（每轮都调）：只做一次 registry 快照遍历 + 内存判断，不做任何 I/O。
     """
 
+    # 同 inplay provider:Polymarket end_date 对体育单场市场常 == start_time,
+    # 不能用 end > now 判 live。MLB/NBA/NHL/NFL/Tennis 单场 ≤ 6h + 1h buffer。
+    _LIVESCORE_GAME_WINDOW = timedelta(hours=7)
+
     def _provider() -> frozenset[str]:
         now = datetime.now(timezone.utc)
         near_start_cutoff = now + timedelta(minutes=60)
@@ -229,19 +233,16 @@ def _build_livescore_active_sports_provider(
             end = market.end_date
             if end is not None and end.tzinfo is None:
                 end = end.replace(tzinfo=timezone.utc)
-            # live：已开赛且尚未结束。about-to-start：开赛时间落在 [now, now+60min]。
+            # live：已开赛且在比赛持续期内(≤ 7h)。about-to-start：[now, now+60min]。
             is_live = (
                 start is not None
                 and start <= now
-                and (end is None or end > now)
+                and now <= start + _LIVESCORE_GAME_WINDOW
             )
             is_near_start = (
                 start is not None and now <= start <= near_start_cutoff
             )
-            # game_start_time 缺失兜底：部分市场（如 esports）未带开赛时间，
-            # 仅靠 start 判断会让整类运动永不进 active 集合、直播源不被轮询。
-            # 此时改用 end_date：结束时间在未来 6h 内 → 视为正在进行/临近，
-            # 纳入轮询。registry 已被 discovery 限定在近端市场，过度轮询有界。
+            # game_start_time 缺失兜底:用 end_date 在未来 6h 内判定为进行中/临近。
             start_unknown_active = start is None and (
                 end is None or now < end < now + timedelta(hours=6)
             )
@@ -269,6 +270,11 @@ def _build_inplay_active_sports_provider(
     必须廉价（每轮都调）：只做一次 registry 快照遍历 + 内存判断，不做任何 I/O。
     """
 
+    # MLB/NBA/NHL/NFL/Tennis 单场比赛持续时间上限 ≤ 6 小时,加 1h buffer 保证
+    # 末段 inplay 仍拉。Polymarket end_date 对体育单场市场常 = game_start_time
+    # (Gamma API 字段语义混淆),不能用 end > now 判 live。
+    _GAME_INPLAY_WINDOW = timedelta(hours=7)
+
     def _provider() -> frozenset[str]:
         now = datetime.now(timezone.utc)
         near_start_cutoff = now + timedelta(minutes=60)
@@ -280,16 +286,18 @@ def _build_inplay_active_sports_provider(
             end = market.end_date
             if end is not None and end.tzinfo is None:
                 end = end.replace(tzinfo=timezone.utc)
+            # is_live: 比赛已开始且未超过 _GAME_INPLAY_WINDOW(默认 7h)。
+            # 之前用 end > now 是 bug — Polymarket end_date 对体育市场常 == start_time,
+            # 会让已开赛市场永远判 not-live → inplay 不拉 → 122 个 missing live state。
             is_live = (
                 start is not None
                 and start <= now
-                and (end is None or end > now)
+                and now <= start + _GAME_INPLAY_WINDOW
             )
             is_near_start = (
                 start is not None and now <= start <= near_start_cutoff
             )
-            # game_start_time 缺失兜底：与 livescore provider 同理（部分 esports
-            # 市场无开赛时间），改用 end_date 在未来 6h 内判定为正在进行/临近。
+            # game_start_time 缺失兜底:用 end_date 在未来 6h 内判定为进行中/临近。
             start_unknown_active = start is None and (
                 end is None or now < end < now + timedelta(hours=6)
             )

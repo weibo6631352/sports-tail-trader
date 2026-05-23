@@ -100,15 +100,18 @@ def test_provider_excludes_far_future_market() -> None:
     assert provider() == frozenset()
 
 
-def test_provider_excludes_ended_market() -> None:
-    """已结束（end_date 过去）的市场不纳入。"""
+def test_provider_excludes_old_market_beyond_game_window() -> None:
+    """超过 game window(7h)的市场不纳入。end_date 不可信(Polymarket 体育单场
+    市场 endDate 常 == startTime),所以以 game_start + 7h 为准——比赛已超过
+    合理持续期,sports_live_state_worker 应已下线该 market 的 LIVE 状态。"""
+
     registry = MarketRegistry()
     now = datetime.now(timezone.utc)
     registry.upsert(
         _market(
             "esports-ended",
             tags=("Esports", "CS2"),
-            game_start_time=now - timedelta(hours=4),
+            game_start_time=now - timedelta(hours=10),  # 超过 7h window
             end_date=now - timedelta(hours=1),
         )
     )
