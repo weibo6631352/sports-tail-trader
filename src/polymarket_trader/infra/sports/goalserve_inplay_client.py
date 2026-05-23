@@ -26,7 +26,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -72,6 +72,29 @@ SPORT_CODE_TO_INPLAY_KEYS: dict[str, frozenset[str]] = {
 _BASE_URL = "http://inplay.goalserve.com"
 
 
+def _parse_http_date_header(raw: str | None) -> datetime | None:
+    """RFC 7231 / RFC 1123 HTTP Date header → UTC datetime。
+
+    所有 HTTP 响应都自带 Date header（RFC 7231 §7.1.1.2 几乎强制），是 zero-cost
+    的"server 生成响应时刻"信号。系统时钟差异通常 < 1s，足够做延迟测量。
+    格式如 "Tue, 15 Nov 1994 12:45:26 GMT"。
+    """
+    if not raw:
+        return None
+    try:
+        from email.utils import parsedate_to_datetime
+
+        dt = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+    if dt is None:
+        return None
+    # parsedate_to_datetime 可能返回 naive datetime（罕见 mal-formed header），统一带上 UTC。
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 @dataclass
 class _SportPollState:
     """单个 sport 的后台轮询状态（缓存 + 健康 + 退避）。"""
@@ -79,6 +102,13 @@ class _SportPollState:
     events: tuple[LiveEvent, ...] = ()
     raw_count: int = 0
     last_success_at: datetime | None = None
+    # HTTP `Date` response header 解析出的 Goalserve server 生成响应时间。
+    # 配合 last_success_at 给出"server 生成 → 我们收到"的传输延迟：
+    #   transport_lag = last_success_at - server_clock_at
+    # 配合 now() 给出"server 生成到当下"的端到端 stale 程度：
+    #   total_lag = now() - server_clock_at
+    # total_lag > 阈值（默认 10s）→ 决策应降级（task #48 D2）。
+    server_clock_at: datetime | None = None
     last_error: str | None = None
     consecutive_failures: int = 0
     # 429 触发的退避截止时间戳（time.monotonic 基准）；None 表示无退避。
@@ -150,10 +180,24 @@ class GoalserveInplayClient:
         for sport in self._sports:
             st = self._states[sport]
             task_running = st.task is not None and not st.task.done()
+            now_utc = utc_now(self._now_provider)
             poll_age_s: float | None = None
             if st.last_success_at is not None:
                 poll_age_s = round(
-                    utc_now(self._now_provider).timestamp() - st.last_success_at.timestamp(), 1
+                    now_utc.timestamp() - st.last_success_at.timestamp(), 1
+                )
+            # Goalserve server 生成响应到当下的总延迟（端到端 stale 程度）。
+            # 决策应优先看这个数：> 10s = feed 数据陈旧，行情可能已变。
+            server_clock_lag_s: float | None = None
+            if st.server_clock_at is not None:
+                server_clock_lag_s = round(
+                    now_utc.timestamp() - st.server_clock_at.timestamp(), 1
+                )
+            # server 到我们的传输延迟（只反映网络 + 解码），独立于 stale 程度。
+            transport_lag_s: float | None = None
+            if st.server_clock_at is not None and st.last_success_at is not None:
+                transport_lag_s = round(
+                    st.last_success_at.timestamp() - st.server_clock_at.timestamp(), 1
                 )
             backoff_remaining_s: float | None = None
             if st.backoff_until is not None and st.backoff_until > now:
@@ -167,6 +211,8 @@ class GoalserveInplayClient:
                     "events": st.raw_count,
                     "last_error": st.last_error,
                     "poll_age_s": poll_age_s,
+                    "server_clock_lag_s": server_clock_lag_s,
+                    "transport_lag_s": transport_lag_s,
                     "backoff_remaining_s": backoff_remaining_s,
                     "consecutive_failures": st.consecutive_failures,
                     "poll_task_running": task_running,
@@ -345,11 +391,15 @@ class GoalserveInplayClient:
             return
 
         observed_at = utc_now(self._now_provider)
-        events = parse_goalserve_inplay(sport, feed, observed_at=observed_at)
+        server_clock_at = _parse_http_date_header(response.headers.get("date"))
+        events = parse_goalserve_inplay(
+            sport, feed, observed_at=observed_at, server_clock_at=server_clock_at,
+        )
         st.events = tuple(events)
         raw = feed.get("events")
         st.raw_count = len(raw) if isinstance(raw, dict) else len(events)
         st.last_success_at = observed_at
+        st.server_clock_at = server_clock_at
         st.last_error = None
         st.consecutive_failures = 0
         st.backoff_until = None

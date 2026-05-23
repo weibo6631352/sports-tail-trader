@@ -153,6 +153,9 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
         "seconds_remaining": event.seconds_remaining,
         "status": event.status.value,
         "observed_at": None if event.observed_at is None else event.observed_at.isoformat(),
+        "server_clock_at": (
+            None if event.server_clock_at is None else event.server_clock_at.isoformat()
+        ),
         "event_start_time": (
             None if event.event_start_time is None else event.event_start_time.isoformat()
         ),

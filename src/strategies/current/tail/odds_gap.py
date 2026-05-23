@@ -240,6 +240,19 @@ def evaluate_odds_gap_opportunity(
     """
 
     market = candidate.market
+    # live feed stale 守门：feed 数据陈旧时不入场——陈旧数据可能让我们买在
+    # 已锁定输方（goalserve odds 也是过时的，devig edge 失真）。阈值由
+    # policy.odds_gap_max_live_feed_lag_seconds 控制（默认 15s）。
+    lag = candidate.game.live_feed_lag_seconds()
+    if lag is not None and lag > policy.odds_gap_max_live_feed_lag_seconds:
+        return _reject(
+            candidate,
+            TailRejectReason.LIVE_FEED_STALE.value,
+            metadata={
+                "live_feed_lag_seconds": str(round(lag, 1)),
+                "max_lag_threshold_seconds": policy.odds_gap_max_live_feed_lag_seconds,
+            },
+        )
     # 流动性守卫: ask 深度 < odds_gap_min_liquidity_usdc 的小盘口禁用 odds_gap 入场。
     # 用户要求:"资金太小的盘口,只跑尾盘"——冷盘口退出难,odds_gap 概率性入场
     # 一旦判断错没退出通道,只能 hold 到结算。tail lockin(数学锁定)不依赖流动性,

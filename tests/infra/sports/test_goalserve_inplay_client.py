@@ -203,6 +203,63 @@ async def test_successful_fetch_clears_backoff() -> None:
         await client.aclose()
 
 
+@pytest.mark.asyncio
+async def test_fetch_records_http_date_header_as_server_clock() -> None:
+    """成功抓取后从 HTTP Date header 解析 server_clock_at，暴露 server_clock_lag_s。"""
+    client = GoalserveInplayClient(sports=("baseball",), now_provider=_now)
+    feed = {"events": {}, "bm": "bet365"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=gzip.compress(json.dumps(feed).encode()),
+            headers={"Date": "Tue, 15 Nov 1994 12:45:26 GMT"},
+        )
+
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        await client._fetch_once("baseball")
+        st = client._states["baseball"]
+        assert st.server_clock_at is not None
+        # 1994-11-15T12:45:26 UTC
+        assert st.server_clock_at.year == 1994
+        assert st.server_clock_at.hour == 12
+        # 暴露到 status：server_clock_lag_s > 0（date 是远古，差很大）
+        status = client.inplay_per_sport_status()
+        baseball_status = next(s for s in status if s["sport"] == "baseball")
+        assert baseball_status["server_clock_lag_s"] is not None
+        assert baseball_status["server_clock_lag_s"] > 0
+        # transport_lag_s = last_success_at - server_clock_at（_now 是 2025-...
+        # 大约 30 多年差），但同一行 logic 验证字段存在即可。
+        assert baseball_status["transport_lag_s"] is not None
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_fetch_handles_missing_date_header() -> None:
+    """无 Date header 时 server_clock_at 保持 None，status 不崩。"""
+    client = GoalserveInplayClient(sports=("baseball",), now_provider=_now)
+    feed = {"events": {}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # 显式覆盖默认 Date：httpx 默认会自动塞 Date，这里清空
+        return httpx.Response(200, content=gzip.compress(json.dumps(feed).encode()))
+
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        await client._fetch_once("baseball")
+        st = client._states["baseball"]
+        # httpx MockTransport 不自动加 Date header → server_clock_at = None
+        assert st.server_clock_at is None
+        status = client.inplay_per_sport_status()
+        baseball_status = next(s for s in status if s["sport"] == "baseball")
+        assert baseball_status["server_clock_lag_s"] is None
+        assert baseball_status["transport_lag_s"] is None
+    finally:
+        await client.aclose()
+
+
 # ---------------------------------------------------------------------------
 # 后台 Task 自愈
 # ---------------------------------------------------------------------------

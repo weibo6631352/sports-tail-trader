@@ -351,6 +351,10 @@ class LiveEvent:
     seconds_remaining: int | None = None
     raw_status: str | None = None
     observed_at: datetime | None = None
+    # HTTP `Date` response header（Goalserve server 生成响应时间）。
+    # 配合 utc_now() 算 live_feed_lag_seconds = stale 程度，决策侧据此降级
+    # （exit_overlay / odds_gap 在 lag > 阈值时不基于陈旧状态决策）。
+    server_clock_at: datetime | None = None
     event_start_time: datetime | None = None
     event_name: str = ""
     external_ids: Mapping[str, str] = field(default_factory=dict)
@@ -420,6 +424,9 @@ class LiveEvent:
             "seconds_remaining": self.seconds_remaining,
             "raw_status": self.raw_status,
             "observed_at": None if self.observed_at is None else self.observed_at.isoformat(),
+            "server_clock_at": (
+                None if self.server_clock_at is None else self.server_clock_at.isoformat()
+            ),
             "event_start_time": (
                 None if self.event_start_time is None else self.event_start_time.isoformat()
             ),

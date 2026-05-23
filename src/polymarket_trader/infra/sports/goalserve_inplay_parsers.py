@@ -1062,6 +1062,8 @@ def parse_goalserve_inplay(
     sport: str,
     feed_dict: dict[str, Any],
     observed_at: datetime | None = None,
+    *,
+    server_clock_at: datetime | None = None,
 ) -> list[LiveEvent]:
     """把一个 inplay GZIP feed dict 解析成 LiveEvent 列表。
 
@@ -1070,9 +1072,15 @@ def parse_goalserve_inplay(
     ``events`` 为空 dict（当前无 live 赛事）时返回空列表——这是正常态，不是错误。
     observed_at 为 None 时取当前 UTC 时间。
 
+    server_clock_at 是 HTTP `Date` header 解析出的 Goalserve server 生成响应时刻，
+    统一 stamp 到所有 events（同一次 fetch 共享同一个 server_clock_at），用于
+    决策侧测算 live_feed_lag_seconds（task D2）。
+
     停止/已结束的赛事不在此过滤——状态由 _map_status 标记，由上层决定如何处理；
     parser 保持纯函数，不做"该不该交易"的判断。
     """
+    import dataclasses
+
     ts = observed_at or utc_now()
     if not isinstance(feed_dict, dict):
         return []
@@ -1094,4 +1102,6 @@ def parse_goalserve_inplay(
             # 单场解析失败不阻断其他赛事——inplay feed 字段偶有缺失，
             # 跳过坏数据而非整批丢弃。
             continue
+    if server_clock_at is not None:
+        results = [dataclasses.replace(e, server_clock_at=server_clock_at) for e in results]
     return results

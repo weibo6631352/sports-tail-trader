@@ -148,6 +148,9 @@ class TailRejectReason(StrEnum):
     # 锁定方向与下注方向不一致：玩家已进球但 market.side=NO（注定输），
     # 或玩家未进球且比赛已结束但 market.side=YES（注定输）——精确拒绝。
     ANYTIME_GOALSCORER_WRONG_SIDE = "anytime_goalscorer_wrong_side"
+    # live feed stale：LiveGameState.server_clock_at 距当下超阈值（15s 默认），
+    # feed 数据陈旧（server/网络/解析问题），不基于陈旧状态决策。
+    LIVE_FEED_STALE = "live_feed_stale"
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +204,11 @@ class TailPolicy:
     # 只允许 tail lockin(数学锁定 → 不依赖盘口流动性退出,等结算)。用户要求:
     # "资金太小的盘口,只跑尾盘"——减少冷盘口风险敞口。
     odds_gap_min_liquidity_usdc: Decimal = Decimal("300")
+    # live feed stale 阈值（秒）：LiveGameState.server_clock_at 距 utc_now() 超过
+    # 此值视为陈旧数据，odds_gap 入场拒绝。inplay feed 1.2s 轮询 + 网络 < 2s 正常
+    # ≤ 4s；> 15s 说明 server / 网络 / 解析有问题，宁可错过机会也不基于陈旧数据
+    # 下单（陈旧数据可能让我们买在已锁定输方）。
+    odds_gap_max_live_feed_lag_seconds: int = 15
 
 
 @dataclass(frozen=True, slots=True)

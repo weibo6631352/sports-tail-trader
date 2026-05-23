@@ -1967,6 +1967,8 @@ def parse_goalserve_livescore_sport(
     sport: str,
     data: dict[str, Any],
     observed_at: datetime | None = None,
+    *,
+    server_clock_at: datetime | None = None,
 ) -> list[LiveEvent]:
     """顶层分派：按 sport key 调对应 livescore parser，返回 LiveEvent 列表。
 
@@ -1974,7 +1976,11 @@ def parse_goalserve_livescore_sport(
     XML 运动（basketball/baseball/hockey/tennis）由客户端预转换为此格式。
     scores=null 时（F1 赛间等）直接返回空列表。
     observed_at 为 None 时自动取当前 UTC 时间。
+    server_clock_at 是 HTTP `Date` header 解析出的 Goalserve 响应生成时刻，
+    统一 stamp 到所有 events（task D2 用于 live_feed_lag 决策降级）。
     """
+    import dataclasses
+
     ts = observed_at or utc_now()
     if not isinstance(data, dict):
         return []
@@ -1984,40 +1990,43 @@ def parse_goalserve_livescore_sport(
 
     match sport:
         case "soccer":
-            return _parse_soccer_with_cats(scores, ts)
+            events = _parse_soccer_with_cats(scores, ts)
         case "basketball" | "nba" | "wnba":
-            return _parse_basketball_with_cats(scores, ts)
+            events = _parse_basketball_with_cats(scores, ts)
         case "hockey" | "nhl":
-            return _parse_hockey_with_cats(scores, ts)
+            events = _parse_hockey_with_cats(scores, ts)
         case "baseball" | "mlb":
-            return _parse_baseball_with_cats(scores, ts)
+            events = _parse_baseball_with_cats(scores, ts)
         case "tennis":
-            return _parse_tennis_with_cats(scores, ts)
+            events = _parse_tennis_with_cats(scores, ts)
         case "table-tennis":
-            return _parse_table_tennis(scores, ts)
+            events = _parse_table_tennis(scores, ts)
         case "cricket":
-            return _parse_cricket(scores, ts)
+            events = _parse_cricket(scores, ts)
         case "esports":
-            return _parse_esports(scores, ts)
+            events = _parse_esports(scores, ts)
         case "handball":
-            return _parse_handball(scores, ts)
+            events = _parse_handball(scores, ts)
         case "rugby":
-            return _parse_rugby(scores, ts)
+            events = _parse_rugby(scores, ts)
         case "volleyball":
-            return _parse_volleyball(scores, ts)
+            events = _parse_volleyball(scores, ts)
         case "amfootball":
-            return _parse_amfootball(scores, ts)
+            events = _parse_amfootball(scores, ts)
         case "boxing":
-            return _parse_boxing(scores, ts)
+            events = _parse_boxing(scores, ts)
         case "mma":
-            return _parse_mma(scores, ts)
+            events = _parse_mma(scores, ts)
         case "golf_pga" | "golf_dp" | "golf_liv" | "golf_lpga":
-            return _parse_golf("golf", scores, ts)
+            events = _parse_golf("golf", scores, ts)
         case "horse_racing_us" | "horse_racing_uk" | "horse_racing_au" | "horse_racing_hk":
-            return _parse_horse_racing(scores, ts)
+            events = _parse_horse_racing(scores, ts)
         case "f1":
-            return _parse_motorsport("formula1", scores, ts)
+            events = _parse_motorsport("formula1", scores, ts)
         case "motogp":
-            return _parse_motorsport("motogp", scores, ts)
+            events = _parse_motorsport("motogp", scores, ts)
         case _:
             return []
+    if server_clock_at is not None:
+        events = [dataclasses.replace(e, server_clock_at=server_clock_at) for e in events]
+    return events

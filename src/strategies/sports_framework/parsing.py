@@ -44,6 +44,7 @@ def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState 
         return None
 
     observed_at = _datetime_value(raw_game.get("observed_at"))
+    server_clock_at = _datetime_value(raw_game.get("server_clock_at"))
     return LiveGameState(
         league=str(raw_game.get("league") or ""),
         home_name=str(raw_game.get("home_name") or "home"),
@@ -54,6 +55,7 @@ def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState 
         status=_game_status(raw_game.get("status")),
         seconds_remaining=_optional_int(raw_game.get("seconds_remaining")),
         observed_at=observed_at,
+        server_clock_at=server_clock_at,
         source_conflicts=_source_conflicts(raw_game.get("source_conflicts")),
         sport=str(raw_game.get("sport") or ""),
         baseball_state=_baseball_state(raw_game.get("baseball_state")),

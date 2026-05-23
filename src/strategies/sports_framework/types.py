@@ -104,6 +104,9 @@ class LiveGameState:
     status: LiveGameStatus
     seconds_remaining: int | None = None
     observed_at: datetime | None = None
+    # HTTP `Date` header（Goalserve server 生成响应时刻）—— live_feed_lag_seconds
+    # @property 据此算"feed 数据 stale 程度"，决策侧在 lag > 阈值时降级。
+    server_clock_at: datetime | None = None
     source_conflicts: tuple[Mapping[str, Any], ...] = ()
     sport: str = ""
     baseball_state: BaseballGameState | None = None
@@ -118,6 +121,20 @@ class LiveGameState:
     @property
     def total_score(self) -> int:
         return self.home_score + self.away_score
+
+    def live_feed_lag_seconds(self, now: datetime | None = None) -> float | None:
+        """直播 feed 当前 stale 程度（秒）= now - server_clock_at。
+
+        返回 None 表示无 server_clock 数据（旧数据 / 测试构造 / 未走 Goalserve 客户端）。
+        >0 = feed 已陈旧；阈值 10s 是经验值（inplay feed 1.2s 轮询 + 网络 < 2s，
+        正常 ≤ 4s；超过 10s 说明 server / 网络 / 我方解析有问题，决策应降级）。
+        """
+        if self.server_clock_at is None:
+            return None
+        if now is None:
+            from datetime import datetime as _dt, timezone as _tz
+            now = _dt.now(_tz.utc)
+        return (now - self.server_clock_at).total_seconds()
 
     def score_diff_for(self, side: SportsMarketSide) -> int:
         if side == SportsMarketSide.HOME:

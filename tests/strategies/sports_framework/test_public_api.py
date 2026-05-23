@@ -155,6 +155,42 @@ def test_live_game_state_returns_none_on_missing_scores() -> None:
     assert live_game_state_from_metadata({}) is None
 
 
+def test_live_game_state_live_feed_lag_seconds_from_server_clock() -> None:
+    """server_clock_at 经 metadata → LiveGameState → lag_seconds 算 stale 程度。"""
+    server_clock = datetime(2026, 5, 23, 12, 0, 0, tzinfo=timezone.utc)
+    metadata = {
+        "live_game": {
+            "league": "MLB",
+            "home_name": "A",
+            "away_name": "B",
+            "home_score": 0,
+            "away_score": 0,
+            "status": "live",
+            "server_clock_at": server_clock.isoformat(),
+        }
+    }
+    game = live_game_state_from_metadata(metadata)
+    assert game is not None
+    assert game.server_clock_at == server_clock
+    # now = server_clock + 7s
+    now = datetime(2026, 5, 23, 12, 0, 7, tzinfo=timezone.utc)
+    assert game.live_feed_lag_seconds(now=now) == 7.0
+
+
+def test_live_game_state_lag_returns_none_when_no_server_clock() -> None:
+    """无 server_clock_at（旧数据 / 非 Goalserve 源）→ lag = None，决策侧应不降级。"""
+    metadata = {
+        "live_game": {
+            "league": "MLB", "home_name": "A", "away_name": "B",
+            "home_score": 0, "away_score": 0, "status": "live",
+        }
+    }
+    game = live_game_state_from_metadata(metadata)
+    assert game is not None
+    assert game.server_clock_at is None
+    assert game.live_feed_lag_seconds() is None
+
+
 def test_sports_framework_does_not_import_strategy_modules() -> None:
     """sports_framework 必须单向依赖 domain，绝不反向依赖任何具体策略包。"""
 

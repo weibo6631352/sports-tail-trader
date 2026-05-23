@@ -136,6 +136,12 @@ class GoalserveLivescoreClient:
         # background loop. list_events() returns cached data without blocking on HTTP.
         self._cache: SportsLiveSnapshot | None = None
         self._poll_task: asyncio.Task[None] | None = None
+        # 每个 sport 最近一次成功响应的 HTTP `Date` header（Goalserve server 生成
+        # 响应的时间）。配合 utc_now() 算 server_clock_lag_s = stale 程度，决策侧
+        # 据此降级（task #48 D2）。
+        self._server_clock_at_by_sport: dict[str, datetime | None] = {
+            sport: None for sport in self._sports
+        }
         if proxy:
             mounts: dict[str, Any] = {
                 "http://": httpx.AsyncHTTPTransport(proxy=proxy),
@@ -170,6 +176,8 @@ class GoalserveLivescoreClient:
                 if ":" in ss.source:
                     status_by_sport[ss.source.split(":", 1)[1]] = ss
 
+        import time as _time
+        now_ts = _time.time()
         result = []
         for sport in self._sports:
             ss = status_by_sport.get(sport)
@@ -186,6 +194,10 @@ class GoalserveLivescoreClient:
                 events = 0
                 last_error = None
                 idle = cache is not None
+            server_clock_at = self._server_clock_at_by_sport.get(sport)
+            server_clock_lag_s: float | None = None
+            if server_clock_at is not None:
+                server_clock_lag_s = round(now_ts - server_clock_at.timestamp(), 1)
             result.append({
                 "sport": sport,
                 "type": "http",
@@ -194,6 +206,7 @@ class GoalserveLivescoreClient:
                 "events": events,
                 "last_error": last_error,
                 "poll_age_s": poll_age_s,
+                "server_clock_lag_s": server_clock_lag_s,
                 "poll_task_running": self._poll_task is not None and not self._poll_task.done(),
             })
         return result
@@ -360,7 +373,14 @@ class GoalserveLivescoreClient:
             response = await self._client.get(url)
             response.raise_for_status()
             data = response.json()
-        events = parse_goalserve_livescore_sport(sport, data, observed_at=observed_at)
+        # HTTP `Date` header → Goalserve server 生成响应时刻；用于延迟测量。
+        from polymarket_trader.infra.sports.goalserve_inplay_client import _parse_http_date_header
+
+        server_clock_at = _parse_http_date_header(response.headers.get("date"))
+        self._server_clock_at_by_sport[sport] = server_clock_at
+        events = parse_goalserve_livescore_sport(
+            sport, data, observed_at=observed_at, server_clock_at=server_clock_at,
+        )
         return events, len(events)
 
 
