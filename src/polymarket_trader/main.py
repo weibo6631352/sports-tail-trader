@@ -851,6 +851,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         kelly_round_up_max_overbet_ratio=strategy_config.kelly_round_up_max_overbet_ratio,
         order_retry_limit=settings.order_retry_limit,
         entry_metadata_provider=entry_metadata_for_event,
+        orderbook_direction_signal_reader=orderbook_delta_store.direction_signal,
         parameter_store=parameter_store,
     )
     reconcile_service = ReconcileService(

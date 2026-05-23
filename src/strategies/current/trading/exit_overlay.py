@@ -363,16 +363,43 @@ def evaluate_dynamic_exit(
     elif bid_deviation >= Decimal("0.05"):
         bullish_vote += Decimal("0.5") * bid_signal_weight
         vote_reasons.append(f"bid_deviation_pos:{bid_deviation:+.3f}*w={bid_signal_weight}")
-    # **趋势 filter**（修饰，不主导）：imbalance 是供需方向 ratio，不能直接当价格/
-    # 概率投票（一笔小单就能翻转）。当前作弱修饰：仅在跟 bearish_vote 同向时加 0.5
-    # 强化（"价格信号说要止损 + 盘口方向也支持" 才算确认），单独 imbalance 不投票。
-    # 旧逻辑 imbalance ±2 权重等同 math_lock 是概念混淆，已纠正。
-    if bearish_vote > Decimal("0") and imbalance < Decimal("0.35"):
-        bearish_vote += Decimal("0.5") * bid_signal_weight
-        vote_reasons.append(f"trend_confirm_bearish:imbalance={imbalance:.3f}*w={bid_signal_weight}")
-    elif bullish_vote > Decimal("0") and imbalance > Decimal("0.65"):
-        bullish_vote += Decimal("0.5") * bid_signal_weight
-        vote_reasons.append(f"trend_confirm_bullish:imbalance={imbalance:.3f}*w={bid_signal_weight}")
+    # **趋势 filter**（修饰，不主导）：单时点 imbalance 是供需方向 ratio，被 MM
+    # 假墙骗的概率高（[[feedback_orderbook_direction_delta]]）。优先用 10s 窗口
+    # OFI 方向信号（context.metadata['orderbook_direction']）：
+    # - direction_score: 基于 microprice 价位移归一 [-1,+1]
+    # - flow_imbalance: real_depth 消耗失衡（ask 被吃多 = 买压 → 正）
+    # 综合 direction_label（majority vote of score/momentum/flow）= 真订单流方向，
+    # 比单时点 ratio 抗噪。OFI 缺失时退回 imbalance ratio 作弱兜底。
+    ob_direction = context.metadata.get("orderbook_direction") if context.metadata else None
+    used_ofi = False
+    if isinstance(ob_direction, dict):
+        label = str(ob_direction.get("direction_label") or "")
+        try:
+            confidence = Decimal(str(ob_direction.get("confidence") or "0"))
+        except (ArithmeticError, ValueError, TypeError):
+            confidence = None
+        # 只在样本充足（confidence >= 0.5）时信任 OFI 方向
+        if confidence is not None and confidence >= Decimal("0.5"):
+            used_ofi = True
+            if bearish_vote > Decimal("0") and label == "no":
+                bearish_vote += Decimal("0.5") * bid_signal_weight
+                vote_reasons.append(
+                    f"trend_confirm_bearish:ofi_label={label}*conf={confidence}*w={bid_signal_weight}"
+                )
+            elif bullish_vote > Decimal("0") and label == "yes":
+                bullish_vote += Decimal("0.5") * bid_signal_weight
+                vote_reasons.append(
+                    f"trend_confirm_bullish:ofi_label={label}*conf={confidence}*w={bid_signal_weight}"
+                )
+    if not used_ofi:
+        # OFI 缺失（窗口样本不足/数据 reader 未注入）→ 退回单时点 imbalance ratio
+        # 作弱兜底；阈值收紧（0.30/0.70）减少假墙误判。
+        if bearish_vote > Decimal("0") and imbalance < Decimal("0.30"):
+            bearish_vote += Decimal("0.5") * bid_signal_weight
+            vote_reasons.append(f"trend_confirm_bearish_fallback:imbalance={imbalance:.3f}*w={bid_signal_weight}")
+        elif bullish_vote > Decimal("0") and imbalance > Decimal("0.70"):
+            bullish_vote += Decimal("0.5") * bid_signal_weight
+            vote_reasons.append(f"trend_confirm_bullish_fallback:imbalance={imbalance:.3f}*w={bid_signal_weight}")
     # fair_value 辅助门禁：跌 20% 即触发评估（旧 30%）。盘口风向反应快，
     # 早识别 fair_value 走弱 + orderbook 卖方一致 → 立即止损少亏 10%。
     fair_value_bearish = fair_value <= entry_price * Decimal("0.8")

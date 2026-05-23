@@ -129,7 +129,7 @@ class TradingDecisionWorker:
         kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
         order_retry_limit: int | None = None,
         entry_metadata_provider: EntryMetadataProvider | None = None,
-        orderbook_direction_signal_reader: "Callable[[str, float], Any] | None" = None,
+        orderbook_direction_signal_reader: "Callable[..., Any] | None" = None,
         parameter_store: "ParameterStore | None" = None,
         heartbeat: HeartbeatCallback | None = None,
         idle_heartbeat_seconds: float = _TRADING_DECISION_IDLE_HEARTBEAT_SECONDS,
@@ -186,6 +186,28 @@ class TradingDecisionWorker:
             trading_service=self._trading_service,
             account_state_store=self._account_state_store,
         )
+
+    def _fetch_orderbook_direction(self, token_id: str | None) -> dict[str, Any] | None:
+        """从 OrderbookDeltaStore 取 10s 窗口方向信号，序列化成 dict 注入
+        ExtensionContext.metadata['orderbook_direction']。
+
+        策略消费归一化复合信号（direction_score / price_momentum / flow_imbalance /
+        direction_label / confidence），替代单时点 bid/ask 深度比 imbalance ratio——
+        后者会被 MM 假墙骗，flow_imbalance 是窗口内 best 价位移 + real_depth 消耗
+        的真实订单流方向，更可靠。
+        """
+        if self._orderbook_direction_signal_reader is None or not token_id:
+            return None
+        try:
+            signal = self._orderbook_direction_signal_reader(token_id, window_seconds=10.0)
+        except Exception:
+            return None
+        if signal is None:
+            return None
+        as_metadata = getattr(signal, "as_metadata", None)
+        if callable(as_metadata):
+            return dict(as_metadata())
+        return None
 
     def _param_override(self, key: str, default: Any) -> Any:
         store = self._parameter_store
@@ -609,6 +631,14 @@ class TradingDecisionWorker:
             token_id=position.token_id,
         )
         open_orders = snapshot.open_orders_for_market(position.condition_id, position.token_id)
+        exit_metadata: dict[str, Any] = {
+            "exit_trigger": "position_updated",
+            "source_event_id": event.event_id,
+            "source_reason": event.reason,
+        }
+        direction = self._fetch_orderbook_direction(position.token_id)
+        if direction is not None:
+            exit_metadata["orderbook_direction"] = direction
         decision = self._trading_decision_service.decide_exit(
             ExtensionContext(
                 trace_id=event.trace_id,
@@ -626,11 +656,7 @@ class TradingDecisionWorker:
                 account_snapshot=snapshot,
                 position=position,
                 open_orders=open_orders,
-                metadata={
-                    "exit_trigger": "position_updated",
-                    "source_event_id": event.event_id,
-                    "source_reason": event.reason,
-                },
+                metadata=exit_metadata,
             )
         )
         # 缓存决策 metadata 供 /positions/signals admin endpoint 暴露。每次
