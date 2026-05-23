@@ -164,6 +164,11 @@ class TradingDecisionWorker:
         # main.py position_exit_evaluator 5s 周期 publish 合成 event，但合成
         # 事件处理时检查：该 token 5s 内已有真实 event 就 skip，避免重复评估。
         self._token_last_real_orderbook_at: dict[str, datetime] = {}
+        # token_id → 最近一次 decide_exit 决策的完整 metadata 快照。
+        # /positions/signals admin endpoint 从此读取，给 UI/操盘人实时展示
+        # 5 类投票 + 流动性 tier + math_lock 是否支持 + fair_value 来源。
+        # 仅持仓 token 写入，无持仓 token 不会有 entry，自动 LRU 由内存压力管理。
+        self._token_position_signals: dict[str, dict[str, Any]] = {}
         # (strategy_id, reason) → count，供 admin/observability 查询哪个策略因何跳过了多少次。
         self._skip_reason_histogram: dict[tuple[str, str], int] = {}
         # condition_id → [(lifecycle, timestamp), …]，记录每次状态转换的时间点。
@@ -651,6 +656,20 @@ class TradingDecisionWorker:
                 },
             )
         )
+        # 缓存决策 metadata 供 /positions/signals admin endpoint 暴露。每次
+        # decide_exit 后更新当前 token 的 signals 快照，UI/操盘人可实时看到
+        # 5 类投票 + 流动性 tier + math_lock 是否支持 + fair_value 来源。
+        if position.token_id and decision.metadata:
+            self._token_position_signals[position.token_id] = {
+                "condition_id": position.condition_id,
+                "token_id": position.token_id,
+                "market_slug": (market.market_slug if market is not None else position.market_slug),
+                "evaluated_at": _utc_now().isoformat(),
+                "decision_action": decision.action.value,
+                "decision_reason": decision.reason,
+                "decision_price": str(decision.price) if decision.price is not None else None,
+                "metadata": {k: v for k, v in decision.metadata.items() if k.startswith("dynamic_exit_")},
+            }
         # SELL 直接挂；REPLACE 是 reprice 路径（_maybe_reprice_stale_sell 把 stale
         # $0.99 SELL cancel-replace 到 fair_value × 0.97），不接 REPLACE 会让订阅
         # 触发的 reprice 决策静默丢弃。

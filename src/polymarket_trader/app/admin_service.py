@@ -62,6 +62,31 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
     def bind_runtime(self, runtime: RuntimeComponents) -> "AdminService":
         return AdminService(runtime=runtime)
 
+    def get_position_signals(
+        self, *, condition_id: str | None = None, token_id: str | None = None
+    ) -> dict[str, object]:
+        """返回最近一次 decide_exit 决策的完整持仓信号快照。
+
+        命名"持仓信号"而非"exit 决策信号"——内部 metadata 仍用 dynamic_exit_*
+        前缀保持 audit/测试兼容，对外接口语义是持仓评估的多信号 breakdown：
+        5 类投票（fair_value/imbalance/best_bid/goalserve/math_lock）+ 流动性
+        tier + math_lock 是否支持 + fair_value 来源等。
+
+        condition_id / token_id 都缺 → 返回全部持仓 signals 列表。
+        """
+
+        if self.runtime is None or self.runtime.trading_decision_worker is None:
+            return {"items": []}
+        cache = self.runtime.trading_decision_worker._token_position_signals
+        items: list[dict[str, object]] = []
+        for tid, signals in cache.items():
+            if token_id is not None and tid != token_id:
+                continue
+            if condition_id is not None and signals.get("condition_id") != condition_id:
+                continue
+            items.append(signals)
+        return {"items": items, "total": len(items)}
+
     def _serializer(self) -> AdminSerializer:
         return AdminSerializer(
             account_snapshot_provider=self._account_snapshot,

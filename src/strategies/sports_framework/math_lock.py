@@ -770,6 +770,199 @@ def _hockey_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResu
     )
 
 
+def _soccer_btts_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResult:
+    """Soccer BTTS (Both Teams To Score) Yes/No 锁定。
+
+    Yes 锁定 = 双方都至少进 1 球 (home_score >= 1 AND away_score >= 1)。
+    进行中按 Poisson 双边率算 P(任一方仍 = 0)。
+    """
+    if side not in {SportsMarketSide.YES, SportsMarketSide.NO}:
+        return MathLockResult(_ZERO, "soccer_btts", "unsupported_side", {})
+    h = game.home_score
+    a = game.away_score
+    both_scored = h >= 1 and a >= 1
+    remaining = _estimate_remaining_seconds(game)
+    if remaining is None:
+        return MathLockResult(_ZERO, "soccer_btts", "missing_remaining_time", {})
+    if remaining <= 0 or game.status == LiveGameStatus.ENDED:
+        # 比赛结束按当前比分定
+        yes_won = both_scored
+        return MathLockResult(
+            _ONE if (yes_won if side == SportsMarketSide.YES else not yes_won) else _ZERO,
+            "soccer_btts", "game_ended",
+            {"home": h, "away": a, "both_scored": both_scored, "side": side.value},
+        )
+    if both_scored:
+        return MathLockResult(
+            _ONE if side == SportsMarketSide.YES else _ZERO,
+            "soccer_btts", "both_already_scored",
+            {"home": h, "away": a},
+        )
+    from math import exp
+    lam = _SOCCER_GOAL_RATE_PER_SEC * remaining  # 单边期望
+    # 哪边还没进 → 它进 ≥1 概率 = 1 - exp(-λ)
+    if h == 0 and a == 0:
+        p_each_scores = 1.0 - exp(-lam)
+        p_btts_yes = p_each_scores ** 2  # 双方独立都进
+    elif h == 0:
+        p_btts_yes = 1.0 - exp(-lam)  # 只需 home 进
+    else:  # a == 0
+        p_btts_yes = 1.0 - exp(-lam)
+    lock = p_btts_yes if side == SportsMarketSide.YES else (1.0 - p_btts_yes)
+    return MathLockResult(
+        Decimal(str(round(max(0.0, min(1.0, lock)), 4))),
+        "soccer_btts", "live_estimate",
+        {"home": h, "away": a, "remaining_seconds": remaining,
+         "p_btts_yes": round(p_btts_yes, 4), "side": side.value},
+    )
+
+
+def _soccer_draw_ft_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResult:
+    """Soccer Draw Yes/No (整场是否平局) — 用 Skellam(0) 算剩余进球差 = 0 概率。"""
+    if side not in {SportsMarketSide.YES, SportsMarketSide.NO}:
+        return MathLockResult(_ZERO, "soccer_draw_ft", "unsupported_side", {})
+    h = game.home_score
+    a = game.away_score
+    remaining = _estimate_remaining_seconds(game)
+    if remaining is None:
+        return MathLockResult(_ZERO, "soccer_draw_ft", "missing_remaining_time", {})
+    if remaining <= 0 or game.status == LiveGameStatus.ENDED:
+        is_draw = h == a
+        won = is_draw if side == SportsMarketSide.YES else not is_draw
+        return MathLockResult(
+            _ONE if won else _ZERO, "soccer_draw_ft", "game_ended",
+            {"home": h, "away": a, "is_draw": is_draw},
+        )
+    lam = _SOCCER_GOAL_RATE_PER_SEC * remaining
+    # Skellam(λ_h, λ_a) 在 k 处的 pmf：用 Bessel modified function。简化：
+    # P(Δgoals = current_diff) 用枚举 Poisson 双边 sum
+    from math import exp, factorial
+    current_diff = h - a
+    # 我方需要剩余 (away - home) goals = current_diff
+    # P(剩 home_goals = k, away_goals = k + current_diff)
+    p_draw = 0.0
+    max_k = max(3, int(lam * 5))  # 截断
+    for k in range(0, max_k + 1):
+        opp_k = k + current_diff
+        if opp_k < 0:
+            continue
+        p_h = (lam ** k) * exp(-lam) / factorial(k)
+        p_a = (lam ** opp_k) * exp(-lam) / factorial(opp_k) if opp_k <= max_k else 0
+        p_draw += p_h * p_a
+    lock = p_draw if side == SportsMarketSide.YES else (1.0 - p_draw)
+    return MathLockResult(
+        Decimal(str(round(max(0.0, min(1.0, lock)), 4))),
+        "soccer_draw_ft", "live_estimate",
+        {"home": h, "away": a, "current_diff": current_diff,
+         "remaining_seconds": remaining, "lambda_per_side": round(lam, 4),
+         "p_draw": round(p_draw, 4), "side": side.value},
+    )
+
+
+def _baseball_nrfi_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResult:
+    """Baseball NRFI (No Run First Inning) Yes/No 锁定。
+
+    Yes 锁定 = inning 1 双方都没得分。inning >= 2 + first inning runs == 0 → Yes 锁。
+    inning 1 中: 用 Poisson 单半局 λ=0.55 算剩余半局任一进 ≥1 的反向概率。
+    """
+    if side not in {SportsMarketSide.YES, SportsMarketSide.NO}:
+        return MathLockResult(_ZERO, "baseball_nrfi", "unsupported_side", {})
+    state = game.baseball_state
+    if state is None or state.current_inning is None:
+        return MathLockResult(_ZERO, "baseball_nrfi", "missing_baseball_state", {})
+    inning = state.current_inning
+    first_h_runs = (state.home_inning_runs or (None,))[0] if state.home_inning_runs else None
+    first_a_runs = (state.away_inning_runs or (None,))[0] if state.away_inning_runs else None
+    if inning >= 2:
+        # First inning 已结束
+        if first_h_runs is None or first_a_runs is None:
+            # 数据缺：保守按 unsupported
+            return MathLockResult(_ZERO, "baseball_nrfi", "missing_first_inning_runs", {})
+        no_runs = first_h_runs == 0 and first_a_runs == 0
+        won = no_runs if side == SportsMarketSide.YES else not no_runs
+        return MathLockResult(
+            _ONE if won else _ZERO, "baseball_nrfi", "first_inning_completed",
+            {"first_h": first_h_runs, "first_a": first_a_runs, "no_runs": no_runs},
+        )
+    # inning == 1
+    half = (state.inning_half or "top").lower()
+    if (first_h_runs and first_h_runs >= 1) or (first_a_runs and first_a_runs >= 1):
+        # 已经有得分 → NRFI 输
+        return MathLockResult(
+            _ZERO if side == SportsMarketSide.YES else _ONE,
+            "baseball_nrfi", "run_already_scored_in_first",
+            {"first_h": first_h_runs, "first_a": first_a_runs},
+        )
+    # 剩余半局：top → 1 (top remainder) + 1 (bottom); bottom → 1 (remainder)
+    remaining_half = 1 if half == "bottom" else 2
+    # P(单半局 0 runs) = _MLB_HALF_INNING_SCORE_DIST[0] = 0.70
+    p_no_run_single = float(_MLB_HALF_INNING_SCORE_DIST[0])
+    p_nrfi_yes = p_no_run_single ** remaining_half
+    lock = p_nrfi_yes if side == SportsMarketSide.YES else (1.0 - p_nrfi_yes)
+    return MathLockResult(
+        Decimal(str(round(max(0.0, min(1.0, lock)), 4))),
+        "baseball_nrfi", "live_estimate",
+        {"inning": inning, "half": half, "remaining_half_innings_in_first": remaining_half,
+         "p_nrfi_yes": round(p_nrfi_yes, 4), "side": side.value},
+    )
+
+
+def _basketball_period_ml_lock(
+    side: SportsMarketSide, game: LiveGameState, scope_quarter: int | None = None
+) -> MathLockResult:
+    """篮球分节 ML（1H/Q1-4）：用对应节剩余秒数算 reversal。
+
+    scope_quarter=None 时是 1H (Q1+Q2 合并)；否则是具体节。
+    简化用 _BASKETBALL_VAR_PER_SECOND × scope_remaining_seconds。
+    """
+    if side not in {SportsMarketSide.HOME, SportsMarketSide.AWAY}:
+        return MathLockResult(_ZERO, "basketball_period_ml", "unsupported_side", {})
+    bs = game.basketball_state
+    if bs is None or bs.current_period is None:
+        return MathLockResult(_ZERO, "basketball_period_ml", "missing_basketball_state", {})
+    current = bs.current_period
+    if scope_quarter is not None:
+        # 单节：scope 节早于当前节 → 已结束按累计判（暂用 game 总 lead，粗）
+        if current > scope_quarter:
+            # 节已结束，按该节比分判（域里没分节比分则 unsupported）
+            quarter_idx = scope_quarter - 1
+            h_q = (bs.home_quarter_scores or ())[quarter_idx] if quarter_idx < len(bs.home_quarter_scores or ()) else None
+            a_q = (bs.away_quarter_scores or ())[quarter_idx] if quarter_idx < len(bs.away_quarter_scores or ()) else None
+            if h_q is None or a_q is None:
+                return MathLockResult(_ZERO, "basketball_period_ml", "missing_quarter_score", {})
+            won = (h_q > a_q) if side == SportsMarketSide.HOME else (a_q > h_q)
+            return MathLockResult(
+                _ONE if won else _ZERO, "basketball_period_ml", "quarter_ended",
+                {"quarter": scope_quarter, "h_q": h_q, "a_q": a_q},
+            )
+        if current < scope_quarter:
+            # 还没到该节：完全未知，返回 0.5 中性
+            return MathLockResult(Decimal("0.5"), "basketball_period_ml", "quarter_not_started",
+                                  {"quarter": scope_quarter, "current": current})
+        # current == scope_quarter：用单节剩余秒
+        remaining_in_q = 6 * 60  # 估当前节剩余 6min（节中间）
+    else:
+        # 1H：剩余 Q1+Q2 - 已打部分
+        if current > 2:
+            # 1H 已结束
+            return MathLockResult(_ZERO, "basketball_period_ml", "first_half_ended_lockup_needed", {})
+        remaining_in_q = (2 - current) * 12 * 60 + 6 * 60
+    # 用 lead 算锁定（暂用整场 lead 当 1H/Q lead，粗）
+    lead = game.score_diff_for(side)
+    if lead <= 0:
+        return MathLockResult(_ZERO, "basketball_period_ml", "not_leading_in_scope", {"lead": lead})
+    var_diff = 2.0 * _BASKETBALL_VAR_PER_SECOND * remaining_in_q
+    z = lead / math.sqrt(var_diff)
+    p_reversal = 0.5 * math.erfc(z / math.sqrt(2.0))
+    lock = max(0.0, min(1.0, 1.0 - p_reversal))
+    return MathLockResult(
+        Decimal(str(round(lock, 4))), "basketball_period_ml", "live_estimate",
+        {"scope": f"Q{scope_quarter}" if scope_quarter else "1H",
+         "lead": lead, "remaining_seconds": remaining_in_q,
+         "p_reversal": round(p_reversal, 4)},
+    )
+
+
 def _cricket_chase_lock(side: SportsMarketSide, game: LiveGameState) -> MathLockResult:
     """Cricket 第二局 chase ML：剩余 balls + wickets + 目标差。
 
@@ -883,18 +1076,29 @@ def evaluate_math_lock(
 
     # ===== Baseball (MLB/KBO/NPB) =====
     if game.baseball_state is not None:
+        slug_lc = (market_slug or "").lower()
+        if market_type == SportsMarketType.BINARY_PROP and (
+            "nrfi" in slug_lc or "no-runs-first-inning" in slug_lc or "first-inning-no-run" in slug_lc
+        ):
+            return _baseball_nrfi_lock(side, game)
         if market_type == SportsMarketType.TOTALS and line is not None:
             return _mlb_totals_lock(side, line, game)
         if market_type == SportsMarketType.MONEYLINE:
             return _baseball_moneyline_lock(side, game)
 
-    # ===== Soccer (整场 + halftime prop) =====
+    # ===== Soccer (整场 + halftime + BTTS + Draw FT prop) =====
     if game.soccer_state is not None or sport == "soccer":
         if market_type == SportsMarketType.BINARY_PROP:
             slug = (market_slug or "").lower()
             for direction in ("home", "draw", "away"):
                 if slug.endswith(f"halftime-result-{direction}"):
                     return _soccer_halftime_lock(side, direction, game)
+            # BTTS: slug 含 "both-teams-to-score" / "btts"
+            if "btts" in slug or "both-teams-to-score" in slug or "both-teams-score" in slug:
+                return _soccer_btts_lock(side, game)
+            # Draw Yes/No: slug 以 -draw / -tie 结尾且非 halftime
+            if (slug.endswith("-draw") or slug.endswith("-tie") or "draw-no-bet" not in slug and "-draw-" in slug) and "halftime" not in slug:
+                return _soccer_draw_ft_lock(side, game)
         if market_type == SportsMarketType.MONEYLINE:
             return _soccer_ml_lock(side, game)
         if market_type == SportsMarketType.TOTALS and line is not None:
