@@ -285,6 +285,19 @@ class TradingDecisionWorker:
         event: DomainEvent,
         snapshot: AccountSnapshot | None,
     ) -> "TradingDecisionWorkerResult | None":
+        # 订阅驱动 reprice：每个 orderbook tick 检查该 token 是否有持仓，
+        # 有 → 跑 decide_exit 让 _maybe_reprice_stale_sell 用最新 best_bid/fair_value
+        # 评估是否 cancel-replace stale SELL。不依赖 60s reconcile 周期。
+        # 在 entry 路径之前先 reprice，确保盘口快速反弹时 SELL 立即跟价。
+        if snapshot is not None and event.condition_id and event.token_id:
+            position = snapshot.get_position(event.condition_id, event.token_id)
+            if position is not None and position.shares > Decimal("0"):
+                await self._execute_position_exit_if_needed(
+                    event=event,
+                    snapshot=snapshot,
+                    position=position,
+                )
+
         if _entry_gate_closed_for_event(snapshot, event):
             return None
         plan = self._trading_decision_service.build_entry_plan(
@@ -576,7 +589,10 @@ class TradingDecisionWorker:
                 },
             )
         )
-        if decision.action != ExtensionAction.SELL:
+        # SELL 直接挂；REPLACE 是 reprice 路径（_maybe_reprice_stale_sell 把 stale
+        # $0.99 SELL cancel-replace 到 fair_value × 0.97），不接 REPLACE 会让订阅
+        # 触发的 reprice 决策静默丢弃。
+        if decision.action not in {ExtensionAction.SELL, ExtensionAction.REPLACE}:
             return None
         intent = self._trading_decision_service.build_intent_from_decision(
             trace_id=event.trace_id,
