@@ -196,6 +196,10 @@ class TailPolicy:
     odds_gap_min_edge: Decimal = Decimal("0.06")
     # 赔率差价候选的执行权限；默认 AUTO_EXECUTE，与扫尾锁定一致走完整入场链路。
     odds_gap_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
+    # 小流动性盘口 odds_gap 禁用阈值: ask 深度 < N USDC 时拒 odds_gap 入场,
+    # 只允许 tail lockin(数学锁定 → 不依赖盘口流动性退出,等结算)。用户要求:
+    # "资金太小的盘口,只跑尾盘"——减少冷盘口风险敞口。
+    odds_gap_min_liquidity_usdc: Decimal = Decimal("300")
 
 
 @dataclass(frozen=True, slots=True)

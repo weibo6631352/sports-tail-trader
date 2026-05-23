@@ -228,21 +228,40 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
     spread_widening = config.tail_implied_conf_spread_widening
 
     def _prob_provider(snap: AllocationMarketSnapshot) -> ProbView:
-        """Kelly probability source 优先级:
-        1. Goalserve devig true_p (有 odds 源时,confidence=1.0)
-        2. math_lock 数学模型(无 odds 时归一化锁定概率, confidence=0.7)
-        3. implied_fair_value_from_price_cap 反推(最后 fallback,confidence 已 depth/spread 缩水)
+        """Kelly probability source — 赔率源优先 + 可与数学锁定结合:
 
-        新增第 2 层 math_lock — 用户要求:"没有赔率源的市场,用数学模型"。
-        math_lock 用统一 evaluate_math_lock 算出锁定概率,作为 Kelly p 输入。
+        1. Goalserve devig + math_lock 同时可用 → **结合**:p=odds_devig,
+           confidence = 0.7 + 0.3 × consistency(odds 和 math 越一致越高 conf)
+        2. 只 Goalserve devig: confidence=1.0
+        3. 只 math_lock: confidence=0.7
+        4. 都没有: fallback implied_fair_value_from_price_cap(confidence 已缩水)
+
+        结合的意义: 用户要求 "有赔率源优先用赔率,可结合数学锁定"。当 Goalserve
+        odds 和 math_lock 估计一致(差异 < 5%) → 真信号,confidence 加成;不一致
+        → odds 可能 stale,confidence 收紧让 Kelly fraction 变小。
         """
 
         odds_gap_view = odds_gap_prob_views.get((snap.condition_id, snap.token_id))
+        math_view = _math_lock_prob_view(snap, context)
+
+        if odds_gap_view is not None and math_view is not None:
+            # 结合: odds_p 作 Kelly p; consistency 调整 confidence
+            odds_p = odds_gap_view.prob_p or Decimal("0")
+            math_p = math_view.prob_p or Decimal("0")
+            diff = abs(odds_p - math_p)
+            # diff <= 0.05: 高度一致,conf=1.0; diff >= 0.30: 完全不一致,conf=0.4
+            # 线性插值: conf = 1.0 - 2 × diff (clip [0.4, 1.0])
+            consistency_conf = max(Decimal("0.4"), min(Decimal("1"), Decimal("1") - Decimal("2") * diff))
+            return ProbView(
+                prob_p=odds_p,
+                prob_confidence=consistency_conf,
+                source=f"odds_gap+math_lock(diff={diff:.3f})",
+            )
+
         if odds_gap_view is not None:
             return odds_gap_view
 
-        # math_lock fallback: 缺 odds 时用统一数学模型估真概率。
-        math_view = _math_lock_prob_view(snap, context)
+        # math_lock 单源
         if math_view is not None:
             return math_view
 

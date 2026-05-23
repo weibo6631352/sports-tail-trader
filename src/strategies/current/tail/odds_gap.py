@@ -226,6 +226,20 @@ def evaluate_odds_gap_opportunity(
     """
 
     market = candidate.market
+    # 流动性守卫: ask 深度 < odds_gap_min_liquidity_usdc 的小盘口禁用 odds_gap 入场。
+    # 用户要求:"资金太小的盘口,只跑尾盘"——冷盘口退出难,odds_gap 概率性入场
+    # 一旦判断错没退出通道,只能 hold 到结算。tail lockin(数学锁定)不依赖流动性,
+    # 但 odds_gap 是概率性,流动性是必要条件。
+    if market.buyable_liquidity_usdc < policy.odds_gap_min_liquidity_usdc:
+        return _reject(
+            candidate,
+            TailRejectReason.NO_ODDS_GAP.value,
+            metadata={
+                "odds_gap_reject_reason": "low_liquidity_only_lockin",
+                "buyable_liquidity_usdc": str(market.buyable_liquidity_usdc),
+                "min_liquidity_threshold": str(policy.odds_gap_min_liquidity_usdc),
+            },
+        )
     # 无末段预先 reject 守卫: 比赛没结束就丢弃机会是草率的。Kelly 自决:即使
     # Goalserve odds 末段可能 stale,Kelly 仍按 devig p 算 fraction;多盘口分摊
     # 后统计意义上仍 +EV。承担合理风险,不放过任何可盈利市场(CLAUDE.md §17)。

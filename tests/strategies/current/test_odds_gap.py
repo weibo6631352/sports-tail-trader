@@ -64,7 +64,7 @@ def _moneyline_market(
         line=None,
         best_ask=best_ask,
         best_bid=best_ask - Decimal("0.02"),
-        buyable_liquidity_usdc=Decimal("50"),
+        buyable_liquidity_usdc=Decimal("1000"),
         market_slug="nba-lal-bos-2026-05-23",
         metadata=metadata,
     )
@@ -256,7 +256,7 @@ def test_kelly_sizes_odds_gap_on_devigged_prob() -> None:
         market_min_order_size_shares=Decimal("5"),
         fee_rate_bps=0,
         fees_enabled=False,
-        liquidity_usdc=Decimal("50"),
+        liquidity_usdc=Decimal("1000"),
     )
     # true_p≈0.6364 > ask 0.55 → 正 edge → Kelly 给出非零仓位。
     assert stake.stake_usdc > Decimal("0")
@@ -288,7 +288,7 @@ def _totals_market(
         line=line,
         best_ask=best_ask,
         best_bid=best_ask - Decimal("0.02"),
-        buyable_liquidity_usdc=Decimal("50"),
+        buyable_liquidity_usdc=Decimal("1000"),
         market_slug=market_slug,
         metadata=metadata,
     )
@@ -312,7 +312,7 @@ def _spread_market(
         line=line,
         best_ask=best_ask,
         best_bid=best_ask - Decimal("0.02"),
-        buyable_liquidity_usdc=Decimal("50"),
+        buyable_liquidity_usdc=Decimal("1000"),
         market_slug=market_slug,
         metadata=metadata,
     )
@@ -646,7 +646,7 @@ def test_moneyline_odds_gap_unchanged_does_not_use_totals_metadata() -> None:
         line=None,
         best_ask=Decimal("0.55"),
         best_bid=Decimal("0.53"),
-        buyable_liquidity_usdc=Decimal("50"),
+        buyable_liquidity_usdc=Decimal("1000"),
         market_slug="nba-lal-bos-2026-05-23",
         metadata={
             "goalserve_moneyline": gs_ml,
@@ -696,7 +696,7 @@ def test_kelly_sizes_totals_odds_gap_on_devigged_prob() -> None:
         market_min_order_size_shares=Decimal("5"),
         fee_rate_bps=0,
         fees_enabled=False,
-        liquidity_usdc=Decimal("50"),
+        liquidity_usdc=Decimal("1000"),
     )
     assert stake.stake_usdc > Decimal("0")
     assert stake.edge > Decimal("0")
