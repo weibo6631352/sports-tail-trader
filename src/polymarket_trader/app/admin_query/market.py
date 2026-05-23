@@ -275,19 +275,42 @@ class AdminMarketQueryMixin:
                 "tracked_tokens": len(store.tracked_tokens()),
             }
         else:
+            def _opt(d: Any) -> str | None:
+                return None if d is None else str(d)
             payload = {
                 "token_id": token_id,
                 "window_seconds": signal.window_seconds,
                 "sample_count": signal.sample_count,
                 "first_observed_at": signal.first_observed_at.isoformat(),
                 "last_observed_at": signal.last_observed_at.isoformat(),
-                "bid_price_delta": str(signal.bid_price_delta) if signal.bid_price_delta is not None else None,
-                "ask_price_delta": str(signal.ask_price_delta) if signal.ask_price_delta is not None else None,
-                "mid_price_delta": str(signal.mid_price_delta) if signal.mid_price_delta is not None else None,
-                "bid_size_delta": str(signal.bid_size_delta) if signal.bid_size_delta is not None else None,
-                "ask_size_delta": str(signal.ask_size_delta) if signal.ask_size_delta is not None else None,
-                "direction_score": str(signal.direction_score),
-                "direction_label": signal.direction_label,
+                # raw deltas
+                "bid_price_delta": _opt(signal.bid_price_delta),
+                "ask_price_delta": _opt(signal.ask_price_delta),
+                "mid_price_delta": _opt(signal.mid_price_delta),
+                "bid_size_delta": _opt(signal.bid_size_delta),
+                "ask_size_delta": _opt(signal.ask_size_delta),
+                # microprice 真公允锚点(排除地板/天花板单失真)
+                "first_microprice": _opt(signal.first_microprice),
+                "last_microprice": _opt(signal.last_microprice),
+                "microprice_delta": _opt(signal.microprice_delta),
+                # 真实价区窗口深度变化(microprice ± 0.05,排除地板单)
+                "first_real_bid_depth_usdc": _opt(signal.first_real_bid_depth_usdc),
+                "last_real_bid_depth_usdc": _opt(signal.last_real_bid_depth_usdc),
+                "first_real_ask_depth_usdc": _opt(signal.first_real_ask_depth_usdc),
+                "last_real_ask_depth_usdc": _opt(signal.last_real_ask_depth_usdc),
+                "real_bid_depth_delta_usdc": _opt(signal.real_bid_depth_delta_usdc),
+                "real_ask_depth_delta_usdc": _opt(signal.real_ask_depth_delta_usdc),
+                # 变化率(per second)
+                "bid_price_velocity": _opt(signal.bid_price_velocity),
+                "ask_price_velocity": _opt(signal.ask_price_velocity),
+                "mid_price_velocity": _opt(signal.mid_price_velocity),
+                "bid_size_consumption_rate": _opt(signal.bid_size_consumption_rate),
+                "ask_size_consumption_rate": _opt(signal.ask_size_consumption_rate),
+                # 归一化复合信号 [-1,+1]
+                "direction_score": str(signal.direction_score),  # mid_delta 归一
+                "price_momentum": str(signal.price_momentum),    # velocity 归一
+                "flow_imbalance": str(signal.flow_imbalance),    # order flow 归一
+                "direction_label": signal.direction_label,        # 综合 majority vote
                 "confidence": str(signal.confidence),
             }
 
