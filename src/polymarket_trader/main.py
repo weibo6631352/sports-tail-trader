@@ -1045,28 +1045,46 @@ async def bootstrap_runtime(runtime: RuntimeComponents) -> RuntimeComponents:
     runtime.supervisor.set_phase(RuntimePhase.RECOVERING_SNAPSHOT)
     loaded_reference = await _load_reference_state(runtime)
 
-    reconcile_summary: dict[str, Any]
+    # 之前 lifespan 同步 await _run_reconcile_once → 9 个 orphan account-exposure
+    # 仓位每个要 gamma+clob 多查,实测 10-11s 全在这里。lifespan 阻塞 → health
+    # 不响应、wait_for_http 临界超时。改为后台任务:lifespan 几秒完成,reconcile
+    # 在 background 跑,完成后 supervisor 状态自然过渡到 trading_enabled。
+    # CLAUDE.md §7 也明确"reconciler 不长时间持锁阻塞 P0 路径",同精神适用启动。
     runtime.supervisor.set_phase(RuntimePhase.RECONCILING)
-    try:
-        result = await _run_reconcile_once(
-            runtime,
-            source="startup",
-            refresh_market_authority=False,
-        )
-        reconcile_summary = {
-            "trace_id": result.trace_id,
-            "markets": len(result.plan.market_plans),
-            "diff_count": result.plan.diff_count,
-            "applied_actions": len(result.applied_actions),
-            "failed_actions": len(result.failed_actions),
-        }
-    except Exception as exc:  # pragma: no cover - startup may fail on live dependencies
-        reconcile_summary = {"error": str(exc)}
-        runtime.supervisor.mark_degraded(f"startup_reconcile_failed:{exc}")
-        logger.warning(
-            "startup reconcile failed; runtime remains degraded",
-            extra={"reason": str(exc)},
-        )
+
+    async def _async_startup_reconcile() -> None:
+        try:
+            result = await _run_reconcile_once(
+                runtime,
+                source="startup",
+                refresh_market_authority=False,
+            )
+            runtime.bootstrap_summary["startup_reconcile"] = {
+                "trace_id": result.trace_id,
+                "markets": len(result.plan.market_plans),
+                "diff_count": result.plan.diff_count,
+                "applied_actions": len(result.applied_actions),
+                "failed_actions": len(result.failed_actions),
+            }
+            # reconcile 跑完刷新 supervisor,让 phase 过渡到 trading_enabled。
+            snapshot = await runtime.supervisor.refresh()
+            runtime.metrics.set_trading_gate(
+                snapshot.automatic_trading_enabled,
+                reason=trading_gate_reason(snapshot),
+                source="supervisor",
+            )
+        except Exception as exc:  # pragma: no cover - startup may fail on live deps
+            runtime.bootstrap_summary["startup_reconcile"] = {"error": str(exc)}
+            runtime.supervisor.mark_degraded(f"startup_reconcile_failed:{exc}")
+            logger.warning(
+                "startup reconcile failed; runtime remains degraded",
+                extra={"reason": str(exc)},
+            )
+
+    runtime.background_tasks["startup_reconcile"] = asyncio.create_task(
+        _async_startup_reconcile(), name="startup_reconcile"
+    )
+    reconcile_summary: dict[str, Any] = {"status": "scheduled_background"}
 
     _start_background_tasks(runtime)
     _register_scheduler_jobs(runtime)
