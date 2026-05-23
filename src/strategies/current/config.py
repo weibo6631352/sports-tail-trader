@@ -118,9 +118,6 @@ class CurrentStrategyConfig:
             ``/events/keyset?title_search=nba&tag_slug=sports``。
             如果不确定 Gamma tag 是否覆盖目标市场，保持为空，并让
             ``select_market()`` 做本地最终过滤。
-        tail_live_discovery_*:
-            用外部直播源里的真实比赛队名补充高意图 discovery 查询，避免通用
-            ``nba/nhl/mlb`` 搜索长期停留在冠军、系列赛、选秀或电竞市场。
         tail_category_tokens:
             本地 universe 精筛时用于识别已接入直播源的体育联赛 token。
             识别文本以 category/tags 为优先信号，并用 market/event slug、
@@ -197,8 +194,6 @@ class CurrentStrategyConfig:
     max_spread: Decimal | None = Decimal("0.10")
     discovery_title_searches: tuple[str, ...] = ("nba", "nhl", "nfl", "mlb", "tennis", "atp", "wta")
     discovery_tag_slugs: tuple[str, ...] = ("sports",)
-    tail_live_discovery_max_games: int = 40
-    tail_live_discovery_max_queries: int = 120
     # CLAUDE.md §9：所有目标盘口必须纳入诊断，不得 silent 忽略。universe 接受的
     # 运动现已全部具备直播源——KBO 走 baseball/home livescore，table-tennis/WTT
     # 走 tennis_scores/tt_live livescore，其余由 inplay GZIP + livescore 覆盖。
