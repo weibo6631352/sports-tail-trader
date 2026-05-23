@@ -175,13 +175,14 @@ def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None
 
     # 顺序已变成"按 end_date 升序"——near-end 优先，因为 _MARKET_WS_MAX_SUBSCRIPTIONS
     # 截断时要保留最快结束的。集合内容仍只覆盖有 live state 信号或持仓的 market。
+    # phase=ended 且无 account exposure 的市场(condition-5)不再订阅 WS:
+    # 等结算市场推送对决策无价值,exit overlay 已挂好 SELL,降订阅量根治
+    # queue saturation(实测 958 token 中 ~300 是 ended 市场浪费)。
     assert sorted(market_ws_subscription_token_ids(runtime)) == [
         "token-1-no",
         "token-1-yes",
         "token-3-no",
         "token-3-yes",
-        "token-5-no",
-        "token-5-yes",
     ]
     assert user_ws_subscription_condition_ids(runtime) == (
         "condition-1",
