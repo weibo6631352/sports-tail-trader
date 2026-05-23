@@ -544,11 +544,21 @@ async def run_market_ws(runtime: Any) -> None:
                     _drain_queue(queue)
                     if desired_token_ids:
                         runtime.market_ws_worker.build_subscription_request(desired_token_ids)
-                        await runtime.market_ws_worker.refresh_rest_snapshots(desired_token_ids)
-                        # REST 预取可能耗时（并发 20 路仍需若干秒）。完成后重置定时器，
-                        # 避免耗时结束时 next_subscription_refresh_at 已过期、下一轮循环
-                        # 立即重建连接（stream_task 刚建好即被 cancel）。
+                        # 实测启动时 refresh_rest_snapshots 并发 20 路预取上百个 token 仍要
+                        # 10-14s,期间阻塞 WS 连接建立 → market_ws_connected gate 推迟到预取
+                        # 完才解除 → trading_enabled 推迟 ~14s。WS 自己会推 book snapshot,
+                        # REST 预取只是"in-memory 头几秒就有完整 book"的加速,可后台并行跑。
+                        # WS 连接立即起 → on_connect 立即 set_connection_state(True) → gate
+                        # 立即解除。新交易在 reconcile_fresh 之前也不会下单,无风险窗口。
                         next_subscription_refresh_at = loop.time() + _SUBSCRIPTION_REFRESH_SECONDS
+                        prefetch_task = asyncio.create_task(
+                            runtime.market_ws_worker.refresh_rest_snapshots(desired_token_ids),
+                            name="trader:market-ws-rest-prefetch",
+                        )
+                        # 不存引用 set 防 GC——任务执行后让 GC 自然回收;长时跑没问题。
+                        prefetch_task.add_done_callback(
+                            lambda t: t.exception() if not t.cancelled() else None
+                        )
                         stream_task = asyncio.create_task(
                             stream_market_ws_messages(runtime, desired_token_ids, queue),
                             name="trader:market-ws-stream",
