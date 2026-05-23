@@ -226,10 +226,9 @@ def evaluate_odds_gap_opportunity(
     """
 
     market = candidate.market
-    # 末段守卫: Goalserve odds 在 MLB B8 / 篮球 Q4 末段 / 等已 stale,基于此信号
-    # 入场期望值为负(实盘 CWS-SF U15.5 B9th 案例: Kelly 算正 EV,但末段实际负 EV)。
-    if _is_odds_stale_late_game(candidate):
-        return _reject(candidate, TailRejectReason.NO_ODDS_GAP.value)
+    # 无末段预先 reject 守卫: 比赛没结束就丢弃机会是草率的。Kelly 自决:即使
+    # Goalserve odds 末段可能 stale,Kelly 仍按 devig p 算 fraction;多盘口分摊
+    # 后统计意义上仍 +EV。承担合理风险,不放过任何可盈利市场(CLAUDE.md §17)。
     if market.market_type == SportsMarketType.MONEYLINE:
         return _evaluate_moneyline_odds_gap(candidate, policy)
     if market.market_type == SportsMarketType.TOTALS:
@@ -237,33 +236,6 @@ def evaluate_odds_gap_opportunity(
     if market.market_type == SportsMarketType.SPREADS:
         return _evaluate_spreads_odds_gap(candidate, policy)
     return _reject(candidate, TailRejectReason.NO_ODDS_GAP.value)
-
-
-def _is_odds_stale_late_game(candidate: SportsTailCandidate) -> bool:
-    """末段 Goalserve odds stale 判定。
-
-    末段博彩 odds 不再频繁更新(book 减少 hedge / 接近停盘),用 stale odds 算
-    devig p 会跟实际剩余概率严重脱节,Kelly 据此入场会接到失真 edge。
-    本守卫只覆盖明确的"末段":
-    - MLB: B8 之后(inning >= 8 且 half=bottom)或 inning >= 9
-    - 其他运动暂不限制(后续看实盘表现按需扩展)
-
-    扫尾锁定路径不受本守卫影响(只针对 odds_gap 入场)。
-    """
-
-    game = candidate.game
-    if game is None or game.baseball_state is None:
-        return False
-    state = game.baseball_state
-    if state.current_inning is None:
-        return False
-    inning = state.current_inning
-    half = (state.inning_half or "top").lower()
-    if inning >= 9:
-        return True
-    if inning >= 8 and half == "bottom":
-        return True
-    return False
 
 
 def _evaluate_moneyline_odds_gap(
