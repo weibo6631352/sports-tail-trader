@@ -377,11 +377,19 @@ class Supervisor:
         trading_depth = _int(queue_depths, "trading_queue_depth")
         if trading_depth >= self._trading_queue_warn_depth:
             return True
-        latency_ms = _extract_metric_value(metrics, "entry_signal_to_submit_ms")
+        latency_ms = _extract_metric_value(
+            metrics,
+            "entry_signal_to_submit_ms",
+            max_age_seconds=_BACKPRESSURE_GAUGE_STALE_AFTER_SECONDS,
+        )
         if latency_ms is not None and latency_ms >= self._entry_signal_to_submit_warn_ms:
             return True
         for key in ("trading_lock_wait_ms", "executor_queue_wait_ms"):
-            value = _extract_metric_value(metrics, key)
+            value = _extract_metric_value(
+                metrics,
+                key,
+                max_age_seconds=_BACKPRESSURE_GAUGE_STALE_AFTER_SECONDS,
+            )
             if value is not None and value >= self._entry_signal_to_submit_warn_ms:
                 return True
         return False
@@ -393,12 +401,43 @@ class Supervisor:
         return provider()
 
 
-def _extract_metric_value(metrics: Mapping[str, Any], metric_name: str) -> int | None:
+# gauge stale 阈值: 用于判断 backpressure 的 latency gauge 必须是新的。
+# 死循环 bug 根因: 某次冷启动 entry_signal_to_submit_ms=2256ms 写入 gauge 后无 TTL,
+# 历史 stale 高值永远高于 warn 阈值 → 持续触发 pause_low_priority → trading_enabled
+# 永远 false → 没新交易能更新该 gauge → 永远 stale → 系统永久 degraded。
+# stale gauge 视同 "no data",不参与 backpressure 判断。
+_BACKPRESSURE_GAUGE_STALE_AFTER_SECONDS = 60.0
+
+
+def _extract_metric_value(
+    metrics: Mapping[str, Any],
+    metric_name: str,
+    *,
+    max_age_seconds: float | None = None,
+) -> int | None:
     def _to_int(value: Any) -> int | None:
         try:
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    def _fresh(updated_at: Any) -> bool:
+        if max_age_seconds is None:
+            return True
+        if updated_at is None:
+            return True
+        if isinstance(updated_at, str):
+            try:
+                ts = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            except ValueError:
+                return True
+        elif isinstance(updated_at, datetime):
+            ts = updated_at
+        else:
+            return True
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return (_utc_now() - ts).total_seconds() <= max_age_seconds
 
     if metric_name in metrics:
         value = metrics.get(metric_name)
@@ -407,6 +446,8 @@ def _extract_metric_value(metrics: Mapping[str, Any], metric_name: str) -> int |
     if isinstance(gauges, Mapping):
         gauge = gauges.get(metric_name)
         if isinstance(gauge, Mapping):
+            if not _fresh(gauge.get("updated_at")):
+                return None
             value = gauge.get("value")
         else:
             value = gauge
@@ -415,5 +456,7 @@ def _extract_metric_value(metrics: Mapping[str, Any], metric_name: str) -> int |
         for gauge in gauges:
             if not isinstance(gauge, Mapping) or gauge.get("name") != metric_name:
                 continue
+            if not _fresh(gauge.get("updated_at")):
+                return None
             return _to_int(gauge.get("value"))
     return None

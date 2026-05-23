@@ -1324,10 +1324,14 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         start=True,
         run_immediately=True,
     )
+    # P1 not P2: 死循环 bug — P2 在 p0_backpressure 触发后被 pause_low_priority 暂停,
+    # 但 reconcile stale 又会让 readiness fail/phase=degraded 永远无法 clear(periodic_reconcile
+    # 是清除 reconcile_not_fresh blocking_reason 的唯一来源)。reconcile 是恢复路径,
+    # 不应该被 backpressure 拖死。
     runtime.scheduler.register_job(
         "periodic_reconcile",
         lambda: _publish_reconcile_trigger(runtime, source="scheduled"),
-        priority="P2",
+        priority="P1",
         interval_seconds=float(runtime.settings.market_sync_interval_seconds),
         tags=("reconcile",),
         start=True,
