@@ -1141,3 +1141,29 @@ def test_sport_feeds_and_code_map_include_new_sports() -> None:
     assert "volleyball" in SPORT_CODE_TO_FEED_KEYS["volleyball"]
     # table-tennis 规范码与 feed key 同名。
     assert "table-tennis" in SPORT_CODE_TO_FEED_KEYS["table-tennis"]
+
+
+# D3：scores.@updated 字段（PT 时区 DD.MM.YYYY HH:MM:SS）作 server_clock_at
+
+def test_parse_livescore_updated_field_converts_pt_to_utc() -> None:
+    """scores.@updated 是 PT 时区，转 UTC 后跟 HTTP Date 几乎一致（差 < 20s server cache）。"""
+    from datetime import datetime, timezone
+    from polymarket_trader.infra.sports.goalserve_livescore_parsers import (
+        _parse_livescore_updated_field,
+    )
+    # sample 实测："23.05.2026 06:51:39" PT = 14:51:39 UTC
+    parsed = _parse_livescore_updated_field("23.05.2026 06:51:39")
+    assert parsed is not None
+    assert parsed.tzinfo == timezone.utc
+    assert parsed.year == 2026 and parsed.month == 5 and parsed.day == 23
+    assert parsed.hour == 14 and parsed.minute == 51 and parsed.second == 39
+
+
+def test_parse_livescore_updated_field_invalid_returns_none() -> None:
+    from polymarket_trader.infra.sports.goalserve_livescore_parsers import (
+        _parse_livescore_updated_field,
+    )
+    assert _parse_livescore_updated_field(None) is None
+    assert _parse_livescore_updated_field("") is None
+    assert _parse_livescore_updated_field("not-a-date") is None
+    assert _parse_livescore_updated_field(123) is None

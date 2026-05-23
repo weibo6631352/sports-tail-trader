@@ -24,7 +24,7 @@ scores 内结构按运动而异：
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from polymarket_trader.domain.sports_live import (
@@ -46,6 +46,28 @@ from polymarket_trader.domain.sports_live import (
     VolleyballGameState,
 )
 from polymarket_trader.infra.sports.common import utc_now
+
+
+def _parse_livescore_updated_field(raw: Any) -> datetime | None:
+    """Goalserve livescore feed `scores.@updated` 字段 → UTC datetime。
+
+    实测格式 "DD.MM.YYYY HH:MM:SS"（PT 时区，US/Pacific，与官方文档约定一致）。
+    现行 PST = UTC-8，PDT = UTC-7。Goalserve 服务器在 PT 全年用 PST（无夏令时
+    切换）—— sample 实测 2026-05-23 06:51:39 PT vs HTTP Date 14:51:50 UTC，差
+    8h11s = PT - UTC = -8 + 11s 内部缓存延迟，验证 PST UTC-8 假设。
+    格式不匹配 / 解析失败返回 None，由上层 fallback 到 HTTP Date。
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        # DD.MM.YYYY HH:MM:SS
+        naive = datetime.strptime(raw.strip(), "%d.%m.%Y %H:%M:%S")
+    except ValueError:
+        return None
+    # PT (UTC-8 PST，Goalserve server 全年使用)。给 naive datetime 标 PT 时区
+    # 后转 UTC：PT_time + 8h = UTC_time。
+    pt_tz = timezone(timedelta(hours=-8))
+    return naive.replace(tzinfo=pt_tz).astimezone(timezone.utc)
 
 
 def _split_team_name(full_name: str) -> tuple[str | None, str | None]:
@@ -1976,8 +1998,10 @@ def parse_goalserve_livescore_sport(
     XML 运动（basketball/baseball/hockey/tennis）由客户端预转换为此格式。
     scores=null 时（F1 赛间等）直接返回空列表。
     observed_at 为 None 时自动取当前 UTC 时间。
-    server_clock_at 是 HTTP `Date` header 解析出的 Goalserve 响应生成时刻，
-    统一 stamp 到所有 events（task D2 用于 live_feed_lag 决策降级）。
+    server_clock_at 是上层 HTTP `Date` header 时间；但 scores 根节点带 `@updated`
+    字段（如 "23.05.2026 06:51:39"，PT 时区）是 Goalserve server 写 feed 时刻，
+    比 HTTP Date 更准（实测早 ~11s，差异是 server 内部 cache 延迟）——优先用
+    feed 内 @updated。
     """
     import dataclasses
 
@@ -1987,6 +2011,10 @@ def parse_goalserve_livescore_sport(
     scores = data.get("scores")
     if not isinstance(scores, dict):
         return []
+    # D3：优先用 scores.@updated（server 数据生成时刻）替代 HTTP Date
+    feed_server_clock = _parse_livescore_updated_field(scores.get("@updated"))
+    if feed_server_clock is not None:
+        server_clock_at = feed_server_clock
 
     match sport:
         case "soccer":

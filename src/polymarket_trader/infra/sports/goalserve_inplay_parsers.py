@@ -1072,9 +1072,11 @@ def parse_goalserve_inplay(
     ``events`` 为空 dict（当前无 live 赛事）时返回空列表——这是正常态，不是错误。
     observed_at 为 None 时取当前 UTC 时间。
 
-    server_clock_at 是 HTTP `Date` header 解析出的 Goalserve server 生成响应时刻，
+    server_clock_at 是上层 client 传入的 HTTP `Date` header 解析时间。但 inplay
+    feed 顶层带 `updated_ts`（epoch ms）字段，是 server 写 feed 的精确时刻，
+    比 HTTP Date（响应发出时刻）更准——优先用 feed 内时间戳，HTTP Date 作 fallback。
     统一 stamp 到所有 events（同一次 fetch 共享同一个 server_clock_at），用于
-    决策侧测算 live_feed_lag_seconds（task D2）。
+    决策侧测算 live_feed_lag_seconds（task D2/D3）。
 
     停止/已结束的赛事不在此过滤——状态由 _map_status 标记，由上层决定如何处理；
     parser 保持纯函数，不做"该不该交易"的判断。
@@ -1091,6 +1093,12 @@ def parse_goalserve_inplay(
     if parser is None:
         return []
 
+    # D3 优先用 feed 内 updated_ts（epoch ms，server 写 feed 时刻）替代 HTTP Date
+    # （响应发出时刻）。Sample 实测两者差 < 1s，但 updated_ts 是数据真实生成
+    # 时刻，避免把 server-to-client 网络/排队延迟算进 feed lag。
+    feed_server_clock = _parse_inplay_updated_ts(feed_dict.get("updated_ts"))
+    effective_server_clock = feed_server_clock if feed_server_clock is not None else server_clock_at
+
     results: list[LiveEvent] = []
     for match_id, event in events.items():
         if not isinstance(event, dict):
@@ -1102,6 +1110,32 @@ def parse_goalserve_inplay(
             # 单场解析失败不阻断其他赛事——inplay feed 字段偶有缺失，
             # 跳过坏数据而非整批丢弃。
             continue
-    if server_clock_at is not None:
-        results = [dataclasses.replace(e, server_clock_at=server_clock_at) for e in results]
+    if effective_server_clock is not None:
+        results = [dataclasses.replace(e, server_clock_at=effective_server_clock) for e in results]
     return results
+
+
+def _parse_inplay_updated_ts(raw: Any) -> datetime | None:
+    """Goalserve inplay feed 顶层 `updated_ts` 字段（epoch milliseconds, UTC）→ UTC datetime。
+
+    实测 feed 内 `updated_ts=1779547975513` 对应 UTC `2026-05-23 14:52:55`，
+    与 HTTP Date 几乎一致（差 < 1s）。该字段是 server 写 feed 时刻，比 HTTP
+    Date 更准。无字段 / 解析失败返回 None，由上层 fallback 到 HTTP Date。
+    """
+    if raw is None:
+        return None
+    try:
+        # 直接接受 int / float / str 数字（epoch ms）
+        ms = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if ms <= 0:
+        return None
+    # 合理性检查：epoch ms 应在 [2000-01-01, 2100-01-01) 范围内
+    # （946684800000, 4102444800000）；范围外视为格式错误。
+    if ms < 946684800000 or ms >= 4102444800000:
+        return None
+    try:
+        return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None

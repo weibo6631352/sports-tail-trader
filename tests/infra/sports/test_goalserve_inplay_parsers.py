@@ -418,3 +418,38 @@ def test_subperiod_market_name_does_not_warn(caplog) -> None:
     with caplog.at_level(logging.WARNING, logger=gip.logger.name):
         parse_goalserve_inplay("basket", feed, observed_at=_OBSERVED_AT)
     assert not any("unrecognized odds market name" in r.getMessage() for r in caplog.records)
+
+
+# D3 测试：feed 内 updated_ts / @updated 字段优先于 HTTP Date
+
+def test_parse_inplay_updated_ts_overrides_http_date() -> None:
+    """inplay feed 顶层 updated_ts (epoch ms) 优先于 HTTP Date 作 server_clock_at。"""
+    feed = {
+        "updated_ts": 1779547975513,  # 2026-05-23 14:52:55 UTC
+        "updated": "05.23.2026 14:52:55",
+        "events": {},
+    }
+    # 即使传入不同的 HTTP Date，应该被 feed 内 updated_ts 覆盖
+    http_date = datetime(2026, 5, 23, 14, 53, 10, tzinfo=timezone.utc)
+    events = parse_goalserve_inplay(
+        "tennis", feed, observed_at=_OBSERVED_AT, server_clock_at=http_date,
+    )
+    # 空 events 列表（feed 没事件），但 effective_server_clock 已计算
+    assert events == []
+    # 单独测 helper：updated_ts 解析
+    from polymarket_trader.infra.sports.goalserve_inplay_parsers import _parse_inplay_updated_ts
+    parsed = _parse_inplay_updated_ts(1779547975513)
+    assert parsed is not None
+    assert parsed.year == 2026 and parsed.month == 5 and parsed.day == 23
+    assert parsed.hour == 14 and parsed.minute == 52 and parsed.second == 55
+
+
+def test_parse_inplay_updated_ts_invalid_returns_none() -> None:
+    """非法 updated_ts 返回 None，fallback 到 HTTP Date。"""
+    from polymarket_trader.infra.sports.goalserve_inplay_parsers import _parse_inplay_updated_ts
+    assert _parse_inplay_updated_ts(None) is None
+    assert _parse_inplay_updated_ts("") is None
+    assert _parse_inplay_updated_ts(0) is None
+    assert _parse_inplay_updated_ts(-1) is None
+    assert _parse_inplay_updated_ts(123) is None  # 太小（< 2000-01-01）
+    assert _parse_inplay_updated_ts("not-a-number") is None
