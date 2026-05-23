@@ -474,6 +474,128 @@ class _MarketTracker:
         self.tracked_condition_ids.append(market.condition_id)
 
 
+class _RecordingPauser:
+    """测试用 market_pauser：记录每次 pause_market 调用。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def pause_market(self, condition_id: str, *, reason: str, **_: object) -> object:
+        self.calls.append((condition_id, reason))
+        return None
+
+
+def _terminal_match(market: Market, *, status: SportsLiveGameStatus) -> LiveStateMatch:
+    return LiveStateMatch(
+        market=market,
+        event=LiveEvent(
+            participants=(
+                Participant(role="home", name="Knicks", score=102),
+                Participant(role="away", name="Celtics", score=94),
+            ),
+            kind=LiveEventKind.TEAM_MATCH,
+            sport="basketball",
+            source="espn",
+            source_event_id="game-1",
+            league="NBA",
+            status=status,
+            period="Final",
+            seconds_remaining=0,
+            observed_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
+            raw_status="STATUS_FINAL",
+        ),
+        signal_allowed=False,
+        signal_reason="sports_live_state_ended",
+        phase="ended",
+        payload={"live_game": {"status": status.value}},
+    )
+
+
+def test_terminal_status_triggers_pause_market_once() -> None:
+    """ENDED/CANCELLED/RETIRED 必须把 condition_id pause 一次，且不重复 pause。"""
+
+    async def run(status: SportsLiveGameStatus) -> _RecordingPauser:
+        registry = MarketRegistry()
+        market = _market()
+        registry.upsert(market)
+        pauser = _RecordingPauser()
+        worker = SportsLiveStateWorker(
+            snapshot_provider=lambda: _snapshot(_game()),
+            match_live_state=lambda m, _events: _terminal_match(m, status=status),
+            registry=registry,
+            entry_metadata_store=EntryMetadataStore(),
+            market_pauser=pauser,
+            enabled=True,
+            source="espn",
+            leagues=("nba",),
+            publish_entry_signals=False,
+        )
+        await worker.sync_once()
+        await worker.sync_once()  # 第二轮：相同 terminal status，不应重复 pause
+        return pauser
+
+    for status, expected_reason in (
+        (SportsLiveGameStatus.CANCELLED, "sports_live_state_cancelled"),
+        (SportsLiveGameStatus.RETIRED, "sports_live_state_retired"),
+    ):
+        pauser = asyncio.run(run(status))
+        assert pauser.calls == [("moneyline-condition", expected_reason)], (
+            f"status={status.value} expected single pause with reason={expected_reason}, got {pauser.calls}"
+        )
+
+
+def test_ended_status_does_not_trigger_pause_market() -> None:
+    """ENDED 故意保留：策略侧 entry_signal_gate 把 "ended_not_closed" 视作扫尾入场信号
+    （§17 赢方等结算），worker 自动 pause 会误杀套利窗口。"""
+
+    async def run() -> _RecordingPauser:
+        registry = MarketRegistry()
+        market = _market()
+        registry.upsert(market)
+        pauser = _RecordingPauser()
+        worker = SportsLiveStateWorker(
+            snapshot_provider=lambda: _snapshot(_game()),
+            match_live_state=lambda m, _events: _terminal_match(m, status=SportsLiveGameStatus.ENDED),
+            registry=registry,
+            entry_metadata_store=EntryMetadataStore(),
+            market_pauser=pauser,
+            enabled=True,
+            source="espn",
+            leagues=("nba",),
+            publish_entry_signals=False,
+        )
+        await worker.sync_once()
+        return pauser
+
+    pauser = asyncio.run(run())
+    assert pauser.calls == []
+
+
+def test_live_status_does_not_trigger_pause_market() -> None:
+    """LIVE / PAUSED / SCHEDULED 不应触发 pause_market。"""
+
+    async def run() -> _RecordingPauser:
+        registry = MarketRegistry()
+        registry.upsert(_market())
+        pauser = _RecordingPauser()
+        worker = SportsLiveStateWorker(
+            snapshot_provider=lambda: _snapshot(_game()),
+            match_live_state=_live_state_match_from_metadata,
+            registry=registry,
+            entry_metadata_store=EntryMetadataStore(),
+            market_pauser=pauser,
+            enabled=True,
+            source="espn",
+            leagues=("nba",),
+            publish_entry_signals=False,
+        )
+        await worker.sync_once()
+        return pauser
+
+    pauser = asyncio.run(run())
+    assert pauser.calls == []
+
+
 # ============================================================
 # audit dedupe（commit 1752416 引入的"稳态字段 hash"路径）
 # ============================================================

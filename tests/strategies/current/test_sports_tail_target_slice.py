@@ -71,7 +71,7 @@ def test_config_expresses_complete_tail_policy() -> None:
     assert policy.moneyline_execution_permission == ExecutionPermission.AUTO_EXECUTE
     assert policy.spreads_execution_permission == ExecutionPermission.AUTO_EXECUTE
     assert policy.locked_outcome_max_entry_price == Decimal("0.98")
-    assert policy.baseball_max_game_state_age_seconds == 45
+    assert policy.baseball_max_game_state_age_seconds == 120
 
 
 def test_live_game_metadata_preserves_scheduled_status() -> None:

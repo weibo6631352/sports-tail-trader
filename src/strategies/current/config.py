@@ -244,7 +244,11 @@ class CurrentStrategyConfig:
     tail_spreads_max_entry_price: Decimal = Decimal("0.96")
     tail_min_liquidity_usdc: Decimal = Decimal("1")
     tail_max_game_state_age_seconds: int = 10
-    tail_baseball_max_game_state_age_seconds: int = 45
+    # MLB/KBO baseball livescore feed 实测 30-90s 才推新比分（局间/换投手时段更慢），
+    # 45s 阈值经常误标 sports_live_state_stale → reconcile pause market → 即使
+    # candidate accepted（odds_gap_entry / 扫尾锁定）也被 entry_planner 短路下不了单。
+    # 调到 120s 给 KBO/MLB 比赛足够 buffer，与 soccer 同口径。
+    tail_baseball_max_game_state_age_seconds: int = 120
     tail_tennis_max_game_state_age_seconds: int = 35
     # J1/J2/Australia/各次级足球联赛 livescore feed 更新周期 60-90s(实测重启后
     # 仍有 sports_live_state_stale pause 触发);设 120s 给足 buffer,避免 reconcile

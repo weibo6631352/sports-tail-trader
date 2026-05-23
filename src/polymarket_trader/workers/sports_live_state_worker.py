@@ -20,6 +20,7 @@ from polymarket_trader.domain.events import DomainEvent, DomainEventType, Outbox
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import (
     LiveEvent,
+    SportsLiveGameStatus,
     SportsLiveSnapshot,
     SportsLiveSourceHealth,
     SportsLiveSourceStatus,
@@ -55,6 +56,23 @@ class SportsLiveMarketTracker(Protocol):
 
     def track_market(self, market: Market) -> None:
         """开始跟踪 market 的盘口快照。"""
+
+
+@runtime_checkable
+class SportsLiveMarketPauser(Protocol):
+    """比赛进入终态（ended/cancelled/retired）时通知 account_state 暂停该市场。"""
+
+    def pause_market(self, condition_id: str, *, reason: str, **kwargs: Any) -> Any: ...
+
+
+# 仅 CANCELLED / RETIRED 立即 pause——这两类比赛不会再结算赢方，市场也无套利价值。
+# ENDED 故意 *不* 在这里 pause：策略侧 entry_signal_gate 把 "ended_not_closed" 视作
+# 扫尾入场信号（§17：已分出胜负、等 Polymarket 结算的赢方挂 BUY 锁定确定性收益），
+# 自动 pause 会误杀此类套利窗口。ENDED → 死盘的 prune 仍由 end_date+6h grace 兜底。
+_TERMINAL_STATUS_PAUSE_REASONS: dict[str, str] = {
+    SportsLiveGameStatus.CANCELLED.value: "sports_live_state_cancelled",
+    SportsLiveGameStatus.RETIRED.value: "sports_live_state_retired",
+}
 
 
 def _utc_now() -> datetime:
@@ -95,6 +113,7 @@ class SportsLiveStateWorker:
         event_bus: EventBus | None = None,
         market_tracker: SportsLiveMarketTracker | Callable[[Market], None] | None = None,
         lifecycle_bus: LifecyclePublisher | None = None,
+        market_pauser: SportsLiveMarketPauser | None = None,
         enabled: bool = True,
         source: str = "espn",
         leagues: tuple[str, ...] = (),
@@ -107,6 +126,11 @@ class SportsLiveStateWorker:
         self._event_bus = event_bus
         self._market_tracker = market_tracker
         self._lifecycle_bus = lifecycle_bus
+        self._market_pauser = market_pauser
+        # 已对外发出 terminal pause 的 condition_id 集合——避免每秒重复 pause；
+        # 比赛进入 ENDED/CANCELLED/RETIRED 后不会回到 LIVE，不需要 revert 逻辑。
+        # registry 退订该 market 后下一轮 _match_markets 已经看不到它，集合长期上限。
+        self._terminal_status_paused: set[str] = set()
         self._enabled = enabled
         self._source = source
         self._leagues = leagues
@@ -229,6 +253,7 @@ class SportsLiveStateWorker:
         entry_signals = 0
         for match in matches:
             market = match.market
+            self._maybe_pause_terminal_market(match)
             self._entry_metadata_store.upsert(
                 condition_id=market.condition_id,
                 market_slug=market.market_slug,
@@ -284,6 +309,34 @@ class SportsLiveStateWorker:
             entry_signals_published=entry_signals,
             source_statuses=snapshot.source_statuses,
         )
+
+    def _maybe_pause_terminal_market(self, match: LiveStateMatch) -> None:
+        """比赛进入 ENDED/CANCELLED/RETIRED 时通知 account_state pause 该市场。
+
+        激活 market_tracking_policy.TERMINAL_LIVE_STATE_PAUSE_REASONS 的 prune 链路：
+        discovery 和 reconcile 看到 terminal pause reason → 无敞口的 market 立即退订，
+        不再产生 candidate 评估开销。仅本 worker 调用 pauser，避免多源同步状态。
+        """
+
+        if self._market_pauser is None:
+            return
+        condition_id = match.market.condition_id
+        if condition_id in self._terminal_status_paused:
+            return
+        reason = _TERMINAL_STATUS_PAUSE_REASONS.get(match.event.status.value)
+        if reason is None:
+            return
+        try:
+            self._market_pauser.pause_market(
+                condition_id,
+                reason=reason,
+                source="sports_live_state_worker",
+            )
+        except Exception:
+            # pause 失败仅记录到本地 set 重试一次的话语义反而更复杂；下次发现该 cid
+            # 仍是 terminal 时会重新走这里。不阻塞 entry_metadata.upsert 主路径。
+            return
+        self._terminal_status_paused.add(condition_id)
 
     def _record_match_sources(self, match: LiveStateMatch) -> None:
         """缺口 1：每个匹配产生 per-market 源选择条目，供 admin / 校准 harness 复盘。"""

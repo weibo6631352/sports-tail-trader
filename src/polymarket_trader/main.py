@@ -913,6 +913,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 event_bus=event_bus,
                 market_tracker=market_ws_worker.track_market,
                 lifecycle_bus=lifecycle_bus,
+                market_pauser=account_state_store,
                 enabled=True,
                 source="sports_live_aggregate",
                 leagues=settings.sports_live_state_league_codes,
