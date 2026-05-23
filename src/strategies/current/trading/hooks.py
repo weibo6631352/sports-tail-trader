@@ -531,19 +531,23 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
         or (context.position.token_id if context.position is not None else None)
         or _metadata_text(context, "token_id")
     )
+    # entry_price 先算出来 → 同时喂给 exit_plan metadata 和静态 exit_price，
+    # 确保 build_exit_plan_metadata + exit_price_for_context 都走 entry+offset，
+    # 而不是 fallback 到 config.exit_no_price ($0.99) 永远等结算。
+    entry_price = _position_entry_price(context)
     decision_metadata = build_exit_plan_metadata(
         config,
         context,
         token_id=token_id,
         source_reason="strategy_exit",
         target_size_shares=uncovered_shares,
+        entry_price=entry_price,
     )
 
     # 动态退出：有实时盘口时每个决策周期重估退出价/退出时机，结果优先于
     # 旧的静态 _profit_take_target_price。无盘口时返回 None，退回静态退出价。
-    exit_price = exit_price_for_context(config, context)
+    exit_price = exit_price_for_context(config, context, entry_price=entry_price)
     exit_reason = "strategy_exit"
-    entry_price = _position_entry_price(context)
     if entry_price is not None:
         dynamic = evaluate_dynamic_exit(
             config,
