@@ -129,18 +129,23 @@ class AccountSnapshot:
 
     @property
     def equity_usdc(self) -> Decimal:
-        """组合权益 = 可用 USDC + Σ(持仓 mark-to-market)。
+        """组合权益 = 可用 USDC + Σ(持仓真实可实现值)。
 
-        Kelly drawdown lockout 用 ``equity / peak_equity`` 比值判断是否停仓——
-        而非纯 USDC，否则"高仓位利用率 + 部分亏损平仓"会误锁。仓位缺 current_value
-        时按 cost_usdc 兜底（保守，宁高估 equity 也不低估）。
+        position.current_value 来源链：reconcile worker 拉 data-api curPrice
+        (last_trade) + worker 订阅触发用 best_bid mark-to-market。data-api 的
+        cur_price 是 stale（冷盘几小时不动 + 可能反映对面 outcome 价），不能
+        真实反映可成交价。
+
+        关键：current_value=None 或 = cost_usdc 兜底都会 **虚假高估**——实测
+        Kalinina case 显示 cv 是 stale 数据，best_bid=None 实际可实现 0。
+        修复后：current_value 缺失 → 0（保守，没数据=没价值），不再用 cost 兜底。
         """
 
         total = self.available_usdc
         for position in self.positions:
-            mtm = position.current_value if position.current_value is not None else position.cost_usdc
-            if mtm > Decimal("0"):
-                total += mtm
+            value = position.current_value
+            if value is not None and value > Decimal("0"):
+                total += value
         return total
 
     def get_position(self, condition_id: str, token_id: str) -> Position | None:

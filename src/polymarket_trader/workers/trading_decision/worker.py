@@ -312,14 +312,17 @@ class TradingDecisionWorker:
             if position is not None and position.shares > Decimal("0"):
                 # 订阅驱动 MTM 刷新：从 hot orderbook 拿 best_bid 即时更新
                 # position.current_value / cash_pnl，不等 reconcile 60s 周期。
-                # 这让 portfolio / admin / drawdown 实时看到当前价值。
+                # 这让 portfolio / admin / 净值显示实时看到当前真实可实现价值。
+                # 关键：best_bid=None（冷板凳无买家）→ MTM=$0，强制覆盖
+                # data-api 返回的 stale curPrice，避免虚假浮盈（Kalinina case
+                # 显示 cv=\$59 但实际 best_bid=None 全损 \$6.24 cost）。
                 orderbook = self._trading_decision_service.lookup_orderbook(event.token_id)
-                if (
-                    orderbook is not None
-                    and orderbook.best_bid is not None
-                    and orderbook.best_bid > Decimal("0")
-                ):
-                    refreshed = position.with_mark_to_market(orderbook.best_bid)
+                if orderbook is not None:
+                    if orderbook.best_bid is not None and orderbook.best_bid > Decimal("0"):
+                        refreshed = position.with_mark_to_market(orderbook.best_bid)
+                    else:
+                        # best_bid=None 强制 MTM=$0：没买家 = 没真实可实现价值。
+                        refreshed = position.with_mark_to_market(Decimal("0"))
                     self._account_state_store.upsert_position(refreshed)
                     position = refreshed
                 logger.info(
