@@ -7,65 +7,36 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
 from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.extension_api import DiscoveryQuery
 from strategies.current.config import CurrentStrategyConfig
 
 
 def build_configured_discovery_queries(config: CurrentStrategyConfig) -> tuple[DiscoveryQuery, ...]:
-    """生成 Gamma 粗筛查询——复用 Polymarket 官方 sports/live 页面的发现方法。
+    """生成 Gamma 粗筛查询——只用 polymarket 官方 ``live=true`` 标志。
 
-    官方 live 页面对 ``/events/keyset`` 只发三个定向查询、不做全量翻页扫描：
-    ① ``live=true``——正在直播的赛事；
-    ② ``start_time_min/max``——按**开赛时间**窗口查进行中+临近开赛的赛事；
-    ③ ``start_time_min/max``——未来 24h 即将开赛的赛事。
+    polymarket 自己标记 ``live=true`` 的事件即"当下真正可交易的直播比赛",
+    实测 30 events / 458 markets 直接覆盖核心目标. 删除旧的 start_time 窗口
+    查询 (旧 12h/8h 窗口拉了大量已结束 + 远期市场, 实测 1500+ markets, 60%+
+    是 stale): 让 discovery 与 polymarket /sports/live 同口径.
 
-    这三个查询都基于 Polymarket 自己的事件数据(零名字匹配、不会漏市场)，
-    每个一次定向查询、秒级返回——取代旧的 title_search × tag_slug 全量翻页。
-    每轮发现都会用当前时间重新生成窗口。
+    Trade-offs:
+    - polymarket live 标志可能比赛事真实开赛晚几秒~几分钟标记 → 接受少量延迟
+    - 不再 24h 提前 track 远期 → discovery 会在赛事开打瞬间 (live 标志一打开)
+      立即纳入, 实测延迟可接受
+    - outright/futures (champion/season winner) 由专用 worker 拉, 不依赖
+      sports 类 discovery query
     """
 
     tag_slugs = tuple(
         tag_slug.strip() for tag_slug in config.discovery_tag_slugs if tag_slug.strip()
     ) or ("sports",)
-    now = datetime.now(timezone.utc)
-
-    def _iso(dt: datetime) -> str:
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     queries: list[DiscoveryQuery] = []
     for tag_slug in tag_slugs:
         base = {"tag_slug": tag_slug, "order": "startTime", "ascending": "true"}
-        # ① 正在直播
         queries.append(
             DiscoveryQuery(name=f"sports_live:{tag_slug}", params={**base, "live": "true"})
-        )
-        # ② 进行中 + 临近开赛：开赛时间在 [now-12h, now+1h]。
-        # 这条按 start_time 取，与 live 标志无关——所有进行中的比赛(startTime
-        # 在过去)都会被捞到，是 ①(live=true 可能滞后)的完整兜底。-12h 覆盖
-        # 长时/雨延比赛。
-        queries.append(
-            DiscoveryQuery(
-                name=f"sports_inplay_soon:{tag_slug}",
-                params={
-                    **base,
-                    "start_time_min": _iso(now - timedelta(hours=12)),
-                    "start_time_max": _iso(now + timedelta(hours=1)),
-                },
-            )
-        )
-        # ③ 即将开赛：开赛时间在 [now+1h, now+24h]——提前发现、临近时再纳入订阅
-        queries.append(
-            DiscoveryQuery(
-                name=f"sports_upcoming:{tag_slug}",
-                params={
-                    **base,
-                    "start_time_min": _iso(now + timedelta(hours=1)),
-                    "start_time_max": _iso(now + timedelta(hours=24)),
-                },
-            )
         )
     return tuple(queries)
 

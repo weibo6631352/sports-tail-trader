@@ -32,32 +32,24 @@ def _live_game() -> LiveEvent:
     )
 
 
-def test_configured_discovery_queries_use_official_live_and_start_time_method() -> None:
-    """build_configured_discovery_queries 复用官方 sports/live 的发现方法：
+def test_configured_discovery_queries_only_live_flag() -> None:
+    """build_configured_discovery_queries 只使用 polymarket 官方 live=true 标志.
 
-    每个 tag 生成三个定向查询——live=true / start_time 进行中窗口 /
-    start_time 即将开赛窗口——不再做 title_search × tag_slug 全量翻页。
+    极简方案: 删除 start_time 兜底窗口, 完全依赖 live=true.
+    旧 12h/8h 窗口拉了大量已结束 + 远期市场 (~1500 markets, 60%+ stale),
+    收敛到只用 live=true 后约 458 markets (与 polymarket /sports/live 同口径).
     """
 
     config = CurrentStrategyConfig()
     queries = build_configured_discovery_queries(config)
 
     by_name = {q.name.split(":")[0]: q for q in queries}
-    assert set(by_name) == {"sports_live", "sports_inplay_soon", "sports_upcoming"}
+    assert set(by_name) == {"sports_live"}
 
     live = by_name["sports_live"]
     assert live.params.get("live") == "true"
     assert "start_time_min" not in live.params
-
-    inplay = by_name["sports_inplay_soon"]
-    assert "start_time_min" in inplay.params and "start_time_max" in inplay.params
-    # 进行中窗口按 start_time 取——与 live 标志无关，是 live=true 的完整兜底。
-    assert inplay.params["start_time_min"] < inplay.params["start_time_max"]
-
-    upcoming = by_name["sports_upcoming"]
-    assert "start_time_min" in upcoming.params and "start_time_max" in upcoming.params
-    # 即将开赛窗口接在进行中窗口之后。
-    assert upcoming.params["start_time_min"] >= inplay.params["start_time_max"]
+    assert "start_time_max" not in live.params
 
 
 def test_configured_discovery_queries_cover_every_tag_slug() -> None:
@@ -67,8 +59,8 @@ def test_configured_discovery_queries_cover_every_tag_slug() -> None:
     queries = build_configured_discovery_queries(config)
     tags = {q.params.get("tag_slug") for q in queries}
     assert tags == {"sports", "games"}
-    # 每个 tag 三个查询。
-    assert len(queries) == 6
+    # 每个 tag 一个 live=true 查询.
+    assert len(queries) == 2
 
 
 def test_live_event_discovery_queries_disabled() -> None:

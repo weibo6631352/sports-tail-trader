@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from polymarket_trader.api.deps import build_time_range, get_admin_service
+from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
 router = APIRouter(tags=["runtime"])
@@ -196,6 +198,122 @@ async def system_perf(service: AdminService = Depends(get_admin_service)) -> dic
     - db_ping_ms: SELECT 1 实时延迟
     """
     return await service.system_perf_snapshot()
+
+
+@router.get("/markets/tracking-breakdown")
+async def markets_tracking_breakdown(
+    runtime: Any = Depends(get_runtime),
+) -> dict[str, Any]:
+    """诊断: tracked markets 按多维度拆开统计.
+
+    用于对照 polymarket /sports/live: 我们 tracked N 个 markets 但 polymarket
+    可能 0 个 live, 看哪些维度上不一致.
+
+    返回:
+    - total_registry / total_ws_tracked / total_entry_metadata
+    - by_sport: 按 sport 分布 (按 market_slug 前缀推断)
+    - by_trading_status: ELIGIBLE / PAUSED / CLOSED / RESOLVED
+    - by_trade_window: 按 game_start_time 与当前时间关系分类
+        * no_game_start: outright/futures
+        * upcoming_30min: 即将开赛 (now ~ now+30min)
+        * upcoming_far: 远期未开赛 (>30min 后)
+        * in_progress: 正在比赛窗口 (now-6h ~ now)
+        * elapsed: 已结束 (game_start < now-6h)
+    - by_live_state: 是否在 entry_metadata 中有 live_state_payload
+    - sample_elapsed: 最早结束的 20 个 market (应该被 prune 但没的样本)
+    """
+    from datetime import datetime, timedelta, timezone
+    from collections import Counter
+
+    registry = getattr(runtime, "registry", None)
+    if registry is None:
+        return {"available": False, "reason": "registry_unavailable"}
+
+    ws_worker = getattr(runtime, "market_ws_worker", None)
+    metadata_store = getattr(runtime, "entry_metadata_store", None)
+
+    snapshot = registry.snapshot()
+    markets = snapshot.markets
+    now = datetime.now(timezone.utc)
+    window_future = timedelta(minutes=30)
+    window_past = timedelta(hours=6)
+
+    by_sport: Counter[str] = Counter()
+    by_status: Counter[str] = Counter()
+    by_window: Counter[str] = Counter()
+    by_live_state: Counter[str] = Counter()
+    elapsed_samples: list[dict[str, Any]] = []
+
+    ws_tracked_tokens = set(getattr(ws_worker, "_tracked_markets", {}).keys()) if ws_worker else set()
+    metadata_cids = (
+        {r.condition_id for r in metadata_store.records() if r.condition_id}
+        if metadata_store else set()
+    )
+
+    for market in markets:
+        # by_sport: 按 slug 前缀 (粗略)
+        slug = (market.market_slug or "").lower()
+        sport = "unknown"
+        for s in ("mlb", "nba", "wnba", "nhl", "nfl", "ncaaf", "ncaab", "kbo", "cricket",
+                  "atp", "wta", "itf", "mls", "epl", "laliga", "j1100", "j2100", "j3",
+                  "cs2", "lol", "dota", "val", "sc2", "ow", "esports",
+                  "boxing", "mma", "ufc", "f1", "motogp", "golf", "tennis"):
+            if slug.startswith(s + "-") or slug.startswith(s + "1-") or slug.startswith(s + "2-"):
+                sport = s
+                break
+        if sport == "unknown" and slug:
+            # 取第一段 (xxx-yyy-zzz → xxx)
+            sport = slug.split("-")[0] if "-" in slug else slug[:10]
+        by_sport[sport] += 1
+
+        # by_trading_status
+        ts = getattr(market.trading_status, "value", str(market.trading_status))
+        by_status[ts] += 1
+
+        # by_trade_window
+        gst = market.game_start_time
+        if gst is None:
+            window_key = "no_game_start"
+        else:
+            if gst.tzinfo is None:
+                gst = gst.replace(tzinfo=timezone.utc)
+            if gst > now + window_future:
+                window_key = "upcoming_far"
+            elif gst > now:
+                window_key = "upcoming_30min"
+            elif gst > now - window_past:
+                window_key = "in_progress"
+            else:
+                window_key = "elapsed"
+                if len(elapsed_samples) < 20:
+                    elapsed_samples.append({
+                        "market_slug": market.market_slug,
+                        "condition_id": market.condition_id,
+                        "trading_status": ts,
+                        "game_start_time": gst.isoformat(),
+                        "elapsed_minutes": int((now - gst).total_seconds() / 60),
+                    })
+        by_window[window_key] += 1
+
+        # by_live_state (按 cid 查 metadata_store)
+        if market.condition_id in metadata_cids:
+            by_live_state["has_metadata"] += 1
+        else:
+            by_live_state["no_metadata"] += 1
+
+    return {
+        "available": True,
+        "total_registry": len(markets),
+        "total_ws_tracked_tokens": len(ws_tracked_tokens),
+        "total_entry_metadata": len(metadata_cids),
+        "by_sport": dict(by_sport.most_common(30)),
+        "by_trading_status": dict(by_status),
+        "by_trade_window": dict(by_window),
+        "by_live_state": dict(by_live_state),
+        "elapsed_samples": elapsed_samples,
+        "note": "对照 https://polymarket.com/zh/sports/live - in_progress 应该是真正 live, "
+                "elapsed 是应被 prune 的, upcoming_far 是 discovery 拉了远期市场.",
+    }
 
 
 @router.get("/runtime/pipeline-health")
