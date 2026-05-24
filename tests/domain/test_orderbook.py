@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
-import pytest
 
 from polymarket_trader.domain.orderbook import (
     AskLiquidityState,

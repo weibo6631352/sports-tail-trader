@@ -734,35 +734,24 @@ def test_audit_dedupe_emits_on_signal_allowed_change() -> None:
     assert len(audit_events) == 2
 
 
-def test_audit_dedupe_lru_evicts_oldest_beyond_capacity() -> None:
-    """超出 _LIVE_STATE_AUDIT_DEDUPE_CAPACITY 时最老的 condition_id 被淘汰，下次相同 hash 视为"首次"重发。
-    用直接操作 _last_audit_state_hash 验证 LRU 行为（不真跑 8192 个 condition 太重）。"""
-    from polymarket_trader.workers.sports_live_state_worker import (
-        _LIVE_STATE_AUDIT_DEDUPE_CAPACITY,
-    )
+def test_audit_dedupe_state_dies_with_market() -> None:
+    """audit dedupe state 现已迁移到 registry.companion(cid),lifecycle 严格随 market:
+    registry.remove_market(cid) → companion 自动 pop → 无任何"按 cid 索引"的 dict 泄漏。
+    """
     registry = MarketRegistry()
-    worker = SportsLiveStateWorker(
-        snapshot_provider=lambda: _snapshot(_game()),
-        match_live_state=lambda _m, _g: None,
-        registry=registry,
-        entry_metadata_store=EntryMetadataStore(),
-        enabled=True,
-        source="espn",
-        leagues=("nba",),
-        publish_entry_signals=False,
-    )
-    # 填到 capacity 上限
-    for i in range(_LIVE_STATE_AUDIT_DEDUPE_CAPACITY):
-        worker._last_audit_state_hash[f"cond-{i}"] = f"hash-{i}"
-    assert len(worker._last_audit_state_hash) == _LIVE_STATE_AUDIT_DEDUPE_CAPACITY
-
-    # 模拟 _publish_sports_live_state_recorded 的写入逻辑：超过容量时 popitem(last=False)
-    worker._last_audit_state_hash["cond-new"] = "hash-new"
-    worker._last_audit_state_hash.move_to_end("cond-new")
-    while len(worker._last_audit_state_hash) > _LIVE_STATE_AUDIT_DEDUPE_CAPACITY:
-        worker._last_audit_state_hash.popitem(last=False)
-
-    # cond-0（最老）应被淘汰；cond-new 仍在
-    assert "cond-0" not in worker._last_audit_state_hash
-    assert "cond-new" in worker._last_audit_state_hash
-    assert len(worker._last_audit_state_hash) == _LIVE_STATE_AUDIT_DEDUPE_CAPACITY
+    market = _market(condition_id="cond-1")
+    registry.upsert(market)
+    assert registry.companion("cond-1") is not None
+    # 模拟 worker 写入 dedupe state
+    comp = registry.companion("cond-1")
+    comp.last_audit_state_hash = "hash-1"
+    comp.last_audit_emit_at_mono = 123.0
+    # market prune → companion 应自动消失
+    registry.remove_market("cond-1")
+    assert registry.companion("cond-1") is None
+    # 再 upsert 同 cid → 新 companion(默认空 state)
+    registry.upsert(market)
+    new_comp = registry.companion("cond-1")
+    assert new_comp is not None
+    assert new_comp.last_audit_state_hash is None
+    assert new_comp.last_audit_emit_at_mono == 0.0

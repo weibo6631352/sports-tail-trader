@@ -74,6 +74,7 @@ class AuditEventRepository(BaseRepository):
         token_id: str | None = None,
         time_range: TimeRange | None = None,
         strategy_id: str | None = None,
+        with_total: bool = True,
     ) -> RepositoryPage[AuditEvent]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(AuditEventModel).order_by(AuditEventModel.created_at.desc(), AuditEventModel.id.desc())
@@ -93,7 +94,7 @@ class AuditEventRepository(BaseRepository):
                 stmt = stmt.where(AuditEventModel.created_at >= since_dt)
             if until_dt is not None:
                 stmt = stmt.where(AuditEventModel.created_at <= until_dt)
-        rows, total = await self._paginate(stmt, limit=limit, offset=offset)
+        rows, total = await self._paginate(stmt, limit=limit, offset=offset, with_total=with_total)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
     async def stream_audit_events_in_range(

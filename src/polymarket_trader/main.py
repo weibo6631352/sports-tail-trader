@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 import hashlib
 import logging
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -55,6 +56,9 @@ from polymarket_trader.infra.polymarket.order_executor import (
     InMemoryPolymarketOrderClient,
     PolymarketOrderExecutor,
 )
+from polymarket_trader.app.paper import PaperSubmitOnlyOrderClient, PaperVirtualLedger
+from polymarket_trader.infra.sports.goalserve_mlb_playbyplay_client import MlbPlayByPlayClient, NbaPlayByPlayClient
+from polymarket_trader.infra.sports.goalserve_lazy_client import GoalserveLazyClient
 from polymarket_trader.infra.sports import (
     GoalserveInplayClient,
     GoalserveLivescoreClient,
@@ -87,6 +91,9 @@ from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
 from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics as _sync_runtime_metrics
 from polymarket_trader.runtime.orderbook_delta import OrderbookDeltaStore
+from polymarket_trader.runtime.orderbook_derived_publisher import OrderbookDerivedPublisher
+from polymarket_trader.runtime.orderbook_derived_store import OrderbookDerivedStore
+from polymarket_trader.runtime.orderbook_history_buffer import OrderbookHistoryBuffer
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.runtime.ws_loops import (
     handle_market_ws_message,
@@ -171,6 +178,9 @@ class RuntimeComponents:
     order_executor: PolymarketOrderExecutor
     market_ws_worker: MarketWsWorker
     orderbook_delta_store: OrderbookDeltaStore
+    orderbook_history_buffer: OrderbookHistoryBuffer
+    orderbook_derived_store: OrderbookDerivedStore
+    orderbook_derived_publisher: OrderbookDerivedPublisher
     user_ws_worker: UserWsWorker
     market_service: MarketService
     market_discovery_worker: MarketDiscoveryWorker
@@ -204,6 +214,15 @@ class RuntimeComponents:
     pregame_worker: GoalservePregameWorker | None = None
     pregame_client: GoalservePregameOddsClient | None = None
     parameter_store: ParameterStore | None = None
+    # paper 模式虚拟账本（paper_trading_mode=true 时注入）。
+    # admin API /runtime/paper-ledger 暴露 ledger.available_usdc / positions /
+    # 累计 fee / 已实现 + 浮动 PnL，复盘必查。
+    paper_ledger: "PaperVirtualLedger | None" = None
+    # MLB 逐球事件流客户端（paper 模式启动；observability only，不参与决策）。
+    # 每 8s 轮询全 16 场 play-by-play，per game 含 inning/play/pitch（球速/球种/结果）。
+    mlb_pbp_client: "MlbPlayByPlayClient | None" = None
+    nba_pbp_client: "NbaPlayByPlayClient | None" = None
+    goalserve_lazy_client: "GoalserveLazyClient | None" = None
 
 
 def _build_livescore_active_sports_provider(
@@ -704,11 +723,229 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         outbox=outbox,
         repository=persistence_repository,
     )
-    execution_client = (
-        PolymarketOrderExecutionClient(trading_client)
-        if trading_client is not None
-        else InMemoryPolymarketOrderClient()
+    async def load_market_rest_snapshot(token_id: str):
+        orderbook = await clob_client.get_orderbook(token_id)
+        return orderbook.to_snapshot()
+
+    orderbook_delta_store = OrderbookDeltaStore()
+    # 纯时间窗 15s(覆盖 2/3/5/10s + 余量),无 maxlen 兜底.
+    # max_tokens=2000 LRU evict 防极端 token 爆.
+    orderbook_history_buffer = OrderbookHistoryBuffer(max_age_s=15.0, max_tokens=2000)
+    # 派生指标 store + publisher: ws 推送时同步算派生指标 (microprice / depth_imbalance
+    # / 滑点表 / 15s 波动 / windows delta / whale / 流动性评级), 同步写入 store.
+    # P0 量化决策接到 ORDERBOOK_SNAPSHOT_UPDATED 事件时 derived 已对齐 snapshot 新鲜度;
+    # admin endpoint O(1) 读 store. 实测 compute_derived ~245μs/次, 推送延迟可忽略.
+    orderbook_derived_store = OrderbookDerivedStore(max_tokens=2000)
+    orderbook_derived_publisher = OrderbookDerivedPublisher(
+        store=orderbook_derived_store,
+        history_buffer=orderbook_history_buffer,
+        delta_store=orderbook_delta_store,
     )
+    # market 销毁时同步清 derived cache, 跟随 market lifecycle.
+    registry.register_prune_callback(orderbook_derived_store.evict_market)
+    market_ws_worker = MarketWsWorker(
+        event_bus=event_bus,
+        registry=registry,
+        rest_snapshot_loader=load_market_rest_snapshot,
+        orderbook_delta_store=orderbook_delta_store,
+        orderbook_history_buffer=orderbook_history_buffer,
+        derived_publisher=orderbook_derived_publisher,
+        # WS market_resolved 即时 prune 用: 收到 polymarket 推送的 resolved 事件
+        # 后立即查账户敞口, 无敞口立即 prune (不等 reconcile 5min 周期).
+        account_snapshot_provider=account_state_store.snapshot,
+    )
+
+    # execution_client 必须在 market_ws_worker 之后构造——paper 模式直接复用真实
+    # Polymarket WS 推送的 orderbook（market_ws_worker.snapshot），实盘签名走真
+    # trading_client。
+    paper_ledger: PaperVirtualLedger | None = None
+    mlb_pbp_client: MlbPlayByPlayClient | None = None
+    nba_pbp_client: NbaPlayByPlayClient | None = None
+    goalserve_lazy_client: GoalserveLazyClient | None = None
+    if settings.paper_trading_mode:
+        paper_ledger = PaperVirtualLedger()
+        paper_ledger.fund(settings.portfolio_budget_usdc)
+        # paper 模式禁用真签名：py-clob-client.sign_order 会调链上 balance check,
+        # 链上实际余额很少（多被 active orders 锁住）→ 立即报 "not enough balance"
+        # 阻塞所有下单。paper 模式不上链,签名走本地虚拟即可,不损失策略验证价值。
+        execution_client = PaperSubmitOnlyOrderClient(
+            real_sign_client=None,
+            market_lookup=registry.get_by_token_id,
+            orderbook_lookup=market_ws_worker.snapshot,
+            ledger=paper_ledger,
+        )
+        # account_state_store 必须用 paper_ledger 的虚拟余额，否则 RiskManager 看
+        # 链上真实余额（$0.x 锁在 active orders 后）→ "available_usdc_below..." 警告 +
+        # Kelly 算 stake=0 全部拒绝。初始一次性设值,启动一个后台 syncer 持续覆盖
+        # reconcile worker 周期写回的真链上余额。
+        account_state_store.update_balances(
+            balance_usdc=settings.portfolio_budget_usdc,
+            allowance_usdc=settings.portfolio_budget_usdc * Decimal("10"),
+        )
+
+        from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor as _SPM
+        async def _paper_balance_syncer() -> None:
+            """每秒把 paper_ledger 同步到 account_state_store（balance + positions）。
+
+            balance: paper_ledger.available_usdc → account_state_store.balance_usdc
+              （否则 reconcile 写回真链上 $0.x 余额阻塞 Kelly）
+            positions: paper_ledger.positions → account_state_store.positions
+              （否则策略读 stale account_state 持仓反复 reprice 已平仓 token，
+              触发 simulate_fill 卖空 ledger 持仓 → available 凭空涨的 bug）
+            """
+            from polymarket_trader.domain.position import Position
+            while True:
+                try:
+                    account_state_store.update_balances(
+                        balance_usdc=paper_ledger.available_usdc,
+                        allowance_usdc=settings.portfolio_budget_usdc * Decimal("10"),
+                    )
+                    # 把 ledger 持仓投射成 Position 同步回 account_state
+                    paper_positions: list[Position] = []
+                    for token_id, shares in paper_ledger.positions.items():
+                        if shares <= Decimal("0"):
+                            continue
+                        market = registry.get_by_token_id(token_id)
+                        if market is None:
+                            continue
+                        cost = paper_ledger.cost_basis_usdc.get(token_id, Decimal("0"))
+                        # 跟踪 per-token max_unrealized_loss（drawdown 时序统计指标）
+                        ob = market_ws_worker.snapshot(token_id)
+                        if ob is not None and ob.best_bid is not None and ob.sell_actionable:
+                            paper_ledger.observe_unrealized(token_id, ob.best_bid)
+                        paper_positions.append(Position(
+                            strategy_id=strategy_id,
+                            condition_id=market.condition_id,
+                            token_id=token_id,
+                            market_slug=market.market_slug,
+                            shares=shares,
+                            cost_usdc=cost,
+                        ))
+                    account_state_store.replace_positions(tuple(paper_positions))
+                    _SPM.get().worker_tick("paper_balance_syncer", expected_interval_s=1.0)
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
+
+        paper_balance_syncer_task = asyncio.create_task(  # noqa: F841 - 保留引用防 GC
+            _paper_balance_syncer(), name="paper_balance_syncer"
+        )
+
+        # 资金曲线时序记录器：每 60s 写一条 equity_snapshot 到 paper_ledger，
+        # 供 /runtime/equity-curve 画图。in-memory，重启清零。最多保留 1440 条 (24h)。
+        async def _equity_curve_recorder() -> None:
+            from datetime import datetime, timezone
+            while True:
+                try:
+                    total_cost = Decimal("0")
+                    unrealized_value = Decimal("0")
+                    for tok, shares in paper_ledger.positions.items():
+                        cost = paper_ledger.cost_basis_usdc.get(tok, Decimal("0"))
+                        total_cost += cost
+                        ob = market_ws_worker.snapshot(tok)
+                        if ob and ob.best_bid is not None and ob.sell_actionable:
+                            unrealized_value += shares * ob.best_bid
+                    equity = paper_ledger.available_usdc + unrealized_value
+                    if not hasattr(paper_ledger, "equity_curve"):
+                        paper_ledger.equity_curve = []  # type: ignore[attr-defined]
+                    paper_ledger.equity_curve.append({  # type: ignore[attr-defined]
+                        "at": datetime.now(timezone.utc).isoformat(),
+                        "available_usdc": str(paper_ledger.available_usdc),
+                        "total_cost_usdc": str(total_cost),
+                        "unrealized_value_usdc": str(unrealized_value),
+                        "equity_usdc": str(equity),
+                        "positions_count": len(paper_ledger.positions),
+                        "fees_accrued_usdc": str(paper_ledger.fees_accrued_usdc),
+                    })
+                    # 30s 一次（720 点 = 6h，max 2880 点 = 24h）
+                    if len(paper_ledger.equity_curve) > 2880:  # type: ignore[attr-defined]
+                        paper_ledger.equity_curve = paper_ledger.equity_curve[-2880:]  # type: ignore[attr-defined]
+                    _SPM.get().worker_tick("equity_curve_recorder", expected_interval_s=30.0)
+                except Exception:
+                    pass
+                await asyncio.sleep(30)
+        equity_curve_task = asyncio.create_task(_equity_curve_recorder(), name="paper_equity_curve")  # noqa: F841 - 保留引用防 GC
+
+        # 系统性能采样后台任务（每 60s 采 RSS + 每 30s 采 PnL）
+        async def _system_perf_sampler() -> None:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            import resource
+            import platform
+            mon = SystemPerfMonitor.get()
+            while True:
+                # 用 Python 内置 resource 模块（无 psutil 依赖）
+                try:
+                    ru = resource.getrusage(resource.RUSAGE_SELF)
+                    rss_bytes = ru.ru_maxrss if platform.system() == "Darwin" else ru.ru_maxrss * 1024
+                    mon.sample_memory(rss_bytes / 1024 / 1024)
+                except Exception:
+                    pass
+                # PnL: equity = avail + unrealized_value（用 equity_curve 最新点）
+                try:
+                    if hasattr(paper_ledger, "equity_curve") and paper_ledger.equity_curve:
+                        last = paper_ledger.equity_curve[-1]
+                        pnl = float(last["equity_usdc"]) - float(settings.portfolio_budget_usdc)
+                        mon.sample_pnl(pnl)
+                except Exception:
+                    pass
+                await asyncio.sleep(30)
+        system_perf_sampler_task = asyncio.create_task(_system_perf_sampler(), name="system_perf_sampler")  # noqa: F841 - 保留引用防 GC
+
+        # event loop scheduler lag prober:每 2s await sleep(0.1),实际耗时 - 100 ms = loop 被卡多久
+        async def _eventloop_lag_prober() -> None:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            mon = SystemPerfMonitor.get()
+            target_sleep_s = 0.1
+            while True:
+                t0 = time.perf_counter()
+                await asyncio.sleep(target_sleep_s)
+                actual_ms = (time.perf_counter() - t0) * 1000
+                lag_ms = actual_ms - target_sleep_s * 1000
+                mon.record_eventloop_lag(max(0.0, lag_ms))
+                # 单次 lag > 50ms → 记 slow_callback(说明 loop 被某个 callback 长时间占用)
+                if lag_ms > 50:
+                    mon.record_slow_callback(lag_ms, task_name="eventloop_lag_prober_observed")
+                await asyncio.sleep(2.0)
+        eventloop_lag_task = asyncio.create_task(_eventloop_lag_prober(), name="eventloop_lag_prober")  # noqa: F841 - 保留引用防 GC
+        # asyncio.loop.slow_callback_duration:默认 0.1s,超过会 warning.我们设 0.05
+        # 让 loop 自己检测+log,我们的 prober 兜底.
+        try:
+            asyncio.get_event_loop().slow_callback_duration = 0.05
+        except Exception:
+            pass
+
+        # MLB play-by-play 客户端（仅观测量化，不参与决策）：每 8s 拉一次全 16 场
+        # 实时逐球事件流。挂在 paper 模式下，避免给生产添加额外的轮询。
+        api_key_secret = settings.goalserve_api_key
+        api_key = api_key_secret.get_secret_value() if api_key_secret else None
+        if api_key:
+            mlb_pbp_client = MlbPlayByPlayClient(
+                api_key=api_key,
+                proxy=settings.goalserve_proxy,
+                poll_interval_s=2.0,  # 压最大频率（实时事件流）
+            )
+            mlb_pbp_client.start()
+            nba_pbp_client = NbaPlayByPlayClient(
+                api_key=api_key,
+                proxy=settings.goalserve_proxy,
+                poll_interval_s=2.0,  # 同 MLB
+            )
+            nba_pbp_client.start()
+            goalserve_lazy_client = GoalserveLazyClient(
+                api_key=api_key,
+                proxy=settings.goalserve_proxy,
+                cache_ttl_s=3600.0,
+            )
+            logger.info("MLB + NBA play-by-play + GoalserveLazy (schedule/standings/h2h) started")
+        logger.warning(
+            "paper_trading_mode=true → PaperSubmitOnlyOrderClient + 本地签名 + 虚拟余额 %s USDC。"
+            "WS 盘口=market_ws_worker.snapshot, syncer 每秒同步 paper_ledger → account_state_store",
+            settings.portfolio_budget_usdc,
+        )
+    elif trading_client is not None:
+        execution_client = PolymarketOrderExecutionClient(trading_client)
+    else:
+        execution_client = InMemoryPolymarketOrderClient()
     order_executor = PolymarketOrderExecutor(
         client=execution_client,
         outbox=outbox,
@@ -718,24 +955,15 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         critical_lock_timeout_ms=settings.critical_lock_timeout_ms,
         metrics=metrics,
     )
-
-    async def load_market_rest_snapshot(token_id: str):
-        orderbook = await clob_client.get_orderbook(token_id)
-        return orderbook.to_snapshot()
-
-    orderbook_delta_store = OrderbookDeltaStore()
-    market_ws_worker = MarketWsWorker(
-        event_bus=event_bus,
-        registry=registry,
-        rest_snapshot_loader=load_market_rest_snapshot,
-        orderbook_delta_store=orderbook_delta_store,
-    )
     bind_extension_orderbook_reader(extension_ports, market_ws_worker.snapshot)
     market_service = MarketService(
         extension_hooks=extension.hooks,
         registry=registry,
         market_tracker=market_ws_worker,
         account_snapshot_provider=account_state_store.snapshot,
+        # 300s(5min) audit 节流:discovery 每秒扫 22 个新 cid,1h 累 420 MB audit;
+        # 5min 颗粒度对复盘"为什么这个市场被拒"足够,节省 80% audit 写入.
+        filter_emit_min_interval_s=300.0,
     )
     decision_recorder = DecisionEventRecorder(outbox=outbox, strategy_id=strategy_id)
     trading_decision_service = TradingDecisionService(
@@ -860,6 +1088,13 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         entry_metadata_provider=entry_metadata_for_market,
         orderbook_reader=trading_decision_service.lookup_orderbook,
     )
+    # 注册 trading_decision_worker prune callback:market prune 时同步清 worker
+    # 内部 4 个 cid/token 索引 dict(_market_lifecycle / _token_*) 防内存泄漏.
+    registry.register_prune_callback(trading_decision_worker.evict_market)
+    # entry_metadata_store 已有 remove API,适配成 callback signature 注册:
+    registry.register_prune_callback(
+        lambda cid, _tokens: entry_metadata_store.remove(condition_id=cid)
+    )
     reconcile_worker = ReconcileWorker(
         event_bus=event_bus,
         reconcile_service=reconcile_service,
@@ -875,6 +1110,8 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         trading_client=trading_client,
         lifecycle_bus=lifecycle_bus,
     )
+    # 注册 authority_refresher prune callback:market prune 时清 _condition_failure_counts.
+    registry.register_prune_callback(reconcile_worker._authority_refresher.evict_market)
     market_discovery_worker = MarketDiscoveryWorker(
         market_service=market_service,
         event_bus=event_bus,
@@ -916,6 +1153,10 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 source="sports_live_aggregate",
                 leagues=settings.sports_live_state_league_codes,
                 publish_entry_signals=settings.sports_live_state_publish_entry_signals,
+                # 60s audit 节流:state_hash dedupe 因 live_game 嵌套时间字段
+                # (seconds_remaining 等)每 5s 都变而失效.60s 颗粒度对复盘足够,
+                # P0 决策走内存不依赖 audit.30s→60s 省 50% sports_live_state audit.
+                audit_min_interval_s=60.0,
             )
     season_state_store = SeasonStateStore()
     bind_extension_season_state(extension_ports, season_state_store)
@@ -945,6 +1186,16 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         extension=extension,
         event_bus=event_bus,
     )
+    # 注册 3 个 state worker + user_ws 的 prune callbacks
+    if season_odds_worker is not None:
+        registry.register_prune_callback(season_odds_worker.evict_market)
+    if series_state_worker is not None:
+        registry.register_prune_callback(series_state_worker.evict_market)
+    if game_odds_worker is not None:
+        registry.register_prune_callback(game_odds_worker.evict_market)
+    registry.register_prune_callback(user_ws_worker.evict_market)
+    # account_state 的 _fills 也按 market lifecycle 清(fills 已写 DB,内存不必常驻 dead market).
+    registry.register_prune_callback(account_state_store.evict_market)
     pregame_worker, pregame_client = _build_pregame_worker(
         settings,
         registry=registry,
@@ -995,6 +1246,9 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         order_executor=order_executor,
         market_ws_worker=market_ws_worker,
         orderbook_delta_store=orderbook_delta_store,
+        orderbook_history_buffer=orderbook_history_buffer,
+        orderbook_derived_store=orderbook_derived_store,
+        orderbook_derived_publisher=orderbook_derived_publisher,
         user_ws_worker=user_ws_worker,
         market_service=market_service,
         market_discovery_worker=market_discovery_worker,
@@ -1024,6 +1278,10 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         maintenance_thread_pool=maintenance_thread_pool,
         maintenance_process_pool=maintenance_process_pool,
         sse_subscription_registry=sse_subscription_registry,
+        paper_ledger=paper_ledger if settings.paper_trading_mode else None,
+        mlb_pbp_client=mlb_pbp_client,
+        nba_pbp_client=nba_pbp_client,
+        goalserve_lazy_client=goalserve_lazy_client,
     )
 
 
@@ -1039,12 +1297,22 @@ async def create_runtime(settings: Settings | None = None) -> RuntimeComponents:
 
 
 async def bootstrap_runtime(runtime: RuntimeComponents) -> RuntimeComponents:
+    from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+    _perf = SystemPerfMonitor.get()
+    _perf.start_phase("bootstrap_total")
+
     runtime.supervisor.set_phase(RuntimePhase.CONFIG_LOADING)
+    _perf.start_phase("register_workers")
     _register_runtime_workers(runtime)
+    _perf.end_phase("register_workers")
+    _perf.start_phase("seed_metrics")
     _seed_default_metrics(runtime)
     _sync_runtime_metrics(runtime)
+    _perf.end_phase("seed_metrics")
 
+    _perf.start_phase("db_check")
     db_ready = await _check_database_connection(runtime.db_session_factory)
+    _perf.end_phase("db_check")
     runtime.supervisor.mark_db_ready(db_ready, reason="database_unavailable" if not db_ready else "")
     runtime.supervisor.mark_trading_client_ready(
         runtime.trading_client is not None and runtime.readiness.ready_to_trade,
@@ -1053,7 +1321,9 @@ async def bootstrap_runtime(runtime: RuntimeComponents) -> RuntimeComponents:
 
     runtime.supervisor.set_phase(RuntimePhase.INFRA_READY)
     runtime.supervisor.set_phase(RuntimePhase.RECOVERING_SNAPSHOT)
+    _perf.start_phase("load_reference_state")
     loaded_reference = await _load_reference_state(runtime)
+    _perf.end_phase("load_reference_state")
 
     # 之前 lifespan 同步 await _run_reconcile_once → 9 个 orphan account-exposure
     # 仓位每个要 gamma+clob 多查,实测 10-11s 全在这里。lifespan 阻塞 → health
@@ -1230,10 +1500,32 @@ async def _check_database_connection(
     try:
         async with session_factory() as session:
             await session.execute(text("SELECT 1"))
+        # 预热连接池:并发跑 N 次 SELECT 1,迫使 pool 建立 N 个 conn,避免冷调用 200ms+ 抖动
+        await _warmup_db_pool(session_factory, n=5)
         return True
     except Exception as exc:  # pragma: no cover - depends on external db
         logger.warning("database readiness check failed", extra={"reason": str(exc)})
         return False
+
+
+async def _warmup_db_pool(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    n: int = 5,
+) -> None:
+    """并发 borrow N 个 session 跑 SELECT 1。
+
+    SQLAlchemy AsyncEngine 默认 lazy 建连——首次 query 会触发 DNS/TCP/SSL/auth
+    ~200ms。启动时预热 N 个 conn 进 pool,后续 query 直接复用,p99 抖动收敛.
+    """
+    async def _one() -> None:
+        try:
+            async with session_factory() as session:
+                await session.execute(text("SELECT 1"))
+        except Exception as exc:
+            logger.warning("db pool warmup conn failed: %s", exc)
+    import asyncio as _asyncio
+    await _asyncio.gather(*[_one() for _ in range(n)], return_exceptions=True)
 
 
 def _restore_account_reference_state(runtime: RuntimeComponents, *, balance_usdc, allowance_usdc) -> None:
@@ -1460,7 +1752,7 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         interval_seconds=float(runtime.settings.audit_retention_interval_seconds),
         tags=("audit", "retention", "persistence"),
         start=True,
-        run_immediately=False,
+        run_immediately=True,
     )
     # 死记录(终态 orders / 已结算空 positions / 老 fills)清理 — 每天跑一次,
     # 防止 reconcile 用历史 fills/orders 反复推无意义 market refs 拖慢启动。
@@ -1471,7 +1763,7 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         interval_seconds=float(runtime.settings.dead_records_retention_interval_seconds),
         tags=("dead_records", "retention", "persistence"),
         start=True,
-        run_immediately=False,
+        run_immediately=True,
     )
 
 

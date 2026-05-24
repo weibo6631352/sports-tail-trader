@@ -136,6 +136,7 @@ class AdminOrderController:
             new_price=new_price,
             size_shares=requested_size_shares,
             market_slug=source_order.market_slug or market.market_slug,
+            side=source_order.side,  # 从原 order 透传 side 给 paper simulate_fill / 实盘 replace
             reason=reason,
         )
         replace_review = await trading_service.replace(replace_intent)

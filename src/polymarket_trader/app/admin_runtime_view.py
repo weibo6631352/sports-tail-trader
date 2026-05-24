@@ -67,6 +67,11 @@ def _dedupe_warnings(values: list[Any]) -> list[Any]:
     return result
 
 
+# module-level identity cache (AdminRuntimeView 是 frozen dataclass,无法 setattr).
+# key 是 id(runtime), value 是 (result_dict, timestamp).
+_IDENTITY_CACHE: dict[int, tuple[dict[str, Any], float]] = {}
+
+
 @dataclass(frozen=True, slots=True)
 class AdminRuntimeView:
     runtime: RuntimeComponents | None = None
@@ -91,40 +96,57 @@ class AdminRuntimeView:
         }
 
     async def runtime_snapshot(self) -> dict[str, Any]:
-        supervisor = self._supervisor_snapshot()
-        readiness = self._readiness_payload(supervisor)
-        config_readiness = self._config_readiness_snapshot()
+        import time as _time
+        def _t(step: str, t0: float) -> None:
+            try:
+                from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+                SystemPerfMonitor.get().record_endpoint_step("runtime", step, (_time.perf_counter() - t0) * 1000)
+            except Exception: pass
+        t = _time.perf_counter()
+        supervisor = self._supervisor_snapshot(); _t("supervisor", t); t = _time.perf_counter()
+        readiness = self._readiness_payload(supervisor); _t("readiness", t); t = _time.perf_counter()
+        config_readiness = self._config_readiness_snapshot(); _t("config_readiness", t); t = _time.perf_counter()
         readiness_view = dict(readiness)
         readiness_view["warnings"] = tuple(self._readiness_warnings(config_readiness, readiness))
         runtime_status = self._runtime_status_snapshot(supervisor, readiness)
-        account = self._account_snapshot()
-        registry = self._registry_snapshot()
+        account = self._account_snapshot(); _t("account", t); t = _time.perf_counter()
+        registry = self._registry_snapshot(); _t("registry", t); t = _time.perf_counter()
         market_sample = [
             self._serializer().market_view(market)
             for market in registry.markets[:_RUNTIME_MARKET_SAMPLE_LIMIT]
-        ]
+        ]; _t("market_sample_view", t); t = _time.perf_counter()
         markets_truncated = len(registry.markets) > _RUNTIME_MARKET_SAMPLE_LIMIT
+        identity = await self._identity_snapshot(); _t("identity_async", t); t = _time.perf_counter()
+        settings_payload = self._settings_snapshot(); _t("settings", t); t = _time.perf_counter()
+        bootstrap_summary = jsonable(self.runtime.bootstrap_summary if self.runtime else {}); _t("bootstrap_summary", t); t = _time.perf_counter()
+        market_discovery = self._market_discovery_snapshot(); _t("market_discovery", t); t = _time.perf_counter()
+        sports_live_sync = self._sports_live_sync_snapshot(); _t("sports_live_sync", t); t = _time.perf_counter()
+        market_sample_jsonable = [jsonable(market) for market in market_sample]; _t("market_sample_jsonable", t); t = _time.perf_counter()
+        account_serialized = self._serializer().account_snapshot(account); _t("account_serialize", t); t = _time.perf_counter()
+        event_bus_payload = jsonable(self._event_bus_snapshot()); _t("event_bus_snapshot", t); t = _time.perf_counter()
+        persistence_payload = jsonable(self._persistence_snapshot()); _t("persistence_snapshot", t); t = _time.perf_counter()
+        portfolio_payload = self._serializer().portfolio_snapshot(account); _t("portfolio_snapshot", t)
         return {
             "phase": runtime_status["phase"],
             "ready_to_trade": runtime_status["ready_to_trade"],
             "readiness": readiness_view,
-            "settings": self._settings_snapshot(),
-            "identity": await self._identity_snapshot(),
+            "settings": settings_payload,
+            "identity": identity,
             "runtime": runtime_status,
-            "bootstrap_summary": jsonable(self.runtime.bootstrap_summary if self.runtime else {}),
-            "market_discovery": self._market_discovery_snapshot(),
-            "sports_live_sync": self._sports_live_sync_snapshot(),
+            "bootstrap_summary": bootstrap_summary,
+            "market_discovery": market_discovery,
+            "sports_live_sync": sports_live_sync,
             "registry": {
                 "market_count": len(registry.markets),
-                "market_sample": [jsonable(market) for market in market_sample],
+                "market_sample": market_sample_jsonable,
                 "market_sample_limit": _RUNTIME_MARKET_SAMPLE_LIMIT,
                 "markets_truncated": markets_truncated,
             },
-            "account": self._serializer().account_snapshot(account),
-            "event_bus": jsonable(self._event_bus_snapshot()),
-            "persistence": jsonable(self._persistence_snapshot()),
+            "account": account_serialized,
+            "event_bus": event_bus_payload,
+            "persistence": persistence_payload,
             "market_sample": market_sample,
-            "portfolio": self._serializer().portfolio_snapshot(account),
+            "portfolio": portfolio_payload,
         }
 
     def workers_snapshot(self) -> dict[str, Any]:
@@ -320,6 +342,16 @@ class AdminRuntimeView:
         return jsonable(settings)
 
     async def _identity_snapshot(self) -> dict[str, Any]:
+        # 60s TTL cache(module-level,因 AdminRuntimeView 是 frozen dataclass):
+        # identity 含 gamma public profile HTTP ~700ms,wallet/name/avatar 变更极低.
+        import time as _time
+        cache_ttl_s = 60.0
+        runtime_key = id(self.runtime) if self.runtime is not None else 0
+        cached_entry = _IDENTITY_CACHE.get(runtime_key)
+        if cached_entry is not None:
+            cached_result, cached_at = cached_entry
+            if (_time.time() - cached_at) < cache_ttl_s:
+                return cached_result
         settings = self._settings()
         wallet_address: str | None = None
         if self.runtime is not None:
@@ -342,7 +374,7 @@ class AdminRuntimeView:
         profile_name = None
         if display_username_public is not False:
             profile_name = _text_or_none(None if profile is None else getattr(profile, "name", None))
-        return {
+        result = {
             "wallet_address": wallet_address,
             "funder_address": funder_address,
             "signature_type": settings.polymarket_signature_type if isinstance(settings, Settings) else None,
@@ -364,6 +396,8 @@ class AdminRuntimeView:
                 None if profile is None else getattr(profile, "x_username", None)
             ),
         }
+        _IDENTITY_CACHE[runtime_key] = (result, _time.time())
+        return result
 
     async def _public_profile(self, address: str | None) -> Any | None:
         if address is None:

@@ -114,6 +114,9 @@ class EntryPlanner:
             )
 
         if account_snapshot is not None:
+            # §11 框架不自动 pause,但 admin MANUAL pause 仍是强门禁:
+            # - 自动 pause(RECONCILE/RISK/sports_live_state_ended)已全删 → 不会出现在 _market_pauses
+            # - admin pause_market_manual → 写入 _market_pauses(MANUAL source) → 这里 block
             if not account_snapshot.allow_new_entries or account_snapshot.is_market_paused(
                 resolved_market.condition_id
             ):
@@ -216,7 +219,15 @@ class EntryPlanner:
                 # signal_at 在 decide_entry 返回后立即捕获——这是"策略信号产生"
                 # 的时刻；后续 risk→executor 的链路时延以此为基准，由 OrderExecutor
                 # 发布到 entry_signal_to_submit_ms gauge 供 supervisor 削载决策。
+                import time as _time
+                _t0 = _time.perf_counter()
                 decision = self._extension_hooks.decide_entry(entry_context)
+                try:
+                    from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+                    SystemPerfMonitor.get().record_strategy_hook(
+                        "decide_entry", (_time.perf_counter() - _t0) * 1000
+                    )
+                except Exception: pass
                 signal_at = utc_now()
                 self._record_decision(
                     hook_name="decide_entry",

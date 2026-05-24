@@ -43,9 +43,9 @@ def test_non_persistable_event_types_are_dropped(event_type: DomainEventType) ->
     assert outbox.events == []
 
 
-def test_market_discovered_event_is_persisted_with_stripped_payload() -> None:
-    """discovery 事件需要落库（CLAUDE.md §10 可审计），但 raw_market 这类
-    重型字段必须在 _project_payload 阶段剔除，避免 audit 表暴涨。"""
+def test_market_discovered_event_is_dropped_not_persisted() -> None:
+    """设计变更:MARKET_DISCOVERED 不再 persist(元数据流水,decision_records
+    + reconcile snapshot 已含市场状态,discovery 心跳不必落库)."""
 
     outbox = _CollectingOutbox()
     sink = build_domain_event_outbox_sink(outbox)
@@ -56,39 +56,17 @@ def test_market_discovered_event_is_persisted_with_stripped_payload() -> None:
         market_slug="nba-game-moneyline",
         condition_id="condition-1",
         reason="market_selected",
-        payload={
-            "source": "gamma.events_keyset",
-            "summary": "nba-game-moneyline",
-            "parse_status": "accepted",
-            "accepted": True,
-            "discovery_kind": "market_discovered",
-            "extension_reason": "market_selected",
-            "raw_market": {
-                "condition_id": "condition-1",
-                "large_blob": "x" * 20_000,
-            },
-            "market": {
-                "condition_id": "condition-1",
-                "market_slug": "nba-game-moneyline",
-                "token_ids": ["token-yes", "token-no"],
-            },
-        },
+        payload={"source": "gamma.events_keyset"},
     )
 
     sink(3, event)
 
-    assert len(outbox.events) == 1
-    persisted = outbox.events[0]
-    assert persisted.event_type == "market_discovered"
-    assert persisted.reason == "market_selected"
-    assert persisted.payload.get("market", {}).get("market_slug") == "nba-game-moneyline"
-    assert "raw_market" not in persisted.payload
-    assert persisted.payload.get("accepted") is True
-    assert persisted.payload.get("discovery_kind") == "market_discovered"
+    assert outbox.events == []
 
 
-def test_market_filtered_out_event_is_persisted_for_audit() -> None:
-    """universe 拒绝首次目标盘口时必须留下可审计记录。"""
+def test_market_filtered_out_event_is_dropped_not_persisted() -> None:
+    """设计变更:MARKET_FILTERED_OUT 不再 persist(被拒市场无业务价值,
+    decision_records 已含策略评估上下文,filter 流水心跳不必落库)."""
 
     outbox = _CollectingOutbox()
     sink = build_domain_event_outbox_sink(outbox)
@@ -99,27 +77,20 @@ def test_market_filtered_out_event_is_persisted_for_audit() -> None:
         market_slug="nba-futures-champion",
         condition_id="condition-2",
         reason="market_family_not_single_game",
-        payload={
-            "source": "gamma.events_keyset",
-            "accepted": False,
-            "discovery_kind": "market_filtered_out",
-            "extension_reason": "market_family_not_single_game",
-            "raw_market": {"large_blob": "x" * 20_000},
-        },
+        payload={"source": "gamma.events_keyset"},
     )
 
     sink(3, event)
 
-    assert len(outbox.events) == 1
-    persisted = outbox.events[0]
-    assert persisted.event_type == "market_filtered_out"
-    assert persisted.reason == "market_family_not_single_game"
-    assert persisted.payload.get("extension_reason") == "market_family_not_single_game"
-    assert "raw_market" not in persisted.payload
+    assert outbox.events == []
 
 
-def test_trading_paused_event_is_persisted_with_projected_payload() -> None:
-    """主交易开关 pause/resume 必须落 outbox→audit_events，否则违反 CLAUDE.md §10。"""
+def test_trading_paused_event_is_persisted_with_full_payload() -> None:
+    """主交易开关 pause/resume 必须落 outbox→audit_events，整 payload 透传供复盘。
+
+    设计变更：原先按白名单字段裁剪 payload（漏新字段静默丢），改为默认透传 +
+    单字段超 _MAX_FIELD_BYTES 才剥离。Extra 字段也会被持久化，复盘不再有黑洞。
+    """
 
     outbox = _CollectingOutbox()
     sink = build_domain_event_outbox_sink(outbox)
@@ -134,7 +105,7 @@ def test_trading_paused_event_is_persisted_with_projected_payload() -> None:
             "phase_before": "trading_enabled",
             "phase_after": "paused",
             "occurred_at": "2026-05-11T12:34:56+00:00",
-            "extra_unprojected_field": "must-be-dropped",
+            "extra_unprojected_field": "kept-by-default",
         },
     )
 
@@ -144,12 +115,16 @@ def test_trading_paused_event_is_persisted_with_projected_payload() -> None:
     persisted = outbox.events[0]
     assert persisted.event_type == DomainEventType.TRADING_PAUSED.value
     assert persisted.reason == "market_alarm"
+    # trading_mode 字段由 _project_payload 自动注入（paper/live 区分），
+    # 测试环境未设 PAPER_TRADING_MODE → 默认 'live'。
     assert persisted.payload == {
+        "trading_mode": "live",
         "operator": "op",
         "reason": "market_alarm",
         "phase_before": "trading_enabled",
         "phase_after": "paused",
         "occurred_at": "2026-05-11T12:34:56+00:00",
+        "extra_unprojected_field": "kept-by-default",
     }
 
 
@@ -241,23 +216,22 @@ def test_reconcile_events_are_persisted_for_admin_audit() -> None:
         sink(3, ev)
 
     persisted_types = {persisted.event_type for persisted in outbox.events}
+    # 设计变更:RECONCILE_STARTED 是心跳事件,不进 audit(supervisor heartbeat 已记调度起点);
+    # DIFF_DETECTED/APPLIED 是真实修复记录,admin /reconcile_diffs endpoint 依赖.
     assert persisted_types == {
         DomainEventType.RECONCILE_DIFF_DETECTED.value,
         DomainEventType.RECONCILE_APPLIED.value,
-        DomainEventType.RECONCILE_STARTED.value,
         DomainEventType.TRADING_PAUSED_FOR_MARKET.value,
     }
     by_type = {persisted.event_type: persisted for persisted in outbox.events}
     diff_payload = by_type[DomainEventType.RECONCILE_DIFF_DETECTED.value].payload
     assert diff_payload["action_type"] == "cancel_external_unknown"
-    assert "raw_internal_blob" not in diff_payload
+    # 设计变更:payload 默认透传,旧白名单丢弃的字段现在也会落库(除非超大).
+    assert diff_payload["raw_internal_blob"] == "should-be-dropped"
     applied_payload = by_type[DomainEventType.RECONCILE_APPLIED.value].payload
-    assert applied_payload == {"action_count": 2, "applied_count": 2, "failed_count": 0}
-    started_payload = by_type[DomainEventType.RECONCILE_STARTED.value].payload
-    assert started_payload["market_count"] == 5
-    assert started_payload["refresh_summary"] == {"refreshed": 5, "failures": []}
+    assert applied_payload == {"trading_mode": "live", "action_count": 2, "applied_count": 2, "failed_count": 0}
     paused_payload = by_type[DomainEventType.TRADING_PAUSED_FOR_MARKET.value].payload
-    assert paused_payload == {"market_status": "closed", "pause_reason": "market_closed"}
+    assert paused_payload == {"trading_mode": "live", "market_status": "closed", "pause_reason": "market_closed"}
 
 
 def test_unknown_event_type_warning_is_deduplicated(caplog: pytest.LogCaptureFixture) -> None:
@@ -332,11 +306,14 @@ def test_transaction_snapshot_event_is_persisted() -> None:
 
     assert len(outbox.events) == 1
     assert outbox.events[0].event_type == DomainEventType.ORDER_STATE_UPDATED.value
+    # 设计变更：payload 默认透传，order + snapshot 都保留供复盘。
     assert outbox.events[0].payload == {
+        "trading_mode": "live",
         "order": {
             "order_id": "order-1",
             "condition_id": "condition-1",
             "token_id": "token-yes",
             "status": "live",
-        }
+        },
+        "snapshot": {"large_runtime_state": "not-needed"},
     }

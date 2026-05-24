@@ -98,17 +98,6 @@ runtime -> domain
 - Reconciler 不在批量扫描里长时间持有交易状态写锁。
 - 队列必须有容量上限、可观测性和降级路径。
 
-## 7.0 不做电竞(LoL / CS2 / Dota / Valorant 等)
-
-**Polymarket 电竞市场是无流动性死路 + 数据源缺失,strategy 必须强制 reject 所有电竞 candidate。**
-
-- **流动性**: 实测 LoL / CS2 candidate 在 Polymarket `bid_count=0 ask_count=0`,无人挂单 → 即使 accept 也无法成交;就算成交也无退出通道(冷盘口)
-- **数据**: Goalserve inplay 仅提供基础信息(对局开始/结束),不提供 LoL 赛点/经济/击杀/防御塔等内部指标,Kelly 无真概率源
-- **结论**: 不做。即使有 odds_gap 或 math_lock 信号,evaluator 必须先按 sport 一票否决电竞
-
-实现:`describe_sports_market` 识别到电竞 sport 直接 reject,不进入 evaluate;
-或在 evaluate_tail_opportunity 顶部加 sport 守卫。
-
 ## 7.1 操盘和审计统一走后端 API（不绕过后端）
 
 **所有运行时观测、操盘动作、审计查询、账户审计都必须通过后端 admin API**，不允许 agent / 操盘脚本 / 前端绕过后端直接调链上 RPC、Polymarket data-api、Goalserve 等外部源。

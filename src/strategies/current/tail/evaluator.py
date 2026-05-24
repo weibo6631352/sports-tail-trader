@@ -177,15 +177,6 @@ def evaluate_tail_opportunity(
     if game is None:
         return _reject(None, TailRejectReason.MISSING_LIVE_GAME_STATE.value)
 
-    # 不做电竞 (CLAUDE.md §7.0): Polymarket 电竞盘口流动性=0 + Goalserve 不提供
-    # LoL 赛点/经济/击杀/防御塔等核心指标 → Kelly 无真概率源 + 无退出通道。
-    if is_esports_game(game):
-        return _reject(
-            None,
-            TailRejectReason.ESPORTS_MARKET_NOT_AUTO_TRADABLE.value,
-            metadata={"esports_sport": game.sport, "reject_reason": "policy_no_esports"},
-        )
-
     candidate = _candidate(game, market)
     scope_reject_reason = _market_scope_reject_reason(market)
     if scope_reject_reason is not None:
@@ -199,6 +190,35 @@ def evaluate_tail_opportunity(
     common_reject_reason = _common_reject_reason(game, market, policy, now=now)
     if common_reject_reason:
         return _reject(candidate, common_reject_reason.value)
+
+    # 通用入场守卫（推广自 odds_gap）：覆盖 tail lockin / odds_gap / 所有 evaluator
+    # 路径。实盘案例：5 分钟连续买入 7 个 underdog 浮亏 -$26，根因是 BUY 路径
+    # 没看盘口风向 → 买在单边下杀方向。
+    from decimal import Decimal as _Dec
+
+    # NO_EXIT_CHANNEL 守卫不放在这里——会拦截 tail lockin（lockin 入场不依赖
+    # 退出通道，可以等结算）。该守卫只在 odds_gap 路径内启用（概率性入场必须有
+    # 退出通道），见 odds_gap.evaluate_odds_gap_opportunity 顶部。
+
+    ob_dir = market.metadata.get("orderbook_direction") if isinstance(market.metadata, dict) else None
+    if isinstance(ob_dir, dict):
+        label = str(ob_dir.get("direction_label") or "")
+        try:
+            confidence = _Dec(str(ob_dir.get("confidence") or "0"))
+        except (ArithmeticError, ValueError, TypeError):
+            confidence = _Dec("0")
+        if label == "no" and confidence >= _Dec("0.5"):
+            return _reject(
+                candidate,
+                TailRejectReason.ORDERBOOK_DIRECTION_BEARISH.value,
+                metadata={
+                    "direction_label": label,
+                    "confidence": str(confidence),
+                    "direction_score": str(ob_dir.get("direction_score") or ""),
+                    "flow_imbalance": str(ob_dir.get("flow_imbalance") or ""),
+                    "guard_scope": "tail_evaluator_top",
+                },
+            )
 
     # 先评估扫尾锁定（结果数学锁定的确定性入场）；未命中再评估赔率差价。
     locked_evaluation = _dispatch_tail_lock(game, market, candidate, policy)
@@ -406,15 +426,6 @@ def evaluate_scale_in_opportunity(
         )
     if game is None:
         return _reject(None, TailRejectReason.MISSING_LIVE_GAME_STATE.value)
-
-    # 不做电竞 (CLAUDE.md §7.0): Polymarket 电竞盘口流动性=0 + Goalserve 不提供
-    # LoL 赛点/经济/击杀/防御塔等核心指标 → Kelly 无真概率源 + 无退出通道。
-    if is_esports_game(game):
-        return _reject(
-            None,
-            TailRejectReason.ESPORTS_MARKET_NOT_AUTO_TRADABLE.value,
-            metadata={"esports_sport": game.sport, "reject_reason": "policy_no_esports"},
-        )
 
     candidate = _candidate(game, market)
     scope_reject_reason = _market_scope_reject_reason(market)

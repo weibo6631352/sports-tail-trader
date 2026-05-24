@@ -12,9 +12,20 @@ from polymarket_trader.app.admin_service_helpers import (
     _RepositoryGroup,
     _candidate_matches_filters,
 )
+from polymarket_trader.observability.cpu_track import cpu_track
 from polymarket_trader.domain.decisions import DecisionRecord
 from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
+
+
+# module-level candidate cache(AdminService 是 frozen dataclass slots,不能 setattr).
+# key 加 id(self) 区分不同 AdminService 实例(测试隔离).
+_CANDIDATE_CACHE: dict[tuple[int, str | None, str | None, str | None], tuple[float, list[dict[str, Any]], int]] = {}
+
+
+def reset_candidate_cache() -> None:
+    """测试 fixture / 运行时手动重置(如 market_pruned 后立即让 admin 看到最新)."""
+    _CANDIDATE_CACHE.clear()
 
 
 class AdminReconcileDecisionsQueryMixin:
@@ -266,6 +277,7 @@ class AdminReconcileDecisionsQueryMixin:
         page = await self._with_repositories(_query)
         return page_payload(page, serializer=_decision_record_payload)
 
+    @cpu_track("candidates_evaluation")
     async def list_strategy_candidates(
         self,
         *,
@@ -288,7 +300,6 @@ class AdminReconcileDecisionsQueryMixin:
         candidates: list[dict[str, Any]] = []
         account = self._account_snapshot()
         # candidates 在运行时纯内存投影，归属由 runtime.extension.spec.strategy_id 决定。
-        # 入参 strategy_id 与运行时不一致时直接返回空集——避免不同策略 id 之间漂移。
         runtime_strategy_id = self._runtime_strategy_id()
         if strategy_id is not None and runtime_strategy_id is not None and strategy_id != runtime_strategy_id:
             empty_page = self._slice_sequence((), limit=limit, offset=offset)
@@ -296,46 +307,71 @@ class AdminReconcileDecisionsQueryMixin:
             payload["has_more"] = False
             payload["source_markets"] = 0
             return payload
-        source_markets = self._candidate_source_markets(
-            condition_id=condition_id,
-            token_id=token_id,
-            market_slug=market_slug,
-        )
-        for index, market in enumerate(source_markets, start=1):
-            if index % 20 == 0:
-                await asyncio.sleep(0)
-            for outcome in market.outcomes:
-                if token_id is not None and outcome.token_id != token_id:
-                    continue
-                orderbook = self._market_ws_snapshot(outcome.token_id)
-                if orderbook is None:
-                    continue
-                plan = self._build_entry_plan_for_admin(
-                    market=market,
-                    token_id=outcome.token_id,
-                    orderbook=orderbook,
-                    account=account,
-                )
-                summary = plan.summary
-                if summary is None or not summary.reason:
-                    continue
-                candidate = self._candidate_payload(market, outcome.token_id, plan)
-                if not _candidate_matches_filters(
-                    candidate,
-                    market_type=market_type,
-                    game_status=game_status,
-                    action=action,
-                    execution_permission=execution_permission,
-                    accepted=accepted,
-                    confirmable=confirmable,
-                    league=league,
-                ):
-                    continue
+        # === module-level candidate cache (TTL 3s) ===
+        # /candidates 每次重跑 1500 markets × 2 outcome = 3000 次 build_entry_plan,
+        # p99 22 秒卡死 event loop → ws_queue DEGRADED.3s TTL 让多客户端共享一次评估,负载降 90%+.
+        # 候选数据是策略快照,3s 颗粒度对实时决策无影响(P0 链路自己走).
+        # key 含 id(self) 区分不同 AdminService 实例(测试隔离).
+        import time as _time
+        now_mono = _time.monotonic()
+        cache_key = (id(self), condition_id, token_id, market_slug)
+        cached = _CANDIDATE_CACHE.get(cache_key)
+        if cached is not None and (now_mono - cached[0]) < 3.0:
+            all_candidates = cached[1]
+            source_count = cached[2]
+        else:
+            all_candidates = None
+
+        if all_candidates is None:
+            source_markets = self._candidate_source_markets(
+                condition_id=condition_id,
+                token_id=token_id,
+                market_slug=market_slug,
+            )
+            source_count = len(source_markets)
+            all_candidates = []
+            for index, market in enumerate(source_markets, start=1):
+                if index % 20 == 0:
+                    await asyncio.sleep(0)
+                for outcome in market.outcomes:
+                    if token_id is not None and outcome.token_id != token_id:
+                        continue
+                    orderbook = self._market_ws_snapshot(outcome.token_id)
+                    if orderbook is None:
+                        continue
+                    plan = self._build_entry_plan_for_admin(
+                        market=market,
+                        token_id=outcome.token_id,
+                        orderbook=orderbook,
+                        account=account,
+                    )
+                    summary = plan.summary
+                    if summary is None or not summary.reason:
+                        continue
+                    all_candidates.append(self._candidate_payload(market, outcome.token_id, plan))
+            _CANDIDATE_CACHE[cache_key] = (now_mono, all_candidates, source_count)
+            # LRU evict:cap 200 个不同 (svc_id,cid,token,slug) 过滤组合
+            while len(_CANDIDATE_CACHE) > 200:
+                oldest = next(iter(_CANDIDATE_CACHE))
+                _CANDIDATE_CACHE.pop(oldest, None)
+
+        # filter 是轻量 dict 操作,不缓存(每次调用都跑)
+        for candidate in all_candidates:
+            if _candidate_matches_filters(
+                candidate,
+                market_type=market_type,
+                game_status=game_status,
+                action=action,
+                execution_permission=execution_permission,
+                accepted=accepted,
+                confirmable=confirmable,
+                league=league,
+            ):
                 candidates.append(candidate)
         page = self._slice_sequence(candidates, limit=limit, offset=offset)
         payload = page_payload(page, serializer=lambda item: item)
         payload["has_more"] = offset + len(page.items) < page.total
-        payload["source_markets"] = len(source_markets)
+        payload["source_markets"] = source_count
         return payload
 
 

@@ -95,7 +95,10 @@ class TradingDecisionService:
         )
 
     def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
+        import time as _time
+        t0 = _time.perf_counter()
         decisions = self._extension_hooks.decide_follow_up(context)
+        self._record_hook_latency("decide_follow_up", _time.perf_counter() - t0)
         self._record(hook_name="decide_follow_up", context=context, decision=decisions)
         return decisions
 
@@ -105,10 +108,20 @@ class TradingDecisionService:
         该方法只桥接策略 hook，不直接解释具体策略字段；调用侧仍需把
         返回的决策转换为受控 intent，并统一经过 TradingService/RiskManager。
         """
-
+        import time as _time
+        t0 = _time.perf_counter()
         decision = self._extension_hooks.decide_exit(context)
+        self._record_hook_latency("decide_exit", _time.perf_counter() - t0)
         self._record(hook_name="decide_exit", context=context, decision=decision)
         return decision
+
+    @staticmethod
+    def _record_hook_latency(name: str, elapsed_s: float) -> None:
+        try:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            SystemPerfMonitor.get().record_strategy_hook(name, elapsed_s * 1000)
+        except Exception:
+            pass
 
     def _record(
         self,

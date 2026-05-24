@@ -17,6 +17,7 @@ dependencies = [
   "httpx>=0.26",
   "pydantic>=2.6",
   "pydantic-settings>=2.2",
+  "psutil>=5.9",
   "py-clob-client-v2>=1.0.0",
   "sqlalchemy>=2.0",
   "uvicorn[standard]>=0.27",
@@ -48,6 +49,12 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
+# 历史代码大量使用紧凑单行风格 (if x: y / a; b), 项目接受这种写法不强制拆行.
+# E402 (module import not at top): 条件 import / lazy import 避免循环依赖, 合法用例多.
+# E741 (ambiguous variable name): 个别 l/i 在数学上下文有意义, 不强制改名.
+extend-ignore = ["E701", "E702", "E402", "E741"]
 
 [[tool.mypy.overrides]]
 module = ["py_clob_client_v2.*"]

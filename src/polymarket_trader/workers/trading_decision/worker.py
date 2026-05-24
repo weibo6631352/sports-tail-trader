@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from polymarket_trader.app.parameter_store import ParameterStore
 from uuid import uuid4
 
+from polymarket_trader.observability.cpu_track import cpu_track
+
 from polymarket_trader.app.trading_decision_service import EntryPlan, TradingDecisionService
 from polymarket_trader.app.trading_service import TradingReviewResult, TradingService
 from polymarket_trader.app.order_projection import AccountStateProjector
@@ -29,7 +31,7 @@ from polymarket_trader.domain.order import (
 )
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.state_machine import MarketLifecycle
-from polymarket_trader.domain.account import AccountSnapshot, MarketPauseSource
+from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.extension_api import ExtensionAction, ExtensionContext, MarketTokenView
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
@@ -70,6 +72,11 @@ _LIFECYCLE_HISTORY_PER_MARKET = 50
 # buy budget 没变时不再 emit，避免 audit_events 每天千万条。precise buy_budget_usdc
 # 随 bankroll/orderbook 每 tick 抖动，不进 hash——只看"是否真的拿到预算"这个布尔位。
 _ALLOCATION_DEDUPE_CAPACITY = 10_000
+# market lifecycle / token state dict 容量上限:防 market 长期 active 但 entry
+# 停止访问时 dict 永久累积.LRU evict 最久未访问的;market prune callback 同时
+# 兜底.5000 market × 2 token + 安全余量 = 12000.
+_MARKET_LIFECYCLE_DICT_CAP = 5_000
+_TOKEN_STATE_DICT_CAP = 12_000
 
 POSITION_INCREASE_LIFECYCLES = {
     MarketLifecycle.POSITION_OPEN,
@@ -89,6 +96,110 @@ ENTRY_ATTEMPT_LIFECYCLES = {
 }
 
 
+# 赔率时序 store（module-level，纯观测）：market_slug → deque[(ts_iso, ml_home_p, ml_away_p, tt_over_p, tt_under_p, sp_home_p, sp_away_p)]
+# 用于 /runtime/odds-drift API 查看 goalserve 赔率随时间漂移
+from collections import deque
+_ODDS_DRIFT_STORE: dict[str, deque] = {}
+_ODDS_DRIFT_MAX_LEN = 360  # 每 market 360 点 = 30min 数据 (5s 采样)
+_ODDS_DRIFT_LAST_AT: dict[str, datetime] = {}
+_ODDS_DRIFT_INTERVAL_S = 2  # 2s 采样（贴近 inplay 1.05s 频率，去抖避免重复）
+
+
+def _record_odds_drift(market_slug: str, goalserve_ml: dict | None, goalserve_totals: dict | None, goalserve_spread: dict | None) -> None:
+    """采样赔率到时序 store（节流 5s/market）。"""
+    if not market_slug:
+        return
+    now = datetime.now(timezone.utc)
+    last = _ODDS_DRIFT_LAST_AT.get(market_slug)
+    if last and (now - last).total_seconds() < _ODDS_DRIFT_INTERVAL_S:
+        return
+    _ODDS_DRIFT_LAST_AT[market_slug] = now
+    sample = {
+        "at": now.isoformat(),
+        "ml_home_p": (goalserve_ml or {}).get("home_implied_prob"),
+        "ml_away_p": (goalserve_ml or {}).get("away_implied_prob"),
+        "ml_draw_p": (goalserve_ml or {}).get("draw_implied_prob"),
+        "tt_over_p": (goalserve_totals or {}).get("over_implied_prob"),
+        "tt_under_p": (goalserve_totals or {}).get("under_implied_prob"),
+        "tt_line": (goalserve_totals or {}).get("total_line"),
+        "sp_home_p": (goalserve_spread or {}).get("home_implied_prob"),
+        "sp_away_p": (goalserve_spread or {}).get("away_implied_prob"),
+        "sp_handicap": (goalserve_spread or {}).get("home_handicap"),
+    }
+    dq = _ODDS_DRIFT_STORE.setdefault(market_slug, deque(maxlen=_ODDS_DRIFT_MAX_LEN))
+    dq.append(sample)
+
+
+def get_odds_drift_store() -> dict[str, deque]:
+    """admin API 读取入口"""
+    return _ODDS_DRIFT_STORE
+
+
+def _compute_game_progress_from_dict(live_game: dict) -> dict | None:
+    """从 live_game dict 算跨运动统一比赛进度量化（纯统计指标）。
+
+    返回 dict {progress_pct, phase, time_remaining_seconds, segment_label,
+    is_critical_moment}。无法估算时各字段为 None / "unknown"。
+    设计要点：不参与决策（用户明确要求"只统计不决策"），供 audit 复盘 + 未来
+    ML 训练。各运动统一为 [0.0, 1.0] 的 progress 浮点 + 5 类 phase 标签。
+    """
+    status = (live_game.get("status") or "").lower()
+    sport = (live_game.get("sport") or "").lower()
+    period = live_game.get("period") or ""
+    seconds_remaining = live_game.get("seconds_remaining")
+    result: dict = {
+        "progress_pct": None,
+        "phase": "unknown",
+        "time_remaining_seconds": seconds_remaining,
+        "segment_label": period,
+        "is_critical_moment": False,
+    }
+    if status == "scheduled":
+        result.update({"progress_pct": 0.0, "phase": "pregame"})
+        return result
+    if status == "ended":
+        result.update({"progress_pct": 1.0, "phase": "ended"})
+        return result
+    if status not in ("live", "paused"):
+        return result
+    if sport == "baseball":
+        bb = live_game.get("baseball_state") or {}
+        inning = bb.get("current_inning") or 0
+        half = 0.5 if (bb.get("inning_half") or "").lower() == "bottom" else 0.0
+        result["progress_pct"] = round(max(0.0, min(1.0, (inning - 1 + half) / 9.0)), 3)
+        result["segment_label"] = f"Inning {inning}" + (" Bot" if half else " Top")
+        result["is_critical_moment"] = inning >= 9
+    elif sport in ("basketball", "basket"):
+        bk = live_game.get("basketball_state") or {}
+        per = bk.get("current_period") or 0
+        result["progress_pct"] = round(max(0.0, min(1.0, (per - 0.5) / 4.0)), 3)
+        result["segment_label"] = f"Q{per}"
+        result["is_critical_moment"] = per >= 4 and (seconds_remaining is None or seconds_remaining <= 120)
+    elif sport == "tennis":
+        tn = live_game.get("tennis_state") or {}
+        cur = tn.get("current_set") or 0
+        bo = tn.get("best_of") or 3
+        result["progress_pct"] = round(max(0.0, min(1.0, cur / bo)), 3) if bo > 0 else 0.0
+        result["segment_label"] = f"Set {cur}/{bo}"
+        result["is_critical_moment"] = cur >= bo
+    elif sport == "soccer":
+        sc = live_game.get("soccer_state") or {}
+        mins = sc.get("clock_minutes") or 0
+        soc_period = (sc.get("period") or "").lower()
+        base = 0 if "first" in soc_period else (45 if "second" in soc_period else (90 if "extra" in soc_period else 0))
+        total = base + mins
+        result["progress_pct"] = round(max(0.0, min(1.0, total / 90.0)), 3)
+        result["segment_label"] = f"Min {total}"
+        result["is_critical_moment"] = total >= 80
+    pct = result["progress_pct"]
+    if isinstance(pct, (int, float)):
+        if pct < 0.25: result["phase"] = "early"
+        elif pct < 0.6: result["phase"] = "mid"
+        elif pct < 0.9: result["phase"] = "late"
+        else: result["phase"] = "final"
+    return result
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -97,8 +208,12 @@ def _entry_gate_closed_for_event(
     snapshot: AccountSnapshot | None,
     event: DomainEvent,
 ) -> bool:
-    """账户或单市场入场闸门关闭时，不对高频盘口事件构建交易计划。"""
+    """账户或单市场入场闸门关闭时,不对高频盘口事件构建交易计划。
 
+    §11 框架不自动 pause,但 admin MANUAL pause 仍是强门禁(运维显式说 stop):
+    - 框架自动检测 not_tradable → 不再 pause,让策略 hook 自己看 context 判断
+    - admin pause_market_manual → 仍写入 _market_pauses,这里 block entry
+    """
     if snapshot is None:
         return False
     if not snapshot.allow_new_entries:
@@ -161,17 +276,22 @@ class TradingDecisionWorker:
         self._heartbeat = heartbeat
         # 单测可以设 < 1s 让 idle heartbeat 路径快速触发；运行时仍用 60s 默认。
         self._idle_heartbeat_seconds = max(0.001, float(idle_heartbeat_seconds))
-        self._market_lifecycle: dict[str, MarketLifecycle] = {}
+        # OrderedDict + LRU cap:即使 market 长期 active(reconcile 不 prune),
+        # 长期不被访问的 entry 也会自动从 LRU 尾部淘汰,防 dict 永久膨胀.
+        self._market_lifecycle: OrderedDict[str, MarketLifecycle] = OrderedDict()
         # token_id → 上次 *真实* ORDERBOOK_SNAPSHOT_UPDATED 事件处理时间戳。
         # main.py position_exit_evaluator 5s 周期 publish 合成 event，但合成
         # 事件处理时检查：该 token 5s 内已有真实 event 就 skip，避免重复评估。
-        self._token_last_real_orderbook_at: dict[str, datetime] = {}
+        self._token_last_real_orderbook_at: OrderedDict[str, datetime] = OrderedDict()
         # token_id → 最近一次 decide_exit 决策的完整 metadata 快照。
         # /positions/signals admin endpoint 从此读取，给 UI/操盘人实时展示
         # 5 类投票 + 流动性 tier + math_lock 是否支持 + fair_value 来源。
         # 仅持仓 token 写入，无持仓 token 不会有 entry，自动 LRU 由内存压力管理。
-        self._token_position_signals: dict[str, dict[str, Any]] = {}
+        self._token_position_signals: OrderedDict[str, dict[str, Any]] = OrderedDict()
         # (strategy_id, reason) → count，供 admin/observability 查询哪个策略因何跳过了多少次。
+        # (strategy_id, reason) → count 计数器.reason 是 enum-like 字符串
+        # (< 100 种内建),strategy_id 由 framework 固定,组合上限 < 500;不需要 LRU.
+        # 如果 reason 包含动态文本(本来不该如此),应在 source 端归一化,而非 LRU 兜底.
         self._skip_reason_histogram: dict[tuple[str, str], int] = {}
         # condition_id → [(lifecycle, timestamp), …]，记录每次状态转换的时间点。
         # OrderedDict + cap = LRU 防止无限增长（见 _LIFECYCLE_MARKET_CAP）。
@@ -186,6 +306,23 @@ class TradingDecisionWorker:
             trading_service=self._trading_service,
             account_state_store=self._account_state_store,
         )
+
+    def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
+        """registry prune callback:清自己的 cid/token 索引 dict,防内存泄漏.
+
+        4 个 dict:
+        - _market_lifecycle (cid)
+        - _token_last_real_orderbook_at (token)
+        - _token_position_signals (token)
+        - _last_allocation_state_hash (cid+token tuple key,有 cap 但 prune 联动更干净)
+        """
+        self._market_lifecycle.pop(condition_id, None)
+        for tok in token_ids:
+            self._token_last_real_orderbook_at.pop(tok, None)
+            self._token_position_signals.pop(tok, None)
+            self._last_allocation_state_hash.pop((condition_id, tok), None)
+        # _lifecycle_timeline 已有 LRU cap,但 prune 联动让其立即清:
+        self._lifecycle_timeline.pop(condition_id, None)
 
     def _fetch_orderbook_direction(self, token_id: str | None) -> dict[str, Any] | None:
         """从 OrderbookDeltaStore 取 10s 窗口方向信号，序列化成 dict 注入
@@ -282,18 +419,34 @@ class TradingDecisionWorker:
         self._emit_heartbeat(detail=self._processed_detail(event))
         return result
 
+    @cpu_track("trading_decision")
     async def process_event(self, event: DomainEvent) -> "TradingDecisionWorkerResult | None":
         if is_self_emitted(event):
             return None
+        import time as _time
+        _event_start = _time.time()
 
         event_name = str(event.event_type)
         snapshot = self._snapshot()
+        try:
+            result = await self._process_event_inner(event, event_name, snapshot)
+            return result
+        finally:
+            try:
+                from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+                SystemPerfMonitor.get().record_event_latency(
+                    event_type=event_name,
+                    latency_ms=(_time.time() - _event_start) * 1000,
+                )
+            except Exception:
+                pass
+
+    async def _process_event_inner(self, event, event_name, snapshot):
         if event_name in {
             DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED.value,
             DomainEventType.ENTRY_SIGNAL_TRIGGERED.value,
         }:
             return await self._handle_orderbook_snapshot_updated(event, snapshot)
-
         order_result = coerce_order_result_from_event(event)
         if order_result is not None:
             return await self._handle_order_result(
@@ -326,6 +479,9 @@ class TradingDecisionWorker:
                 return None
         if not is_synthetic and event.token_id:
             self._token_last_real_orderbook_at[event.token_id] = _utc_now()
+            self._token_last_real_orderbook_at.move_to_end(event.token_id)
+            while len(self._token_last_real_orderbook_at) > _TOKEN_STATE_DICT_CAP:
+                self._token_last_real_orderbook_at.popitem(last=False)
         # 订阅驱动 reprice：每个 orderbook tick 检查该 token 是否有持仓，
         # 有 → 跑 decide_exit 让 _maybe_reprice_stale_sell 用最新 best_bid/fair_value
         # 评估是否 cancel-replace stale SELL。不依赖 60s reconcile 周期。
@@ -673,6 +829,9 @@ class TradingDecisionWorker:
                 "decision_price": str(decision.price) if decision.price is not None else None,
                 "metadata": {k: v for k, v in decision.metadata.items() if k.startswith("dynamic_exit_")},
             }
+            self._token_position_signals.move_to_end(position.token_id)
+            while len(self._token_position_signals) > _TOKEN_STATE_DICT_CAP:
+                self._token_position_signals.popitem(last=False)
         # SELL 直接挂；REPLACE 是 reprice 路径（_maybe_reprice_stale_sell 把 stale
         # $0.99 SELL cancel-replace 到 fair_value × 0.97），不接 REPLACE 会让订阅
         # 触发的 reprice 决策静默丢弃。
@@ -841,29 +1000,26 @@ class TradingDecisionWorker:
             for allocation in allocation_plan.allocations
             if allocation.buy_budget_usdc > 0
         ]
-        # dedup hash：稳定字段集合
-        #   - 每条 allocation 的 (cid, token, reason, release_reason, buy_budget>0)
-        #     —— 精确 buy_budget_usdc 数值会随 bankroll/orderbook 每 tick 抖动，把它
-        #     纳入 hash 会让 dedup 永远不命中；只看是否拿到预算这个布尔位。
-        #   - 选中市场列表（排序）
-        #   - plan 顶层 reason
-        # 任何"决策本质"变化都会命中；纯数值抖动会被吸收。
-        candidate_state = sorted(
-            (
-                allocation.condition_id,
-                allocation.token_id,
-                allocation.reason,
-                allocation.release_reason,
-                allocation.buy_budget_usdc > 0,
-            )
-            for allocation in allocation_plan.allocations
+        # dedup hash:**只看当前 event 自己的 (cid,token) 自身决策状态**.
+        # 旧 bug:hash 含 sorted(整个 plan 的 allocations)+selected,A 市场 allocation
+        # 变化让 B 市场 hash 也变 → "状态不变"被误判 "状态变了"重发.实测同 (cid,token)
+        # 60s 内 3-4 条都是同一 reason,纯粹是兄弟市场扰动.
+        # 修复:只 hash 我自己这条 allocation + plan_reason(说明全局上下文).
+        my_alloc = next(
+            (a for a in allocation_plan.allocations
+             if a.condition_id == event.condition_id and a.token_id == event.token_id),
+            None,
         )
+        candidate_state = (
+            my_alloc.reason if my_alloc else None,
+            my_alloc.release_reason if my_alloc else None,
+            (my_alloc.buy_budget_usdc > 0) if my_alloc else False,
+        )
+        # hash 只看自己,不含 plan-level 全局信号(selected_count 等会因兄弟
+        # market 选中而抖动,让稳定 reason="no_eligible_market" 的市场也被重复 emit).
+        # plan_reason 是 plan 顶层 reason(很少变,保留作为决策上下文).
         hash_payload = json.dumps(
-            {
-                "candidates": candidate_state,
-                "selected": sorted(selected),
-                "plan_reason": allocation_plan.reason or "",
-            },
+            {"self": candidate_state, "plan_reason": allocation_plan.reason or ""},
             sort_keys=True,
             default=str,
         )
@@ -878,6 +1034,145 @@ class TradingDecisionWorker:
         self._last_allocation_state_hash.move_to_end(dedup_key)
         while len(self._last_allocation_state_hash) > _ALLOCATION_DEDUPE_CAPACITY:
             self._last_allocation_state_hash.popitem(last=False)
+        # decision_snapshot：把"做决策时所看到的真实数据"嵌入 audit payload，
+        # 供事后复盘"为什么这笔在这个价位下单/不下单"。否则只看 candidate 的
+        # reason/budget 是黑盒——无法分辨：信号触发是因为盘口真错位 vs Goalserve
+        # odds stale vs orderbook 已单边下杀策略没看。
+        # 体积控制：只摘关键字段（best_bid/ask/sizes/spread/depth/tick + 关键
+        # 直播/赔率字段），不存全部 bids/asks 层级（每秒变化高频）。
+        decision_snapshot: dict[str, Any] = {}
+        if plan.orderbook is not None:
+            ob = plan.orderbook
+            top_bids = sorted(ob.bids, key=lambda lvl: lvl.price, reverse=True)[:5]
+            top_asks = sorted(ob.asks, key=lambda lvl: lvl.price)[:5]
+            # 多档 imbalance：1/3/5 层各计算（不同时间尺度的买卖压）
+            def _imbalance(b: list, a: list) -> str | None:
+                bn = sum((lvl.size * lvl.price for lvl in b), Decimal("0"))
+                an = sum((lvl.size * lvl.price for lvl in a), Decimal("0"))
+                tot = bn + an
+                if tot <= 0: return None
+                return str((bn / tot).quantize(Decimal("0.001")))
+            imb_1 = _imbalance(top_bids[:1], top_asks[:1])
+            imb_3 = _imbalance(top_bids[:3], top_asks[:3])
+            imb_5 = _imbalance(top_bids[:5], top_asks[:5])
+            # book entropy（5 层 size 分布的均匀度，越接近 1 越平均，越接近 0 越集中）
+            def _entropy(levels: list) -> str | None:
+                import math
+                sizes = [float(lvl.size) for lvl in levels if lvl.size > 0]
+                if not sizes: return None
+                total = sum(sizes)
+                if total <= 0: return None
+                probs = [s / total for s in sizes]
+                ent = -sum(p * math.log2(p) for p in probs if p > 0)
+                max_ent = math.log2(len(sizes)) if len(sizes) > 1 else 1
+                return str(round(ent / max_ent, 3)) if max_ent > 0 else "0"
+            bid_entropy = _entropy(top_bids)
+            ask_entropy = _entropy(top_asks)
+            # price impact: 买 $X 推 best_ask 上涨 Y bps（模拟逐档吃 ask）
+            def _buy_impact(asks: list, target_usdc: Decimal) -> dict | None:
+                if not asks: return None
+                remaining = target_usdc
+                spent = Decimal("0")
+                filled_shares = Decimal("0")
+                last_price = asks[0].price
+                for lvl in asks:
+                    if remaining <= 0: break
+                    max_shares = remaining / lvl.price
+                    use_shares = min(lvl.size, max_shares)
+                    spent += use_shares * lvl.price
+                    filled_shares += use_shares
+                    remaining -= use_shares * lvl.price
+                    last_price = lvl.price
+                if filled_shares <= 0: return None
+                avg_fill = spent / filled_shares
+                first_ask = asks[0].price
+                slippage_bps = int(((avg_fill - first_ask) / first_ask) * 10000) if first_ask > 0 else 0
+                return {
+                    "target_usdc": str(target_usdc),
+                    "filled_shares": str(filled_shares.quantize(Decimal("0.01"))),
+                    "avg_fill_price": str(avg_fill.quantize(Decimal("0.0001"))),
+                    "last_level_price": str(last_price),
+                    "slippage_bps": slippage_bps,
+                    "fully_filled": remaining <= Decimal("0.01"),
+                }
+            decision_snapshot["orderbook"] = {
+                "best_bid": str(ob.best_bid) if ob.best_bid is not None else None,
+                "best_ask": str(ob.best_ask) if ob.best_ask is not None else None,
+                "best_bid_size": str(ob.best_bid_size) if ob.best_bid_size is not None else None,
+                "best_ask_size": str(ob.best_ask_size) if ob.best_ask_size is not None else None,
+                "spread": str(ob.spread) if ob.spread is not None else None,
+                "microprice": str(ob.microprice) if ob.microprice is not None else None,
+                "ask_depth": str(ob.buyable_ask_depth()),
+                "tick_size": str(ob.tick_size) if ob.tick_size is not None else None,
+                "received_at": ob.received_at.isoformat() if ob.received_at is not None else None,
+                "top_bids": [{"price": str(lvl.price), "size": str(lvl.size)} for lvl in top_bids],
+                "top_asks": [{"price": str(lvl.price), "size": str(lvl.size)} for lvl in top_asks],
+                "bid_total_depth_5": str(sum((lvl.size * lvl.price for lvl in top_bids), Decimal("0"))),
+                "ask_total_depth_5": str(sum((lvl.size * lvl.price for lvl in top_asks), Decimal("0"))),
+                # 多档统计（新加 P3）
+                "imbalance_1": imb_1,
+                "imbalance_3": imb_3,
+                "imbalance_5": imb_5,
+                "bid_entropy": bid_entropy,
+                "ask_entropy": ask_entropy,
+                "price_impact_5usdc": _buy_impact(top_asks, Decimal("5")),
+                "price_impact_25usdc": _buy_impact(top_asks, Decimal("25")),
+                "price_impact_100usdc": _buy_impact(top_asks, Decimal("100")),
+            }
+        if plan.metadata is not None:
+            # 完整透传所有策略输出的信号字段（不需逐项列）：goalserve odds、
+            # orderbook_direction（OFI/microprice 漂移）、live_game（含 baseball/
+            # basketball/tennis state 各局段比分）、math_lock_prob、kelly 决策、
+            # 排名信号、家族识别等。自由 dict 透传到 audit payload 供复盘 + 训练。
+            metadata_keys_of_interest = (
+                "orderbook_direction",
+                "goalserve_moneyline",
+                "goalserve_totals",
+                "goalserve_spread",
+                "goalserve_halftime",
+                "live_game",
+                "math_lock_prob",
+                "math_lock_metadata",
+                "live_match",
+                "tail_metadata",
+                "kelly_stake",
+                "kelly_f_star",
+                "edge_net",
+                "edge_gross",
+                "fair_value",
+                "fair_value_source",
+                "true_p",
+                "devig",
+                "score_breakdown",
+                "scope",
+            )
+            for key in metadata_keys_of_interest:
+                value = plan.metadata.get(key)
+                if value is not None:
+                    decision_snapshot[key] = value
+            # 比赛进度量化（纯统计指标，不参与决策）：跨运动统一 progress_pct +
+            # phase + critical_moment + segment_label。复盘/未来 ML 训练用。
+            live_game = decision_snapshot.get("live_game")
+            if isinstance(live_game, dict):
+                progress = _compute_game_progress_from_dict(live_game)
+                if progress:
+                    decision_snapshot["game_progress"] = progress
+            # 赔率时序采样：把 goalserve_ml/totals/spread 推到 _ODDS_DRIFT_STORE
+            # 5s 节流，供 /runtime/odds-drift 查询漂移趋势
+            market_slug = plan.market.market_slug if plan.market is not None else None
+            if market_slug:
+                _record_odds_drift(
+                    market_slug,
+                    decision_snapshot.get("goalserve_moneyline"),
+                    decision_snapshot.get("goalserve_totals"),
+                    decision_snapshot.get("goalserve_spread"),
+                )
+            # 兜底：所有以 "goalserve_" / "dynamic_" / "live_state_" 前缀的字段全透
+            for key, value in plan.metadata.items():
+                if value is None or key in decision_snapshot:
+                    continue
+                if key.startswith(("goalserve_", "dynamic_", "live_state_", "ofi_", "math_")):
+                    decision_snapshot[key] = value
         try:
             await self._event_bus.publish(
                 OutboxPriority.P3,
@@ -896,6 +1191,7 @@ class TradingDecisionWorker:
                         "total_budget_usdc": str(allocation_plan.total_budget_usdc),
                         "buy_budget_usdc": str(allocation_plan.allocated_budget_usdc),
                         "allocator": TRADING_DECISION_WORKER_ORIGIN,
+                        "decision_snapshot": decision_snapshot,
                     },
                 ),
             )
@@ -943,6 +1239,13 @@ class TradingDecisionWorker:
         """
 
         metadata: dict[str, object] = dict(event.payload)
+        # 注入 orderbook_direction（10s 窗口 OFI/microprice/momentum 综合方向信号），
+        # 与 exit_metadata 同源——入场决策必须能识别"盘口已单边下杀"场景，否则
+        # 仅看 best_ask < fair_value 会在 ask 厚 bid 薄、microprice 快速下走时
+        # 强行进场，落地即亏（实战案例：mlb spread BUY @ 0.31 → 20s 后 SELL @ 0.26）。
+        direction = self._fetch_orderbook_direction(event.token_id)
+        if direction is not None:
+            metadata["orderbook_direction"] = direction
         if self._entry_metadata_provider is None:
             return metadata
         try:
@@ -1016,6 +1319,9 @@ class TradingDecisionWorker:
         if market is None or lifecycle is None:
             return
         self._market_lifecycle[market.condition_id] = lifecycle
+        self._market_lifecycle.move_to_end(market.condition_id)
+        while len(self._market_lifecycle) > _MARKET_LIFECYCLE_DICT_CAP:
+            self._market_lifecycle.popitem(last=False)
         self._record_lifecycle(market.condition_id, lifecycle)
 
     def _record_lifecycle(self, condition_id: str, lifecycle: MarketLifecycle) -> None:
@@ -1056,16 +1362,17 @@ class TradingDecisionWorker:
                 self._transition_market_by_result(order_result, MarketLifecycle.POSITION_OPEN)
 
     def _pause_market(self, condition_id: str | None, *, reason: str) -> None:
+        """§11 框架不自动 pause:仅在 worker 内部 lifecycle 标 PAUSED(影响 worker 决策),
+        不再调 account_state.pause_market(避免框架自动写入 _market_pauses).
+        admin 仍可通过 /markets/{cid}/pause 手动 pause.
+        """
         if condition_id is None:
             return
         self._market_lifecycle[condition_id] = MarketLifecycle.PAUSED
+        self._market_lifecycle.move_to_end(condition_id)
+        while len(self._market_lifecycle) > _MARKET_LIFECYCLE_DICT_CAP:
+            self._market_lifecycle.popitem(last=False)
         self._record_lifecycle(condition_id, MarketLifecycle.PAUSED)
-        if self._account_state_store is not None:
-            self._account_state_store.pause_market(
-                condition_id,
-                reason=reason,
-                source=MarketPauseSource.RISK,
-            )
 
     def _state_for_market(self, market: Market | None) -> MarketLifecycle | None:
         if market is None:

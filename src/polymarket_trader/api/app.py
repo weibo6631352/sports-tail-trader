@@ -157,6 +157,49 @@ def create_app(
             "Set ADMIN_API_TOKEN in .env / environment for any non-local deployment."
         )
 
+    # === HTTP 性能监控 middleware（统一记录所有 endpoint latency / error）===
+    from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+    _perf_monitor = SystemPerfMonitor.get()
+
+    @app.middleware("http")
+    async def _perf_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """区分 程序处理时间（handler_ms）vs 响应大小（流量）。
+
+        - handler_ms: middleware 测的 = handler 执行 + 响应序列化（不含网络传输）
+        - response_bytes: 响应体大小 → 客户端总等待 ≈ handler_ms + transmit
+        """
+        import time as _time
+        start = _time.time()
+        error = False
+        response_bytes = 0
+        response = None
+        try:
+            _perf_monitor.http_request_enter()
+        except Exception: pass
+        try:
+            response = await call_next(request)
+            if response.status_code >= 500:
+                error = True
+            # 拿 Content-Length（不强制 buffer 整个 body）
+            cl = response.headers.get("content-length")
+            if cl and cl.isdigit():
+                response_bytes = int(cl)
+            return response
+        except Exception:
+            error = True
+            raise
+        finally:
+            try:
+                _perf_monitor.record_http(
+                    endpoint=f"{request.method} {request.url.path}",
+                    handler_ms=(_time.time() - start) * 1000,
+                    response_bytes=response_bytes,
+                    error=error,
+                )
+                _perf_monitor.http_request_exit()
+            except Exception:
+                pass
+
     @app.middleware("http")
     async def _admin_token_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
         if expected_token is None:

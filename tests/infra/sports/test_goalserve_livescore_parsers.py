@@ -1147,7 +1147,7 @@ def test_sport_feeds_and_code_map_include_new_sports() -> None:
 
 def test_parse_livescore_updated_field_converts_pt_to_utc() -> None:
     """scores.@updated 是 PT 时区，转 UTC 后跟 HTTP Date 几乎一致（差 < 20s server cache）。"""
-    from datetime import datetime, timezone
+    from datetime import timezone
     from polymarket_trader.infra.sports.goalserve_livescore_parsers import (
         _parse_livescore_updated_field,
     )

@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     # portfolio_budget_usdc)。设 0 时 Kelly 拒新仓（启动安全态）。Kelly 引擎在
     # ``domain/kelly.py``——见该模块 docstring 公式。
     portfolio_budget_usdc: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
+    # paper_trading_mode：开启后所有下单走 PaperSubmitOnlyOrderClient，签名仍真实
+    # （走 trading_client.sign_order），但 submit 不上链——改用真实 Polymarket WS
+    # 盘口 + 撮合引擎模拟成交，账本累积虚拟 PnL。复盘/策略验证用，不动真钱。
+    # 用法：.env 设 PAPER_TRADING_MODE=true 后重启即可，无需改任何其他配置。
+    paper_trading_mode: bool = Field(default=False)
     # reconcile 周期：从 60 → 20s，让 chain balance/shares 同步更接近实时。
     # 订阅驱动 reprice + MTM 刷新已经覆盖大部分需求（毫秒级响应），但 chain
     # balance 仍需周期 query（USDC 余额、share allowance、未追踪持仓）。
@@ -106,14 +111,17 @@ class Settings(BaseSettings):
     # 每天 ~370 万行 audit_events。3 天 retention ≈ 1100 万行,DB 体积可控;
     # 想长保留要先做写源抽样(只在 accepted/拒绝原因变化时记)。
     audit_retention_days: int = Field(default=3, ge=0, le=365)
-    audit_retention_interval_seconds: int = Field(default=86_400, ge=300)
+    # 改 24h→1h:实测每秒 ~55 条 INSERT,24h interval+run_immediately=False 让
+    # purge 永远跑不到(每次重启重置).1h 兜底,稳态控 audit 表 < 15M rows.
+    audit_retention_interval_seconds: int = Field(default=3_600, ge=300)
     # 单次 purge 的批量上限——避免一次 DELETE 锁表过久。10k 在 PG 上约几百 ms。
     audit_retention_purge_batch_size: int = Field(default=10_000, ge=100, le=200_000)
 
     # 死记录清理 — 默认 2 天。终态 orders + shares=0 的空 positions 是 reconcile
     # 反复查 gamma 的源头,缩到 2 天足够保留近期复盘窗口。
     dead_records_retention_days: int = Field(default=2, ge=0, le=365)
-    dead_records_retention_interval_seconds: int = Field(default=86_400, ge=300)
+    # 改 24h→1h:同 audit_retention_interval_seconds(见上).
+    dead_records_retention_interval_seconds: int = Field(default=3_600, ge=300)
     # 各审计表 retention — 默认按事件密度选:
     # - outbox 1 天(transient queue,消费后即过期,无长期审计价值);
     # - fills 14 天(成交存档,有审计价值);

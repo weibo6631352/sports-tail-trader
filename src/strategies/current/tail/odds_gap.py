@@ -220,6 +220,48 @@ def _line_matches(goalserve_line: Any, market_line: Decimal | None) -> bool:
     return parsed == market_line
 
 
+def _is_late_game_for_underdog_buy(game: Any) -> bool:
+    """判定比赛是否进入末段（胜负将快速收敛，underdog 翻盘概率极低）。
+
+    跨运动末段定义（实战经验阈值）：
+    - baseball: inning >= 8（最后 2 局多数翻盘已不可能）
+    - basketball: 4th quarter（current_period >= 4）
+    - tennis: 决胜盘（current_set 等于 best_of；best_of 未知时第 3 盘起算）
+    - soccer: 80+ 分钟（second_half 且 clock_minutes >= 35）
+    - 其他运动暂不判定（无统一末段语义）→ 返回 False（不触发该守卫）
+    """
+    sport = (getattr(game, "sport", "") or "").lower()
+    if sport == "baseball":
+        st = getattr(game, "baseball_state", None)
+        if st and (st.current_inning or 0) >= 8:
+            return True
+    elif sport in ("basketball", "basket"):
+        st = getattr(game, "basketball_state", None)
+        if st and (st.current_period or 0) >= 4:
+            return True
+    elif sport == "tennis":
+        st = getattr(game, "tennis_state", None)
+        if st:
+            cur_set = st.current_set or 0
+            best_of = getattr(st, "best_of", None) or 0
+            # 决胜盘：BO3 第 3 盘 / BO5 第 5 盘；best_of 未知时第 3 盘起算
+            if best_of > 0 and cur_set >= best_of:
+                return True
+            if best_of == 0 and cur_set >= 3:
+                return True
+    elif sport == "soccer":
+        st = getattr(game, "soccer_state", None)
+        if st:
+            period = (st.period or "").lower()
+            clock = st.clock_minutes or 0
+            # second_half 且 35+ 分钟（=正赛 80+ 分钟，含可能补时）
+            if "second" in period and clock >= 35:
+                return True
+            if "extra" in period or "penalt" in period:
+                return True
+    return False
+
+
 def evaluate_odds_gap_opportunity(
     candidate: SportsTailCandidate,
     policy: TailPolicy,
@@ -267,9 +309,76 @@ def evaluate_odds_gap_opportunity(
                 "min_liquidity_threshold": str(policy.odds_gap_min_liquidity_usdc),
             },
         )
-    # 无末段预先 reject 守卫: 比赛没结束就丢弃机会是草率的。Kelly 自决:即使
-    # Goalserve odds 末段可能 stale,Kelly 仍按 devig p 算 fraction;多盘口分摊
-    # 后统计意义上仍 +EV。承担合理风险,不放过任何可盈利市场(CLAUDE.md §17)。
+    # 负 EV 价位守卫已挪到 _accept_odds_gap（算完 devig 后再判定，只拦 edge 不够
+    # 大的中间价位入场。0.40-0.60 区间需要 edge >= 0.15 才放过——单纯算出 edge
+    # 不够区分"真 edge"和"odds 噪音"，实证数据 416 笔显示该区间累计 -$45）。
+    # 无退出通道守卫: odds_gap 是概率性入场,best_bid=None 表示盘口无人接 SELL,
+    # 错判时无法主动平仓只能 hold 到结算 / 亏到 0。tail lockin 不受此约束（数学
+    # 锁定可以等结算）,但 odds_gap 必须有退出。
+    if market.best_bid is None:
+        return _reject(
+            candidate,
+            TailRejectReason.NO_EXIT_CHANNEL.value,
+            metadata={
+                "best_ask": str(market.best_ask) if market.best_ask is not None else None,
+                "ask_depth": str(market.buyable_liquidity_usdc),
+                "guard_scope": "odds_gap_no_best_bid",
+            },
+        )
+    # 宽 spread 守卫: best_bid 离 best_ask 太远 → 入场后立刻成"账面亏损"(BUY ask
+    # 但 mark-to-market 用 bid),且退出价远低于入场价。实战案例: BUY @ 0.27 →
+    # best_bid=0.18 → 浮亏立刻 -33%(还没价格反向)。spread > 30% 直接拒入场,
+    # 留给 lockin 这种不依赖出场的路径。
+    if market.best_ask is not None and market.best_ask > Decimal("0"):
+        spread_ratio = (market.best_ask - market.best_bid) / market.best_ask
+        if spread_ratio > Decimal("0.30"):
+            return _reject(
+                candidate,
+                TailRejectReason.NO_EXIT_CHANNEL.value,
+                metadata={
+                    "best_bid": str(market.best_bid),
+                    "best_ask": str(market.best_ask),
+                    "spread_ratio": str(spread_ratio.quantize(Decimal("0.001"))),
+                    "guard_scope": "odds_gap_spread_too_wide",
+                },
+            )
+    # 末段低赔率 underdog 守卫: 比赛进入收敛段时(baseball 8th+ inning /
+    # basket 4th quarter 末段 / tennis 决胜盘 / soccer 80+ min), BUY price
+    # < 0.30 = underdog 一方, 翻盘概率极低 → 几乎必砸手里, 不下单。
+    # 该规则不影响 lockin (已锁定盘口本就接近 1.0, 不受 0.30 阈值影响)。
+    if market.best_ask is not None and market.best_ask < Decimal("0.30"):
+        if _is_late_game_for_underdog_buy(candidate.game):
+            return _reject(
+                candidate,
+                TailRejectReason.LATE_GAME_LOW_PRICE_UNDERDOG.value,
+                metadata={
+                    "best_ask": str(market.best_ask),
+                    "sport": candidate.game.sport,
+                    "period": candidate.game.period,
+                },
+            )
+    # 盘口风向守卫: 10s 窗口 OFI/microprice/momentum 综合方向 = "no"(看跌) 且
+    # confidence >= 0.5 → 此时入场会落地即亏。entry 必须看盘口风向, 不能只看
+    # best_ask < fair_value——后者在 ask 厚 bid 薄、microprice 快速下走时仍触发,
+    # 实战案例: BUY @ 0.31 → 20s 后 SELL @ 0.26 (-16%)。
+    ob_dir = market.metadata.get("orderbook_direction")
+    if isinstance(ob_dir, dict):
+        label = str(ob_dir.get("direction_label") or "")
+        try:
+            confidence = Decimal(str(ob_dir.get("confidence") or "0"))
+        except (ArithmeticError, ValueError, TypeError):
+            confidence = Decimal("0")
+        if label == "no" and confidence >= Decimal("0.5"):
+            return _reject(
+                candidate,
+                TailRejectReason.ORDERBOOK_DIRECTION_BEARISH.value,
+                metadata={
+                    "direction_label": label,
+                    "confidence": str(confidence),
+                    "direction_score": str(ob_dir.get("direction_score") or ""),
+                    "flow_imbalance": str(ob_dir.get("flow_imbalance") or ""),
+                },
+            )
     if market.market_type == SportsMarketType.MONEYLINE:
         return _evaluate_moneyline_odds_gap(candidate, policy)
     if market.market_type == SportsMarketType.TOTALS:
@@ -544,6 +653,11 @@ def _accept_odds_gap(
     # 真正 Kelly 内部用 market.fee_rate_bps 重新算 net edge,这里不影响下注大小。
     fee_per_share = (market.best_ask * Decimal("30") / Decimal("10000")).quantize(Decimal("0.000001"))
     edge_net = edge_gross - fee_per_share
+    # 实证 PRICE_NEGATIVE_EV_ZONE 守卫已撤回：违背"无条件信任 Kelly"哲学
+    # （CLAUDE.md memory feedback_trust_kelly_no_extra_caps）。Kelly 自带 fraction
+    # 收缩，edge 弱时 stake 自然小。/runtime/win-rate 显示的 0.40-0.60 区间
+    # -$45 损失，后续通过 true_p 估算更保守 / Kelly 参数调小 fraction 而非硬拒。
+    # 历史指标本身保留在 /runtime/win-rate 供操盘人工调参参考。
 
     enriched = SportsTailCandidate(
         game=candidate.game,

@@ -113,6 +113,10 @@ class UserWsWorker:
         self._last_result: UserWsResultSummary | None = None
         self._recent_results: deque[UserWsResultSummary] = deque(maxlen=8)
 
+    def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
+        """registry prune callback:清订阅时间戳记录,防 cid 累积."""
+        self._subscribed_condition_ids.pop(condition_id, None)
+
     def snapshot(self) -> AccountSnapshot:
         return self._account_state.snapshot()
 

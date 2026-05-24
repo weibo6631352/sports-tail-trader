@@ -26,7 +26,9 @@ class AdminTimelineQueryMixin:
         token_id: str | None = None,
         time_range: TimeRange | None = None,
         strategy_id: str | None = None,
+        with_total: bool = False,
     ) -> dict[str, Any]:
+        import time as _time
         if not self._has_db_session_factory():
             page: RepositoryPage[Any] = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
             return page_payload(page, serializer=self._serializer().audit_event)
@@ -41,10 +43,24 @@ class AdminTimelineQueryMixin:
                 token_id=token_id,
                 time_range=time_range,
                 strategy_id=strategy_id,
+                with_total=with_total,
             )
 
+        t0 = _time.perf_counter()
         page = await self._with_repositories(_query)
-        return page_payload(page, serializer=self._serializer().audit_event)
+        db_ms = (_time.perf_counter() - t0) * 1000
+        t1 = _time.perf_counter()
+        payload = page_payload(page, serializer=self._serializer().audit_event)
+        ser_ms = (_time.perf_counter() - t1) * 1000
+        try:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            mon = SystemPerfMonitor.get()
+            mon.record_endpoint_step("audit_events", "db_with_repos", db_ms)
+            mon.record_endpoint_step("audit_events", "serialize", ser_ms)
+            mon.record_endpoint_step("audit_events", f"limit_{limit}", db_ms + ser_ms)
+        except Exception:
+            pass
+        return payload
 
     async def list_trade_replays(
         self,

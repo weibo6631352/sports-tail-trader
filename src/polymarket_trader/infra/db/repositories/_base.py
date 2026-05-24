@@ -56,10 +56,14 @@ class BaseRepository:
         *,
         limit: int,
         offset: int,
+        with_total: bool = True,
     ) -> tuple[list[Any], int]:
-        base_stmt = stmt.order_by(None)
-        total_stmt = select(func.count()).select_from(base_stmt.subquery())
-        total = int((await self._session.scalar(total_stmt)) or 0)
+        if with_total:
+            base_stmt = stmt.order_by(None)
+            total_stmt = select(func.count()).select_from(base_stmt.subquery())
+            total = int((await self._session.scalar(total_stmt)) or 0)
+        else:
+            total = -1  # sentinel：调用方不需要 total，跳过 count subquery
         result = await self._session.scalars(stmt.limit(limit).offset(offset))
         return list(result.all()), total
 

@@ -47,6 +47,7 @@ class MarketService:
         registry: MarketRegistry | None = None,
         market_tracker: MarketTracker | None = None,
         account_snapshot_provider: AccountSnapshotProvider | None = None,
+        filter_emit_min_interval_s: float = 0.0,
     ) -> None:
         self._parser = parser or MarketPayloadParser()
         self._extension_hooks = extension_hooks
@@ -58,6 +59,13 @@ class MarketService:
         # 这样下次再被同一原因过滤会重新发出一次。
         self._last_filter_reason: OrderedDict[str, str] = OrderedDict()
         self._suppressed_filter_emits: int = 0
+        # filter 拒掉的 cid 不进 registry 没 lifecycle 信号 → 用 TTL 主管理 + cap 兜底:
+        # - TTL 2h:超过 2 小时没被扫到的 cid 自动清(主管理)
+        # - cap 50000:safety net 防 2h 内 cid 暴涨(极端情况)
+        self._last_filter_emit_at: OrderedDict[str, float] = OrderedDict()
+        self._filter_emit_min_interval_s: float = filter_emit_min_interval_s
+        # TTL:超 2 小时(7200s)未碰的 cid 视为陈旧,主动删除让下次重新 emit
+        self._filter_ttl_seconds: float = 7_200.0
 
     @property
     def extension_hooks(self) -> ExtensionHooks:
@@ -231,15 +239,51 @@ class MarketService:
                 self._last_filter_reason.move_to_end(cid)
                 self._suppressed_filter_emits += 1
                 return True
+            # 最小间隔兜底(prod 60s):即使 reason 切换,同 cid 配置秒内最多 1 条 audit.
+            if self._filter_emit_min_interval_s > 0:
+                import time as _time
+                now_mono = _time.monotonic()
+                last_emit = self._last_filter_emit_at.get(cid, 0.0)
+                if (now_mono - last_emit) < self._filter_emit_min_interval_s:
+                    self._suppressed_filter_emits += 1
+                    return True
+                self._last_filter_emit_at[cid] = now_mono
+                self._last_filter_emit_at.move_to_end(cid)
+                # TTL sweep:OrderedDict leftmost=最久未更新,2h 未碰的 cid 整体删除
+                # (reason+emit_at 联动).discovery 再次扫到该 cid 时如果还被拒,
+                # 当作"首次"重新 emit(有 audit 价值).TTL 优于 cap LRU:
+                # - cap 只在容量满时被动清,长期低活跃场景 dict 可能停在 cap 边界
+                # - TTL 主动清陈旧数据,vol 低时 dict 自然瘦身.
+                self._sweep_stale_filter_entries(now_mono)
             self._last_filter_reason[cid] = reason
             self._last_filter_reason.move_to_end(cid)
+            # cap 兜底 safety net:极端情况(2h 内 50k+ 新 cid)防爆
             while len(self._last_filter_reason) > _FILTER_DEDUPE_CAPACITY:
                 self._last_filter_reason.popitem(last=False)
             return False
         # discovery_kind 是 MARKET_DISCOVERED / MARKET_UPDATED 时清缓存，让下次重新被
         # 过滤会再发出一次（"过滤状态恢复"也是有审计价值的事件）。
         self._last_filter_reason.pop(cid, None)
+        self._last_filter_emit_at.pop(cid, None)
         return False
+
+    def _sweep_stale_filter_entries(self, now_mono: float) -> None:
+        """amortized O(1):从最久未更新端开始 pop 过期 entry.
+
+        OrderedDict 在每次 emit 时 move_to_end,所以 leftmost 永远是最久未碰的.
+        遇到第一个未过期立即停止,大多数调用是 O(1).
+        """
+        cutoff = now_mono - self._filter_ttl_seconds
+        # 同步清 emit_at 和 reason(同 cid)
+        while self._last_filter_emit_at:
+            try:
+                oldest_cid = next(iter(self._last_filter_emit_at))
+            except StopIteration:
+                break
+            if self._last_filter_emit_at[oldest_cid] >= cutoff:
+                break
+            self._last_filter_emit_at.popitem(last=False)
+            self._last_filter_reason.pop(oldest_cid, None)
 
     @property
     def suppressed_filter_emits(self) -> int:

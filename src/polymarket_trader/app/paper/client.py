@@ -87,6 +87,8 @@ class PaperSubmitOnlyOrderClient:
         return outcome.response
 
     async def cancel_order(self, request: OrderExecutionRequest) -> OrderExecutionResponse:
+        # paper 模式不持有 Polymarket 真实挂单 → cancel 视为成功（与实盘 cancel
+        # 高成功率一致）。`order_id` 来自 caller 端先前 submit/replace 返回值。
         self.requests.append(("cancel", request))
         return OrderExecutionResponse(
             status=OrderResultStatus.CANCELLED,
@@ -96,14 +98,39 @@ class PaperSubmitOnlyOrderClient:
         )
 
     async def replace_order(self, request: OrderExecutionRequest) -> OrderExecutionResponse:
+        """replace = cancel old + submit new；paper 走 simulate_fill 真撮合。
+
+        旧实现直接返回 LIVE 不撮合 → 与实盘行为严重失真（生产环境 replace 是新
+        订单上 book，按当前盘口可能立刻成交）。新实现：构造一个等价的 submit
+        request（按 ``new_price`` 或 ``price``），调 simulate_fill 真撮合，结果与
+        SELL submit 完全对齐——能成 FULL_FILL/PARTIAL_FILL，不能成 LIVE。
+        """
         self.requests.append(("replace", request))
-        return OrderExecutionResponse(
-            status=OrderResultStatus.LIVE,
-            order_id=f"paper-replace-{request.trace_id}",
-            remaining_shares=request.size_shares,
-            raw_response={"virtual": True, "action": "replace"},
-            reason="paper_replaced",
+        effective_price = request.new_price if request.new_price is not None else request.price
+        submit_request = OrderExecutionRequest(
+            action="submit",
+            strategy_id=request.strategy_id,
+            trace_id=request.trace_id,
+            idempotency_key=request.idempotency_key,
+            condition_id=request.condition_id,
+            token_id=request.token_id,
+            market_slug=request.market_slug,
+            side=request.side,
+            order_type=request.order_type,
+            price=effective_price,
+            amount_usdc=request.amount_usdc,
+            size_shares=request.size_shares,
+            order_id=request.order_id,
+            post_only=request.post_only,
+            reason=request.reason,
+            retry_count=request.retry_count,
+            timestamps=request.timestamps,
         )
+        market = self._market_lookup(request.token_id)
+        orderbook = self._orderbook_lookup(request.token_id)
+        outcome = simulate_fill(submit_request, market=market, orderbook=orderbook, ledger=self._ledger)
+        self.simulations.append((request.trace_id, outcome))
+        return outcome.response
 
 
 async def _maybe_await(value: Any) -> Any:

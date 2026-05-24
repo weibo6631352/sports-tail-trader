@@ -56,9 +56,8 @@ class AuditEventModel(Base, TimestampMixin):
         Index("ix_audit_events_trace_event", "trace_id", "event_title"),
         Index("ix_audit_events_trace_order_trade", "trace_id", "order_id", "trade_id"),
         Index("ix_audit_events_strategy_created", "strategy_id", "created_at"),
-        # retention purge 用 ``DELETE WHERE created_at < cutoff``——必须有 created_at
-        # 单列索引，否则 daily 删除百万级 row 会全表扫。
-        Index("ix_audit_events_created_at", "created_at"),
+        # 注:created_at 单列索引由 TimestampMixin.index=True 自动创建为
+        # ix_audit_events_created_at,不重复显式定义(SQLAlchemy 会冲突).
     )
 
     @classmethod

@@ -156,10 +156,14 @@ def _maybe_reprice_stale_sell(
             )
             continue
         # 新价：tick 对齐到 sell_target，但不超过原价 - tick（避免反向更难成交）
+        # 必须最后再做一次 floor 对齐——上游 sell_price 可能来自历史未对齐挂单
+        # （如旧版本入场逻辑或手工挂单），sell_price - tick 不保证是 tick 倍数。
+        # 不对齐直接进 RiskManager 会被 tick_size_invalid 拒，反复重试刷日志。
         aligned_target = (
             (sell_target / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
         )
-        new_price = min(aligned_target, sell_price - tick)
+        raw_new_price = min(aligned_target, sell_price - tick)
+        new_price = (raw_new_price / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
         if new_price <= Decimal("0") or new_price >= sell_price:
             continue
         return ExtensionDecision.replace(
@@ -638,6 +642,14 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
             if isinstance(plan, dict):
                 plan["target_exit_price"] = str(exit_price)
 
+    # 强制 floor 到 orderbook.tick_size：所有上游 SELL 价格计算（dynamic exit
+    # quantize 到 0.001 / clearing_price 任意精度 / fair × 0.95 等）都可能产出
+    # 非 tick 倍数价，进 RiskManager 必被 tick_size_invalid 拒。在 SELL decision
+    # 唯一出口统一 floor 是最干净的修复——所有 SELL 路径自动获得保护。
+    if exit_price is not None and context.orderbook is not None:
+        tick = context.orderbook.tick_size or Decimal("0.01")
+        if tick > Decimal("0"):
+            exit_price = (exit_price / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
     return ExtensionDecision.sell(
         reason=exit_reason,
         token_id=token_id,

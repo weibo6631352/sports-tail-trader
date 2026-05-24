@@ -82,6 +82,11 @@ class AllocationPlan:
 
 
 def current_exposure_usdc(position: Position | None, open_orders: Iterable[Order] = ()) -> Decimal:
+    """计算 token 的 exposure(自身持仓 cost + 自身 open BUY orders).
+
+    每个 (cid, token) 独立计算,不抵扣对面 token——双边持仓视为独立机会,
+    每边按 Kelly 自己的 edge/edge 给完整预算.对冲收益由策略层独立决策.
+    """
     exposure_usdc = Decimal("0")
     if position is not None and not position.settled_zero_value:
         exposure_usdc += position.cost_usdc

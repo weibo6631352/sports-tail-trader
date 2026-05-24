@@ -133,7 +133,7 @@ class GoalserveInplayClient:
         base_url: str = _BASE_URL,
         proxy: str | None = None,
         timeout_s: float = 12.0,
-        poll_interval_s: float = 1.2,
+        poll_interval_s: float = 1.05,
         rate_limit_backoff_s: float = 3.0,
         now_provider: Callable[[], datetime] | None = None,
         active_sports_provider: Callable[[], frozenset[str]] | None = None,
@@ -363,24 +363,48 @@ class GoalserveInplayClient:
 
     async def _fetch_once(self, sport: str) -> None:
         """抓取并解析单个 sport 的 inplay feed，更新该 sport 缓存。"""
+        import time as _time
         st = self._states[sport]
         url = f"{self._base_url}/inplay-{sport}.gz"
+        _t0 = _time.perf_counter()
         try:
             response = await self._client.get(url)
         except httpx.HTTPError as exc:
+            latency_ms = (_time.perf_counter() - _t0) * 1000
             st.consecutive_failures += 1
             st.last_error = f"transport error: {exc}"
+            try:
+                from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+                SystemPerfMonitor.get().record_api_call(
+                    f"goalserve_inplay_{sport}", success=False,
+                    error_type=type(exc).__name__, latency_ms=latency_ms,
+                )
+            except Exception: pass
             return
 
+        latency_ms = (_time.perf_counter() - _t0) * 1000
         if response.status_code == 429:
-            # 同 sport 超速——单独退避，不波及其他 sport。
             st.consecutive_failures += 1
             st.last_error = "HTTP 429 rate limited"
             st.backoff_until = self._monotonic() + self._rate_limit_backoff_s
+            try:
+                from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+                SystemPerfMonitor.get().record_api_call(
+                    f"goalserve_inplay_{sport}", success=False,
+                    error_type="HTTP_429", latency_ms=latency_ms,
+                )
+            except Exception: pass
             return
         if response.status_code != 200:
             st.consecutive_failures += 1
             st.last_error = f"HTTP {response.status_code}"
+            try:
+                from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+                SystemPerfMonitor.get().record_api_call(
+                    f"goalserve_inplay_{sport}", success=False,
+                    error_type=f"HTTP_{response.status_code}", latency_ms=latency_ms,
+                )
+            except Exception: pass
             return
 
         try:
@@ -403,6 +427,13 @@ class GoalserveInplayClient:
         st.last_error = None
         st.consecutive_failures = 0
         st.backoff_until = None
+        try:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            mon = SystemPerfMonitor.get()
+            mon.worker_tick(name=f"inplay_{sport}", expected_interval_s=self._poll_interval_s)
+            mon.record_api_call(f"goalserve_inplay_{sport}", success=True, latency_ms=latency_ms)
+        except Exception:
+            pass
 
 
 def _matching_keys(active: frozenset[str]) -> list[frozenset[str]]:

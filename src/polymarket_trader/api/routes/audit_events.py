@@ -21,6 +21,9 @@ async def list_audit_events(
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
     strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
+    # 默认 False:大表 count subquery 每次 ~870ms,monitor 高频拉取不需要 total.
+    # 前端如需总数显式传 include_total=true.
+    include_total: bool = Query(default=False),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
     return await service.list_audit_events(
@@ -32,6 +35,7 @@ async def list_audit_events(
         token_id=token_id,
         time_range=build_time_range(since=since, until=until),
         strategy_id=strategy_id,
+        with_total=include_total,
     )
 
 

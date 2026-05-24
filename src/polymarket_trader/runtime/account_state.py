@@ -38,11 +38,16 @@ class AccountStateStore:
     阻塞 P0 主链路。若日后引入 P0 写入路径，必须先拆分片锁。
     """
 
+    # _fills 主管理走 registry prune callback(market 销毁时清该 cid 所有 fill);
+    # cap 是兜底防极端(如 market 长期 active 但每天上千 fill).
+    _FILLS_CAP = 10_000
+
     def __init__(self) -> None:
         self._lock = Lock()
         self._positions: dict[tuple[str, str], Position] = {}
         self._open_orders: dict[str, Order] = {}
-        self._fills: dict[str, Fill] = {}
+        from collections import OrderedDict as _OD
+        self._fills: _OD[str, Fill] = _OD()
         self._balance_usdc = Decimal("0")
         self._allowance_usdc = Decimal("0")
         self._user_ws_connected = False
@@ -50,6 +55,17 @@ class AccountStateStore:
         self._market_pauses: dict[str, MarketPause] = {}
         self._last_reconcile_at: datetime | None = None
         self._snapshot = AccountSnapshot()
+
+    def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
+        """registry prune callback:market 销毁时清该 cid 所有 fill(lifecycle-bound).
+
+        fills 已经写入 DB(fills 表,有 retention),内存 fills 只服务"活跃 market
+        实时审计".market 已 prune 表示该 cid 不再交易,内存里 fills 无业务价值.
+        """
+        with self._lock:
+            stale = [fid for fid, f in self._fills.items() if f.condition_id == condition_id]
+            for fid in stale:
+                self._fills.pop(fid, None)
 
     def snapshot(self) -> AccountSnapshot:
         return self._snapshot
@@ -129,11 +145,17 @@ class AccountStateStore:
     def record_fill(self, fill: Fill) -> AccountSnapshot:
         with self._lock:
             self._fills[fill.event_id] = fill
+            self._fills.move_to_end(fill.event_id)
+            while len(self._fills) > self._FILLS_CAP:
+                self._fills.popitem(last=False)
             return self._publish_snapshot_locked()
 
     def replace_fills(self, fills: tuple[Fill, ...]) -> AccountSnapshot:
+        from collections import OrderedDict as _OD
         with self._lock:
-            self._fills = {fill.event_id: fill for fill in fills}
+            self._fills = _OD((fill.event_id, fill) for fill in fills)
+            while len(self._fills) > self._FILLS_CAP:
+                self._fills.popitem(last=False)
             return self._publish_snapshot_locked()
 
     def mark_user_ws_connected(self, connected: bool) -> AccountSnapshot:

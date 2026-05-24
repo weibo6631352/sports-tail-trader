@@ -102,7 +102,8 @@ async def get_market_midpoint(
 @router.get("/orderbook-direction")
 async def get_orderbook_direction(
     token_id: str = Query(min_length=1),
-    window_seconds: float = Query(default=10.0, ge=0.5, le=120.0),
+    window_seconds: float | None = Query(default=None, ge=0.5, le=120.0),
+    windows: str | None = Query(default=None, description="逗号分隔的多窗口秒数,如 2,5,10,30"),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
     """读盘口多时点 delta 信号(best bid/ask price + size 变化)。
@@ -110,9 +111,90 @@ async def get_orderbook_direction(
     单时点 bid/ask 深度比会被 MM 远端"墙"骗;真买卖压来自窗口内 best 价位移 +
     size 消耗。返回 direction_score [-1,+1] + raw deltas + confidence + samples。
     每次查询落 audit(ORDERBOOK_DIRECTION_QUERIED),供事后复盘。
-    """
 
-    return await service.get_orderbook_direction(token_id=token_id, window_seconds=window_seconds)
+    用法:
+    - 单窗口(向后兼容): ``?window_seconds=10`` → 返回扁平 signal dict
+    - 多窗口: ``?windows=2,5,10,30`` → 返回 {token_id, signals: [...]} 一次查询比对各窗口
+    - 都不传时默认 ``window_seconds=10``
+    """
+    if windows is not None:
+        try:
+            window_list = [float(w.strip()) for w in windows.split(",") if w.strip()]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="windows must be comma-separated floats")
+        if not window_list:
+            raise HTTPException(status_code=422, detail="windows must contain at least one value")
+        for w in window_list:
+            if w < 0.5 or w > 120.0:
+                raise HTTPException(status_code=422, detail=f"each window must be in [0.5, 120.0], got {w}")
+        return await service.get_orderbook_direction_multi(token_id=token_id, windows=tuple(window_list))
+    return await service.get_orderbook_direction(
+        token_id=token_id, window_seconds=window_seconds if window_seconds is not None else 10.0,
+    )
+
+
+@router.get("/orderbook-depth")
+async def get_orderbook_depth(
+    token_id: str = Query(min_length=1),
+    windows: str = Query(default="2,3,5,10", description="逗号分隔的窗口秒数"),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """完整盘口资金分布 + 我方 resting/持仓 + 多窗口波动。
+
+    返回字段:
+    - bid/ask 双侧:total_size/usdc, top20 levels, 中位价(累积 size 50%), 地板/天花板集中量
+    - ours:position_shares/cost, resting BUY/SELL size/usdc
+    - windows:每个窗口秒数对应的 bid/ask total size/usdc delta + best price delta + mid delta
+
+    内存 ring buffer 由 market_ws 每次 snapshot 更新自动喂入,15s 时间窗.
+    """
+    try:
+        windows_s = tuple(float(w.strip()) for w in windows.split(",") if w.strip())
+    except ValueError:
+        raise HTTPException(status_code=422, detail="windows must be comma-separated floats")
+    if not windows_s:
+        windows_s = (2.0, 3.0, 5.0, 10.0)
+    return service.orderbook_depth_snapshot(token_id=token_id, windows_s=windows_s)
+
+
+@router.get("/liquidity-summary")
+async def get_liquidity_summary(
+    top_n: int = Query(default=20, ge=1, le=100),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """全市场盘口资金聚合 + 双边比例 + whale 大单 + by_classification 分组 + top N 深度.
+
+    回答"当前 Polymarket 我们追踪的所有市场总流动性多少,双边压力如何,哪类
+    盘口资金最多".
+    """
+    return service.liquidity_summary_snapshot(top_n=top_n)
+
+
+@router.get("/event-bundle")
+async def get_event_bundle(
+    event_slug: str = Query(min_length=1),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """一个 event 下所有 condition_id 的市场聚合视图(ML/Totals/Spreads/分节 prop 一次拿).
+
+    每市场带 classification + 各 token 的 best bid/ask + bid/ask usdc + 双边比例.
+    """
+    return service.event_bundle_snapshot(event_slug=event_slug)
+
+
+@router.get("/data-health")
+async def get_market_data_health(
+    condition_id: str | None = Query(default=None),
+    token_id: str | None = Query(default=None),
+    service: AdminService = Depends(get_admin_service),
+) -> dict[str, object]:
+    """单市场所有数据源连接状态 + 新鲜度。
+
+    覆盖:market_ws / live_state / inplay / pregame.回答"这个市场各路数据现在是否新鲜".
+    """
+    if condition_id is None and token_id is None:
+        raise HTTPException(status_code=422, detail="condition_id or token_id required")
+    return service.market_data_health_snapshot(condition_id=condition_id, token_id=token_id)
 
 
 @router.get("/orderbook-history")

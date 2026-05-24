@@ -6,9 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from threading import Lock
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from polymarket_trader.domain.market import Market, TradingStatus
+
+if TYPE_CHECKING:
+    from polymarket_trader.runtime.market_companion_state import MarketCompanionState
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +63,41 @@ class MarketRegistry:
         self._condition_id_by_token_id: dict[str, str] = {}
         self._condition_id_by_slug: dict[str, str] = {}
         self._condition_id_by_event_slug: dict[str, str] = {}
+        # companion state(audit dedupe + 节流计时器),lifecycle 严格随 market:
+        # upsert 时若 cid 首次出现自动创建,remove_market 时同步 pop → 不留泄漏.
+        from polymarket_trader.runtime.market_companion_state import MarketCompanionState
+        self._companion_cls = MarketCompanionState
+        self._companions: dict[str, MarketCompanionState] = {}
+        # 首次 tracked 的 monotonic 时间, 用于 reconcile 判断"market tracked N 秒后
+        # 仍无 live source 匹配 → prune". remove_market 时同步 pop.
+        self._first_tracked_at_mono: dict[str, float] = {}
+        # market prune callback(condition_id, token_ids) - workers 自己注册清自己的
+        # cid/token 索引 dict;避免散落各处忘记 prune 联动.
+        self._prune_callbacks: list[Callable[[str, tuple[str, ...]], None]] = []
         self._snapshot = MarketRegistrySnapshot(tuple())
         self._shard_locks: dict[str, Lock] = {}
         self._locks_lock = Lock()
         self._commit_lock = Lock()
+
+    def register_prune_callback(self, cb: "Callable[[str, tuple[str, ...]], None]") -> None:
+        """workers 在 init 时注册 prune 回调.
+
+        signature: cb(condition_id: str, token_ids: tuple[str, ...]).
+        market 被 remove_market 时同步调用所有 cb,worker 自己清自己的 dict.
+        """
+        self._prune_callbacks.append(cb)
+
+    def first_tracked_at_mono(self, condition_id: str) -> float | None:
+        """首次 tracked 的 monotonic 时间戳, 用于算 tracked_for_seconds."""
+        return self._first_tracked_at_mono.get(condition_id)
+
+    def companion(self, condition_id: str) -> "MarketCompanionState | None":
+        """读 companion(market 已 prune 返回 None,调用方应跳过操作).
+
+        故意不 lazy-create:返回 None 说明 cid 不属于活跃 market,
+        worker 也不应该再写 dedupe state.
+        """
+        return self._companions.get(condition_id)
 
     def upsert(self, market: Market, *, timeout: float = 0.05) -> None:
         self._with_condition_lock(market.condition_id, timeout, lambda: self._upsert_locked(market))
@@ -285,6 +319,12 @@ class MarketRegistry:
             if market.event_slug:
                 condition_id_by_event_slug.setdefault(market.event_slug, market.condition_id)
 
+            # 首次出现 cid 时创建 companion(已存在则保留旧 state,避免 reconnect/upsert
+            # 触发 audit 重发)
+            if market.condition_id not in self._companions:
+                self._companions[market.condition_id] = self._companion_cls()
+                self._first_tracked_at_mono[market.condition_id] = time.monotonic()
+
             self._publish_state(
                 markets_by_condition_id,
                 condition_id_by_token_id,
@@ -348,13 +388,26 @@ class MarketRegistry:
                 condition_id_by_event_slug,
             )
             markets_by_condition_id.pop(condition_id, None)
+            # 联动清 companion:lifecycle 绑定保证 prune 后 dedupe state 自然消失,
+            # 无需各 worker 各自 sync.
+            self._companions.pop(condition_id, None)
+            self._first_tracked_at_mono.pop(condition_id, None)
             self._publish_state(
                 markets_by_condition_id,
                 condition_id_by_token_id,
                 condition_id_by_slug,
                 condition_id_by_event_slug,
             )
-            return current
+            # 触发 prune callbacks:workers 清自己的 cid/token 索引 dict.
+            # 在 commit lock 外执行 cb,避免 cb 阻塞索引锁;捕获异常防一个 cb 挂掉影响其他.
+            tokens = current.token_ids or ()
+        # commit_lock 已释放,在这里触发 callbacks
+        for cb in self._prune_callbacks:
+            try:
+                cb(condition_id, tokens)
+            except Exception as exc:
+                logger.warning("prune_callback failed: %s", exc)
+        return current
 
     def _detach_indexes(
         self,

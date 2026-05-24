@@ -37,6 +37,7 @@ from polymarket_trader.infra.polymarket.order_result_builder import (
 )
 from polymarket_trader.infra.outbox.event_sink import OutboxSink
 from polymarket_trader.observability.metrics import MetricsRegistry
+import time
 from polymarket_trader.serialization import utc_now
 
 logger = logging.getLogger(__name__)
@@ -295,8 +296,6 @@ class PolymarketOrderExecutor:
         return task
 
     def _log_task_exception(self, task: asyncio.Task[Any]) -> None:
-        # 后台任务静默失败会让审计链路出现不可见缺口——主动通过模块 logger 上报，
-        # 而不是依赖 asyncio default exception handler。CancelledError 视为干净关闭信号。
         if task.cancelled():
             return
         exc = task.exception()
@@ -304,6 +303,11 @@ class PolymarketOrderExecutor:
             return
         if isinstance(exc, asyncio.CancelledError):
             return
+        try:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            SystemPerfMonitor.get().record_coroutine_exception(task.get_name())
+        except Exception:
+            pass
         logger.warning(
             "order_executor.background_task_failed name=%s",
             task.get_name(),
@@ -388,6 +392,7 @@ class PolymarketOrderExecutor:
             order_id=intent.order_id,
             new_price=intent.new_price,
             size_shares=intent.size_shares,
+            side=intent.side,  # paper simulate_fill 撮合分支必需,实盘 replace 也要 side
             reason=intent.reason,
         )
 
@@ -574,11 +579,20 @@ class PolymarketOrderExecutor:
                 signed_at=timestamps.signed_at,
                 submitted_at=submit_started_at,
             )
+            _adapter_t0 = time.time()
             response = await self._invoke_adapter(
                 _adapter_method_for_action(request.action),
                 request,
                 timeout_s=self._timeout_for_action(request.action),
             )
+            try:
+                from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+                SystemPerfMonitor.get().record_decision_step(
+                    step=f"adapter_{request.action}",
+                    latency_ms=(time.time() - _adapter_t0) * 1000,
+                )
+            except Exception:
+                pass
             response_model = normalize_execution_response(
                 response,
                 action=request.action,

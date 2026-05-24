@@ -169,6 +169,17 @@ class ReconcileAuthorityRefresher:
             else authority_call_timeout_s
         )
         self._market_authority_concurrency = max(1, market_authority_concurrency)
+        # 自动 quarantine：condition_id → 连续 retryable 失败计数。每次 market
+        # refresh 失败 +1，成功清零；超过阈值（默认 5）→ 自动 pause market 标
+        # 'auto_quarantine_dead_market'，让 reconcile 下次跳过这个死 condition。
+        # 防 5/23 比赛结算后 Polymarket 删 condition_id 时 reconcile 反复 retry
+        # 把 refresh_summary.failures 撑到 56+ 触发 degraded warning。
+        self._condition_failure_counts: dict[str, int] = {}
+        self._quarantine_threshold = 5
+
+    def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
+        """registry prune callback:清 cid 的失败计数,避免 cid 永久累积."""
+        self._condition_failure_counts.pop(condition_id, None)
 
     async def refresh(
         self,
@@ -445,13 +456,21 @@ class ReconcileAuthorityRefresher:
     ) -> tuple[AuthoritativeMarketRefresh | BaseException, ...]:
         if not markets:
             return ()
+        # 自动 quarantine 过滤：连续失败超阈值的 condition 直接跳过 refresh,
+        # 让 reconcile failures 不再被这些死 market 撑爆触发 degraded。
+        active_markets = tuple(
+            m for m in markets
+            if self._condition_failure_counts.get(m.condition_id, 0) < self._quarantine_threshold
+        )
+        if not active_markets:
+            return ()
         semaphore = asyncio.Semaphore(self._market_authority_concurrency)
 
         async def _refresh_one(market: Market) -> AuthoritativeMarketRefresh:
             async with semaphore:
                 return await self._refresh_market_authority(market)
 
-        return await asyncio.gather(*(_refresh_one(market) for market in markets), return_exceptions=True)
+        return await asyncio.gather(*(_refresh_one(market) for market in active_markets), return_exceptions=True)
 
     async def _refresh_market_authority(self, market: Market) -> AuthoritativeMarketRefresh:
         failures: list[AuthoritativeRefreshFailure] = []
@@ -474,6 +493,18 @@ class ReconcileAuthorityRefresher:
             market_for_orderbook,
             failures,
         )
+        # 自动 quarantine 计数：refresh 整体看作"有效成功"= gamma 找到 market +
+        # orderbook 至少 1 个快照。任一缺失 → 失败计数 +1；超阈值 → 下次跳过。
+        # 成功则清零（market 可能临时不可用，恢复后立即解 quarantine）。
+        is_dead = refreshed_market is None and not orderbook_snapshots
+        if is_dead:
+            self._condition_failure_counts[market.condition_id] = (
+                self._condition_failure_counts.get(market.condition_id, 0) + 1
+            )
+            if self._condition_failure_counts[market.condition_id] >= self._quarantine_threshold:
+                self._apply_quarantine_pause(market)
+        else:
+            self._condition_failure_counts.pop(market.condition_id, None)
         return AuthoritativeMarketRefresh(
             requested_market=market,
             refreshed_market=refreshed_market,
@@ -481,6 +512,15 @@ class ReconcileAuthorityRefresher:
             fee_rate_refreshed=fee_rate_refreshed,
             failures=tuple(failures),
         )
+
+    def _apply_quarantine_pause(self, market: Market) -> None:
+        """连续失败超阈值 → 标 market PAUSED 阻止下游再下单 + 触发 reconcile 跳过。"""
+        if self._registry is not None:
+            paused = market.with_trading_status(
+                TradingStatus.PAUSED,
+                reject_reason="auto_quarantine_dead_market",
+            )
+            self._registry.upsert(paused)
 
     async def _fetch_gamma_market(
         self,

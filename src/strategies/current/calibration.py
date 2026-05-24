@@ -221,6 +221,7 @@ def _load_market_snapshot(case: Mapping[str, Any]) -> SportsMarketSnapshot:
         token_id=str(market_payload.get("token_id") or case.get("token_id") or ""),
         line=_optional_decimal(market_payload.get("line")),
         best_ask=_optional_decimal(market_payload.get("best_ask")),
+        best_bid=_optional_decimal(market_payload.get("best_bid")),
         buyable_liquidity_usdc=_optional_decimal(market_payload.get("buyable_liquidity_usdc")) or Decimal("0"),
         market_slug=_optional_text(market_payload.get("market_slug")),
         sports_market_type=_optional_text(market_payload.get("sports_market_type")),

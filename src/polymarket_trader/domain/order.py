@@ -140,6 +140,9 @@ class ReplaceOrderIntent:
     idempotency_key: str | None = None
     reason: str = ""
     intent_tags: frozenset[str] = field(default_factory=frozenset)
+    # paper 模式 simulate_fill 需要 side 选择 BUY/SELL 撮合分支;实盘 replace 透传
+    # 给 Polymarket 的 buildOrder.replace 也需要 side.None=未知(向后兼容).
+    side: OrderSide | None = None
 
 
 TradableOrderIntent: TypeAlias = BuyOrderIntent | SellOrderIntent

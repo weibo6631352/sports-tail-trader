@@ -349,6 +349,67 @@ def _extract_goalserve_moneyline(event: LiveEvent) -> dict[str, Any] | None:
     return payload
 
 
+# 子盘/分段盘关键字——出现这些词的 market 不是全场主线，需排除。
+# - half/quarter/set/inning/period/minute/map：明确的分段标识
+# - "1st"/"2nd"/"3rd"/"4th"... 前缀也意味着分段
+# - "team total"：单方总数（如 Home Team Total Goals），不是全场总分
+# - "total hits"/"total bases"/"total cards"/"total corners"/"total fouls"：非得分类总数
+# - "race to"：先到 N 分（不是 over/under）
+# - "total band"/"result/total"：复合盘 3-way / 组合下注
+_SEGMENT_OR_NONMAIN_SUBSTRINGS = (
+    "half", "quarter", "set", "inning", "period", "minute", "map",
+    "1st ", "2nd ", "3rd ", "4th ", "5th ", "6th ", "7th ", "8th ", "9th ", "10th ",
+    "(1st", "(2nd", "(3rd", "(4th", "(5th", "(6th", "(7th",
+    "team total",
+    "total hits", "total bases", "total cards", "total corners", "total fouls",
+    "race to",
+    "total band", "result/total", "european handicap", "3-way handicap",
+)
+
+
+def _is_segment_or_nonmain(name_low: str) -> bool:
+    return any(s in name_low for s in _SEGMENT_OR_NONMAIN_SUBSTRINGS)
+
+
+def _pick_main_line_pair(outcomes: list[dict], home_names: tuple[str, ...], away_names: tuple[str, ...]) -> tuple[dict | None, dict | None]:
+    """从 multi-line market（Run Lines / Game Totals 含多 handicap）中选最对称的真实 pair。
+
+    Goalserve 同一 market 的 outcomes 可能含 N 组 (home, away) line（如 Run Lines 含
+    7 个 line: -3.5/-2.5/-1.5/+1.5/+2.5/+3.5/+4.5,每对配对方向相反）。
+
+    策略：穷举所有 home×away 组合，选 implied_sum 在健康 vig 区间 [1.00, 1.20]
+    内、且 |home_impl - 0.5| + |away_impl - 0.5| 最小（最对称）的那对。
+
+    无需关心 hc 配对规则（totals 是同号、spread 是反号）——只要 (home_eu, away_eu)
+    去 vig 后接近 50/50 且 overround 健康，就是 main line pair。
+    """
+    homes = [o for o in outcomes if o.get("name", "").lower() in home_names]
+    aways = [o for o in outcomes if o.get("name", "").lower() in away_names]
+    if not homes or not aways: return None, None
+
+    pairs = []
+    for h in homes:
+        try: heu = float(h.get("value_eu", 0) or 0)
+        except (TypeError, ValueError): continue
+        if heu <= 0: continue
+        h_impl = 1.0 / heu
+        for a in aways:
+            try: aeu = float(a.get("value_eu", 0) or 0)
+            except (TypeError, ValueError): continue
+            if aeu <= 0: continue
+            a_impl = 1.0 / aeu
+            impl_sum = h_impl + a_impl
+            # 健康 vig 区间：1.0（无 vig）到 1.20（20% vig 边界）。超出 = 非配对组合。
+            if not (1.0 <= impl_sum <= 1.20): continue
+            symmetry = abs(h_impl - 0.5) + abs(a_impl - 0.5)
+            pairs.append((symmetry, impl_sum, h, a))
+    if not pairs:
+        # 退化：找不到健康 overround pair，返回首组（如 Money Line 单组 outcomes）
+        return homes[0], aways[0]
+    pairs.sort(key=lambda x: (x[0], x[1]))
+    return pairs[0][2], pairs[0][3]
+
+
 def _extract_goalserve_spread(event: LiveEvent) -> dict[str, Any] | None:
     """从 Goalserve odds 提取让分盘（Spread/Handicap）数据，供策略方向确认用。
 
@@ -358,24 +419,31 @@ def _extract_goalserve_spread(event: LiveEvent) -> dict[str, Any] | None:
     markets = _goalserve_markets(event)
     if markets is None:
         return None
-    spread_market = next(
-        (
-            m for m in markets
-            if (
-                ("spread" in m.get("name", "").lower() or "handicap" in m.get("name", "").lower())
-                and "2nd half" not in m.get("name", "").lower()
-                and "quarter" not in m.get("name", "").lower()
-                and not m.get("suspended")
-            )
-        ),
-        None,
-    )
+    # 主线优先：先选含主线关键字的盘（Run Lines / Game Lines Spread / Asian Handicap），
+    # 再回退到通用 spread/handicap。避免撞到 "Asian Handicap (1st 7 Innings)"、
+    # "European Handicap" 3-way 等非主线让分。
+    MAIN_PRIORITY = ("run lines", "game lines spread", "asian handicap")
+    home_outcome = away_outcome = None
+    spread_market = None
+
+    def _try_pick(predicate):
+        nonlocal home_outcome, away_outcome, spread_market
+        for m in markets:
+            name_low = m.get("name", "").lower()
+            if not predicate(name_low): continue
+            if m.get("suspended"): continue
+            h, a = _pick_main_line_pair(m.get("outcomes", []), ("home","1"), ("away","2"))
+            if h is not None and a is not None:
+                home_outcome, away_outcome, spread_market = h, a, m
+                return True
+        return False
+
+    # P1: 主线关键字 + 非分段
+    if not _try_pick(lambda n: any(k in n for k in MAIN_PRIORITY) and not _is_segment_or_nonmain(n)):
+        # P2: 通用 spread/handicap + 非分段
+        _try_pick(lambda n: ("spread" in n or "handicap" in n) and not _is_segment_or_nonmain(n))
+
     if spread_market is None:
-        return None
-    outcomes = spread_market.get("outcomes", [])
-    home_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("home", "1")), None)
-    away_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("away", "2")), None)
-    if home_outcome is None or away_outcome is None:
         return None
     try:
         home_eu = float(home_outcome.get("value_eu", 0) or 0)
@@ -409,28 +477,34 @@ def _extract_goalserve_totals(event: LiveEvent) -> dict[str, Any] | None:
     markets = _goalserve_markets(event)
     if markets is None:
         return None
-    totals_market = next(
-        (
-            m for m in markets
-            if (
-                (
-                    "over" in m.get("name", "").lower()
-                    or "total" in m.get("name", "").lower()
-                    or "under" in m.get("name", "").lower()
-                )
-                and "2nd half" not in m.get("name", "").lower()
-                and "quarter" not in m.get("name", "").lower()
-                and not m.get("suspended")
-            )
-        ),
-        None,
+    # 主线优先：先选含主线关键字的盘（Game Totals / Game Lines Total / Match Goals /
+    # Over/Under Line / Total Games in Match），再回退到通用 over/under/total。
+    # 避免撞到 "Total Hits"、"Home Team Total Goals"、"Total Runs (3rd Inning)" 等子盘。
+    MAIN_PRIORITY = (
+        "game totals", "game lines total", "match goals",
+        "over/under line", "total games in match",
     )
+    over_outcome = under_outcome = None
+    totals_market = None
+
+    def _try_pick(predicate):
+        nonlocal over_outcome, under_outcome, totals_market
+        for m in markets:
+            name_low = m.get("name", "").lower()
+            if not predicate(name_low): continue
+            if m.get("suspended"): continue
+            ov, un = _pick_main_line_pair(m.get("outcomes", []), ("over",), ("under",))
+            if ov is not None and un is not None:
+                over_outcome, under_outcome, totals_market = ov, un, m
+                return True
+        return False
+
+    # P1: 主线关键字 + 非分段
+    if not _try_pick(lambda n: any(k in n for k in MAIN_PRIORITY) and not _is_segment_or_nonmain(n)):
+        # P2: 通用 over/under/total + 非分段
+        _try_pick(lambda n: ("over" in n or "under" in n or "total" in n) and not _is_segment_or_nonmain(n))
+
     if totals_market is None:
-        return None
-    outcomes = totals_market.get("outcomes", [])
-    over_outcome = next((o for o in outcomes if "over" in o.get("name", "").lower()), None)
-    under_outcome = next((o for o in outcomes if "under" in o.get("name", "").lower()), None)
-    if over_outcome is None or under_outcome is None:
         return None
     try:
         over_eu = float(over_outcome.get("value_eu", 0) or 0)

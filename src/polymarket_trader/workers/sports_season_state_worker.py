@@ -81,6 +81,11 @@ class SportsSeasonStateWorker:
         finally:
             self._running = False
 
+    # 7 天 TTL:season 结束后 worker 不再 fetch 该 (league, season),observed_at
+    # 不再更新,7 天后视为 dead 自动清.精确 market-lifecycle 绑定需要 Market 加
+    # league/season 字段,工作量大;TTL 是替代方案,足够精确(过期 7 天才删).
+    _STORE_STALE_TTL_SECONDS = 7 * 24 * 3600
+
     def _apply(self, snapshot: SeasonSnapshot) -> None:
         for standings in snapshot.standings:
             self._store.upsert_standings(standings)
@@ -111,6 +116,15 @@ class SportsSeasonStateWorker:
                         "source": series.source,
                     },
                 )
+        # sync 末尾 TTL prune:过期 7 天的旧 (league, season/series) entry 清掉.
+        # now 用 snapshot.observed_at:保证测试 fixture 用过去时刻时不会误清刚写入的 entry.
+        try:
+            self._store.prune_stale(
+                max_age_seconds=self._STORE_STALE_TTL_SECONDS,
+                now=snapshot.observed_at,
+            )
+        except Exception:
+            pass
 
     def status_snapshot(self) -> SeasonStateSyncStatus:
         return SeasonStateSyncStatus(

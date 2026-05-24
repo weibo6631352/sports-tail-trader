@@ -300,10 +300,10 @@ def _team_names(info: dict[str, Any], team_info: dict[str, Any]) -> tuple[str, s
 
 # 各运动「全场主胜负盘口」的原始 name → 归一成下游 _extract_goalserve_moneyline
 # 能识别的 "money line"。inplay feed 各运动的全场胜负盘口命名不统一：
-#   篮球 = "Game Lines Money Line"（已含 money line，原样可识别）
-#   网球 = "To Win"
+#   篮球 = "Game Lines Money Line"（已含 money line，原样可识别）+ "Home/Away"（部分小联赛）
+#   网球 = "To Win" / "Match Winner"
 #   棒球/排球/电竞 = "Home/Away"
-#   足球 = 无全场盘，只有 "1x2 (1st Half)" 等分段盘
+#   足球 = "Fulltime Result" / "Match Winner" / "Final Result"（USA MLS 等联赛全场盘）
 # 下游靠 market name 含 "money line" 识别，因此对未含该串的全场盘做名称归一，
 # 同时保留原始名到 original_name，避免下游误判语义。
 _FULLGAME_MONEYLINE_NAMES: dict[str, frozenset[str]] = {
@@ -314,6 +314,7 @@ _FULLGAME_MONEYLINE_NAMES: dict[str, frozenset[str]] = {
     "basketball": frozenset({"home/away"}),
     "ice-hockey": frozenset({"home/away"}),
     "american-football": frozenset({"home/away"}),
+    "soccer": frozenset({"fulltime result", "match winner", "final result"}),
 }
 
 # Goalserve participant.name 的胜负方写法 → 归一 outcome 名。
@@ -365,11 +366,16 @@ _LOOKS_LIKE_MARKET_KEYWORDS = (
     "over / under",
 )
 # 下游 _extract_goalserve_* 已能识别的盘口名串，或本 parser 会归一成可识别名的串。
+# 注：totals/spread extractor 用 "over"/"under"/"total"/"spread"/"handicap" 任一关键字
+# 即可命中（见 _extract_goalserve_totals / _extract_goalserve_spread），别名表外的
+# market name 包含这些词时下游能识别，因此不算未识别盘口。
 _RECOGNIZED_MARKET_SUBSTRINGS = (
     "money line",
     "handicap",
     "over/under",
     "over / under",
+    "total",
+    "spread",
 )
 
 

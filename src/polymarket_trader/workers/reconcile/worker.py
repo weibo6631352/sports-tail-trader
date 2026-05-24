@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Callable
 from uuid import uuid4
 
+from polymarket_trader.observability.cpu_track import cpu_track
 from polymarket_trader.app.reconcile_service import (
     ReconcileAction,
     ReconcilePlan,
@@ -147,6 +148,18 @@ class ReconcileWorker:
             trading_service=trading_service,
             account_state_store=account_state_store,
         )
+        # audit 节流:reconcile 每 20s 跑 200+ markets,逐条 publish
+        # TRADING_PAUSED/RECONCILE_APPLIED/RECONCILE_DIFF_DETECTED 1h 累计 250k+
+        # 条 audit(占 audit_events 55%).策略:
+        # - TRADING_PAUSED_FOR_MARKET: 状态去重(only new pause,不重发已 paused)
+        # - RECONCILE_APPLIED: 60s/condition_id 最小间隔
+        # - RECONCILE_DIFF_DETECTED: 保留(真实操作历史)但 30s 兜底
+        # audit dedupe + 节流计时器全部迁移到 registry.companion(cid),
+        # market prune 时 companion 自动消失,无需手动维护"按 cid 索引"的 dict.
+        # reconcile 20s 周期 × 200 markets/轮 → 60s throttle 只能 cover 3 轮,实测仍 10/s.
+        # 提到 300s applied / 180s diff:9 轮 reconcile 周期才 emit 1 次,可见率仍足够复盘.
+        self._reconcile_applied_min_interval_s: float = 300.0
+        self._reconcile_diff_min_interval_s: float = 180.0
 
     async def run(self) -> None:
         if self._event_bus is None:
@@ -154,6 +167,7 @@ class ReconcileWorker:
         while True:
             await self.run_once()
 
+    @cpu_track("reconcile")
     async def run_once(self) -> ReconcileWorkerResult:
         trigger = None
         if self._event_bus is not None:
@@ -276,23 +290,34 @@ class ReconcileWorker:
             if market_index > 0 and market_index % _RECONCILE_YIELD_EVERY == 0:
                 await asyncio.sleep(0)
             if market_plan.pause_trading:
-                await self._publish(
-                    OutboxPriority.P1,
-                    DomainEvent(
-                        trace_id=trace_id,
-                        event_type=DomainEventType.TRADING_PAUSED_FOR_MARKET,
-                        event_id=uuid4().hex,
-                        market_slug=market_plan.market.market_slug,
-                        condition_id=market_plan.market.condition_id,
-                        token_id=None,
-                        reason=market_plan.pause_reason or "market_not_tradable",
-                        created_at=_utc_now(),
-                        payload={
-                            "market_status": market_plan.market.trading_status.value,
-                            "pause_reason": market_plan.pause_reason,
-                        },
-                    ),
-                )
+                # 状态去重:已 paused 的 market 不重复 publish.每 20s reconcile×
+                # 200 market = 4000 重复事件/20s,实测占 audit 20%.
+                # state 挂在 registry.companion(cid),prune 时自然消失,无内存泄漏.
+                cid = market_plan.market.condition_id
+                companion = self._registry.companion(cid) if self._registry else None
+                if companion is not None and not companion.already_paused_audit:
+                    companion.already_paused_audit = True
+                    await self._publish(
+                        OutboxPriority.P1,
+                        DomainEvent(
+                            trace_id=trace_id,
+                            event_type=DomainEventType.TRADING_PAUSED_FOR_MARKET,
+                            event_id=uuid4().hex,
+                            market_slug=market_plan.market.market_slug,
+                            condition_id=cid,
+                            token_id=None,
+                            reason=market_plan.pause_reason or "market_not_tradable",
+                            created_at=_utc_now(),
+                            payload={
+                                "market_status": market_plan.market.trading_status.value,
+                                "pause_reason": market_plan.pause_reason,
+                            },
+                        ),
+                    )
+                # reconcile pause 写 _market_pauses(RECONCILE source):
+                # 同次扫描后 _prune_unsubscribable_markets 检测到 TERMINAL_LIVE_STATE_PAUSE_REASONS
+                # → prune market.prune callback 同步 resume → 整轮事务结束后 cid 完全消失.
+                # 前端短暂看到的"pause 状态"是合理瞬态语义,不是 bug.
                 if self._account_state_store is not None:
                     self._account_state_store.pause_market(
                         market_plan.market.condition_id,
@@ -312,28 +337,38 @@ class ReconcileWorker:
                     failed_actions.append((action, str(exc)))
 
             if market_plan.has_changes:
-                await self._publish(
-                    OutboxPriority.P3,
-                    DomainEvent(
-                        trace_id=trace_id,
-                        event_type=DomainEventType.RECONCILE_APPLIED,
-                        event_id=uuid4().hex,
-                        market_slug=market_plan.market.market_slug,
-                        condition_id=market_plan.market.condition_id,
-                        token_id=None,
-                        reason="reconcile_applied",
-                        created_at=_utc_now(),
-                        payload={
-                            "action_count": len(market_plan.actions),
-                            "applied_count": sum(
-                                1 for item in applied_actions if item.condition_id == market_plan.market.condition_id
-                            ),
-                            "failed_count": sum(
-                                1 for item, _ in failed_actions if item.condition_id == market_plan.market.condition_id
-                            ),
-                        },
-                    ),
-            )
+                # 60s throttle:reconcile 每 20s 跑,大部分 cycle 都有微小 changes
+                # (open_order TTL refresh / position fee accrual),逐条 publish 占
+                # audit 18%.60s 颗粒度对复盘足够.关键 diff 由 RECONCILE_DIFF_DETECTED 单独 publish.
+                import time as _time
+                cid = market_plan.market.condition_id
+                now_mono = _time.monotonic()
+                companion = self._registry.companion(cid) if self._registry else None
+                last_at = companion.last_reconcile_applied_at_mono if companion else 0.0
+                if companion is not None and (now_mono - last_at) >= self._reconcile_applied_min_interval_s:
+                    companion.last_reconcile_applied_at_mono = now_mono
+                    await self._publish(
+                        OutboxPriority.P3,
+                        DomainEvent(
+                            trace_id=trace_id,
+                            event_type=DomainEventType.RECONCILE_APPLIED,
+                            event_id=uuid4().hex,
+                            market_slug=market_plan.market.market_slug,
+                            condition_id=cid,
+                            token_id=None,
+                            reason="reconcile_applied",
+                            created_at=_utc_now(),
+                            payload={
+                                "action_count": len(market_plan.actions),
+                                "applied_count": sum(
+                                    1 for item in applied_actions if item.condition_id == cid
+                                ),
+                                "failed_count": sum(
+                                    1 for item, _ in failed_actions if item.condition_id == cid
+                                ),
+                            },
+                        ),
+                )
 
         if self._account_state_store is not None:
             self._account_state_store.mark_reconciled()
@@ -367,6 +402,17 @@ class ReconcileWorker:
         )
 
     async def _publish_diff(self, trace_id: str, market: Market, action: ReconcileAction) -> None:
+        # 30s throttle 兜底:reconcile 每 20s 每 market 多个 action,1h 累 80k+ 条.
+        # 关键 diff(订单 cancel/replace)走 ORDER 链路独立 audit,这里是状态级 diff
+        # 描述,30s 颗粒度复盘足够.companion 挂 registry,prune 自动消失.
+        import time as _time
+        now_mono = _time.monotonic()
+        companion = self._registry.companion(market.condition_id) if self._registry else None
+        if companion is None:
+            return  # cid 已 prune,跳过 audit
+        if (now_mono - companion.last_reconcile_diff_at_mono) < self._reconcile_diff_min_interval_s:
+            return
+        companion.last_reconcile_diff_at_mono = now_mono
         await self._publish(
             OutboxPriority.P3,
             DomainEvent(
@@ -415,6 +461,11 @@ class ReconcileWorker:
             self._registry.remove_market(market.condition_id)
             if self._market_ws_worker is not None:
                 self._market_ws_worker.untrack_market(market.token_ids)
+            # 同步清 market_pauses[cid]:否则 market_pauses 内存泄漏(实测 90s +45),
+            # registry 删了但 pause 还留着,长跑必爆.
+            if self._account_state_store is not None:
+                self._account_state_store.resume_market(market.condition_id)
+            # audit dedupe state 自动消失:registry.remove_market(cid) 已联动 pop companion.
             logger.info(
                 "pruned unsubscribable market from runtime tracking",
                 extra={

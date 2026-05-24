@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections import OrderedDict, deque
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -118,6 +118,7 @@ class SportsLiveStateWorker:
         source: str = "espn",
         leagues: tuple[str, ...] = (),
         publish_entry_signals: bool = True,
+        audit_min_interval_s: float = 0.0,
     ) -> None:
         self._snapshot_provider = snapshot_provider
         self._match_live_state = match_live_state
@@ -130,7 +131,7 @@ class SportsLiveStateWorker:
         # 已对外发出 terminal pause 的 condition_id 集合——避免每秒重复 pause；
         # 比赛进入 ENDED/CANCELLED/RETIRED 后不会回到 LIVE，不需要 revert 逻辑。
         # registry 退订该 market 后下一轮 _match_markets 已经看不到它，集合长期上限。
-        self._terminal_status_paused: set[str] = set()
+        # _terminal_status_paused 已迁移到 registry.companion(cid).terminal_pause_emitted
         self._enabled = enabled
         self._source = source
         self._leagues = leagues
@@ -158,9 +159,9 @@ class SportsLiveStateWorker:
         self._previous_source_health: dict[str, SportsLiveSourceHealth] = {}
         self._last_no_feasible_source_published: bool = False
         self._no_feasible_source: bool = False
-        # audit dedupe：condition_id → 上次发布的 state-hash。仅在 hash 变化时
-        # emit sports_live_state_recorded，让审计反映"真实状态变化"而不是 5s 心跳。
-        self._last_audit_state_hash: OrderedDict[str, str] = OrderedDict()
+        # audit dedupe + 30s 节流全部挂 registry.companion(cid):market prune
+        # 时 companion 自动消失,无需自己 dict + cap.
+        self._audit_min_interval_s: float = audit_min_interval_s
         # 缺口 1 接线：近期每 market 实际匹配到的源选择信息（admin/校准 harness 读）。
         # 环形缓冲优先 FIFO，超容量自动丢弃最旧条目。
         self._recent_match_sources: deque[dict[str, Any]] = deque(
@@ -168,7 +169,7 @@ class SportsLiveStateWorker:
         )
         # 匹配失败 gap 去重：只在 market 从"有匹配"→"无匹配"或首次发现时落 audit。
         # condition_id → 上次 gap 记录的 minute bucket（每分钟最多记一次）。
-        self._last_gap_recorded_minute: dict[str, int] = {}
+        # _last_gap_recorded_minute 已迁移到 registry.companion(cid).last_gap_recorded_minute
 
     async def sync_once(self) -> SportsLiveSyncResult | None:
         """执行一次同步；供 scheduler 和测试直接驱动。"""
@@ -281,17 +282,21 @@ class SportsLiveStateWorker:
         now = _utc_now()
         now_minute = int(now.timestamp()) // 60
         for market in markets:
+            companion = self._registry.companion(market.condition_id)
             if market.condition_id in matched_condition_ids:
                 # 清除 gap 记录——已匹配上，下次失配时重新记录。
-                self._last_gap_recorded_minute.pop(market.condition_id, None)
+                if companion is not None:
+                    companion.last_gap_recorded_minute = None
                 continue
             # 只对 game_start_time 已过去的市场（比赛应该正在进行）记录 gap。
             if market.game_start_time is None or market.game_start_time > now:
                 continue
-            last_minute = self._last_gap_recorded_minute.get(market.condition_id)
+            if companion is None:
+                continue  # cid 已 prune,跳过
+            last_minute = companion.last_gap_recorded_minute
             if last_minute is not None and now_minute - last_minute < 5:
                 continue
-            self._last_gap_recorded_minute[market.condition_id] = now_minute
+            companion.last_gap_recorded_minute = now_minute
             await self._publish_live_match_gap(market=market, snapshot=snapshot, now=now)
 
         completed_at = _utc_now()
@@ -311,17 +316,18 @@ class SportsLiveStateWorker:
         )
 
     def _maybe_pause_terminal_market(self, match: LiveStateMatch) -> None:
-        """比赛进入 ENDED/CANCELLED/RETIRED 时通知 account_state pause 该市场。
+        """比赛进入 ENDED/CANCELLED/RETIRED 时通知 account_state pause 该市场.
 
-        激活 market_tracking_policy.TERMINAL_LIVE_STATE_PAUSE_REASONS 的 prune 链路：
-        discovery 和 reconcile 看到 terminal pause reason → 无敞口的 market 立即退订，
-        不再产生 candidate 评估开销。仅本 worker 调用 pauser，避免多源同步状态。
+        这是**事实信号**(比赛客观结束),不是策略决策,应保留 pause:
+        - account_state.market_pauses 写入 reason=sports_live_state_ended/cancelled/retired
+        - reconcile 看到 TERMINAL_LIVE_STATE_PAUSE_REASONS → 无敞口 market 立即 prune
+        - reconcile 自己的 RECONCILE source pause 已删(避免瞬态闪烁),与此互不影响.
         """
-
         if self._market_pauser is None:
             return
         condition_id = match.market.condition_id
-        if condition_id in self._terminal_status_paused:
+        companion = self._registry.companion(condition_id) if self._registry else None
+        if companion is None or companion.terminal_pause_emitted:
             return
         reason = _TERMINAL_STATUS_PAUSE_REASONS.get(match.event.status.value)
         if reason is None:
@@ -333,10 +339,8 @@ class SportsLiveStateWorker:
                 source="sports_live_state_worker",
             )
         except Exception:
-            # pause 失败仅记录到本地 set 重试一次的话语义反而更复杂；下次发现该 cid
-            # 仍是 terminal 时会重新走这里。不阻塞 entry_metadata.upsert 主路径。
             return
-        self._terminal_status_paused.add(condition_id)
+        companion.terminal_pause_emitted = True
 
     def _record_match_sources(self, match: LiveStateMatch) -> None:
         """缺口 1：每个匹配产生 per-market 源选择条目，供 admin / 校准 harness 复盘。"""
@@ -544,14 +548,19 @@ class SportsLiveStateWorker:
         # 只对 signal_allowed/signal_reason/phase + match.payload 内的 event-state
         # 字段（score/period/status 等）+ primary_source/conflict 摘要哈希。
         state_hash = _audit_state_hash(match)
-        previous_hash = self._last_audit_state_hash.get(market.condition_id)
-        if previous_hash == state_hash:
-            self._last_audit_state_hash.move_to_end(market.condition_id)
+        companion = self._registry.companion(market.condition_id) if self._registry else None
+        if companion is None:
+            return  # cid 已 prune,不应再发 audit
+        if companion.last_audit_state_hash == state_hash:
             return
-        self._last_audit_state_hash[market.condition_id] = state_hash
-        self._last_audit_state_hash.move_to_end(market.condition_id)
-        while len(self._last_audit_state_hash) > _LIVE_STATE_AUDIT_DEDUPE_CAPACITY:
-            self._last_audit_state_hash.popitem(last=False)
+        # 30s 最小间隔兜底:state_hash 含嵌套 sub-state 的时间字段,5s 心跳每次都变,
+        # 单纯 hash dedupe 失效.强制 30s 颗粒度,稳态 audit 写入 < 7/sec.
+        import time as _time
+        now_mono = _time.monotonic()
+        if (now_mono - companion.last_audit_emit_at_mono) < self._audit_min_interval_s:
+            return
+        companion.last_audit_emit_at_mono = now_mono
+        companion.last_audit_state_hash = state_hash
         try:
             await self._event_bus.publish(
                 OutboxPriority.P3,

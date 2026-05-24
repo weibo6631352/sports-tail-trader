@@ -581,76 +581,33 @@ class RiskManager:
         condition_open_orders: tuple[Order, ...],
         condition_positions: tuple[Position, ...],
     ) -> RiskDecision | None:
-        """NEG_RISK 多 outcome 互斥市场守门：拒绝同 condition 跨 token 多仓位。
+        """§11 框架不限制双边持仓.
 
-        Polymarket NEG_RISK adapter 把多结果事件拆成 N 个 binary market（不同
-        condition_id 共享 ``neg_risk_market_id``）；同 condition 跨 token 同时
-        持仓时 Kelly 假设独立，会重复曝光信号。无 ``neg_risk_market_id`` 字段时
-        无法做跨 condition 聚合（P2 待补），先按"同 condition 跨 token 任一已开
-        BUY/持仓直接拒新 BUY"的保守策略。binary YES↔NO 之间也被这条挡——刻意为之，
-        避免 hedge 占满 cap。需要明确开启 hedge 时另走 Admin 路径。
+        双边 hedge 是合法策略(NO 涨止损 / 锁定收益 / sum<1 arb).Kelly 重复曝光由
+        策略层 Kelly 计算时减去 "opposite_exposure" 处理(见 allocation.current_exposure_usdc).
+        框架只追加 observability check.
         """
-
-        if intent.side != OrderSide.BUY:
-            return None
-        if market is None or not market.neg_risk:
-            return None
-
-        for order in condition_open_orders:
-            if (
-                order.condition_id == intent.condition_id
-                and order.token_id != intent.token_id
-                and order.side == OrderSide.BUY
-                and order.status not in {
-                    OrderStatus.CANCELLED,
-                    OrderStatus.REJECTED,
-                    OrderStatus.FAILED,
-                    OrderStatus.NO_FILL,
-                    OrderStatus.MATCHED,
-                }
-            ):
-                return self._fail(
-                    trace_id=intent.trace_id,
-                    checks=checks,
-                    name="neg_risk_isolation_gate",
-                    reason="neg_risk_cross_token_open_order",
-                    field="open_orders",
-                    value={
-                        "condition_id": intent.condition_id,
-                        "intent_token_id": intent.token_id,
-                        "conflict_token_id": order.token_id,
-                        "conflict_order_id": order.order_id,
-                    },
-                    suggested_action="cancel_other_token_first",
-                    retryable=False,
-                )
-        for pos in condition_positions:
-            if (
-                pos.condition_id == intent.condition_id
-                and pos.token_id != intent.token_id
-                and pos.shares > Decimal("0")
-            ):
-                return self._fail(
-                    trace_id=intent.trace_id,
-                    checks=checks,
-                    name="neg_risk_isolation_gate",
-                    reason="neg_risk_cross_token_position",
-                    field="position",
-                    value={
-                        "condition_id": intent.condition_id,
-                        "intent_token_id": intent.token_id,
-                        "conflict_token_id": pos.token_id,
-                        "conflict_shares": pos.shares,
-                    },
-                    suggested_action="exit_other_token_first",
-                    retryable=False,
-                )
+        cross_token_orders = sum(
+            1 for o in condition_open_orders
+            if o.condition_id == intent.condition_id and o.token_id != intent.token_id
+            and o.side == OrderSide.BUY
+            and o.status not in {OrderStatus.CANCELLED, OrderStatus.REJECTED,
+                                 OrderStatus.FAILED, OrderStatus.NO_FILL, OrderStatus.MATCHED}
+        )
+        cross_token_positions = sum(
+            1 for p in condition_positions
+            if p.condition_id == intent.condition_id and p.token_id != intent.token_id
+            and p.shares > Decimal("0")
+        )
         checks.append(
             RiskCheck(
                 name="neg_risk_isolation_gate",
                 passed=True,
-                field="market.neg_risk",
-                value=True,
+                field="cross_token_exposure",
+                value={
+                    "cross_token_open_buy_count": cross_token_orders,
+                    "cross_token_positions_count": cross_token_positions,
+                },
             )
         )
         return None

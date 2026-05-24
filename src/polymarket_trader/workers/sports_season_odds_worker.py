@@ -66,6 +66,10 @@ class SportsSeasonOddsWorker:
         self._last_started_at: datetime | None = None
         self._last_error: str | None = None
         self._consecutive_failures = 0
+
+    def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
+        """registry prune callback:清 fetch 时间戳,防 cid 累积."""
+        self._last_fetched_at.pop(condition_id, None)
         self._last_markets_seen = 0
         self._last_markets_refreshed = 0
 

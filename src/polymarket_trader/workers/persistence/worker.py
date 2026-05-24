@@ -467,6 +467,15 @@ class PersistenceWorker:
         self._stats.written_records += written_records
         self._stats.failed_records += failed_records
         self._stats.route_write_counts.update(route_write_counts)
+        # 同步推到 SystemPerfMonitor:per-route throughput 全局指标
+        try:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            mon = SystemPerfMonitor.get()
+            for route, cnt in route_write_counts.items():
+                if cnt > 0:
+                    mon.record_persistence_route_write(route, cnt)
+        except Exception:
+            pass
         # 至少一条事件成功落库才推 last_persisted_at——监控面板用它判断"持久化是否还在前进"。
         if persisted_events > 0:
             self._stats.last_persisted_at = _utc_now()

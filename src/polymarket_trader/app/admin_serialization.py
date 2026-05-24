@@ -43,7 +43,8 @@ def _normalize_token_id_strings(value: Any) -> Any:
 def page_payload(page: RepositoryPage[Any], *, serializer: Callable[[Any], Any]) -> dict[str, Any]:
     return {
         "items": [serializer(item) for item in page.items],
-        "total": page.total,
+        # total=-1 是 sentinel:调用方传 with_total=False 跳过了 count subquery
+        "total": page.total if page.total >= 0 else None,
         "limit": page.limit,
         "offset": page.offset,
     }

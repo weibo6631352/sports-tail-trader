@@ -59,9 +59,13 @@ def simulate_fill(
     if request.side == OrderSide.SELL:
         return _simulate_sell(request, market=market, orderbook=orderbook, ledger=ledger)
 
+    # side=None:多发生在 extension REPLACE intent(ExtensionDecision 无 side 字段).
+    # replace 实际语义是"refresh resting limit order 的价格",不立刻撮合更接近实盘
+    # (Polymarket 收到 replace 返回新挂单的 order_id,只有 cross spread 才立刻 fill).
+    # 退回 LIVE 状态(resting),不动 ledger;比 REJECTED 更准确反映 replace 语义.
     return _passthrough_response(
-        status=OrderResultStatus.REJECTED,
-        reason="paper_simulate_missing_side",
+        status=OrderResultStatus.LIVE,
+        reason="paper_simulate_replace_no_side_treat_as_resting",
     )
 
 
@@ -150,29 +154,36 @@ def _simulate_sell(
             reason="paper_sell_zero_size",
         )
 
-    if request.order_type == OrderType.GTC:
-        return SimulationOutcome(
-            response=OrderExecutionResponse(
-                status=OrderResultStatus.LIVE,
-                order_id=f"paper-sell-live-{request.trace_id}",
-                matched_shares=_ZERO,
-                remaining_shares=size_shares,
-                spent_usdc=_ZERO,
-                raw_response={
-                    "virtual": True,
-                    "side": "SELL",
-                    "order_type": "GTC",
-                    "limit_price": str(limit_price) if limit_price is not None else None,
-                    "size_shares": str(size_shares),
-                },
-                reason="paper_sell_live",
-            ),
-            match_result=None,
-            fee_quote=None,
-        )
-
+    is_gtc = request.order_type == OrderType.GTC
+    # GTC SELL：先尝试按当前 best_bid 撮合（实盘下行为 = 挂上 book 等买盘吃，但
+    # exit_overlay/profit_take_overlay 在每次 orderbook update 都会 reprice，
+    # 行为退化为"每个 tick 重试 sell，能成就成"——paper 这样模拟与策略实际 PnL
+    # 高度一致）。不能成才返回 LIVE 让策略下一 tick 继续 reprice。
+    # FAK SELL：与原逻辑一致——撮合不到直接 NO_FILL。
     match = match_taker_sell(orderbook, size_shares, limit_price)
     if not match.is_filled:
+        if is_gtc:
+            return SimulationOutcome(
+                response=OrderExecutionResponse(
+                    status=OrderResultStatus.LIVE,
+                    order_id=f"paper-sell-live-{request.trace_id}",
+                    matched_shares=_ZERO,
+                    remaining_shares=size_shares,
+                    spent_usdc=_ZERO,
+                    raw_response={
+                        "virtual": True,
+                        "side": "SELL",
+                        "order_type": "GTC",
+                        "limit_price": str(limit_price) if limit_price is not None else None,
+                        "size_shares": str(size_shares),
+                        "match_attempted": True,
+                        "best_bid_below_limit": True,
+                    },
+                    reason="paper_sell_live_awaiting_bid",
+                ),
+                match_result=match,
+                fee_quote=None,
+            )
         return SimulationOutcome(
             response=OrderExecutionResponse(
                 status=OrderResultStatus.NO_FILL,

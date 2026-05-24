@@ -151,6 +151,24 @@ class TailRejectReason(StrEnum):
     # live feed stale：LiveGameState.server_clock_at 距当下超阈值（15s 默认），
     # feed 数据陈旧（server/网络/解析问题），不基于陈旧状态决策。
     LIVE_FEED_STALE = "live_feed_stale"
+    # 末段低赔率 underdog 买入守卫：BUY price < 0.30 且比赛进入末段时，
+    # 胜负基本已收敛，underdog 翻盘概率极低 → 买入大概率砸手里。
+    # baseball 8th+ inning / basket 4th quarter 末段 / tennis 决胜盘 /
+    # soccer 80+ min 触发；规则源自实战经验（odds_gap 末段下注亏损案例）。
+    LATE_GAME_LOW_PRICE_UNDERDOG = "late_game_low_price_underdog"
+    # 盘口单边下杀守卫：orderbook_direction 10s 窗口显示 direction_label="no"
+    # 且 confidence >= 0.5 → 买盘正在被吃 / microprice 持续下滑，此时入场会
+    # 落地即亏。实战案例：mlb-col-ari-spread-away-1pt5 BUY @ 0.31 → 20s 后
+    # SELL @ 0.26 (-16%)。entry 路径必须看盘口风向，不能只看 best_ask 价格。
+    ORDERBOOK_DIRECTION_BEARISH = "orderbook_direction_bearish"
+    # 无退出通道守卫：best_bid=None = 盘口没人接 SELL，入场后无法主动平仓，
+    # 只能 hold 到结算或亏到 0。冷盘口（如 exact-score 精确比分）常见此态。
+    NO_EXIT_CHANNEL = "no_exit_channel"
+    # 负 EV 价位守卫：实证数据（/runtime/win-rate）显示 0.4-0.8 价位
+    # 长期 -$77 损失（PF 0.27/0.38）。0.4-0.6 胜率仅 27%，0.6-0.8 虽胜率 67%
+    # 但 avg_loss 远大于 avg_win。0.0-0.4 winrate 42-55% PF 1.62-1.94 真赚钱,
+    # 0.8+ 是 lockin 区。中间价位的 odds_gap 入场 EV 显著为负 → 直接拦截。
+    PRICE_NEGATIVE_EV_ZONE = "price_negative_ev_zone"
 
 
 @dataclass(frozen=True, slots=True)

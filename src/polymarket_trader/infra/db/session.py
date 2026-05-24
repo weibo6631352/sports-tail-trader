@@ -1,15 +1,38 @@
 from __future__ import annotations
 
+import time
+
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 
 def build_engine(database_url: str, *, echo: bool = False) -> AsyncEngine:
-    """构建独立的 PostgreSQL 异步引擎。
+    """构建独立的 PostgreSQL 异步引擎 + DB query 延迟自动 instrument。"""
 
-    这里的连接池只服务数据库持久化链路，不能和交易 REST / WS 客户端混用。
-    """
+    engine = create_async_engine(database_url, pool_pre_ping=True, echo=echo)
+    # 自动 instrument: 每次 query 记 latency 到 SystemPerfMonitor
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def _before(conn, cursor, statement, parameters, context, executemany):
+        context._perf_start = time.time()
 
-    return create_async_engine(database_url, pool_pre_ping=True, echo=echo)
+    @event.listens_for(engine.sync_engine, "after_cursor_execute")
+    def _after(conn, cursor, statement, parameters, context, executemany):
+        try:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            elapsed_ms = (time.time() - getattr(context, "_perf_start", time.time())) * 1000
+            SystemPerfMonitor.get().record_db_query(elapsed_ms, error=False, statement=statement)
+        except Exception:
+            pass
+
+    @event.listens_for(engine.sync_engine, "handle_error")
+    def _err(exc_ctx):
+        try:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            SystemPerfMonitor.get().record_db_query(0.0, error=True)
+        except Exception:
+            pass
+
+    return engine
 
 
 def build_session_factory(

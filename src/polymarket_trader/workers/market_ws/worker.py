@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import deque
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -7,16 +8,23 @@ from decimal import Decimal
 from typing import Any, Awaitable, Callable, Mapping
 from uuid import uuid4
 
+from polymarket_trader.app.market_tracking_policy import market_has_exposure
+from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.infra.polymarket import market_ws_adapter
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.orderbook_delta import OrderbookDeltaStore
+from polymarket_trader.runtime.orderbook_derived_publisher import OrderbookDerivedPublisher
+from polymarket_trader.runtime.orderbook_history_buffer import OrderbookHistoryBuffer
+from polymarket_trader.observability.cpu_track import cpu_track, step_track
 from polymarket_trader.runtime.registry import MarketRegistry
 from .book_projector import BookState as _BookState
 from .book_projector import MarketBookProjector
 from .market_updater import MarketWsMarketUpdater
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -111,11 +119,23 @@ class MarketWsWorker:
         ]
         | None = None,
         orderbook_delta_store: OrderbookDeltaStore | None = None,
+        orderbook_history_buffer: "OrderbookHistoryBuffer | None" = None,
+        derived_publisher: "OrderbookDerivedPublisher | None" = None,
+        account_snapshot_provider: "Callable[[], AccountSnapshot | None] | None" = None,
     ) -> None:
         self._event_bus = event_bus
         self._registry = registry
         self._rest_snapshot_loader = rest_snapshot_loader
         self._orderbook_delta_store = orderbook_delta_store
+        # 多窗口波动观测 buffer:每次 snapshot 更新写一条,admin /orderbook-depth 读
+        self._orderbook_history_buffer = orderbook_history_buffer
+        # 派生指标 publisher: 推送时 fire-and-forget 派发, compute 在 to_thread 跑,
+        # 不占主 loop. None 表示功能未启用 (启动前/测试).
+        self._derived_publisher = derived_publisher
+        # WS market_resolved 事件驱动的即时 prune: 收到 polymarket 推送的 resolved
+        # 事件后, 立即检查账户敞口, 无敞口立即 registry.remove_market 触发 prune
+        # callback 链 (不等 reconcile 5min 周期). provider 返回 None 时跳过.
+        self._account_snapshot_provider = account_snapshot_provider
         self._book_projector = MarketBookProjector()
         self._states: dict[str, _BookState] = {}
         self._tracked_markets: dict[str, Market] = {}
@@ -192,6 +212,21 @@ class MarketWsWorker:
         source: str = "market_ws",
     ) -> list[DomainEvent]:
         self._last_message_at = _utc_now()
+        try:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            import json as _json
+            msg_size = len(_json.dumps(message, default=str)) if isinstance(message, dict) else 0
+            mon = SystemPerfMonitor.get()
+            mon.record_ws_in("polymarket_market_ws", msg_size)
+            # per-token msg rate:从 message 抠 token_id(asset_id)
+            tok = (
+                message.get("asset_id") if isinstance(message, Mapping)
+                else None
+            )
+            if tok:
+                mon.record_per_token_ws(str(tok))
+        except Exception:
+            pass
         message_type = _message_type(message)
         if message_type == "price_change" and isinstance(message.get("price_changes"), list):
             expanded_events: list[DomainEvent] = []
@@ -450,7 +485,18 @@ class MarketWsWorker:
         否则 supervisor 会把"未连接"当成"已连接"误开闸（CLAUDE.md §10）。
         """
 
+        prev = self._is_connected
         self._is_connected = bool(connected)
+        # WS 断连/重连历史（System perf monitor）
+        try:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            mon = SystemPerfMonitor.get()
+            if prev and not connected:
+                mon.record_ws_error("polymarket_market_ws_disconnect")
+            elif not prev and connected:
+                mon.record_ws_in("polymarket_market_ws_connect", 0)
+        except Exception:
+            pass
 
     def buyable_depth(self, token_id: str, price_limit: Decimal | None = None) -> Decimal:
         state = self._states.get(token_id)
@@ -574,6 +620,12 @@ class MarketWsWorker:
                     if tracked_state is not None:
                         tracked_state.resolved = True
                         self._book_projector.touch(tracked_state)
+            # WS market_resolved 是 polymarket 推送的最权威退出信号: 无敞口立即 prune,
+            # 触发 registry.remove_market → prune callback 链 (entry_metadata/derived_store/
+            # ws_states/account_state/trading_decision 等同步清). 不等 reconcile 5min 周期.
+            # 有敞口的市场 (持仓/挂单/pending_buy) 留给 reconcile 走完整结算路径,
+            # 保护 §5 强约束: market 未真正退出敞口前不应 untrack.
+            self._maybe_prune_on_resolved(resolved_market or market)
         event = MarketWsEvent(
             trace_id=uuid4().hex,
             event_type=DomainEventType.MARKET_RESOLVED_OR_DISABLED,
@@ -591,6 +643,27 @@ class MarketWsWorker:
             },
         )
         return [await self._publish(OutboxPriority.P0, event)]
+
+    def _maybe_prune_on_resolved(self, market: Market) -> None:
+        """无账户敞口时立即 remove_market 触发 prune callback 链.
+
+        有敞口 (持仓/挂单/pending) 时跳过, 留给 reconcile 走完整结算+持仓清算路径
+        (§5 强约束: market 未真正退出敞口前不应 untrack).
+        """
+        if self._registry is None:
+            return
+        if self._account_snapshot_provider is None:
+            return  # 测试/启动期未注入, 退化到 reconcile 周期 prune
+        try:
+            snapshot = self._account_snapshot_provider()
+        except Exception as exc:
+            logger.warning("account_snapshot_provider failed in _maybe_prune_on_resolved: %s", exc)
+            return
+        if snapshot is None:
+            return
+        if market_has_exposure(snapshot, market):
+            return
+        self._registry.remove_market(market.condition_id)
 
     async def _apply_market_metadata(
         self,
@@ -622,6 +695,7 @@ class MarketWsWorker:
         )
         return events
 
+    @cpu_track("market_ws_push")
     async def _emit_snapshot_update(
         self,
         token_id: str,
@@ -634,8 +708,21 @@ class MarketWsWorker:
         snapshot = state.snapshot
         # P0 路径 sync only: observe 内只是 deque.append + frozen dataclass 构造,
         # 无 await/IO/lock。喂 OrderbookDeltaStore 用于盘口风向 delta 信号。
-        if self._orderbook_delta_store is not None:
-            self._orderbook_delta_store.observe(snapshot)
+        with step_track("market_ws_push", "delta_observe"):
+            if self._orderbook_delta_store is not None:
+                self._orderbook_delta_store.observe(snapshot)
+        # 多窗口波动观测 ring buffer:admin /markets/orderbook-depth 读 2/3/5/10s delta
+        with step_track("market_ws_push", "history_record"):
+            if self._orderbook_history_buffer is not None:
+                self._orderbook_history_buffer.record(snapshot)
+        # 派生指标 publisher: 同步算 + 同步写 store, 确保下游 P0 决策 task 接到
+        # ORDERBOOK_SNAPSHOT_UPDATED 事件时 derived 已就绪 (新鲜度与 snapshot 对齐).
+        # 必须放在 history_buffer.record() 之后, publisher 才能读到含本次 snapshot
+        # 的最新 15s 窗口样本; 必须放在 emit event 之前, P0 才能读到对齐 derived.
+        # 实测 compute_derived ~245μs/次, P0 推送链路新增延迟可忽略.
+        with step_track("market_ws_push", "derived_refresh"):
+            if self._derived_publisher is not None:
+                self._derived_publisher.refresh(snapshot)
         event = MarketWsEvent(
             trace_id=uuid4().hex,
             event_type=DomainEventType.ORDERBOOK_SNAPSHOT_UPDATED,
@@ -655,7 +742,8 @@ class MarketWsWorker:
                 "needs_rest_snapshot": state.needs_rest_snapshot,
             },
         )
-        events.append(await self._publish(OutboxPriority.P1, event))
+        with step_track("market_ws_push", "publish_event"):
+            events.append(await self._publish(OutboxPriority.P1, event))
         self._record_result(
             token_id,
             state,

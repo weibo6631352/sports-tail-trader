@@ -143,6 +143,96 @@ class LiveGameState:
             return self.away_score - self.home_score
         return 0
 
+    def progress_quantification(self) -> dict[str, object]:
+        """跨运动统一的比赛进度量化（自动决策必备时间维度信号）。
+
+        返回:
+        - progress_pct: 比赛进度 0.0-1.0（0=刚开赛, 1=结束）
+        - phase: pregame / early / mid / late / final / ended
+        - time_remaining_seconds: 剩余秒数（如不可估算返回 None）
+        - segment_label: 该运动的阶段文字（"Q3" / "Inning 6" / "Set 2" / "Min 65"）
+        - is_critical_moment: 末段关键时刻（last 2min / 9th inning / final set 决胜局等）
+
+        各运动定义:
+        - baseball: progress = (current_inning - 1 + 0.5*inning_half) / 9, 9th inning = critical
+        - basketball: progress = (current_period - 1 + 0.5) / 4 (或按 seconds_remaining 精细化),
+                      4th quarter last 2min = critical
+        - tennis: progress = current_set / max(best_of, 3), 决胜盘 = critical
+        - soccer: progress = clock_minutes / 90, second_half 80+min = critical
+        - 其他: progress 估算 = (period_num / typical_periods); 无法估则 None
+        """
+        result: dict[str, object] = {
+            "progress_pct": None,
+            "phase": "unknown",
+            "time_remaining_seconds": self.seconds_remaining,
+            "segment_label": self.period or "",
+            "is_critical_moment": False,
+        }
+        if self.status == LiveGameStatus.SCHEDULED:
+            result.update({"progress_pct": 0.0, "phase": "pregame"})
+            return result
+        if self.status == LiveGameStatus.ENDED:
+            result.update({"progress_pct": 1.0, "phase": "ended"})
+            return result
+
+        sport = (self.sport or "").lower()
+        # baseball: 9 inning, top/bottom 各算半局
+        if sport == "baseball" and self.baseball_state is not None:
+            inning = self.baseball_state.current_inning or 0
+            half = 0.5 if (self.baseball_state.inning_half or "").lower() == "bottom" else 0.0
+            pct = max(0.0, min(1.0, (inning - 1 + half) / 9.0))
+            result["progress_pct"] = round(pct, 3)
+            result["segment_label"] = f"Inning {inning}" + (" Bot" if half else " Top")
+            result["is_critical_moment"] = inning >= 9
+        # basketball: 4 quarter
+        elif sport in ("basketball", "basket") and self.basketball_state is not None:
+            period = self.basketball_state.current_period or 0
+            pct = max(0.0, min(1.0, (period - 0.5) / 4.0))
+            result["progress_pct"] = round(pct, 3)
+            result["segment_label"] = f"Q{period}"
+            # 4th quarter last 2min（如有 seconds_remaining）= critical
+            result["is_critical_moment"] = period >= 4 and (
+                self.seconds_remaining is None or self.seconds_remaining <= 120
+            )
+        # tennis: current_set / best_of
+        elif sport == "tennis" and self.tennis_state is not None:
+            cur = self.tennis_state.current_set or 0
+            best_of = self.tennis_state.best_of or 3
+            pct = max(0.0, min(1.0, cur / best_of)) if best_of > 0 else 0.0
+            result["progress_pct"] = round(pct, 3)
+            result["segment_label"] = f"Set {cur}/{best_of}"
+            result["is_critical_moment"] = cur >= best_of  # 决胜盘
+        # soccer: clock_minutes / 90
+        elif sport == "soccer" and self.soccer_state is not None:
+            mins = self.soccer_state.clock_minutes or 0
+            period = (self.soccer_state.period or "").lower()
+            base_mins = 0 if "first" in period else (45 if "second" in period else (90 if "extra" in period else 0))
+            total_mins = base_mins + mins
+            pct = max(0.0, min(1.0, total_mins / 90.0))
+            result["progress_pct"] = round(pct, 3)
+            result["segment_label"] = f"Min {total_mins}"
+            # second_half 80+min = critical
+            result["is_critical_moment"] = total_mins >= 80
+        elif sport == "ice-hockey":
+            # 3 period 各 20min；period 从 self.period 字符串解析
+            result["segment_label"] = self.period
+        else:
+            # 其他运动: 仅返回 period 文本，progress=None
+            result["segment_label"] = self.period
+
+        # 阶段分类（基于 progress_pct）
+        pct_val = result["progress_pct"]
+        if isinstance(pct_val, (int, float)):
+            if pct_val < 0.25:
+                result["phase"] = "early"
+            elif pct_val < 0.6:
+                result["phase"] = "mid"
+            elif pct_val < 0.9:
+                result["phase"] = "late"
+            else:
+                result["phase"] = "final"
+        return result
+
 
 @dataclass(frozen=True, slots=True)
 class SportsMarketSnapshot:

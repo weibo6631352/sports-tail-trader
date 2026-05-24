@@ -55,11 +55,22 @@ def _offer_to_ws_queue(
     满载时丢弃最老一条腾位（ring buffer），并把 worker 标记为 DEGRADED 暴露背压；
     若仍满则放弃当前 payload。WS 摄入循环必须保持非阻塞，否则会反向阻塞 §7 P0 路径。
     """
+    # 暴露 queue 大小到 SystemPerfMonitor 供 admin 查询
+    try:
+        from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+        SystemPerfMonitor.get().report_ws_queue(worker_name, queue.qsize(), queue.maxsize)
+    except Exception:
+        pass
 
     try:
         queue.put_nowait(payload)
         return
     except asyncio.QueueFull:
+        try:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            SystemPerfMonitor.get().record_ws_error(f"{worker_name}_queue_full")
+        except Exception:
+            pass
         pass
     with suppress(asyncio.QueueEmpty):
         queue.get_nowait()
