@@ -4,10 +4,9 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Iterable, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
 
-from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.events import (
     DomainEvent,
     DomainEventType,
@@ -18,14 +17,12 @@ from polymarket_trader.domain.order import (
     BuyOrderIntent,
     CancelOrderIntent,
     ManagedOrderIntent,
-    Order,
     OrderIntent,
     OrderResult,
     OrderResultStatus,
     ReplaceOrderIntent,
     SellOrderIntent,
 )
-from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.risk import RiskDecision, RiskManager
 from polymarket_trader.runtime.lifecycle_bus import LifecycleEvent
@@ -102,57 +99,33 @@ class TradingService:
         intent: OrderIntent,
         *,
         market: Market | None = None,
-        orderbook: OrderbookSnapshot | None = None,
         position: Position | None = None,
-        open_orders: Iterable[Order] = (),
-        condition_open_orders: Iterable[Order] = (),
-        condition_positions: Iterable[Position] = (),
-        allocation_plan: AllocationPlan | None = None,
-        classification_passed: bool | None = True,
-        classification_reason: str | None = None,
         market_active: bool | None = None,
         market_open: bool | None = None,
         clob_enabled: bool | None = None,
         resolved: bool | None = None,
         cancelled: bool | None = None,
         archived: bool | None = None,
-        geoblocked: bool = False,
         balance_usdc: Decimal | None = None,
         allowance_usdc: Decimal | None = None,
         portfolio_total_invested_usdc: Decimal | None = None,
-        open_orders_count: int | None = None,
         bankroll_usdc: Decimal | None = None,
-        kelly_max_position_fraction: Decimal | None = None,
-        kelly_round_up_max_overbet_ratio: Decimal | None = None,
-        min_order_size: Decimal | None = None,
         operation: str = "review",
     ) -> "TradingReviewResult":
         risk_decision = self._risk_manager.check_order_intent(
             intent,
             market=market,
-            orderbook=orderbook,
             position=position,
-            open_orders=open_orders,
-            condition_open_orders=condition_open_orders,
-            condition_positions=condition_positions,
-            allocation_plan=allocation_plan,
-            classification_passed=classification_passed,
-            classification_reason=classification_reason,
             market_active=market_active,
             market_open=market_open,
             clob_enabled=clob_enabled,
             resolved=resolved,
             cancelled=cancelled,
             archived=archived,
-            geoblocked=geoblocked,
             balance_usdc=balance_usdc,
             allowance_usdc=allowance_usdc,
             portfolio_total_invested_usdc=portfolio_total_invested_usdc,
-            open_orders_count=open_orders_count,
             bankroll_usdc=bankroll_usdc,
-            kelly_max_position_fraction=kelly_max_position_fraction,
-            kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
-            min_order_size=min_order_size,
         )
         if risk_decision.passed:
             order_result, submitted, submission_error = await self._execute_trade_intent(

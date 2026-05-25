@@ -608,9 +608,6 @@ class TradingDecisionWorker:
         plan: EntryPlan,
     ) -> "TradingDecisionWorkerResult":
         positions = snapshot.positions if snapshot is not None else tuple(self._positions_provider())
-        open_orders = (
-            snapshot.open_orders if snapshot is not None else tuple(self._open_orders_provider())
-        )
         if snapshot is not None and not snapshot.allow_new_entries:
             return await self._emit_entry_skip(
                 event=event,
@@ -635,27 +632,17 @@ class TradingDecisionWorker:
 
         focus_token_id = plan.intent.token_id
         focus_position = _match_position(positions, plan.market.condition_id, focus_token_id)
-        focus_open_orders = _match_open_orders(open_orders, plan.market.condition_id, focus_token_id)
         self._transition_market(plan.market, MarketLifecycle.ENTRY_SUBMITTING)
         review = await self._trading_service.review_intent(
             plan.intent,
             market=plan.market,
-            orderbook=plan.orderbook,
             position=focus_position,
-            open_orders=focus_open_orders,
-            condition_open_orders=_condition_orders(snapshot, plan.market.condition_id),
-            condition_positions=_condition_positions(snapshot, plan.market.condition_id),
-            allocation_plan=plan.allocation_plan,
-            classification_passed=True,
             balance_usdc=snapshot_available_usdc(snapshot),
             allowance_usdc=snapshot_allowance(snapshot),
             bankroll_usdc=_resolve_bankroll_for_review(
                 portfolio_budget_usdc=self._portfolio_budget_usdc,
                 snapshot=snapshot,
             ),
-            kelly_max_position_fraction=self._kelly_max_position_fraction,
-            kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
-
             operation=plan.intent.side.value.lower(),
         )
         risk_event = await self._publish(
@@ -1437,25 +1424,13 @@ class TradingDecisionWorker:
         return await self._trading_service.review_intent(
             intent,
             market=market,
-            orderbook=self._trading_decision_service.lookup_orderbook(intent.token_id),
             position=snapshot_position(snapshot, intent.condition_id, intent.token_id),
-            open_orders=(
-                snapshot.open_orders_for_market(intent.condition_id, intent.token_id)
-                if snapshot is not None
-                else ()
-            ),
-            condition_open_orders=_condition_orders(snapshot, intent.condition_id),
-            condition_positions=_condition_positions(snapshot, intent.condition_id),
-            classification_passed=True,
             balance_usdc=snapshot_available_usdc(snapshot),
             allowance_usdc=snapshot_allowance(snapshot),
             bankroll_usdc=_resolve_bankroll_for_review(
                 portfolio_budget_usdc=self._portfolio_budget_usdc,
                 snapshot=snapshot,
             ),
-            kelly_max_position_fraction=self._kelly_max_position_fraction,
-            kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
-
             operation=intent.side.value.lower(),
         )
 
@@ -1516,40 +1491,6 @@ def _state_allows_entry_attempt(state: MarketLifecycle, plan: EntryPlan) -> bool
     if state in POSITION_INCREASE_LIFECYCLES:
         return _plan_allows_position_increase(plan)
     return True
-
-
-def _match_open_orders(
-    open_orders: tuple[Order, ...],
-    condition_id: str,
-    token_id: str,
-) -> tuple[Order, ...]:
-    return tuple(
-        order
-        for order in open_orders
-        if order.condition_id == condition_id and order.token_id == token_id
-    )
-
-
-def _condition_orders(
-    snapshot: AccountSnapshot | None,
-    condition_id: str | None,
-) -> tuple[Order, ...]:
-    """同 condition_id 的全部 open orders（跨 token），用于 NEG_RISK 互斥检测。"""
-
-    if snapshot is None or not condition_id:
-        return ()
-    return tuple(order for order in snapshot.open_orders if order.condition_id == condition_id)
-
-
-def _condition_positions(
-    snapshot: AccountSnapshot | None,
-    condition_id: str | None,
-) -> tuple[Position, ...]:
-    """同 condition_id 的全部持仓（跨 token），用于 NEG_RISK 互斥检测。"""
-
-    if snapshot is None or not condition_id:
-        return ()
-    return tuple(p for p in snapshot.positions if p.condition_id == condition_id)
 
 
 def _resolve_bankroll_for_review(

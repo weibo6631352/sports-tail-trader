@@ -709,19 +709,13 @@ class AdminControlsMixin:
             market_slug=market.market_slug,
             order_type=OrderType.GTC,
         )
-        _kelly = self.runtime.workflow.config if self.runtime else TradingWorkflowConfig()
         review = await trading_service.sell(
             intent,
             market=market,
-            orderbook=orderbook,
             position=position,
-            open_orders=account.open_orders_for_market(condition_id, token_id),
-            classification_passed=True,
             balance_usdc=snapshot_available_usdc(account),
             allowance_usdc=snapshot_allowance(account),
             bankroll_usdc=_resolve_admin_bankroll(account, self._settings_value("portfolio_budget_usdc")),
-            kelly_max_position_fraction=_kelly.kelly_max_position_fraction,
-            kelly_round_up_max_overbet_ratio=_kelly.kelly_round_up_max_overbet_ratio,
         )
         result = review.order_result
         failed = result is None or result.status in {
