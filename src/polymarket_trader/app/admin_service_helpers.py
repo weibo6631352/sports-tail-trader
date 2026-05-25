@@ -193,7 +193,7 @@ def _runtime_extension_hooks(runtime: RuntimeComponents) -> Any | None:
     """
 
     try:
-        return runtime.extension.hooks
+        return runtime.strategy
     except (RuntimeError, AttributeError):
         pass
     try:

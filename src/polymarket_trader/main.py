@@ -136,18 +136,8 @@ _RECONCILE_BATCH_SIZE_LIMIT = 256
 class RuntimeComponents:
     settings: Settings
     readiness: StartupReadiness
-    extensions: tuple[_CurrentStrategy, ...]
+    strategy: _CurrentStrategy
     logging_runtime: LoggingRuntime
-
-    @property
-    def extension(self) -> _CurrentStrategy:
-        """单策略快捷访问；多策略并存接入时由调用侧改为按 routing_key 选择。"""
-
-        if not self.extensions:
-            raise RuntimeError("no extensions configured")
-        if len(self.extensions) > 1:
-            raise RuntimeError("multiple extensions are configured; pick one explicitly")
-        return self.extensions[0]
     gamma_client: GammaClient
     clob_client: ClobClient
     data_client: DataClient
@@ -374,7 +364,7 @@ def _build_season_odds_worker(
     *,
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
-    extension: _CurrentStrategy,
+    strategy: _CurrentStrategy,
     event_bus: EventBus | None = None,
 ) -> tuple[SportsSeasonOddsWorker, SeasonOddsClient] | tuple[None, None]:
     """按 settings 装配 sports_season_odds_worker；缺 api_key 或未启用 outright 时返回 (None, None)。
@@ -395,7 +385,7 @@ def _build_season_odds_worker(
             if r.strip()
         ),
     )
-    _classifier = extension
+    _classifier = strategy
 
     def _is_outright(market: Market) -> bool:
         return _classifier.is_outright_market(market) if _classifier is not None else False
@@ -425,7 +415,7 @@ def _build_game_odds_worker(
     *,
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
-    extension: _CurrentStrategy,
+    strategy: _CurrentStrategy,
     event_bus: EventBus | None = None,
 ) -> tuple[GameOddsWorker, GameOddsClient] | tuple[None, None]:
     """按 settings 装配 game_odds_worker；缺 api_key 时返回 (None, None)。"""
@@ -444,7 +434,7 @@ def _build_game_odds_worker(
         ),
     )
 
-    _classifier = extension
+    _classifier = strategy
 
     def _sport_key(market: Market) -> str | None:
         return _classifier.sport_key_for_game_odds(market) if _classifier is not None else None
@@ -501,10 +491,10 @@ def _build_pregame_worker(
     return worker, client
 
 
-def _validate_extension_config(extension: _CurrentStrategy, settings: Settings) -> tuple[ConfigIssue, ...]:
+def _validate_strategy_config(strategy: _CurrentStrategy, settings: Settings) -> tuple[ConfigIssue, ...]:
     """启动期收集策略侧配置拒绝原因，与 Settings.validate_startup_readiness 互补。"""
 
-    issues = extension.validate_config(settings)
+    issues = strategy.validate_config(settings)
     return tuple(issues) if issues else ()
 
 
@@ -572,7 +562,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     from polymarket_trader.quant.identity import STRATEGY_ID
     strategy_config = load_current_strategy_config(settings.extension_config_path)
     extension = CurrentStrategy(config=strategy_config, ports=runtime_ports)
-    extension_issues = _validate_extension_config(extension, settings)
+    extension_issues = _validate_strategy_config(extension, settings)
     if extension_issues:
         raise ConfigLoadError(list(extension_issues))
     parameter_store.bind_settings(settings)
@@ -805,7 +795,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         metrics=metrics,
     )
     market_service = MarketService(
-        strategy=extension.hooks,
+        strategy=extension,
         registry=registry,
         market_tracker=market_ws_worker,
         account_snapshot_provider=account_state_store.snapshot,
@@ -815,7 +805,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     )
     decision_recorder = DecisionEventRecorder(outbox=outbox, strategy_id=strategy_id)
     trading_decision_service = TradingDecisionService(
-        strategy=extension.hooks,
+        strategy=extension,
         strategy_id=strategy_id,
         registry=registry,
         orderbook_reader=market_ws_worker.snapshot,
@@ -930,7 +920,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         parameter_store=parameter_store,
     )
     reconcile_service = ReconcileService(
-        strategy=extension.hooks,
+        strategy=extension,
         strategy_id=strategy_id,
         entry_metadata_provider=entry_metadata_for_market,
         orderbook_reader=trading_decision_service.lookup_orderbook,
@@ -973,7 +963,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     sports_live_state_client: SportsLiveAggregateClient | None = None
     sports_live_state_worker: SportsLiveStateWorker | None = None
     if settings.sports_live_state_enabled:
-        live_state_hooks = extension.live_state_hooks
+        live_state_hooks = extension
         if live_state_hooks is None:
             logger.warning(
                 "sports live state sync skipped because extension does not implement LiveStateHooks",
@@ -1019,14 +1009,14 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         settings,
         registry=registry,
         entry_metadata_store=entry_metadata_store,
-        extension=extension,
+        strategy=extension,
         event_bus=event_bus,
     )
     game_odds_worker, game_odds_client = _build_game_odds_worker(
         settings,
         registry=registry,
         entry_metadata_store=entry_metadata_store,
-        extension=extension,
+        strategy=extension,
         event_bus=event_bus,
     )
     # 注册 odds workers + user_ws 的 prune callbacks
@@ -1067,7 +1057,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     return RuntimeComponents(
         settings=settings,
         readiness=readiness,
-        extensions=(extension,),
+        strategy=extension,
         logging_runtime=logging_runtime,
         parameter_store=parameter_store,
         gamma_client=gamma_client,

@@ -51,7 +51,7 @@ class PersistencePlannedRecord:
 class PersistenceRecordBuilder:
     """事件落库记录构造器。
 
-    strategy_id 在 main.py 设置 worker 时按 ``extension.spec.strategy_id`` 注入，
+    strategy_id 在 main.py 设置 worker 时按 ``polymarket_trader.quant.identity.STRATEGY_ID`` 注入，
     单进程内值固定。Builder 在构造每条记录时把它统一盖上：
     生产者已经在事件 payload 里塞了 strategy_id，则优先使用 payload 中的值
     （便于未来同进程多策略），否则用 builder 持有的默认值。

@@ -1,7 +1,7 @@
 """当前默认策略的配置定义。
 
 这个文件只负责描述“策略自己关心的业务参数”，不负责框架级配置。
-二次开发时如果只是替换筛选词、价格阈值、流动性门槛，通常从这里开始改。
+调参时（筛选词 / 价格阈值 / 流动性门槛）通常从这里开始改。
 
 远端 discovery 粗筛会调用 Polymarket Gamma Events keyset API：
 https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination

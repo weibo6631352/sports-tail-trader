@@ -246,7 +246,7 @@ class AdminControlsMixin:
                 "candidate": self._candidate_payload(market, token_id, plan),
             }
 
-        _kelly = self.runtime.extension.config if self.runtime else CurrentStrategyConfig()
+        _kelly = self.runtime.strategy.config if self.runtime else CurrentStrategyConfig()
         review = await self._trading_service().review_intent(
             plan.intent,
             market=market,
@@ -717,7 +717,7 @@ class AdminControlsMixin:
             market_slug=market.market_slug,
             order_type=OrderType.GTC,
         )
-        _kelly = self.runtime.extension.config if self.runtime else CurrentStrategyConfig()
+        _kelly = self.runtime.strategy.config if self.runtime else CurrentStrategyConfig()
         review = await trading_service.sell(
             intent,
             market=market,

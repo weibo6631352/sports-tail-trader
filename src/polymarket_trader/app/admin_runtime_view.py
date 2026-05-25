@@ -306,7 +306,7 @@ class AdminRuntimeView:
         if not isinstance(settings, Settings):
             return None
         budget: Decimal | None = settings.portfolio_budget_usdc
-        extension = self.runtime.extension if self.runtime else None
+        extension = self.runtime.strategy if self.runtime else None
         kelly = extension.config if extension is not None else CurrentStrategyConfig()
         max_position_fraction = kelly.kelly_max_position_fraction
         min_stake = kelly.kelly_min_stake_usdc

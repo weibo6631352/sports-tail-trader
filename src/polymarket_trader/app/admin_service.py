@@ -1954,7 +1954,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         # settings 缺失时执行。kelly_* 从策略侧 ConfiguredExtension.config 读取；
         # 策略配置是 kelly_* 的唯一真相来源，不再走框架 Settings。
         settings = self.runtime.settings
-        strategy_config = self.runtime.extension.config
+        strategy_config = self.runtime.strategy.config
         return self._trading_decision_service().build_entry_plan(
             market=market,
             orderbook=orderbook,

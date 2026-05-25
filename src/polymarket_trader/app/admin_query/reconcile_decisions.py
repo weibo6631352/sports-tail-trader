@@ -299,7 +299,7 @@ class AdminReconcileDecisionsQueryMixin:
 
         candidates: list[dict[str, Any]] = []
         account = self._account_snapshot()
-        # candidates 在运行时纯内存投影，归属由 runtime.extension.spec.strategy_id 决定。
+        # candidates 在运行时纯内存投影，归属由 runtime.strategy_id 决定。
         runtime_strategy_id = self._runtime_strategy_id()
         if strategy_id is not None and runtime_strategy_id is not None and strategy_id != runtime_strategy_id:
             empty_page = self._slice_sequence((), limit=limit, offset=offset)

@@ -467,7 +467,7 @@ _FRAMEWORK_DISCOVERY_PARAM_KEYS = {"limit", "after_cursor"}
 
 
 def _discovery_queries(runtime: RuntimeComponents) -> tuple[DiscoveryQuery, ...]:
-    hooks = runtime.extension.hooks
+    hooks = runtime.strategy
     queries = (*_live_game_discovery_queries(runtime, hooks), *_configured_discovery_queries(hooks))
     return _dedupe_discovery_queries(queries) or (DEFAULT_DISCOVERY_QUERY,)
 
@@ -483,7 +483,7 @@ def _configured_discovery_queries(hooks: Any) -> tuple[DiscoveryQuery, ...]:
 def _live_game_discovery_queries(runtime: RuntimeComponents, hooks: Any) -> tuple[DiscoveryQuery, ...]:
     """从直播状态 worker 的最近比赛快照中提取策略高意图查询。
 
-    ``hooks`` 这里没用——live state 相关 hook 在 ``extension.live_state_hooks``，
+    ``hooks`` 这里没用——live state 相关 hook 在 ``extension``，
     策略未实现时直接跳过；framework 不再向核心 ExtensionHooks 强制 live state 接口。
     """
 
@@ -493,7 +493,7 @@ def _live_game_discovery_queries(runtime: RuntimeComponents, hooks: Any) -> tupl
     events = tuple(worker.last_events())
     if not events:
         return ()
-    live_state_hooks = runtime.extension.live_state_hooks
+    live_state_hooks = runtime.strategy
     if live_state_hooks is None:
         return ()
     return tuple(

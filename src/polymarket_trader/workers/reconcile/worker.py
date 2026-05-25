@@ -149,7 +149,7 @@ class ReconcileWorker:
         self._last_refresh_summary: AuthoritativeRefreshSummary | None = None
         self._last_result: ReconcileWorkerResultSummary | None = None
         self._recent_results: deque[ReconcileWorkerResultSummary] = deque(maxlen=8)
-        # reconcile_service 持有 strategy_id（来自 extension.spec），下游 applier 复用同一值。
+        # reconcile_service 持有 strategy_id（来自 polymarket_trader.quant.identity），下游 applier 复用同一值。
         self._action_applier = ReconcileActionApplier(
             strategy_id=reconcile_service.strategy_id,
             trading_service=trading_service,

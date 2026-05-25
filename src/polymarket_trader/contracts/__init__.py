@@ -1,8 +1,8 @@
-"""量化决策器与框架共享的数据类型集合。
+"""quant 策略与 framework 共享的数据类型契约。
 
-历史上是"框架 + 策略插件"二次开发抽象层，现仅承载跨模块传递的数据类型
-（Context / Decision / Ports / lifecycle 事件等）。Protocol 类（ExtensionHooks /
-BusinessExtension / 各种 *Hooks）已删除——quant 策略直接装配，无插件层。
+承载跨模块传递的数据类型：DecisionContext / TradingDecision / QuantDecision /
+RuntimePorts / lifecycle events / DiscoveryQuery / UniverseDecision / LiveStateMatch
+等。这层不含任何业务规则——业务规则全部在 polymarket_trader.quant 内。
 """
 
 from __future__ import annotations
