@@ -91,7 +91,7 @@ class OrderbookDirectionSignal:
     confidence: Decimal           # [0, 1]
 
     def as_metadata(self) -> dict[str, Any]:
-        """序列化成 dict 注入 ExtensionContext.metadata['orderbook_direction']。
+        """序列化成 dict 注入 DecisionContext.metadata['orderbook_direction']。
 
         策略只消费归一化复合信号 + label + confidence；不暴露 raw deltas
         （留给 admin 审计 endpoint）。Decimal 转 str 以保证 JSON 安全。

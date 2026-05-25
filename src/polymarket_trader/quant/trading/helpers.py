@@ -1,4 +1,4 @@
-"""通用辅助：从 ExtensionContext.metadata 中读 Decimal / 文本；Fill 金额计算；
+"""通用辅助：从 DecisionContext.metadata 中读 Decimal / 文本；Fill 金额计算；
 决策元数据投影（enrich_decision / build_strategy_summary）；tick_size 解析。
 """
 
@@ -10,10 +10,10 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from polymarket_trader.domain.events import Fill
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.extension_api import (
+from polymarket_trader.contracts import (
     DecisionKind,
-    ExtensionContext,
-    ExtensionDecision,
+    DecisionContext,
+    TradingDecision,
     StrategySummary,
 )
 
@@ -108,7 +108,7 @@ def decimal_from_metadata(value: object) -> Decimal | None:
         return None
 
 
-def enrich_decision(decision: ExtensionDecision, *, default_kind: DecisionKind) -> ExtensionDecision:
+def enrich_decision(decision: TradingDecision, *, default_kind: DecisionKind) -> TradingDecision:
     """把策略私有 metadata 投影成 framework 中性的 StrategySummary / decision_kind / intent_tags。
 
     策略 metadata 仍然透传 audit，但 framework 只读强类型字段。
@@ -163,7 +163,7 @@ def _build_strategy_summary(metadata: Mapping[str, Any]) -> StrategySummary:
     )
 
 
-def _metadata_decimal(context: ExtensionContext, *keys: str) -> Decimal | None:
+def _metadata_decimal(context: DecisionContext, *keys: str) -> Decimal | None:
     """按优先顺序从 metadata 中读取十进制数值。"""
 
     for key in keys:
@@ -179,7 +179,7 @@ def _metadata_decimal(context: ExtensionContext, *keys: str) -> Decimal | None:
     return None
 
 
-def _metadata_text(context: ExtensionContext, *keys: str) -> str | None:
+def _metadata_text(context: DecisionContext, *keys: str) -> str | None:
     """按优先顺序从 metadata 中读取文本值。"""
 
     for key in keys:

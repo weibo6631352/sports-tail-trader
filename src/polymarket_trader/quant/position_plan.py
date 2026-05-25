@@ -11,7 +11,7 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_FLOOR
 from typing import Mapping
 
-from polymarket_trader.extension_api import ExtensionContext
+from polymarket_trader.contracts import DecisionContext
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 
@@ -21,7 +21,7 @@ POSITION_PLAN_VERSION = "1"
 
 def build_position_plan_metadata(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     *,
     token_id: str | None,
     source_reason: str,
@@ -85,7 +85,7 @@ def build_position_plan_metadata(
 
 def exit_price_for_context(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     *,
     entry_price: Decimal | None = None,
 ) -> Decimal:
@@ -146,7 +146,7 @@ def cap_price_to_clob_limit(price: Decimal, *, tick_size: Decimal | None = None)
     return min(price, Decimal("1") - effective_tick)
 
 
-def _effective_tick_size(context: ExtensionContext) -> Decimal | None:
+def _effective_tick_size(context: DecisionContext) -> Decimal | None:
     if context.orderbook is not None and context.orderbook.tick_size is not None:
         return context.orderbook.tick_size
     if context.market is not None:

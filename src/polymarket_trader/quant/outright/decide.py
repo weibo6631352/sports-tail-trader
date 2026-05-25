@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.extension_api import DecisionKind, ExtensionContext, ExtensionDecision, ExtensionPorts, MarketTokenView
+from polymarket_trader.contracts import DecisionKind, DecisionContext, TradingDecision, RuntimePorts, MarketTokenView
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 from polymarket_trader.quant.outright.evaluator import evaluate_outright_opportunity
@@ -30,18 +30,18 @@ class _MockTokenView:
 
 def decide_outright_entry(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
-    ports: ExtensionPorts | None = None,
-) -> ExtensionDecision:
+    context: DecisionContext,
+    ports: RuntimePorts | None = None,
+) -> TradingDecision:
     """遍历每个 outcome token，对每个 token 跑评估器；选 edge 最大的接受候选。"""
     market = context.market
     if market is None:
-        return ExtensionDecision.skip(reason="outright_missing_market")
+        return TradingDecision.skip(reason="outright_missing_market")
     snapshot = season_odds_from_metadata(context.metadata or {})
     token_views = tuple(context.market_token_views or ())
     outcomes = market.outcomes
     if not token_views and not outcomes:
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason="outright_missing_outcomes",
             metadata={"market_family": "outright"},
         )
@@ -107,11 +107,11 @@ def decide_outright_entry(
     if best_accept is None:
         evaluation, token_view = first_reject if first_reject else (None, None)
         if evaluation is None:
-            return ExtensionDecision.skip(
+            return TradingDecision.skip(
                 reason="outright_no_candidates",
                 metadata={"market_family": "outright"},
             )
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason=evaluation.reason,
             metadata={
                 "market_family": "outright",
@@ -125,7 +125,7 @@ def decide_outright_entry(
         )
     (_edge, evaluation), token_view = best_accept
     if evaluation.action.value != "auto_execute":
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason=f"outright_{evaluation.action.value}",
             metadata={
                 "market_family": "outright",
@@ -141,7 +141,7 @@ def decide_outright_entry(
     else:
         proposed_amount = min(budget_usdc, config.tail_outright_max_per_market_usdc)
     if proposed_amount <= Decimal("0"):
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason="outright_budget_exhausted",
             metadata={"market_family": "outright"},
         )
@@ -162,7 +162,7 @@ def decide_outright_entry(
         min_remaining_days=config.tail_outright_min_remaining_days,
     )
     if risk_reject is not None:
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason=f"outright_{risk_reject.value}",
             metadata={
                 "market_family": "outright",
@@ -182,7 +182,7 @@ def decide_outright_entry(
         config.tail_outright_min_expected_profit_per_day_usdc,
     )
     if not eff_passed:
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason=f"outright_{OutrightRejectReason.CAPITAL_EFFICIENCY_BELOW_MIN.value}",
             metadata={
                 "market_family": "outright",
@@ -192,7 +192,7 @@ def decide_outright_entry(
             },
         )
 
-    return ExtensionDecision.buy(
+    return TradingDecision.buy(
         reason=evaluation.reason,
         token_id=evaluation.candidate.token_id if evaluation.candidate else None,
         price=evaluation.entry_price_cap,  # evaluator asserts non-None when accepted
@@ -211,7 +211,7 @@ def decide_outright_entry(
     )
 
 
-def resolve_outright_reject_label(decision: ExtensionDecision) -> str:
+def resolve_outright_reject_label(decision: TradingDecision) -> str:
     metadata = decision.metadata or {}
     reason = metadata.get("outright_reject_reason")
     if isinstance(reason, str) and reason:

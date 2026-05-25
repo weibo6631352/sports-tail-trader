@@ -9,18 +9,18 @@ from typing import Any, Mapping
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
-from polymarket_trader.extension_api.live_state import SeriesState
+from polymarket_trader.contracts.live_state import SeriesState
 
-from polymarket_trader.extension_api.lifecycle import LifecycleEnvelope as _LifecycleEnvelope, LifecycleEvent as _LifecycleEvent
-from polymarket_trader.extension_api import (
+from polymarket_trader.contracts.lifecycle import LifecycleEnvelope as _LifecycleEnvelope, LifecycleEvent as _LifecycleEvent
+from polymarket_trader.contracts import (
     AccountSnapshotView,
     DecisionKind,
     DiscoveryQuery,
     LiveStateMatch,
     QuantDecision,
-    ExtensionContext,
-    ExtensionDecision,
-    ExtensionPorts,
+    DecisionContext,
+    TradingDecision,
+    RuntimePorts,
     UniverseDecision,
 )
 
@@ -117,10 +117,10 @@ class CurrentStrategy:
         self,
         *,
         config: CurrentStrategyConfig,
-        ports: ExtensionPorts | None = None,
+        ports: RuntimePorts | None = None,
     ) -> None:
         self._config = config
-        self._ports = ports or ExtensionPorts()
+        self._ports = ports or RuntimePorts()
         self._live_event_filter_cache_events_id: int | None = None
         self._live_event_filter_cache: dict[tuple[tuple[str, ...], str | None], tuple[LiveEvent, ...]] = {}
         self._live_state_no_feasible_source: bool = False
@@ -298,7 +298,7 @@ class CurrentStrategy:
         return tuple(issues)
 
     @property
-    def ports(self) -> ExtensionPorts:
+    def ports(self) -> RuntimePorts:
         return self._ports
 
     def select_market(self, market: Market) -> UniverseDecision:
@@ -314,7 +314,7 @@ class CurrentStrategy:
     ) -> tuple[DiscoveryQuery, ...]:
         return build_live_event_discovery_queries(self._config, events)
 
-    def quant_decide(self, context: ExtensionContext) -> QuantDecision:
+    def quant_decide(self, context: DecisionContext) -> QuantDecision:
         """量化决策器——按 trigger_kind 分派内部子流程。
 
         ``context.quant_trigger_kind`` ∈ {"market_tick", "reconcile_cycle"}；
@@ -465,7 +465,7 @@ class CurrentStrategy:
         self._live_state_no_feasible_source = no_feasible
 
     def _record_family_decision_metric(
-        self, family: SportsMarketFamily, decision: ExtensionDecision
+        self, family: SportsMarketFamily, decision: TradingDecision
     ) -> None:
         metrics = self._ports.metrics
         if metrics is None:
@@ -492,7 +492,7 @@ class CurrentStrategy:
 
 def build_strategy(
     *,
-    ports: ExtensionPorts | None = None,
+    ports: RuntimePorts | None = None,
     config_path: str | None = None,
 ) -> "CurrentStrategy":
     return CurrentStrategy(

@@ -32,7 +32,7 @@ from polymarket_trader.domain.order import (
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.state_machine import MarketLifecycle
 from polymarket_trader.domain.account import AccountSnapshot
-from polymarket_trader.extension_api import ExtensionAction, ExtensionContext, ExtensionDecision, MarketTokenView
+from polymarket_trader.contracts import TradeAction, DecisionContext, TradingDecision, MarketTokenView
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
 from .event_payloads import (
@@ -320,7 +320,7 @@ class TradingDecisionWorker:
 
     def _fetch_orderbook_direction(self, token_id: str | None) -> dict[str, Any] | None:
         """从 OrderbookDeltaStore 取 10s 窗口方向信号，序列化成 dict 注入
-        ExtensionContext.metadata['orderbook_direction']。
+        DecisionContext.metadata['orderbook_direction']。
 
         策略消费归一化复合信号（direction_score / price_momentum / flow_imbalance /
         direction_label / confidence），替代单时点 bid/ask 深度比 imbalance ratio——
@@ -786,7 +786,7 @@ class TradingDecisionWorker:
         if direction is not None:
             exit_metadata["orderbook_direction"] = direction
         quant_decision = self._trading_decision_service.quant_decide(
-            ExtensionContext(
+            DecisionContext(
                 trace_id=event.trace_id,
                 strategy_id=self._trading_decision_service.strategy_id,
                 market=market,
@@ -811,7 +811,7 @@ class TradingDecisionWorker:
         if quant_decision.actions:
             decision = quant_decision.actions[0]
         else:
-            decision = ExtensionDecision.skip(reason=quant_decision.reason or "quant_no_action")
+            decision = TradingDecision.skip(reason=quant_decision.reason or "quant_no_action")
         # 缓存决策 metadata 供 /positions/signals admin endpoint 暴露。每次
         # decide_exit 后更新当前 token 的 signals 快照，UI/操盘人可实时看到
         # 5 类投票 + 流动性 tier + math_lock 是否支持 + fair_value 来源。
@@ -832,7 +832,7 @@ class TradingDecisionWorker:
         # SELL 直接挂；REPLACE 是 reprice 路径（_maybe_reprice_stale_sell 把 stale
         # $0.99 SELL cancel-replace 到 fair_value × 0.97），不接 REPLACE 会让订阅
         # 触发的 reprice 决策静默丢弃。
-        if decision.action not in {ExtensionAction.SELL, ExtensionAction.REPLACE}:
+        if decision.action not in {TradeAction.SELL, TradeAction.REPLACE}:
             return None
         intent = self._trading_decision_service.build_intent_from_decision(
             trace_id=event.trace_id,

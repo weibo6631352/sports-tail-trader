@@ -3,25 +3,25 @@
 所有工具都是策略中性的、无状态的。Domain 层金额/价格仍按 ``Decimal`` 处理。
 """
 
-from polymarket_trader.extension_api.toolkit.decimal_math import (
+from polymarket_trader.contracts.toolkit.decimal_math import (
     clamp,
     pct_of,
     round_to_tick,
 )
-from polymarket_trader.extension_api.toolkit.idempotency import build_entry_key
-from polymarket_trader.extension_api.toolkit.market_filter import MarketFilterDSL
-from polymarket_trader.extension_api.toolkit.orderbook_tools import (
+from polymarket_trader.contracts.toolkit.idempotency import build_entry_key
+from polymarket_trader.contracts.toolkit.market_filter import MarketFilterDSL
+from polymarket_trader.contracts.toolkit.orderbook_tools import (
     depth_at_price,
     depth_weighted_price,
     midpoint,
     spread_bps,
 )
-from polymarket_trader.extension_api.toolkit.position_projection import (
+from polymarket_trader.contracts.toolkit.position_projection import (
     avg_cost,
     exposure_usdc,
     unrealized_pnl,
 )
-from polymarket_trader.extension_api.toolkit.time_window import (
+from polymarket_trader.contracts.toolkit.time_window import (
     GamePhase,
     classify_phase,
     is_within_tail_window,

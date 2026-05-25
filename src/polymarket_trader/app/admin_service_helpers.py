@@ -197,7 +197,7 @@ def _runtime_extension_hooks(runtime: RuntimeComponents) -> Any | None:
     except (RuntimeError, AttributeError):
         pass
     try:
-        return runtime.market_service.extension_hooks
+        return runtime.market_service.strategy
     except AttributeError:
         return None
 

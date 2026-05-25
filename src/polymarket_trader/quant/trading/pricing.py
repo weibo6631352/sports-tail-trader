@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from polymarket_trader.extension_api import ExtensionContext, ExtensionPorts
+from polymarket_trader.contracts import DecisionContext, RuntimePorts
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 from polymarket_trader.quant.outcomes import describe_sports_market, target_for_token
@@ -17,7 +17,7 @@ def _tail_price_cap(
     token_id: str | None,
     *,
     locked_outcome_signal: bool = False,
-    ports: ExtensionPorts | None = None,
+    ports: RuntimePorts | None = None,
 ) -> Decimal:
     """计算入场价格上限。
 
@@ -51,7 +51,7 @@ def _tail_price_cap(
     return entry_no_price_max
 
 
-def _tail_locked_outcome_signal(context: ExtensionContext) -> bool:
+def _tail_locked_outcome_signal(context: DecisionContext) -> bool:
     """判断 live-state 是否已经标记当前市场为数学锁定候选。"""
 
     return str(context.metadata.get("entry_signal_reason") or "") in {

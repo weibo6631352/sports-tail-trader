@@ -37,7 +37,7 @@ from polymarket_trader.domain.order import (
     OrderType,
     SellOrderIntent,
 )
-from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
+from polymarket_trader.contracts.manual_confirmation import ManualConfirmation
 from polymarket_trader.app.decision_serialization import (
     snapshot_allowance,
     snapshot_available_usdc,

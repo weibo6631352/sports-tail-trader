@@ -10,10 +10,10 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order, OrderType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
-from polymarket_trader.extension_api.summary import StrategySummary
+from polymarket_trader.contracts.summary import StrategySummary
 
 
-class ExtensionAction(StrEnum):
+class TradeAction(StrEnum):
     SKIP = "skip"
     BUY = "buy"
     SELL = "sell"
@@ -98,8 +98,8 @@ class EntryCandidate:
 
 
 @dataclass(frozen=True, slots=True)
-class ExtensionDecision:
-    action: ExtensionAction
+class TradingDecision:
+    action: TradeAction
     reason: str = ""
     token_id: str | None = None
     price: Decimal | None = None
@@ -123,9 +123,9 @@ class ExtensionDecision:
         intent_tags: frozenset[str] | None = None,
         summary: StrategySummary | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> "ExtensionDecision":
+    ) -> "TradingDecision":
         return cls(
-            action=ExtensionAction.SKIP,
+            action=TradeAction.SKIP,
             reason=reason,
             decision_kind=decision_kind,
             intent_tags=intent_tags or frozenset(),
@@ -148,9 +148,9 @@ class ExtensionDecision:
         intent_tags: frozenset[str] | None = None,
         summary: StrategySummary | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> "ExtensionDecision":
+    ) -> "TradingDecision":
         return cls(
-            action=ExtensionAction.BUY,
+            action=TradeAction.BUY,
             reason=reason,
             token_id=token_id,
             price=price,
@@ -179,9 +179,9 @@ class ExtensionDecision:
         intent_tags: frozenset[str] | None = None,
         summary: StrategySummary | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> "ExtensionDecision":
+    ) -> "TradingDecision":
         return cls(
-            action=ExtensionAction.SELL,
+            action=TradeAction.SELL,
             reason=reason,
             token_id=token_id,
             price=price,
@@ -207,9 +207,9 @@ class ExtensionDecision:
         intent_tags: frozenset[str] | None = None,
         summary: StrategySummary | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> "ExtensionDecision":
+    ) -> "TradingDecision":
         return cls(
-            action=ExtensionAction.CANCEL,
+            action=TradeAction.CANCEL,
             reason=reason,
             token_id=token_id,
             order_id=order_id,
@@ -234,9 +234,9 @@ class ExtensionDecision:
         intent_tags: frozenset[str] | None = None,
         summary: StrategySummary | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> "ExtensionDecision":
+    ) -> "TradingDecision":
         return cls(
-            action=ExtensionAction.REPLACE,
+            action=TradeAction.REPLACE,
             reason=reason,
             token_id=token_id,
             order_id=order_id,
@@ -275,7 +275,7 @@ class QuantDecision:
         市场状态不一致）时，主动让 supervisor 暂停新入场。
     """
 
-    actions: tuple[ExtensionDecision, ...] = ()
+    actions: tuple[TradingDecision, ...] = ()
     reason: str = ""
     pause_trading: bool = False
     pause_reason: str = ""

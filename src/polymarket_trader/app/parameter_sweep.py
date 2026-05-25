@@ -331,7 +331,7 @@ def _resolve_decision(record: DecisionRecord) -> _Resolved | None:
 
     实际生产 decision_output 有三种来源 shape：
     1. tail entry (non-outright)：``decision_output["price"]`` 就是 best_ask，
-       evaluator 直接把盘口价当 entry_price 写入 ``ExtensionDecision.buy``。
+       evaluator 直接把盘口价当 entry_price 写入 ``TradingDecision.buy``。
     2. outright accepted/skip：evaluator 写 ``decision_output["metadata"]
        ["outright_metadata"]["best_ask"]``（嵌套），同时把 ``fair_value`` 也放
        在嵌套里；顶层 ``decision_output["price"]`` 是 entry_price_cap，不是
@@ -374,7 +374,7 @@ def _resolve_decision(record: DecisionRecord) -> _Resolved | None:
     )
     if entry_price is None and not is_outright:
         # tail (非 outright) 决策的 price 字段就是 best_ask（hooks.decide_entry
-        # 把 best_ask 直接写进 ExtensionDecision.price）；outright 不能这样退，
+        # 把 best_ask 直接写进 TradingDecision.price）；outright 不能这样退，
         # 否则会把 entry_price_cap 误当成 best_ask 抽出来。
         entry_price = _decimal(record.decision_output, "price")
     if entry_price is None:

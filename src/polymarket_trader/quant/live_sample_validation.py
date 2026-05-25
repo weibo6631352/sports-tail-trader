@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
-from polymarket_trader.extension_api import load_mapping_file
+from polymarket_trader.contracts import load_mapping_file
 from polymarket_trader.infra.sports import parse_goalserve_inplay
 from polymarket_trader.serialization import jsonable
 from polymarket_trader.quant.live_state import best_live_match, live_event_metadata

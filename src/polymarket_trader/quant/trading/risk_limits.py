@@ -11,7 +11,7 @@ from polymarket_trader.domain.allocation import (
     MarketBuyBudgetChanged,
 )
 from polymarket_trader.domain.order import OrderSide
-from polymarket_trader.extension_api import ExtensionContext
+from polymarket_trader.contracts import DecisionContext
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot
 from polymarket_trader.quant.config import CurrentStrategyConfig
@@ -21,7 +21,7 @@ from polymarket_trader.quant.trading.helpers import fill_notional_usdc
 
 def _apply_tail_risk_limits(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     *,
     plan: AllocationPlan,
     candidate_snapshots: tuple[AllocationMarketSnapshot, ...],
@@ -104,7 +104,7 @@ def _covered_exit_shares(snapshot: AllocationMarketSnapshot) -> Decimal:
 
 
 def _buy_fill_summary(
-    context: ExtensionContext,
+    context: DecisionContext,
     snapshot: AllocationMarketSnapshot,
 ) -> tuple[int, Decimal]:
     """统计当前 token 的 BUY 成交次数和首笔入场金额，用于限制加仓。"""

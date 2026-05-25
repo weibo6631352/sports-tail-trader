@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
 from polymarket_trader.domain.sports_season import SeasonSnapshot
-from polymarket_trader.extension_api.lifecycle import LifecycleBus
+from polymarket_trader.contracts.lifecycle import LifecycleBus
 
 
 class MetricsPort(Protocol):
@@ -59,7 +59,7 @@ class SeasonStateReadPort(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class ExtensionPorts:
+class RuntimePorts:
     lifecycle: LifecycleBus | None = None
     parameter: ParameterPort | None = None
     metrics: MetricsPort | None = None

@@ -1,6 +1,6 @@
 """决策录制 producer 侧 helper。
 
-策略 hook 返回 ``ExtensionDecision`` 后，framework 在主链路同步构造
+策略 hook 返回 ``TradingDecision`` 后，framework 在主链路同步构造
 ``DecisionRecord`` 并经 outbox 投递；``PersistenceWorker`` 异步落库到
 ``decision_records`` 表。
 
@@ -127,7 +127,7 @@ def _safe_jsonable(value: Any) -> dict[str, Any]:
 
 
 def _decision_outcome(payload: Mapping[str, Any]) -> tuple[bool, str | None]:
-    """从 ``ExtensionDecision`` 投影出 ``accepted`` 与 ``reason``。
+    """从 ``TradingDecision`` 投影出 ``accepted`` 与 ``reason``。
 
     accepted 语义：策略返回的 ``decision_kind`` 表示"产生了可执行 intent"
     即视为接受；任何 skip / decline / no_signal 等已存在的字符串都保留原值

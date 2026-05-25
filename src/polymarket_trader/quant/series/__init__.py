@@ -10,7 +10,7 @@
   single_game scope 走 ``handicap_model.single_game_cover_probability``（spread de-vig）
 
 所有定价路径都流经 ``_shared/edge_gates.check_entry_gates`` 与 ``series/risk.check_series_entry_risk``，
-再由 strategy 投影成 ``ExtensionDecision``。
+再由 strategy 投影成 ``TradingDecision``。
 """
 
 from polymarket_trader.quant.series.classifier import classify_series_sub_type

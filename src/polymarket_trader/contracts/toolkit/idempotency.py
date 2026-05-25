@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 
-from polymarket_trader.extension_api.decisions import DecisionKind
+from polymarket_trader.contracts.decisions import DecisionKind
 
 
 def build_entry_key(

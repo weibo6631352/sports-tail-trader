@@ -23,18 +23,18 @@ from contextvars import ContextVar
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterator
 
-from polymarket_trader.extension_api import ExtensionPorts
+from polymarket_trader.contracts import RuntimePorts
 
 logger = logging.getLogger(__name__)
 
 
-_active_ports: ContextVar[ExtensionPorts | None] = ContextVar(
+_active_ports: ContextVar[RuntimePorts | None] = ContextVar(
     "polymarket_trader.quant.active_ports", default=None
 )
 
 
 @contextmanager
-def active_ports_scope(ports: ExtensionPorts | None) -> Iterator[None]:
+def active_ports_scope(ports: RuntimePorts | None) -> Iterator[None]:
     """在 strategy hook 入口处包一层；嵌套调用安全（ContextVar.reset）。"""
 
     token = _active_ports.set(ports)
@@ -44,7 +44,7 @@ def active_ports_scope(ports: ExtensionPorts | None) -> Iterator[None]:
         _active_ports.reset(token)
 
 
-def _resolve(ports: ExtensionPorts | None, key: str, default: Any) -> Any:
+def _resolve(ports: RuntimePorts | None, key: str, default: Any) -> Any:
     effective_ports = ports if ports is not None else _active_ports.get()
     if effective_ports is None:
         return default
@@ -58,7 +58,7 @@ def _resolve(ports: ExtensionPorts | None, key: str, default: Any) -> Any:
         return default
 
 
-def effective_int(ports: ExtensionPorts | None, key: str, default: int) -> int:
+def effective_int(ports: RuntimePorts | None, key: str, default: int) -> int:
     """整数 override（bps 之类）。"""
 
     value = _resolve(ports, key, default)
@@ -70,7 +70,7 @@ def effective_int(ports: ExtensionPorts | None, key: str, default: int) -> int:
         return default
 
 
-def effective_decimal(ports: ExtensionPorts | None, key: str, default: Decimal) -> Decimal:
+def effective_decimal(ports: RuntimePorts | None, key: str, default: Decimal) -> Decimal:
     """Decimal override（价格、USDC 阈值）。"""
 
     value = _resolve(ports, key, default)
@@ -85,7 +85,7 @@ def effective_decimal(ports: ExtensionPorts | None, key: str, default: Decimal) 
 
 
 def effective_str_enum(
-    ports: ExtensionPorts | None,
+    ports: RuntimePorts | None,
     key: str,
     default: Any,
     enum_type: type,

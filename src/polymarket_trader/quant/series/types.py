@@ -5,7 +5,7 @@
 
 设计原则与 outright 一致：所有拒绝原因可审计，accepted/rejected 用同一份
 ``SeriesEvaluation`` dataclass 表达，便于 ``strategy.decide_entry`` 投影成
-``ExtensionDecision``。
+``TradingDecision``。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from enum import StrEnum
 from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market
-from polymarket_trader.extension_api.live_state import SeriesState as SeriesState  # re-export
+from polymarket_trader.contracts.live_state import SeriesState as SeriesState  # re-export
 
 
 class SeriesSubType(StrEnum):

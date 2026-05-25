@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.sports_live import BaseballGameState, TennisGameState, VolleyballGameState
-from polymarket_trader.extension_api import ExtensionContext
+from polymarket_trader.contracts import DecisionContext
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 from polymarket_trader.quant.position_plan import cap_price_to_clob_limit
@@ -166,7 +166,7 @@ class DynamicExitDecision:
 
 def evaluate_dynamic_exit(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     *,
     token_id: str | None,
     entry_price: Decimal,
@@ -618,7 +618,7 @@ def evaluate_dynamic_exit(
     )
 
 
-def _resolve_position_shares(context: ExtensionContext) -> Decimal:
+def _resolve_position_shares(context: DecisionContext) -> Decimal:
     """解析当前退出仓位的份额，用于沿 bid 簿逐档撮合定价。
 
     优先 position.shares（权威持仓快照），回退 size_shares（reconcile 退出路径
@@ -635,7 +635,7 @@ def _resolve_position_shares(context: ExtensionContext) -> Decimal:
 
 
 def _resolve_condition_id(
-    context: ExtensionContext,
+    context: DecisionContext,
     orderbook: OrderbookSnapshot,
 ) -> str | None:
     """解析当前持仓的 condition_id，用于 best bid 峰值跟踪键。
@@ -651,7 +651,7 @@ def _resolve_condition_id(
 
 
 def _exit_orderbook(
-    context: ExtensionContext,
+    context: DecisionContext,
     token_id: str | None,
 ) -> OrderbookSnapshot | None:
     """解析当前退出 token 对应的盘口快照。
@@ -671,7 +671,7 @@ def _exit_orderbook(
 
 
 def _estimate_fair_value(
-    context: ExtensionContext,
+    context: DecisionContext,
     *,
     token_id: str | None,
     best_bid: Decimal,
@@ -723,7 +723,7 @@ def _estimate_fair_value(
 
 
 def _math_lock_fair_value(
-    context: ExtensionContext,
+    context: DecisionContext,
     token_id: str | None,
 ) -> Decimal | None:
     """从 math_lock 模型拿我方方向的 lock_probability 作 fair_value。
@@ -770,7 +770,7 @@ def _math_lock_fair_value(
 
 
 def _series_winner_lock_prob(
-    context: ExtensionContext,
+    context: DecisionContext,
     target: Any,
 ) -> Decimal | None:
     """系列赛胜者 lock：用 best_of + games_won + 历史单场胜率算 P(我方赢系列赛)。
@@ -820,7 +820,7 @@ def _clamp_fair_value(value: Decimal) -> Decimal:
 
 
 def _goalserve_implied_prob_for_token(
-    context: ExtensionContext,
+    context: DecisionContext,
     token_id: str | None,
 ) -> Decimal | None:
     """读取 Goalserve 盘口对我方方向的隐含概率。
@@ -875,7 +875,7 @@ def _implied_prob_field(
 
 def _capital_efficiency_gate(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     *,
     entry_price: Decimal,
     amount_usdc: Decimal,
@@ -959,7 +959,7 @@ def _capital_efficiency_gate(
 
 def _estimated_settlement_hold_minutes(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
 ) -> int:
     """单场比赛等待结算的资金占用时间估算（分钟）。
 
@@ -1003,7 +1003,7 @@ def _estimated_settlement_hold_minutes(
 
 def _series_settlement_hold_minutes_if_active(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
 ) -> int | None:
     """若 metadata 含系列赛热态且系列赛未完结，返回估算到结算的分钟数；否则返回 None。
 
@@ -1061,7 +1061,7 @@ def _estimate_seconds_remaining_from_state(game: object) -> int | None:
     return None
 
 
-def _is_math_locked_for_position(context: ExtensionContext) -> bool:
+def _is_math_locked_for_position(context: DecisionContext) -> bool:
     """判断当前持仓是否处于"数学锁定" — 即剩余比赛得分窗口已无法让我方输。
 
     例: MLB B9th + Under 5.5 + 总分=5 → 即使 Dbacks B9th 得 1 分,总分=6 > 5.5 输,
@@ -1199,7 +1199,7 @@ def _volleyball_seconds_remaining(state: VolleyballGameState) -> int | None:
 
 def _profit_take_metadata(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     *,
     entry_price: Decimal,
     shares: Decimal,
@@ -1232,7 +1232,7 @@ def _profit_take_metadata(
     }
 
 
-def _bid_depth_usdc(context: ExtensionContext) -> Decimal | None:
+def _bid_depth_usdc(context: DecisionContext) -> Decimal | None:
     """计算盘口 bid 侧总深度（USDC），作为市场活跃度代理。"""
     ob = context.orderbook
     if ob is None:
@@ -1246,7 +1246,7 @@ def _bid_depth_usdc(context: ExtensionContext) -> Decimal | None:
 
 def _estimated_profit_take_fill_minutes(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
 ) -> int:
     """按 bid 侧深度估算止盈 GTC SELL 的预期成交时间。
 
@@ -1262,7 +1262,7 @@ def _estimated_profit_take_fill_minutes(
 
 
 def _profit_take_target_price(
-    context: ExtensionContext,
+    context: DecisionContext,
     entry_price: Decimal,
     *,
     offset: Decimal | None = None,
@@ -1292,7 +1292,7 @@ def _profit_take_target_price(
     return cap_price_to_clob_limit(target, tick_size=tick_size)
 
 
-def _effective_tick_size(context: ExtensionContext) -> Decimal | None:
+def _effective_tick_size(context: DecisionContext) -> Decimal | None:
     """读取当前 market 或 orderbook 的最小价格跳动。"""
 
     if context.orderbook is not None and context.orderbook.tick_size is not None:

@@ -93,7 +93,7 @@ class _ShadowMarketWs:
 async def run_shadow_session(
     stream: EventStreamSource,
     *,
-    extension_hooks: Any,
+    strategy: Any,
     strategy_id: str,
     ledger: PaperVirtualLedger,
     starting_balance_usdc: Decimal,
@@ -110,7 +110,7 @@ async def run_shadow_session(
 ) -> ShadowSessionReport:
     """顺序消费事件流，返回完整 shadow 报告。
 
-    ``extension_hooks`` 由调用方提供（生产场景从 CurrentStrategy 取，测试场景可
+    ``strategy`` 由调用方提供（生产场景从 CurrentStrategy 取，测试场景可
     构造任意 hooks）。``ledger`` 用于累计成交账本，调用方可读取。``virtual_clock``
     若为 None 则使用 EventTimestampClock 跟随事件时间戳。
     """
@@ -126,7 +126,7 @@ async def run_shadow_session(
     clock = virtual_clock or EventTimestampClock()
 
     decision_service = TradingDecisionService(
-        extension_hooks=extension_hooks,
+        strategy=strategy,
         strategy_id=strategy_id,
         registry=registry,
         orderbook_reader=market_ws.snapshot,

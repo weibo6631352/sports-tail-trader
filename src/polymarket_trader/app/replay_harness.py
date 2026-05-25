@@ -6,7 +6,7 @@
     2. 改完一行策略代码后，在 ReplayHarness 上灌入旧录制 + 新 hooks。
     3. ReplayHarness 比对新旧 decision_output，输出每条 record 的 diff 分类。
 
-这是一个**离线复盘工具**，不进 P0 主链路。它故意不重建 ``ExtensionContext`` 对象，
+这是一个**离线复盘工具**，不进 P0 主链路。它故意不重建 ``DecisionContext`` 对象，
 而是直接给新 hooks 一个能反映原始 context 的轻量结构——这样开发者
 即使改了 Context 的字段顺序也能 replay 历史录制（结构性兼容兜底，避免每改一次
 context 就让整个录制库失效）。

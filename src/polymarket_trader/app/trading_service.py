@@ -28,7 +28,7 @@ from polymarket_trader.domain.order import (
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.risk import RiskDecision, RiskManager
-from polymarket_trader.extension_api.lifecycle import LifecycleEvent
+from polymarket_trader.contracts.lifecycle import LifecycleEvent
 from polymarket_trader.runtime.lifecycle_bus import LifecyclePublisher
 
 logger = logging.getLogger(__name__)

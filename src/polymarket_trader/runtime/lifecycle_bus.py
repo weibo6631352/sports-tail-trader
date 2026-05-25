@@ -1,6 +1,6 @@
 """framework 内部 lifecycle 总线实现。
 
-策略通过 ``ExtensionPorts.lifecycle`` 拿到的是 ``LifecycleBus`` Protocol 的只读视图；
+策略通过 ``RuntimePorts.lifecycle`` 拿到的是 ``LifecycleBus`` Protocol 的只读视图；
 本模块的 ``InProcessLifecycleBus`` 同时暴露 ``publish`` 给 framework 自己用，
 publish 接口被抽象为 ``LifecyclePublisher`` Protocol，让 framework 内部依赖这个
 Protocol 而不是具体实现，将来换 in-process / cross-process 实现都不破调用面。
@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from itertools import count
 from typing import Any, Protocol, runtime_checkable
 
-from polymarket_trader.extension_api.lifecycle import (
+from polymarket_trader.contracts.lifecycle import (
     LifecycleBus,
     LifecycleCallback,
     LifecycleEnvelope,

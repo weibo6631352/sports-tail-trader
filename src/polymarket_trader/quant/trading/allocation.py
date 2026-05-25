@@ -1,4 +1,4 @@
-"""把 ExtensionContext 转成候选 AllocationMarketSnapshot，并计算 skip 原因。"""
+"""把 DecisionContext 转成候选 AllocationMarketSnapshot，并计算 skip 原因。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from polymarket_trader.domain.allocation import (
 )
 from polymarket_trader.domain.market import TradingStatus
 from polymarket_trader.domain.order import OrderSide
-from polymarket_trader.extension_api import EntryCandidate, ExtensionContext
+from polymarket_trader.contracts import EntryCandidate, DecisionContext
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot
 from polymarket_trader.quant.config import CurrentStrategyConfig
@@ -27,7 +27,7 @@ from .gates import (
 )
 
 
-def _empty_sizing_plan(context: ExtensionContext, reason: str) -> AllocationPlan:
+def _empty_sizing_plan(context: DecisionContext, reason: str) -> AllocationPlan:
     """构造一个“无可分配预算”的 AllocationPlan。"""
 
     from .helpers import _metadata_decimal
@@ -43,11 +43,11 @@ def _empty_sizing_plan(context: ExtensionContext, reason: str) -> AllocationPlan
 
 
 def _candidate_snapshots(
-    context: ExtensionContext,
+    context: DecisionContext,
 ) -> tuple[AllocationMarketSnapshot, ...]:
     """从上下文中提取候选市场快照。
 
-    正常路径下，框架会把候选市场列表放在 ``ExtensionContext.entry_candidates``。
+    正常路径下，框架会把候选市场列表放在 ``DecisionContext.entry_candidates``。
     如果当前调用点没有提供这个列表，这里会退化为只用当前 market 生成一个 fallback
     snapshot，保证逻辑仍可运行。
     """
@@ -59,7 +59,7 @@ def _candidate_snapshots(
 
 
 def _fallback_snapshot(
-    context: ExtensionContext,
+    context: DecisionContext,
 ) -> AllocationMarketSnapshot | None:
     """在缺少候选市场列表时，为当前 market 构造一个最小快照。"""
 
@@ -114,7 +114,7 @@ def _entry_candidate_to_snapshot(candidate: EntryCandidate) -> AllocationMarketS
 
 def _allocation_skip_reason(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     snapshot: AllocationMarketSnapshot,
     *,
     buyable_liquidity_usdc: Decimal,
@@ -282,7 +282,7 @@ def _sizing_reason(plan: AllocationPlan, allocation: Allocation | None) -> str:
 
 
 def _is_focus_snapshot(
-    context: ExtensionContext,
+    context: DecisionContext,
     snapshot: AllocationMarketSnapshot,
 ) -> bool:
     """判断 allocation snapshot 是否对应当前触发入场判断的 token。"""

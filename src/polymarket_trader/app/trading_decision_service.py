@@ -25,15 +25,15 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import ManagedOrderIntent, Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
-from polymarket_trader.extension_api import (
+from polymarket_trader.contracts import (
     EntryCandidate,
-    ExtensionContext,
-    ExtensionDecision,
+    DecisionContext,
+    TradingDecision,
 
     MarketTokenView,
 )
-from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
-from polymarket_trader.extension_api.summary import StrategySummary
+from polymarket_trader.contracts.manual_confirmation import ManualConfirmation
+from polymarket_trader.contracts.summary import StrategySummary
 from polymarket_trader.observability.trace import ensure_trace_id
 from polymarket_trader.runtime.registry import MarketRegistry
 
@@ -61,7 +61,7 @@ class TradingDecisionService:
     def __init__(
         self,
         *,
-        extension_hooks: "CurrentStrategy",
+        strategy: "CurrentStrategy",
         strategy_id: str,
         registry: MarketRegistry | None = None,
         orderbook_reader: OrderbookReader | None = None,
@@ -69,7 +69,7 @@ class TradingDecisionService:
     ) -> None:
         if not strategy_id:
             raise ValueError("TradingDecisionService requires non-empty strategy_id")
-        self._extension_hooks = extension_hooks
+        self._extension_hooks = strategy
         self._strategy_id = strategy_id
         self._registry = registry
         self._orderbook_reader = orderbook_reader
@@ -207,13 +207,13 @@ class TradingDecisionService:
             )
         except Exception: pass
         signal_at = utc_now()
-        from polymarket_trader.extension_api import ExtensionAction, ExtensionDecision
+        from polymarket_trader.contracts import TradeAction, TradingDecision
         decision = next(
-            (a for a in quant_decision.actions if a.action == ExtensionAction.BUY),
+            (a for a in quant_decision.actions if a.action == TradeAction.BUY),
             None,
         )
         if decision is None:
-            decision = ExtensionDecision.skip(
+            decision = TradingDecision.skip(
                 reason=quant_decision.reason or "quant_no_buy_action",
             )
         self._record(
@@ -227,7 +227,7 @@ class TradingDecisionService:
         decision_kind = decision.decision_kind
         summary = decision.summary
         intent = None
-        if decision.action == ExtensionAction.BUY:
+        if decision.action == TradeAction.BUY:
             merged_decision_metadata = dict(decision.metadata)
             merged_decision_metadata["signal_at"] = signal_at
             decision_with_signal = replace(decision, metadata=merged_decision_metadata)
@@ -281,15 +281,15 @@ class TradingDecisionService:
         kelly_state: _KellySizingState,
         metadata: Mapping[str, Any],
         manual_confirmation: ManualConfirmation | None = None,
-    ) -> ExtensionContext:
-        """构造给 quant_decide hook 用的单 market_tick ExtensionContext。
+    ) -> DecisionContext:
+        """构造给 quant_decide hook 用的单 market_tick DecisionContext。
 
         历史 ``_sizing_context`` + ``_entry_decision_context`` 两份在 size_entry/
         decide_entry hook 分离时代各拼一遍；现在统一成一份，trigger_kind=market_tick。
         """
         effective_available_usdc = available_usdc if available_usdc is not None else portfolio_budget_usdc
-        # 只把"非 ExtensionContext 一等公民"的 budget 上下文塞进 metadata；Kelly 字段
-        # 已在 ExtensionContext 上有专用 attribute，不再镜像到 metadata 避免双口径漂移。
+        # 只把"非 DecisionContext 一等公民"的 budget 上下文塞进 metadata；Kelly 字段
+        # 已在 DecisionContext 上有专用 attribute，不再镜像到 metadata 避免双口径漂移。
         context_metadata: dict[str, Any] = dict(metadata)
         context_metadata.update(
             {
@@ -297,7 +297,7 @@ class TradingDecisionService:
                 "available_usdc": effective_available_usdc,
             }
         )
-        return ExtensionContext(
+        return DecisionContext(
             trace_id=trace_id,
             strategy_id=self._strategy_id,
             market=market,
@@ -387,7 +387,7 @@ class TradingDecisionService:
         )
 
 
-    def quant_decide(self, context: ExtensionContext):
+    def quant_decide(self, context: DecisionContext):
         """量化决策器——所有 WS / 周期触发统一走这里。
 
         ``context.quant_trigger_kind`` 由调用方填写（"market_tick" / "reconcile_cycle"）。
@@ -413,7 +413,7 @@ class TradingDecisionService:
         self,
         *,
         hook_name: str,
-        context: ExtensionContext,
+        context: DecisionContext,
         decision: object,
     ) -> None:
         if self._decision_recorder is None:
@@ -472,7 +472,7 @@ class TradingDecisionService:
         condition_id: str,
         market_slug: str | None,
         default_token_id: str | None,
-        decision: ExtensionDecision,
+        decision: TradingDecision,
     ) -> ManagedOrderIntent | None:
         return decision_to_managed_intent(
             trace_id=trace_id,

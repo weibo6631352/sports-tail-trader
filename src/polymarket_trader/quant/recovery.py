@@ -9,7 +9,7 @@ from polymarket_trader.domain.market import TradingStatus
 from polymarket_trader.domain.order import Order, OrderSide, OrderType
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.sports_live import LiveEvent
-from polymarket_trader.extension_api import ExtensionContext, ExtensionDecision, QuantDecision
+from polymarket_trader.contracts import DecisionContext, TradingDecision, QuantDecision
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 from polymarket_trader.quant.position_plan import cap_price_to_clob_limit, build_position_plan_metadata
@@ -20,7 +20,7 @@ from polymarket_trader.quant.trading.helpers import resolve_tick_size
 
 def build_recovery_quant_decision(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
 ) -> QuantDecision:
     """reconcile_cycle 触发：清理僵尸订单 / 历史 profit-take / pause 信号。
 
@@ -71,7 +71,7 @@ def build_recovery_quant_decision(
                 if order.condition_id == context.market.condition_id
             )
 
-    actions: list[ExtensionDecision] = []
+    actions: list[TradingDecision] = []
     abnormal_pause_reason = (
         _abnormal_live_state_pause_reason(config, context)
         or _stale_no_live_state_pause_reason(config, context)
@@ -83,7 +83,7 @@ def build_recovery_quant_decision(
             continue
         if _should_cancel_open_entry_order(config, context, order):
             actions.append(
-                ExtensionDecision.cancel(
+                TradingDecision.cancel(
                     reason="open_entry_order_detected",
                     token_id=order.token_id,
                     order_id=order_id,
@@ -96,7 +96,7 @@ def build_recovery_quant_decision(
             continue
         if not config.auto_exit_enabled and _is_open_exit_order(order) and not _is_profit_take_exit_order(order):
             actions.append(
-                ExtensionDecision.cancel(
+                TradingDecision.cancel(
                     reason="settlement_only_open_exit_order_detected",
                     token_id=order.token_id,
                     order_id=order_id,
@@ -163,7 +163,7 @@ def _is_open_entry_order(order: Order) -> bool:
 
 def _should_cancel_open_entry_order(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     order: Order,
 ) -> bool:
     """撤掉超过策略 TTL 的历史开放 BUY，避免旧 GTC 买单长期占用资金。"""
@@ -205,12 +205,12 @@ def _open_order_shares(order: Order) -> Decimal:
 
 def _recovery_profit_take_action(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     position: Position,
     *,
     uncovered_shares: Decimal,
     recovery_metadata: dict[str, object],
-) -> ExtensionDecision | None:
+) -> TradingDecision | None:
     """给历史遗留的高成本价未覆盖仓位补一张小利润 SELL。
 
     该路径只处理已经实际持仓的退出，不新增 BUY，也不绕过交易主链路。低均价仓位
@@ -257,7 +257,7 @@ def _recovery_profit_take_action(
         plan["settlement_rule"] = "keep_profit_take_order_until_fill_or_authoritative_resolution"
         plan["recovery_rule"] = "preserve_existing_profit_take_exit_order"
     exit_metadata["exit_target_price"] = str(target_price)
-    return ExtensionDecision.sell(
+    return TradingDecision.sell(
         reason="recovery_profit_take",
         token_id=position.token_id,
         price=target_price,
@@ -268,7 +268,7 @@ def _recovery_profit_take_action(
 
 
 def _recovery_profit_take_price(
-    context: ExtensionContext,
+    context: DecisionContext,
     token_id: str,
     average_price: Decimal,
 ) -> tuple[Decimal | None, str]:
@@ -285,7 +285,7 @@ def _recovery_profit_take_price(
     return tick_price, "next_tick"
 
 
-def _orderbook_for_token(context: ExtensionContext, token_id: str):
+def _orderbook_for_token(context: DecisionContext, token_id: str):
     """从恢复上下文里找到对应 token 的盘口快照。"""
 
     if context.orderbook is not None and context.orderbook.token_id == token_id:
@@ -296,7 +296,7 @@ def _orderbook_for_token(context: ExtensionContext, token_id: str):
     return None
 
 
-def _next_tick_price(context: ExtensionContext, price: Decimal) -> Decimal | None:
+def _next_tick_price(context: DecisionContext, price: Decimal) -> Decimal | None:
     """返回当前价格上方一档 tick。"""
 
     tick_size = resolve_tick_size(context.orderbook, context.market)
@@ -312,7 +312,7 @@ def _decimal_metadata_text(value: Decimal) -> str:
 
 def _stale_no_live_state_pause_reason(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
 ) -> str | None:
     """检测「赛事起始已过 stale 阈值但完全无直播状态」的 stale market。
 
@@ -346,7 +346,7 @@ def _stale_no_live_state_pause_reason(
 
 def _abnormal_live_state_pause_reason(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
 ) -> str | None:
     """根据已接入的直播状态判断是否需要暂停新增交易。"""
 
@@ -372,7 +372,7 @@ def _abnormal_live_state_pause_reason(
     return None
 
 
-def _live_state_age_seconds(context: ExtensionContext, observed_at: datetime) -> float:
+def _live_state_age_seconds(context: DecisionContext, observed_at: datetime) -> float:
     current_time = context.now or datetime.now(timezone.utc)
     if current_time.tzinfo is None:
         current_time = current_time.replace(tzinfo=timezone.utc)
@@ -407,7 +407,7 @@ def _max_live_state_age_seconds(config: CurrentStrategyConfig, game: LiveEvent) 
 
 def _recovery_metadata(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     *,
     abnormal_pause_reason: str | None,
 ) -> dict[str, object]:

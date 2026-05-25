@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping
 from uuid import uuid4
 
 from polymarket_trader.domain.account import AccountSnapshot
-from polymarket_trader.extension_api import DiscoveryQuery
+from polymarket_trader.contracts import DiscoveryQuery
 
 if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents

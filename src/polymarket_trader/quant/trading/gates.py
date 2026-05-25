@@ -10,7 +10,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from polymarket_trader.domain.order import OrderSide
-from polymarket_trader.extension_api import ExtensionContext
+from polymarket_trader.contracts import DecisionContext
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot
 from polymarket_trader.quant.config import CurrentStrategyConfig
@@ -18,7 +18,7 @@ from polymarket_trader.quant.config import CurrentStrategyConfig
 
 def _tail_pre_orderbook_skip_reason(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     snapshot: AllocationMarketSnapshot,
 ) -> str:
     """保留 stub——allocation.py 仍调用此点。

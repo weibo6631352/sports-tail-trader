@@ -12,7 +12,7 @@ from polymarket_trader.domain.order import (
     SellOrderIntent,
     TradableOrderIntent,
 )
-from polymarket_trader.extension_api import ExtensionAction, ExtensionDecision
+from polymarket_trader.contracts import TradeAction, TradingDecision
 
 
 def decision_to_trade_intent(
@@ -21,7 +21,7 @@ def decision_to_trade_intent(
     strategy_id: str,
     market: Market,
     default_token_id: str | None,
-    decision: ExtensionDecision,
+    decision: TradingDecision,
 ) -> TradableOrderIntent | None:
     intent = decision_to_managed_intent(
         trace_id=trace_id,
@@ -43,7 +43,7 @@ def decision_to_managed_intent(
     condition_id: str,
     market_slug: str | None,
     default_token_id: str | None,
-    decision: ExtensionDecision,
+    decision: TradingDecision,
 ) -> ManagedOrderIntent | None:
     if not strategy_id:
         raise ValueError("decision_to_managed_intent requires non-empty strategy_id")
@@ -51,7 +51,7 @@ def decision_to_managed_intent(
     if resolved_token_id is None:
         return None
     resolved_market_slug = decision.market_slug or market_slug
-    if decision.action == ExtensionAction.BUY:
+    if decision.action == TradeAction.BUY:
         if (
             decision.price is None
             or decision.amount_usdc is None
@@ -72,7 +72,7 @@ def decision_to_managed_intent(
             intent_tags=decision.intent_tags,
             metadata=decision.metadata,
         )
-    if decision.action == ExtensionAction.SELL:
+    if decision.action == TradeAction.SELL:
         if decision.price is None or decision.size_shares is None or decision.size_shares <= Decimal("0"):
             return None
         return SellOrderIntent(
@@ -88,7 +88,7 @@ def decision_to_managed_intent(
             intent_tags=decision.intent_tags,
             metadata=decision.metadata,
         )
-    if decision.action == ExtensionAction.CANCEL:
+    if decision.action == TradeAction.CANCEL:
         if not decision.order_id:
             return None
         return CancelOrderIntent(
@@ -100,7 +100,7 @@ def decision_to_managed_intent(
             market_slug=resolved_market_slug,
             reason=decision.reason,
         )
-    if decision.action == ExtensionAction.REPLACE:
+    if decision.action == TradeAction.REPLACE:
         if (
             not decision.order_id
             or decision.price is None

@@ -86,7 +86,7 @@ def outright_action_for_permission(permission: ExecutionPermission) -> OutrightA
     return OutrightAction.AUTO_EXECUTE
 
 
-# 同侧映射 TailAction，方便 framework 把 outright 决策转成 ExtensionDecision 时
+# 同侧映射 TailAction，方便 framework 把 outright 决策转成 TradingDecision 时
 # 用同一份枚举做下游 metadata。
 _OUTRIGHT_TO_TAIL_ACTION: dict[OutrightAction, TailAction] = {
     OutrightAction.REJECT: TailAction.REJECT,

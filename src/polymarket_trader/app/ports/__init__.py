@@ -1,4 +1,4 @@
-from polymarket_trader.app.ports.extension_ports import (
+from polymarket_trader.app.ports.runtime_ports import (
     MetricsRegistryMetricsPort,
     NullMetricsPort,
     SeasonStatePort,

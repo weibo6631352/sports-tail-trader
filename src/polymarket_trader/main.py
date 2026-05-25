@@ -561,7 +561,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # 拿到第一个权威值前，bankroll=0 → Kelly 全拒，正是安全态。
     lifecycle_bus = InProcessLifecycleBus()
     parameter_store = ParameterStore(event_bus=event_bus)
-    extension_ports = build_extension_ports(
+    runtime_ports = build_extension_ports(
         lifecycle_bus=lifecycle_bus,
         parameter_store=parameter_store,
         metrics_registry=metrics,
@@ -571,7 +571,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     from polymarket_trader.quant.config import load_current_strategy_config
     from polymarket_trader.quant.identity import STRATEGY_ID
     strategy_config = load_current_strategy_config(settings.extension_config_path)
-    extension = CurrentStrategy(config=strategy_config, ports=extension_ports)
+    extension = CurrentStrategy(config=strategy_config, ports=runtime_ports)
     extension_issues = _validate_extension_config(extension, settings)
     if extension_issues:
         raise ConfigLoadError(list(extension_issues))
@@ -805,7 +805,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         metrics=metrics,
     )
     market_service = MarketService(
-        extension_hooks=extension.hooks,
+        strategy=extension.hooks,
         registry=registry,
         market_tracker=market_ws_worker,
         account_snapshot_provider=account_state_store.snapshot,
@@ -815,7 +815,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     )
     decision_recorder = DecisionEventRecorder(outbox=outbox, strategy_id=strategy_id)
     trading_decision_service = TradingDecisionService(
-        extension_hooks=extension.hooks,
+        strategy=extension.hooks,
         strategy_id=strategy_id,
         registry=registry,
         orderbook_reader=market_ws_worker.snapshot,
@@ -930,7 +930,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         parameter_store=parameter_store,
     )
     reconcile_service = ReconcileService(
-        extension_hooks=extension.hooks,
+        strategy=extension.hooks,
         strategy_id=strategy_id,
         entry_metadata_provider=entry_metadata_for_market,
         orderbook_reader=trading_decision_service.lookup_orderbook,
@@ -1011,7 +1011,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 audit_min_interval_s=60.0,
             )
     season_state_store = SeasonStateStore()
-    bind_extension_season_state(extension_ports, season_state_store)
+    bind_extension_season_state(runtime_ports, season_state_store)
     # 注：ESPN-based season-state + series-state worker 已经删除（只服务传统
     # 体育，对当前 e-sports 100% 浪费）。store 保留，strategy ports 仍可绑，
     # 没有 writer 等于空 store——strategy 读到 None 时门控自然跳过。

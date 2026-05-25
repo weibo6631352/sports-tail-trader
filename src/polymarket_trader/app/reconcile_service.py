@@ -26,12 +26,12 @@ from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.account import AccountSnapshot, MarketPause
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
-from polymarket_trader.extension_api import (
-    ExtensionAction,
-    ExtensionDecision,
+from polymarket_trader.contracts import (
+    TradeAction,
+    TradingDecision,
 
     MarketTokenView,
-    ExtensionContext,
+    DecisionContext,
 )
 from polymarket_trader.serialization import utc_now
 
@@ -125,14 +125,14 @@ class ReconcileService:
     def __init__(
         self,
         *,
-        extension_hooks: "CurrentStrategy",
+        strategy: "CurrentStrategy",
         strategy_id: str,
         entry_metadata_provider: Callable[[Market], Mapping[str, Any]] | None = None,
         orderbook_reader: Callable[[str], OrderbookSnapshot | None] | None = None,
     ) -> None:
         if not strategy_id:
             raise ValueError("ReconcileService requires non-empty strategy_id")
-        self._extension_hooks = extension_hooks
+        self._extension_hooks = strategy
         self._strategy_id = strategy_id
         self._entry_metadata_provider = entry_metadata_provider
         self._orderbook_reader = orderbook_reader
@@ -218,7 +218,7 @@ class ReconcileService:
         )
         metadata = self._metadata_for_market(market)
         recovery = self._extension_hooks.quant_decide(
-            ExtensionContext(
+            DecisionContext(
                 trace_id=trace_id,
                 strategy_id=self._strategy_id,
                 market=market,
@@ -235,7 +235,7 @@ class ReconcileService:
         recovery_exit_tokens = {
             decision.token_id
             for decision in recovery_decisions
-            if decision.action == ExtensionAction.SELL and decision.token_id is not None
+            if decision.action == TradeAction.SELL and decision.token_id is not None
         }
         for decision in self._position_exit_decisions(
             trace_id=trace_id,
@@ -337,7 +337,7 @@ class ReconcileService:
         account_snapshot: AccountSnapshot,
         market_token_views: tuple[MarketTokenView, ...],
         metadata: Mapping[str, Any],
-    ) -> tuple[ExtensionDecision, ...]:
+    ) -> tuple[TradingDecision, ...]:
         """为已有未覆盖持仓补充退出决策。
 
         recovery 可以因为比赛结束、状态异常或 market 暂停而拒绝新入场；
@@ -345,7 +345,7 @@ class ReconcileService:
         ``decide_exit``，不在 app 层写具体策略价格或仓位规则。
         """
 
-        decisions: list[ExtensionDecision] = []
+        decisions: list[TradingDecision] = []
         for outcome in market.outcomes:
             position = account_snapshot.get_position(market.condition_id, outcome.token_id)
             if position is None or position.shares <= Decimal("0"):
@@ -359,7 +359,7 @@ class ReconcileService:
                 max(position.open_sell_shares, open_sell_shares)
             )
             quant_decision = self._extension_hooks.quant_decide(
-                ExtensionContext(
+                DecisionContext(
                     trace_id=trace_id,
                     strategy_id=self._strategy_id,
                     market=market,
@@ -376,7 +376,7 @@ class ReconcileService:
                 )
             )
             for decision in quant_decision.actions:
-                if decision.action in {ExtensionAction.SELL, ExtensionAction.REPLACE}:
+                if decision.action in {TradeAction.SELL, TradeAction.REPLACE}:
                     decisions.append(decision)
         return tuple(decisions)
 

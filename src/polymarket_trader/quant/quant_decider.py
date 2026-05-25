@@ -20,11 +20,11 @@ from decimal import Decimal, ROUND_FLOOR
 from polymarket_trader.domain.allocation import Allocation, AllocationPlan
 from polymarket_trader.domain.kelly import implied_fair_value_from_price_cap
 from polymarket_trader.domain.order import OrderSide
-from polymarket_trader.extension_api import (
+from polymarket_trader.contracts import (
     EntrySizing,
-    ExtensionContext,
-    ExtensionDecision,
-    ExtensionPorts,
+    DecisionContext,
+    TradingDecision,
+    RuntimePorts,
     QuantDecision,
 )
 
@@ -64,10 +64,10 @@ def _utc_now() -> datetime:
 
 def _maybe_reprice_stale_sell(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
+    context: DecisionContext,
     *,
     now: datetime,
-) -> ExtensionDecision | None:
+) -> TradingDecision | None:
     """检查 token 下现有 SELL 单是否价位 stale，需 cancel-replace 到 entry+offset。
 
     两条触发路径（任一命中即 replace）：
@@ -173,7 +173,7 @@ def _maybe_reprice_stale_sell(
         new_price = (raw_new_price / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
         if new_price <= Decimal("0") or new_price >= sell_price:
             continue
-        return ExtensionDecision.replace(
+        return TradingDecision.replace(
             order_id=sell.order_id,
             token_id=token_id,
             price=new_price,
@@ -198,7 +198,7 @@ def _maybe_reprice_stale_sell(
 
 def _math_lock_prob_view(
     snap: AllocationMarketSnapshot,
-    context: ExtensionContext,
+    context: DecisionContext,
 ) -> "ProbView | None":
     """math_lock fallback: 没 odds 源时用统一数学模型估真概率作 Kelly p。
 
@@ -239,7 +239,7 @@ def _math_lock_prob_view(
     )
 
 
-def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> EntrySizing:
+def size_entry(config: CurrentStrategyConfig, context: DecisionContext) -> EntrySizing:
     """为当前 market 计算本轮可用入场预算（Kelly sizing）。
 
     流程：
@@ -251,7 +251,7 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
     4. ``_apply_tail_risk_limits`` 套相关性硬上限（事件 / 联赛 / 日新增）。
     """
 
-    # EntryPlanner 是 ExtensionContext 的唯一构造方，所有 kelly_* / bankroll
+    # EntryPlanner 是 DecisionContext 的唯一构造方，所有 kelly_* / bankroll
     # 字段都在 ``_sizing_context`` 里强制写入。缺失只能是契约违反，直接抛错
     # 让 supervisor 抓到，比静默返回 missing_xxx 更早暴露问题。
     portfolio_budget_usdc = context.portfolio_budget_usdc
@@ -288,7 +288,7 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
         or kelly_min_stake_usdc is None
     ):
         raise ValueError(
-            "ExtensionContext 缺少 Kelly 配置字段——EntryPlanner 应当强制写入"
+            "DecisionContext 缺少 Kelly 配置字段——EntryPlanner 应当强制写入"
         )
     kelly_allow_round_up = (
         context.kelly_allow_round_up_to_market_min
@@ -393,7 +393,7 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
     )
 
 
-def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> ExtensionDecision:
+def decide_entry(config: CurrentStrategyConfig, context: DecisionContext) -> TradingDecision:
     """根据盘口和预算生成 BUY 决策。
 
     门禁已在 size_entry / _allocation_skip_reason 通过——这里只负责落 BUY intent
@@ -401,16 +401,16 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
     """
 
     if context.market is None or context.orderbook is None:
-        return ExtensionDecision.skip(reason="missing_market_state")
+        return TradingDecision.skip(reason="missing_market_state")
 
     best_ask = context.orderbook.best_ask
     if best_ask is None:
-        return ExtensionDecision.skip(reason="missing_best_ask")
+        return TradingDecision.skip(reason="missing_best_ask")
     entry_price = best_ask
 
     amount_usdc = context.amount_usdc
     if amount_usdc is None or amount_usdc <= Decimal("0"):
-        return ExtensionDecision.skip(reason="missing_entry_amount")
+        return TradingDecision.skip(reason="missing_entry_amount")
 
     token_id = context.token_id or context.orderbook.token_id
     decision_metadata: dict[str, object] = {}
@@ -423,7 +423,7 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
     )
     decision_metadata.update(efficiency_metadata)
     if not efficiency_allowed:
-        return ExtensionDecision.skip(reason=efficiency_reason, metadata=decision_metadata)
+        return TradingDecision.skip(reason=efficiency_reason, metadata=decision_metadata)
     decision_metadata.update(
         build_position_plan_metadata(
             config,
@@ -434,7 +434,7 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         )
     )
     _apply_profit_take_position_plan(decision_metadata)
-    from polymarket_trader.extension_api.summary import StrategySummary
+    from polymarket_trader.contracts.summary import StrategySummary
     from polymarket_trader.quant.outcomes import describe_sports_market
     descriptor = describe_sports_market(context.market)
     summary = StrategySummary(
@@ -447,7 +447,7 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
             "execution_permission": "auto_execute",
         },
     )
-    return ExtensionDecision.buy(
+    return TradingDecision.buy(
         reason="strategy_entry",
         token_id=token_id,
         price=entry_price,
@@ -460,7 +460,7 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
     )
 
 
-def _position_entry_price(context: ExtensionContext) -> Decimal | None:
+def _position_entry_price(context: DecisionContext) -> Decimal | None:
     """估算我方持仓的实际买入均价（cost / shares）。
 
     动态止盈/止损都以买入均价为基准；无持仓或数据异常（零份额/零成本）时
@@ -473,7 +473,7 @@ def _position_entry_price(context: ExtensionContext) -> Decimal | None:
     return position.cost_usdc / position.shares
 
 
-def _empty_sizing(context: ExtensionContext, *, reason: str) -> EntrySizing:
+def _empty_sizing(context: DecisionContext, *, reason: str) -> EntrySizing:
     """构造一个“无可分配预算”的占位结果。"""
 
     return EntrySizing(
@@ -494,14 +494,14 @@ class QuantDecider:
         self,
         *,
         config: CurrentStrategyConfig,
-        ports: ExtensionPorts | None = None,
+        ports: RuntimePorts | None = None,
     ) -> None:
         self._config = config
         self._ports = ports
 
     # ---- 主入口 -----------------------------------------------------
 
-    def decide(self, context: ExtensionContext) -> QuantDecision:
+    def decide(self, context: DecisionContext) -> QuantDecision:
         trigger = context.quant_trigger_kind
         if trigger == "market_tick":
             return self._decide_market_tick(context)
@@ -511,7 +511,7 @@ class QuantDecider:
 
     # ---- market_tick：盘口事件路径 ----------------------------------
 
-    def _decide_market_tick(self, context: ExtensionContext) -> QuantDecision:
+    def _decide_market_tick(self, context: DecisionContext) -> QuantDecision:
         """市场盘口事件触发：单一入口决策当前动作。
 
         分派规则：
@@ -529,7 +529,7 @@ class QuantDecider:
             return QuantDecision(actions=(), reason=decision.reason)
         return QuantDecision(actions=(decision,), reason=decision.reason)
 
-    def _decide_entry_attempt(self, context: ExtensionContext) -> ExtensionDecision:
+    def _decide_entry_attempt(self, context: DecisionContext) -> TradingDecision:
         """无持仓时的入场决策：按 market family 分派 sizing + 构造 BUY intent。
 
         - ``OUTRIGHT`` / ``SERIES`` → 走各自子策略（赛季冠军 / 系列赛 winner）
@@ -547,13 +547,13 @@ class QuantDecider:
         )
 
         if context.market is None or context.orderbook is None:
-            return ExtensionDecision.skip(reason="missing_market_state")
+            return TradingDecision.skip(reason="missing_market_state")
 
         descriptor = describe_sports_market(context.market)
         family = descriptor.market_family
 
         if family == SportsMarketFamily.ESPORTS:
-            return ExtensionDecision.skip(
+            return TradingDecision.skip(
                 reason="esports_not_auto_tradable",
                 metadata={"market_family": SportsMarketFamily.ESPORTS.value},
             )
@@ -568,7 +568,7 @@ class QuantDecider:
             sizing = size_entry(self._config, context)
 
         if sizing.allocation is None or sizing.allocation.buy_budget_usdc <= Decimal("0"):
-            return ExtensionDecision.skip(reason=sizing.reason or "no_allocation")
+            return TradingDecision.skip(reason=sizing.reason or "no_allocation")
         focus_context = replace(
             context,
             amount_usdc=sizing.allocation.buy_budget_usdc,
@@ -581,25 +581,25 @@ class QuantDecider:
             return decide_series_entry(self._config, focus_context, self._ports)
         return decide_entry(self._config, focus_context)
 
-    def _decide_position_action(self, context: ExtensionContext) -> ExtensionDecision:
+    def _decide_position_action(self, context: DecisionContext) -> TradingDecision:
         from polymarket_trader.quant.position_plan import exit_price_for_context
 
         config = self._config
         if not config.auto_exit_enabled:
-            return ExtensionDecision.skip(reason="settlement_only_exit_disabled")
+            return TradingDecision.skip(reason="settlement_only_exit_disabled")
 
         now = context.now or _utc_now()
         if context.account_snapshot is not None:
             last_reconcile = context.account_snapshot.last_reconcile_at
             if last_reconcile is None:
-                return ExtensionDecision.skip(reason="reconcile_never_completed")
+                return TradingDecision.skip(reason="reconcile_never_completed")
             if last_reconcile.tzinfo is None:
                 last_reconcile = last_reconcile.replace(tzinfo=timezone.utc)
             age = (
                 now.astimezone(timezone.utc) - last_reconcile.astimezone(timezone.utc)
             ).total_seconds()
             if age > 60.0:
-                return ExtensionDecision.skip(
+                return TradingDecision.skip(
                     reason="reconcile_stale_skip_exit",
                     metadata={"reconcile_age_seconds": str(age)},
                 )
@@ -610,13 +610,13 @@ class QuantDecider:
         elif context.position is not None:
             uncovered_shares = context.position.shares - context.position.open_sell_shares
         else:
-            return ExtensionDecision.skip(reason="missing_position_state")
+            return TradingDecision.skip(reason="missing_position_state")
 
         if uncovered_shares < Decimal("0.1"):
             replace_decision = _maybe_reprice_stale_sell(config, context, now=now)
             if replace_decision is not None:
                 return replace_decision
-            return ExtensionDecision.skip(
+            return TradingDecision.skip(
                 reason="no_uncovered_shares",
                 metadata={"uncovered_shares": str(uncovered_shares)},
             )
@@ -629,7 +629,7 @@ class QuantDecider:
             )
             and context.orderbook is None
         ):
-            return ExtensionDecision.skip(reason="position_zero_value_no_orderbook")
+            return TradingDecision.skip(reason="position_zero_value_no_orderbook")
 
         token_id = (
             context.token_id
@@ -658,7 +658,7 @@ class QuantDecider:
             if dynamic is not None:
                 decision_metadata.update(dynamic.metadata)
                 if not dynamic.should_exit:
-                    return ExtensionDecision.skip(
+                    return TradingDecision.skip(
                         reason=dynamic.reason,
                         metadata=decision_metadata,
                     )
@@ -674,7 +674,7 @@ class QuantDecider:
             tick = context.orderbook.tick_size or Decimal("0.01")
             if tick > Decimal("0"):
                 exit_price = (exit_price / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
-        return ExtensionDecision.sell(
+        return TradingDecision.sell(
             reason=exit_reason,
             token_id=token_id,
             price=exit_price,
@@ -689,6 +689,6 @@ class QuantDecider:
 
     # ---- reconcile_cycle：周期路径 ----------------------------------
 
-    def _decide_reconcile(self, context: ExtensionContext) -> QuantDecision:
+    def _decide_reconcile(self, context: DecisionContext) -> QuantDecision:
         from polymarket_trader.quant.recovery import build_recovery_quant_decision
         return build_recovery_quant_decision(self._config, context)

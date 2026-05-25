@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Mapping
 
-from polymarket_trader.extension_api import DecisionKind, ExtensionContext, ExtensionDecision, ExtensionPorts, MarketTokenView
+from polymarket_trader.contracts import DecisionKind, DecisionContext, TradingDecision, RuntimePorts, MarketTokenView
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 from polymarket_trader.quant.series.evaluator import SeriesEvaluatorInputs, evaluate_series_opportunity
@@ -18,17 +18,17 @@ from polymarket_trader.quant.trading.helpers import decimal_from_metadata
 
 def decide_series_entry(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
-    ports: ExtensionPorts | None = None,
-) -> ExtensionDecision:
+    context: DecisionContext,
+    ports: RuntimePorts | None = None,
+) -> TradingDecision:
     """按 sub_type 选取风控 + 定价配置；accepted 路径走 Kelly 分配 + risk 前置 → BUY。"""
     market = context.market
     if market is None:
-        return ExtensionDecision.skip(reason="series_missing_market")
+        return TradingDecision.skip(reason="series_missing_market")
     token_views = tuple(context.market_token_views or ())
     outcomes = market.outcomes
     if not token_views and not outcomes:
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason="series_missing_outcomes",
             metadata={"market_family": "series"},
         )
@@ -87,11 +87,11 @@ def decide_series_entry(
     if best_accept is None:
         evaluation, token_view = first_reject if first_reject else (None, None)
         if evaluation is None or token_view is None:
-            return ExtensionDecision.skip(
+            return TradingDecision.skip(
                 reason="series_no_candidates",
                 metadata={"market_family": "series", "series_sub_type": sub_type.value},
             )
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason=evaluation.reject_reason.value if evaluation.reject_reason else "series_unclassified",
             metadata={
                 "market_family": "series",
@@ -108,7 +108,7 @@ def decide_series_entry(
 
     (_edge, evaluation), token_view = best_accept
     if not auto_enabled:
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason=f"series_record_only_{permission.value}",
             metadata={
                 "market_family": "series",
@@ -130,7 +130,7 @@ def decide_series_entry(
     else:
         proposed_amount = min(settings.budget_usdc, settings.max_per_market_usdc)
     if proposed_amount <= Decimal("0"):
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason="series_budget_exhausted",
             metadata={"market_family": "series", "series_sub_type": sub_type.value},
         )
@@ -156,7 +156,7 @@ def decide_series_entry(
         ),
     )
     if risk_reject is not None:
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason=f"series_{risk_reject.value}",
             metadata={
                 "market_family": "series",
@@ -172,7 +172,7 @@ def decide_series_entry(
     # 避免因 cap > best_ask 导致 min_order_not_met 误拒。
     order_best_ask = token_view.orderbook.best_ask if token_view.orderbook is not None else None
     if order_best_ask is None:
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason="series_missing_best_ask_for_order",
             metadata={"market_family": "series", "series_sub_type": sub_type.value},
         )
@@ -193,7 +193,7 @@ def decide_series_entry(
         config.tail_series_min_expected_profit_per_day_usdc,
     )
     if not eff_passed:
-        return ExtensionDecision.skip(
+        return TradingDecision.skip(
             reason="series_capital_efficiency_below_min",
             metadata={
                 "market_family": "series",
@@ -204,7 +204,7 @@ def decide_series_entry(
         )
 
     entry_price_cap = _series_entry_price(evaluation, fallback=settings.max_entry_price)
-    return ExtensionDecision.buy(
+    return TradingDecision.buy(
         reason=f"series_{sub_type.value}_entry_accepted",
         token_id=evaluation.candidate.token_id,
         price=order_best_ask,
@@ -298,7 +298,7 @@ def _series_capital_efficiency_metadata(
     return passed, meta
 
 
-def resolve_series_sub_type_label(decision: ExtensionDecision) -> str:
+def resolve_series_sub_type_label(decision: TradingDecision) -> str:
     metadata = decision.metadata or {}
     sub_type = metadata.get("series_sub_type")
     if isinstance(sub_type, str) and sub_type:
@@ -306,7 +306,7 @@ def resolve_series_sub_type_label(decision: ExtensionDecision) -> str:
     return "unknown"
 
 
-def resolve_series_reject_label(decision: ExtensionDecision) -> str:
+def resolve_series_reject_label(decision: TradingDecision) -> str:
     metadata = decision.metadata or {}
     reason = metadata.get("series_reject_reason")
     if isinstance(reason, str) and reason:

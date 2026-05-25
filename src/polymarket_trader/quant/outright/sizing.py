@@ -6,9 +6,9 @@ import logging
 from decimal import Decimal
 
 from polymarket_trader.domain.allocation import AllocationPlan
-from polymarket_trader.extension_api import EntrySizing, ExtensionContext
+from polymarket_trader.contracts import EntrySizing, DecisionContext
 
-from polymarket_trader.extension_api import ExtensionPorts
+from polymarket_trader.contracts import RuntimePorts
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot, ProbView, kelly_plan
 from polymarket_trader.quant.config import CurrentStrategyConfig
@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 def size_outright_entry(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
-    ports: ExtensionPorts | None = None,
+    context: DecisionContext,
+    ports: RuntimePorts | None = None,
 ) -> EntrySizing:
     """用赛季赔率作为真概率（conf=1.0）喂 Kelly 公式；独立预算包络，不占 single_game 资金。"""
     budget = effective_decimal(ports, "tail_outright_budget_usdc", config.tail_outright_budget_usdc)

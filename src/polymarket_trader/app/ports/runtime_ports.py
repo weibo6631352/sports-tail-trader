@@ -1,4 +1,4 @@
-"""ExtensionPorts 的具体实现绑定 framework 内的 store / bus。
+"""RuntimePorts 的具体实现绑定 framework 内的 store / bus。
 
 历史上承载 11 个 port 的适配器；现在只保留 4 个实际被 quant 消费的：
 parameter / lifecycle / metrics / season_state。
@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from polymarket_trader.domain.sports_season import SeasonSnapshot
 from polymarket_trader.observability.metrics import MetricsRegistry
 from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
-from polymarket_trader.extension_api import ExtensionPorts
+from polymarket_trader.contracts import RuntimePorts
 
 
 class MetricsRegistryMetricsPort:
@@ -91,13 +91,13 @@ def build_extension_ports(
     lifecycle_bus: InProcessLifecycleBus | None = None,
     parameter_store: Any | None = None,
     metrics_registry: MetricsRegistry | None = None,
-) -> ExtensionPorts:
+) -> RuntimePorts:
     metrics_port = (
         MetricsRegistryMetricsPort(registry=metrics_registry)
         if metrics_registry is not None
         else NullMetricsPort()
     )
-    return ExtensionPorts(
+    return RuntimePorts(
         lifecycle=lifecycle_bus,
         parameter=ParameterStorePort(store=parameter_store) if parameter_store is not None else None,
         metrics=metrics_port,
@@ -106,7 +106,7 @@ def build_extension_ports(
 
 
 def bind_extension_season_state(
-    ports: ExtensionPorts,
+    ports: RuntimePorts,
     season_state_store: Any | None,
 ) -> None:
     """把 season_state_store 注入 ports.season_state（原地修改）。"""

@@ -12,8 +12,8 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order, OrderResult
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
-from polymarket_trader.extension_api.decisions import EntryCandidate, MarketTokenView
-from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
+from polymarket_trader.contracts.decisions import EntryCandidate, MarketTokenView
+from polymarket_trader.contracts.manual_confirmation import ManualConfirmation
 
 
 class AccountSnapshotView(Protocol):
@@ -56,7 +56,7 @@ class AccountSnapshotView(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class ExtensionContext:
+class DecisionContext:
     """框架向策略 hook 输入的上下文。所有字段直接读取，不通过 sub-view 属性中转。"""
 
     trace_id: str

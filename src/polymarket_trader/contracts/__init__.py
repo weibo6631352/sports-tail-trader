@@ -7,40 +7,40 @@ BusinessExtension / 各种 *Hooks）已删除——quant 策略直接装配，�
 
 from __future__ import annotations
 
-from polymarket_trader.extension_api.config_loader import load_extension_config, load_mapping_file
-from polymarket_trader.extension_api.context import (
+from polymarket_trader.contracts.config_loader import load_extension_config, load_mapping_file
+from polymarket_trader.contracts.context import (
     AccountSnapshotView,
-    ExtensionContext,
+    DecisionContext,
 )
-from polymarket_trader.extension_api.discovery import DiscoveryQuery
-from polymarket_trader.extension_api.decisions import (
+from polymarket_trader.contracts.discovery import DiscoveryQuery
+from polymarket_trader.contracts.decisions import (
     DecisionKind,
     EntryCandidate,
     EntrySizing,
     MarketTokenView,
     QuantDecision,
     QuantTriggerKind,
-    ExtensionAction,
-    ExtensionDecision,
+    TradeAction,
+    TradingDecision,
     UniverseDecision,
 )
-from polymarket_trader.extension_api.errors import ExtensionLoadError
-from polymarket_trader.extension_api.lifecycle import (
+from polymarket_trader.contracts.errors import ConfigFileLoadError
+from polymarket_trader.contracts.lifecycle import (
     LifecycleBus,
     LifecycleCallback,
     LifecycleEnvelope,
     LifecycleEvent,
     SubscriptionHandle,
 )
-from polymarket_trader.extension_api.live_state import LiveStateMatch
-from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
-from polymarket_trader.extension_api.ports import (
-    ExtensionPorts,
+from polymarket_trader.contracts.live_state import LiveStateMatch
+from polymarket_trader.contracts.manual_confirmation import ManualConfirmation
+from polymarket_trader.contracts.ports import (
+    RuntimePorts,
     MetricsPort,
     ParameterPort,
     SeasonStateReadPort,
 )
-from polymarket_trader.extension_api.summary import StrategySummary
+from polymarket_trader.contracts.summary import StrategySummary
 from polymarket_trader.domain.events import AuditEvent, DomainEventType, Fill
 
 __all__ = (
@@ -51,11 +51,11 @@ __all__ = (
     "DiscoveryQuery",
     "EntryCandidate",
     "EntrySizing",
-    "ExtensionAction",
-    "ExtensionContext",
-    "ExtensionDecision",
-    "ExtensionLoadError",
-    "ExtensionPorts",
+    "TradeAction",
+    "DecisionContext",
+    "TradingDecision",
+    "ConfigFileLoadError",
+    "RuntimePorts",
     "Fill",
     "LifecycleBus",
     "LifecycleCallback",

@@ -9,9 +9,9 @@ from decimal import Decimal
 
 from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.market import Market
-from polymarket_trader.extension_api import EntrySizing, ExtensionContext
+from polymarket_trader.contracts import EntrySizing, DecisionContext
 
-from polymarket_trader.extension_api import ExtensionPorts
+from polymarket_trader.contracts import RuntimePorts
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot, ProbView, kelly_plan
 from polymarket_trader.quant.config import CurrentStrategyConfig
@@ -44,7 +44,7 @@ class SeriesSubTypeSettings:
 def series_subtype_settings(
     market: Market,
     config: CurrentStrategyConfig,
-    ports: ExtensionPorts | None = None,
+    ports: RuntimePorts | None = None,
 ) -> tuple[SeriesSubType, SeriesSubTypeSettings]:
     """根据 market 的子类型分类返回对应配置包络。
 
@@ -112,8 +112,8 @@ def series_subtype_settings(
 
 def size_series_entry(
     config: CurrentStrategyConfig,
-    context: ExtensionContext,
-    ports: ExtensionPorts | None = None,
+    context: DecisionContext,
+    ports: RuntimePorts | None = None,
 ) -> EntrySizing:
     """Series Kelly sizing：evaluator 已算好的 fair_value 直接喂 Kelly（conf=1.0）。"""
     market = context.market
