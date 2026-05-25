@@ -67,6 +67,7 @@ def _context(market: Market) -> ExtensionContext:
         strategy_id=STRATEGY_ID,
         market=market,
         now=datetime(2026, 5, 11, tzinfo=timezone.utc),
+        quant_trigger_kind="reconcile_cycle",
     )
 
 
@@ -79,7 +80,7 @@ def test_recovery_pauses_single_game_when_no_feasible_source_published() -> None
     market = _single_game_market()
 
     # 先确认没有暂停信号时不会主动停。
-    decision = strategy.decide_recovery(_context(market))
+    decision = strategy.quant_decide(_context(market))
     assert decision.pause_trading is False
 
     asyncio.run(_fire(bus, LifecycleEvent.LIVE_STATE_NO_FEASIBLE_SOURCE, {
@@ -90,7 +91,7 @@ def test_recovery_pauses_single_game_when_no_feasible_source_published() -> None
         ],
     }))
 
-    decision = strategy.decide_recovery(_context(market))
+    decision = strategy.quant_decide(_context(market))
     assert decision.pause_trading is True
     assert decision.pause_reason == "sports_live_state_no_source"
 
@@ -107,7 +108,7 @@ def test_recovery_resumes_when_any_source_recovers() -> None:
         "observed_at": "2026-05-11T12:00:00+00:00",
         "source_statuses": [{"source": "espn", "health": "failed"}],
     }))
-    assert strategy.decide_recovery(_context(market)).pause_trading is True
+    assert strategy.quant_decide(_context(market)).pause_trading is True
 
     # 同事件名再次发布，但这次至少一个源恢复 → 清掉暂停标志。
     asyncio.run(_fire(bus, LifecycleEvent.LIVE_STATE_NO_FEASIBLE_SOURCE, {
@@ -117,7 +118,7 @@ def test_recovery_resumes_when_any_source_recovers() -> None:
             {"source": "sofascore", "health": "success_with_live_data"},
         ],
     }))
-    assert strategy.decide_recovery(_context(market)).pause_trading is False
+    assert strategy.quant_decide(_context(market)).pause_trading is False
 
 
 async def _fire(bus: _FakeLifecycleBus, event: LifecycleEvent, payload: dict) -> None:

@@ -10,8 +10,8 @@ from polymarket_trader.extension_api.context import AccountSnapshotView, Extensi
 from polymarket_trader.extension_api.live_state import SeriesState
 from polymarket_trader.extension_api.decisions import (
     EntrySizing,
-    RecoveryDecision,
     ExtensionDecision,
+    QuantDecision,
     UniverseDecision,
 )
 from polymarket_trader.extension_api.discovery import DiscoveryQuery
@@ -33,11 +33,17 @@ class ExtensionHooks(Protocol):
 
     def decide_entry(self, context: ExtensionContext) -> ExtensionDecision: ...
 
-    def decide_exit(self, context: ExtensionContext) -> ExtensionDecision: ...
+    def quant_decide(self, context: ExtensionContext) -> QuantDecision:
+        """量化决策器——入场后所有 WS / 周期触发的决策统一入口。
 
-    def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision: ...
+        ``context.quant_trigger_kind`` 指明本次触发源：
+        - ``"orderbook_tick"``：market_ws 盘口事件，主要做 SELL 价跟随
+        - ``"order_fill"``：成交事件，主要做跟单（BUY 后挂 GTC SELL）
+        - ``"reconcile_cycle"``：周期性扫账户，主要做 recovery（清理僵尸 / 覆盖裸单）
 
-    def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]: ...
+        返回 QuantDecision，actions 可为 0/1/N 个 intent。
+        """
+        ...
 
     def should_keep_tracking(
         self,

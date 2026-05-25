@@ -18,7 +18,7 @@ from polymarket_trader.extension_api import ExtensionContext
 from polymarket_trader.extension_api.decisions import (
     EntrySizing,
     ExtensionDecision,
-    RecoveryDecision,
+    QuantDecision,
     UniverseDecision,
 )
 from polymarket_trader.runtime.account_state import AccountStateStore
@@ -52,14 +52,8 @@ class _NoopHooks:
     def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
         return ExtensionDecision.skip(reason="test")
 
-    def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
-        return ExtensionDecision.skip(reason="test")
-
-    def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:
-        return RecoveryDecision(reason="test")
-
-    def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
-        return ()
+    def quant_decide(self, context: ExtensionContext) -> QuantDecision:
+        return QuantDecision(reason="test")
 
     def should_keep_tracking(self, market: Market, account_snapshot: AccountSnapshot | None) -> bool:
         return False
@@ -78,9 +72,11 @@ class _CaptureRecoveryHooks(_NoopHooks):
     def __init__(self) -> None:
         self.recovery_context: ExtensionContext | None = None
 
-    def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:
-        self.recovery_context = context
-        return RecoveryDecision(reason="captured")
+    def quant_decide(self, context: ExtensionContext) -> QuantDecision:
+        if context.quant_trigger_kind == "reconcile_cycle":
+            self.recovery_context = context
+            return QuantDecision(reason="captured")
+        return QuantDecision()
 
 
 class _CountingGammaClient:
@@ -192,25 +188,36 @@ class _OpenOrdersClient:
 
 
 class _TerminalLiveStateHooks(_NoopHooks):
-    def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:
-        return RecoveryDecision(
-            reason="test",
-            pause_trading=True,
-            pause_reason="sports_live_state_ended",
-        )
+    def quant_decide(self, context: ExtensionContext) -> QuantDecision:
+        if context.quant_trigger_kind == "reconcile_cycle":
+            return QuantDecision(
+                reason="test",
+                pause_trading=True,
+                pause_reason="sports_live_state_ended",
+            )
+        return QuantDecision()
 
 
 class _TerminalLiveStateExitHooks(_TerminalLiveStateHooks):
-    def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
-        assert context.position is not None
-        return ExtensionDecision.sell(
-            reason="strategy_exit",
-            token_id=context.position.token_id,
-            price=Decimal("0.99"),
-            size_shares=context.position.shares - context.position.open_sell_shares,
-            market_slug=context.market.market_slug if context.market is not None else None,
-            metadata={"exit_trigger": context.metadata.get("exit_trigger")},
-        )
+    def quant_decide(self, context: ExtensionContext) -> QuantDecision:
+        if context.quant_trigger_kind == "reconcile_cycle":
+            return QuantDecision(
+                reason="test",
+                pause_trading=True,
+                pause_reason="sports_live_state_ended",
+            )
+        if context.quant_trigger_kind == "orderbook_tick":
+            assert context.position is not None
+            sell = ExtensionDecision.sell(
+                reason="strategy_exit",
+                token_id=context.position.token_id,
+                price=Decimal("0.99"),
+                size_shares=context.position.shares - context.position.open_sell_shares,
+                market_slug=context.market.market_slug if context.market is not None else None,
+                metadata={"exit_trigger": context.metadata.get("exit_trigger")},
+            )
+            return QuantDecision(actions=(sell,), reason="strategy_exit")
+        return QuantDecision()
 
 
 def _market(index: int) -> Market:

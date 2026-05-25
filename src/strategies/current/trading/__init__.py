@@ -2,13 +2,13 @@
 
 子模块：
 - helpers: metadata 工具、enrich_decision、bid/tick fallback
-- hooks: size_entry / decide_entry / decide_exit 三个入场/退出 hook
-- follow_up: 成交后续动作（profit-take / auto-exit）
+- hooks: size_entry / decide_entry 入场 hook
+- quant_decide: 量化决策器（Workflow 2 统一入口）
 """
 
 from __future__ import annotations
 
-from .follow_up import decide_follow_up
-from .hooks import decide_entry, decide_exit, size_entry
+from .hooks import decide_entry, size_entry
+from .quant_decide import quant_decide
 
-__all__ = ["decide_entry", "decide_exit", "decide_follow_up", "size_entry"]
+__all__ = ["decide_entry", "quant_decide", "size_entry"]

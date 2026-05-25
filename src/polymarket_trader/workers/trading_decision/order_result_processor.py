@@ -354,7 +354,7 @@ class TradingOrderResultProcessor:
             condition_id=order_result.condition_id,
             token_id=order_result.token_id,
         )
-        follow_up_decisions = self._trading_decision_service.decide_follow_up(
+        quant_decision = self._trading_decision_service.quant_decide(
             ExtensionContext(
                 trace_id=order_result.trace_id,
                 strategy_id=self._trading_decision_service.strategy_id,
@@ -382,8 +382,10 @@ class TradingOrderResultProcessor:
                     else ()
                 ),
                 order_result=order_result,
+                quant_trigger_kind="order_fill",
             )
         )
+        follow_up_decisions = quant_decision.actions
         for decision in follow_up_decisions:
             intent = self._trading_decision_service.build_intent_from_decision(
                 trace_id=order_result.trace_id,

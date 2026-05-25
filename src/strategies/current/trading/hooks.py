@@ -22,7 +22,7 @@ from strategies.current.allocation import (
     kelly_plan,
 )
 from strategies.current.config import CurrentStrategyConfig
-from strategies.current.position_plan import build_position_plan_metadata, exit_price_for_context
+from strategies.current.position_plan import build_position_plan_metadata
 
 from .allocation import (
     _allocation_skip_reason,
@@ -38,12 +38,10 @@ from .allocation import (
 from .exit_overlay import (
     _apply_profit_take_position_plan,
     _capital_efficiency_gate,
-    evaluate_dynamic_exit,
 )
 from .gates import (
     _ask_depth_notional,
 )
-from .helpers import _metadata_text
 from .risk_limits import _apply_tail_risk_limits
 
 logger = logging.getLogger(__name__)
@@ -448,129 +446,6 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         market_slug=context.market.market_slug,
         metadata=decision_metadata,
         summary=summary,
-    )
-
-
-def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> ExtensionDecision:
-    """根据持仓状态生成 SELL 决策。"""
-
-    if not config.auto_exit_enabled:
-        return ExtensionDecision.skip(reason="settlement_only_exit_disabled")
-
-    # 实盘双挂 bug 根因:backend 重启后 in-memory open_orders=[] (未加载),
-    # exit overlay 看 position.open_sell_shares=0 算 uncovered=shares 全量,
-    # 又挂一笔 SELL → 链上已经有的 SELL(用户手动或前一次实例挂的)被重复。
-    # 等 reconcile 完成把链上 open_orders 同步进内存后 open_sell_shares 才对。
-    # 这里硬性要求 last_reconcile_at 在 reconcile_freshness_seconds 窗口内才允许
-    # 挂 SELL,否则 skip 等下一周期。reconcile 周期 ~30s,给 2x 余量 60s。
-    now = context.now or _utc_now()
-    if context.account_snapshot is not None:
-        last_reconcile = context.account_snapshot.last_reconcile_at
-        if last_reconcile is None:
-            return ExtensionDecision.skip(reason="reconcile_never_completed")
-        if last_reconcile.tzinfo is None:
-            last_reconcile = last_reconcile.replace(tzinfo=timezone.utc)
-        age = (now.astimezone(timezone.utc) - last_reconcile.astimezone(timezone.utc)).total_seconds()
-        if age > 60.0:
-            return ExtensionDecision.skip(
-                reason="reconcile_stale_skip_exit",
-                metadata={"reconcile_age_seconds": str(age)},
-            )
-
-    size_shares = context.size_shares
-    if size_shares is not None and size_shares > Decimal("0"):
-        uncovered_shares = size_shares
-    elif context.position is not None:
-        uncovered_shares = context.position.shares - context.position.open_sell_shares
-    else:
-        return ExtensionDecision.skip(reason="missing_position_state")
-    # position.shares 4 位小数 vs chain open_sell 2 位小数：差值常 < 0.01 视为已覆盖。
-    # 这种 sliver 没法挂有效 SELL（min_order_size=5），但旧 SELL 价仍可能 stale 需要
-    # reprice，所以走 reprice 检查而非"挂新 SELL"路径。
-    min_meaningful_uncovered = Decimal("0.1")
-    if uncovered_shares < min_meaningful_uncovered:
-        # 全量 size 已被 open SELL 覆盖（或差值过小无法挂新 SELL）。
-        # 但 SELL 价位可能 stale (挂 $0.99 等结算，而当前 fair_value 已跌穿)→
-        # 检查是否需要 cancel-replace 到 fair_value × 0.97 + entry+offset 取大。
-        replace_decision = _maybe_reprice_stale_sell(config, context, now=now)
-        if replace_decision is not None:
-            return replace_decision
-        return ExtensionDecision.skip(
-            reason="no_uncovered_shares",
-            metadata={"uncovered_shares": str(uncovered_shares)},
-        )
-
-    # 跳过已结算/关闭市场中的僵尸仓位：当前值为 0 且盘口不存在，
-    # 说明市场已结束且无流动性，此时挂 SELL 只会被立即拒绝。
-    if (
-        context.position is not None
-        and (context.position.current_value is None or context.position.current_value <= Decimal("0"))
-        and context.orderbook is None
-    ):
-        return ExtensionDecision.skip(reason="position_zero_value_no_orderbook")
-
-    token_id = (
-        context.token_id
-        or (context.position.token_id if context.position is not None else None)
-        or _metadata_text(context, "token_id")
-    )
-    # entry_price 先算出来 → 同时喂给 position_plan metadata 和静态 exit_price，
-    # 确保 build_position_plan_metadata + exit_price_for_context 都走 entry+offset，
-    # 而不是 fallback 到 config.exit_no_price ($0.99) 永远等结算。
-    entry_price = _position_entry_price(context)
-    decision_metadata = build_position_plan_metadata(
-        config,
-        context,
-        token_id=token_id,
-        source_reason="strategy_exit",
-        target_size_shares=uncovered_shares,
-        entry_price=entry_price,
-    )
-
-    # 动态退出：有实时盘口时每个决策周期重估退出价/退出时机，结果优先于
-    # 旧的静态 _profit_take_target_price。无盘口时返回 None，退回静态退出价。
-    exit_price = exit_price_for_context(config, context, entry_price=entry_price)
-    exit_reason = "strategy_exit"
-    if entry_price is not None:
-        dynamic = evaluate_dynamic_exit(
-            config,
-            context,
-            token_id=token_id,
-            entry_price=entry_price,
-        )
-        if dynamic is not None:
-            decision_metadata.update(dynamic.metadata)
-            if not dynamic.should_exit:
-                # 本周期 HOLD：不挂 SELL，让头寸继续持有等待更优出价或结算。
-                return ExtensionDecision.skip(
-                    reason=dynamic.reason,
-                    metadata=decision_metadata,
-                )
-            assert dynamic.exit_price is not None  # should_exit=True 时 exit_price 必有值
-            exit_price = dynamic.exit_price
-            exit_reason = dynamic.reason
-            decision_metadata["exit_target_price"] = str(exit_price)
-            plan = decision_metadata.get("position_plan")
-            if isinstance(plan, dict):
-                plan["target_exit_price"] = str(exit_price)
-
-    # 强制 floor 到 orderbook.tick_size：所有上游 SELL 价格计算（dynamic exit
-    # quantize 到 0.001 / clearing_price 任意精度 / fair × 0.95 等）都可能产出
-    # 非 tick 倍数价，进 RiskManager 必被 tick_size_invalid 拒。在 SELL decision
-    # 唯一出口统一 floor 是最干净的修复——所有 SELL 路径自动获得保护。
-    if exit_price is not None and context.orderbook is not None:
-        tick = context.orderbook.tick_size or Decimal("0.01")
-        if tick > Decimal("0"):
-            exit_price = (exit_price / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
-    return ExtensionDecision.sell(
-        reason=exit_reason,
-        token_id=token_id,
-        price=exit_price,
-        size_shares=uncovered_shares,
-        market_slug=(
-            context.market.market_slug if context.market is not None else _metadata_text(context, "market_slug")
-        ),
-        metadata=decision_metadata,
     )
 
 

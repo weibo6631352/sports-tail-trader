@@ -32,7 +32,7 @@ from polymarket_trader.domain.order import (
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.state_machine import MarketLifecycle
 from polymarket_trader.domain.account import AccountSnapshot
-from polymarket_trader.extension_api import ExtensionAction, ExtensionContext, MarketTokenView
+from polymarket_trader.extension_api import ExtensionAction, ExtensionContext, ExtensionDecision, MarketTokenView
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.event_bus import EventBus
 from .event_payloads import (
@@ -785,7 +785,7 @@ class TradingDecisionWorker:
         direction = self._fetch_orderbook_direction(position.token_id)
         if direction is not None:
             exit_metadata["orderbook_direction"] = direction
-        decision = self._trading_decision_service.decide_exit(
+        quant_decision = self._trading_decision_service.quant_decide(
             ExtensionContext(
                 trace_id=event.trace_id,
                 strategy_id=self._trading_decision_service.strategy_id,
@@ -802,9 +802,16 @@ class TradingDecisionWorker:
                 account_snapshot=snapshot,
                 position=position,
                 open_orders=open_orders,
+                quant_trigger_kind="orderbook_tick",
                 metadata=exit_metadata,
             )
         )
+        # orderbook_tick 路径下最多产出 1 个 action；为兼容旧 SELL/REPLACE
+        # 分发，把 QuantDecision 拆成单一 decision 给后续 intent 转换。
+        if quant_decision.actions:
+            decision = quant_decision.actions[0]
+        else:
+            decision = ExtensionDecision.skip(reason=quant_decision.reason or "quant_no_action")
         # 缓存决策 metadata 供 /positions/signals admin endpoint 暴露。每次
         # decide_exit 后更新当前 token 的 signals 快照，UI/操盘人可实时看到
         # 5 类投票 + 流动性 tier + math_lock 是否支持 + fair_value 来源。

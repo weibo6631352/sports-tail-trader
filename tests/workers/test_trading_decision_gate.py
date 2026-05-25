@@ -67,37 +67,39 @@ class _ExitDecisionService:
     def lookup_orderbook(self, token_id: str) -> OrderbookSnapshot | None:
         return self.orderbook if token_id == self.orderbook.token_id else None
 
-    def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
-        self.exit_calls += 1
-        if context.position is None:
-            return ExtensionDecision.skip(reason="missing_position_state")
-        uncovered = context.position.shares - context.position.open_sell_shares
-        if uncovered <= Decimal("0"):
-            return ExtensionDecision.skip(reason="no_uncovered_shares")
-        return ExtensionDecision.sell(
-            reason="strategy_exit",
-            token_id=context.position.token_id,
-            price=Decimal("0.99"),
-            size_shares=uncovered,
-            market_slug=None if context.market is None else context.market.market_slug,
-            metadata={"exit_source": "unit_test"},
-        )
-
-    def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
-        if context.order_result is None or context.order_result.side != OrderSide.BUY:
-            return ()
-        if context.order_result.matched_shares <= Decimal("0"):
-            return ()
-        return (
-            ExtensionDecision.sell(
+    def quant_decide(self, context: ExtensionContext):
+        from polymarket_trader.extension_api.decisions import QuantDecision
+        if context.quant_trigger_kind == "orderbook_tick":
+            self.exit_calls += 1
+            if context.position is None:
+                return QuantDecision(reason="missing_position_state")
+            uncovered = context.position.shares - context.position.open_sell_shares
+            if uncovered <= Decimal("0"):
+                return QuantDecision(reason="no_uncovered_shares")
+            sell = ExtensionDecision.sell(
+                reason="strategy_exit",
+                token_id=context.position.token_id,
+                price=Decimal("0.99"),
+                size_shares=uncovered,
+                market_slug=None if context.market is None else context.market.market_slug,
+                metadata={"exit_source": "unit_test"},
+            )
+            return QuantDecision(actions=(sell,), reason="strategy_exit")
+        if context.quant_trigger_kind == "order_fill":
+            if context.order_result is None or context.order_result.side != OrderSide.BUY:
+                return QuantDecision()
+            if context.order_result.matched_shares <= Decimal("0"):
+                return QuantDecision()
+            sell = ExtensionDecision.sell(
                 reason="strategy_exit",
                 token_id=context.order_result.token_id,
                 price=Decimal("0.99"),
                 size_shares=context.order_result.matched_shares,
                 market_slug=self.market.market_slug,
                 metadata={"exit_source": "unit_test_follow_up"},
-            ),
-        )
+            )
+            return QuantDecision(actions=(sell,), reason="strategy_exit")
+        return QuantDecision()
 
     def build_intent_from_decision(
         self,
@@ -170,8 +172,9 @@ class _ScaleInDecisionService:
     def lookup_orderbook(self, token_id: str) -> OrderbookSnapshot | None:
         return self.orderbook if token_id == self.orderbook.token_id else None
 
-    def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
-        return ()
+    def quant_decide(self, context: ExtensionContext):
+        from polymarket_trader.extension_api.decisions import QuantDecision
+        return QuantDecision()
 
 
 class _RetryableEntryDecisionService:
@@ -230,8 +233,9 @@ class _RetryableEntryDecisionService:
                 return orderbook
         return None
 
-    def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
-        return ()
+    def quant_decide(self, context: ExtensionContext):
+        from polymarket_trader.extension_api.decisions import QuantDecision
+        return QuantDecision()
 
 
 class _LiveSellExecutor:

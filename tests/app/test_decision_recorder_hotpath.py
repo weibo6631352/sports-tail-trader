@@ -85,7 +85,7 @@ def test_record_swallows_outbox_failure_to_protect_hot_path() -> None:
     recorder = DecisionEventRecorder(strategy_id="sports_tail", outbox=_BrokenOutbox())
     record = build_decision_record_from_hook(
         strategy_id="sports_tail",
-        hook_name="decide_exit",
+        hook_name="quant_decide",
         trace_id="trace-2",
         context={"market": "m2"},
         decision={"action": "skip"},

@@ -66,7 +66,7 @@ from polymarket_trader.extension_api import (
     ExtensionPorts,
     ExtensionSpec,
     LiveStateHooks,
-    RecoveryDecision,
+    QuantDecision,
     UniverseDecision,
 )
 from polymarket_trader.domain.allocation import AllocationPlan
@@ -113,14 +113,9 @@ class {class_name}Strategy:
     def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
         return ExtensionDecision.skip(reason="{name}_not_implemented")
 
-    def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
-        return ExtensionDecision.skip(reason="{name}_not_implemented")
-
-    def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
-        return ()
-
-    def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:
-        return RecoveryDecision()
+    def quant_decide(self, context: ExtensionContext) -> QuantDecision:
+        """量化决策器——按 context.quant_trigger_kind 分派持仓决策。"""
+        return QuantDecision()
 
     # --- tracking ---
 

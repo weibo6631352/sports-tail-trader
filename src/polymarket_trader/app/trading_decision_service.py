@@ -94,25 +94,18 @@ class TradingDecisionService:
             manual_confirmation=manual_confirmation,
         )
 
-    def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
-        import time as _time
-        t0 = _time.perf_counter()
-        decisions = self._extension_hooks.decide_follow_up(context)
-        self._record_hook_latency("decide_follow_up", _time.perf_counter() - t0)
-        self._record(hook_name="decide_follow_up", context=context, decision=decisions)
-        return decisions
+    def quant_decide(self, context: ExtensionContext):
+        """量化决策器——Workflow 2 所有 WS / 周期触发统一走这里。
 
-    def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
-        """根据当前热态持仓生成退出决策。
-
-        该方法只桥接策略 hook，不直接解释具体策略字段；调用侧仍需把
-        返回的决策转换为受控 intent，并统一经过 TradingService/RiskManager。
+        ``context.quant_trigger_kind`` 由调用方填写（"orderbook_tick" /
+        "order_fill" / "reconcile_cycle"）。返回 QuantDecision；调用侧把
+        ``actions`` 转 intent 走统一 TradingService/RiskManager。
         """
         import time as _time
         t0 = _time.perf_counter()
-        decision = self._extension_hooks.decide_exit(context)
-        self._record_hook_latency("decide_exit", _time.perf_counter() - t0)
-        self._record(hook_name="decide_exit", context=context, decision=decision)
+        decision = self._extension_hooks.quant_decide(context)
+        self._record_hook_latency("quant_decide", _time.perf_counter() - t0)
+        self._record(hook_name="quant_decide", context=context, decision=decision)
         return decision
 
     @staticmethod

@@ -27,7 +27,7 @@ from polymarket_trader.extension_api import (
     ExtensionSpec,
     LiveStateHooks,
     LiveStateMatch,
-    RecoveryDecision,
+    QuantDecision,
     ExtensionContext,
     ExtensionDecision,
     ExtensionPorts,
@@ -55,7 +55,6 @@ from strategies.current.outright import (
 from strategies.current.outright.match import season_odds_from_metadata
 from strategies.current.outright.team_resolver import resolve_market_team_debug
 from strategies.current.parameter_overrides import active_ports_scope
-from strategies.current.recovery import decide_recovery
 from strategies.current.series import (
     decide_series_entry,
     resolve_series_reject_label,
@@ -66,7 +65,7 @@ from strategies.current.series import (
 from strategies.current.series.classifier import classify_series_sub_type
 from strategies.current.series.types import SeriesSubType
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
-from strategies.current.trading import decide_entry, decide_exit, decide_follow_up, size_entry
+from strategies.current.trading import decide_entry, quant_decide, size_entry
 from strategies.current.trading.helpers import enrich_decision
 
 logger = logging.getLogger(__name__)
@@ -428,34 +427,40 @@ class CurrentStrategy:
         with active_ports_scope(self._ports):
             return enrich_decision(decide_entry(self._config, context), default_kind=DecisionKind.ENTRY)
 
-    def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
-        with active_ports_scope(self._ports):
-            return enrich_decision(decide_exit(self._config, context), default_kind=DecisionKind.EXIT)
+    def quant_decide(self, context: ExtensionContext) -> QuantDecision:
+        """量化决策器——按 trigger_kind 分派内部子流程。
 
-    def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
-        return decide_follow_up(self._config, context)
-
-    def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:
-        """额外路径：全源不可用时，single_game 市场主动暂停交易。"""
-        if self._live_state_no_feasible_source:
+        ``context.quant_trigger_kind`` ∈ {"orderbook_tick", "order_fill",
+        "reconcile_cycle"}；reconcile 路径下还会处理 single_game live source
+        全断 → pause_trading 的全局降级信号。
+        """
+        # 全源不可用时，single_game 市场主动暂停交易（仅 reconcile_cycle 触发时有意义）。
+        if (
+            context.quant_trigger_kind == "reconcile_cycle"
+            and self._live_state_no_feasible_source
+        ):
             descriptor = describe_sports_market(context.market) if context.market else None
             family = descriptor.market_family if descriptor is not None else None
             if family == SportsMarketFamily.SINGLE_GAME:
-                return RecoveryDecision(
+                return QuantDecision(
                     reason="sports_live_state_no_source",
                     actions=(),
                     pause_trading=True,
                     pause_reason="sports_live_state_no_source",
                 )
-        recovery = decide_recovery(self._config, context)
-        if not recovery.actions:
-            return recovery
-        enriched = tuple(enrich_decision(action, default_kind=DecisionKind.RECOVERY) for action in recovery.actions)
-        return RecoveryDecision(
-            reason=recovery.reason,
+        with active_ports_scope(self._ports):
+            result = quant_decide(self._config, context)
+        if not result.actions:
+            return result
+        enriched = tuple(
+            enrich_decision(action, default_kind=DecisionKind.EXIT)
+            for action in result.actions
+        )
+        return QuantDecision(
+            reason=result.reason,
             actions=enriched,
-            pause_trading=recovery.pause_trading,
-            pause_reason=recovery.pause_reason,
+            pause_trading=result.pause_trading,
+            pause_reason=result.pause_reason,
         )
 
     def should_keep_tracking(

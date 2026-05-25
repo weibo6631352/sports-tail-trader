@@ -9,7 +9,7 @@ from polymarket_trader.domain.market import TradingStatus
 from polymarket_trader.domain.order import Order, OrderSide, OrderType
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.sports_live import LiveEvent
-from polymarket_trader.extension_api import RecoveryDecision, ExtensionContext, ExtensionDecision
+from polymarket_trader.extension_api import ExtensionContext, ExtensionDecision, QuantDecision
 
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.position_plan import cap_price_to_clob_limit, build_position_plan_metadata
@@ -18,12 +18,17 @@ from strategies.current.tail import LiveGameStatus, live_game_state_from_metadat
 from strategies.current.trading.helpers import resolve_tick_size
 
 
-def decide_recovery(
+def build_recovery_quant_decision(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
-) -> RecoveryDecision:
+) -> QuantDecision:
+    """reconcile_cycle 触发：清理僵尸订单 / 历史 profit-take / pause 信号。
+
+    历史名 ``decide_recovery``，现由 ``quant_decide`` 在 trigger_kind=
+    ``reconcile_cycle`` 时调用。返回 QuantDecision 而非旧 RecoveryDecision。
+    """
     if context.market is None:
-        return RecoveryDecision(reason="missing_market_state")
+        return QuantDecision(reason="missing_market_state")
 
     managed_token_ids = {target.token_id for target in tail_token_targets(context.market)}
     missing_target = not managed_token_ids
@@ -138,7 +143,7 @@ def decide_recovery(
     } or (
         account_snapshot is not None and account_snapshot.is_market_paused(context.market.condition_id)
     ) or abnormal_pause_reason is not None or missing_target
-    return RecoveryDecision(
+    return QuantDecision(
         reason="strategy_recovery",
         actions=tuple(actions),
         pause_trading=pause_trading,

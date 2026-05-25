@@ -11,7 +11,7 @@ from polymarket_trader.extension_api import ExtensionContext
 from polymarket_trader.extension_api.decisions import (
     EntrySizing,
     ExtensionDecision,
-    RecoveryDecision,
+    QuantDecision,
     UniverseDecision,
 )
 from polymarket_trader.runtime.registry import MarketRegistry
@@ -31,14 +31,8 @@ class _IncludeAllHooks:
     def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
         return ExtensionDecision.skip(reason="test")
 
-    def decide_exit(self, context: ExtensionContext) -> ExtensionDecision:
-        return ExtensionDecision.skip(reason="test")
-
-    def decide_recovery(self, context: ExtensionContext) -> RecoveryDecision:
-        return RecoveryDecision(reason="test")
-
-    def decide_follow_up(self, context: ExtensionContext) -> tuple[ExtensionDecision, ...]:
-        return ()
+    def quant_decide(self, context: ExtensionContext) -> QuantDecision:
+        return QuantDecision(reason="test")
 
     def should_keep_tracking(self, market: Market, account_snapshot: AccountSnapshot | None) -> bool:
         return False

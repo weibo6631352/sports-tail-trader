@@ -87,5 +87,7 @@ class ExtensionContext:
     amount_usdc: Decimal | None = None
     size_shares: Decimal | None = None
     manual_confirmation: ManualConfirmation | None = None
+    # quant_decide 触发源——仅 Workflow 2 (WS / 周期 触发) 使用；entry path 不填。
+    quant_trigger_kind: str = ""
     metadata: Mapping[str, Any] = field(default_factory=dict)
 

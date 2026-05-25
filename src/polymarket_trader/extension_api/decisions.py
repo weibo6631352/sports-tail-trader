@@ -21,6 +21,17 @@ class ExtensionAction(StrEnum):
     REPLACE = "replace"
 
 
+class QuantTriggerKind(StrEnum):
+    """量化决策器触发源——决定 quant_decide 内部该看什么、产出什么动作。"""
+
+    # market_ws book / price_change tick：每个盘口事件触发；持仓 token 才有意义。
+    ORDERBOOK_TICK = "orderbook_tick"
+    # user_ws order fill：BUY/SELL 成交后立即触发；用来挂跟单 SELL / 处理部分成交。
+    ORDER_FILL = "order_fill"
+    # reconcile 周期（默认 40s）：用来清理僵尸订单 / 覆盖裸持仓 / 必要时 pause。
+    RECONCILE_CYCLE = "reconcile_cycle"
+
+
 class DecisionKind(StrEnum):
     """策略决策的语义分类。framework 用 decision_kind 而不是 metadata 字符串
     判断"该决策是入场 / 加仓 / 退场 / 跟单 / 恢复"。策略下决策时必须显式声明。"""
@@ -246,9 +257,20 @@ class EntrySizing:
 
 
 @dataclass(frozen=True, slots=True)
-class RecoveryDecision:
-    reason: str = ""
+class QuantDecision:
+    """量化决策器输出——入场后所有 WS / 周期触发的决策统一返回此结构。
+
+    actions:
+        本次 trigger 下产生的 0/1/N 个 intent（SELL / replace / cancel / cover）。
+    reason:
+        决策理由，写入 audit。空字符串表示无理由（actions 也通常为空）。
+    pause_trading / pause_reason:
+        仅 reconcile_cycle 触发时使用——量化决策器发现系统性异常（如直播源全断、
+        市场状态不一致）时，主动让 supervisor 暂停新入场。
+    """
+
     actions: tuple[ExtensionDecision, ...] = ()
+    reason: str = ""
     pause_trading: bool = False
     pause_reason: str = ""
 
