@@ -165,7 +165,7 @@ def _live_source_gap_scope_markets(runtime: Any, markets: Sequence[Market]) -> t
     family == single_game 的子集。
     """
 
-    hooks = _runtime_extension_hooks(runtime)
+    hooks = _runtime_strategy(runtime)
     if hooks is None:
         return tuple(markets)
     scoped: list[Market] = []
@@ -184,12 +184,12 @@ def _live_source_gap_scope_markets(runtime: Any, markets: Sequence[Market]) -> t
     return tuple(scoped)
 
 
-def _runtime_extension_hooks(runtime: RuntimeComponents) -> Any | None:
-    """提取运行时已装配的扩展 hooks。
+def _runtime_strategy(runtime: RuntimeComponents) -> Any | None:
+    """提取运行时已装配的策略实例。
 
-    Admin 查询不直接依赖具体策略包；extension 不可用时（无配置扩展）从 MarketService
-    读取同一份 universe hooks。RuntimeError: extension property 无扩展时抛；返回
-    None 让调用方退回全量 markets 诊断。
+    Admin 查询不直接依赖具体策略包；strategy 不可用时从 MarketService 读取
+    同一份 universe hooks。RuntimeError/AttributeError 时返回 None，让调用方
+    退回全量 markets 诊断。
     """
 
     try:

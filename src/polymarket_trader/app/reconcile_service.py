@@ -11,7 +11,7 @@ from enum import StrEnum
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
-from polymarket_trader.app.extension_intent_builder import decision_to_managed_intent
+from polymarket_trader.app.intent_builder import decision_to_managed_intent
 from polymarket_trader.app.order_projection import normalize_order_id
 from polymarket_trader.domain.market import Market, TradingStatus
 from polymarket_trader.domain.order import (
@@ -126,7 +126,7 @@ class ReconcileService:
     ) -> None:
         if not strategy_id:
             raise ValueError("ReconcileService requires non-empty strategy_id")
-        self._extension_hooks = strategy
+        self._strategy = strategy
         self._strategy_id = strategy_id
         self._entry_metadata_provider = entry_metadata_provider
         self._orderbook_reader = orderbook_reader
@@ -211,7 +211,7 @@ class ReconcileService:
             account_pause=account_pause,
         )
         metadata = self._metadata_for_market(market)
-        recovery = self._extension_hooks.quant_decide(
+        recovery = self._strategy.quant_decide(
             DecisionContext(
                 trace_id=trace_id,
                 strategy_id=self._strategy_id,
@@ -352,7 +352,7 @@ class ReconcileService:
             adjusted_position = position.with_open_sell_shares(
                 max(position.open_sell_shares, open_sell_shares)
             )
-            quant_decision = self._extension_hooks.quant_decide(
+            quant_decision = self._strategy.quant_decide(
                 DecisionContext(
                     trace_id=trace_id,
                     strategy_id=self._strategy_id,

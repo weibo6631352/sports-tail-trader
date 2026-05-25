@@ -34,7 +34,6 @@ from polymarket_trader.quant.outright import (
 )
 from polymarket_trader.quant.outright.match import season_odds_from_metadata
 from polymarket_trader.quant.outright.team_resolver import resolve_market_team_debug
-from polymarket_trader.quant.parameter_overrides import active_ports_scope
 from polymarket_trader.quant.series import (
     resolve_series_reject_label,
     resolve_series_sub_type_label,
@@ -131,14 +130,6 @@ class CurrentStrategy:
                 )
             except Exception:
                 logger.warning("strategy.lifecycle_subscribe_failed", exc_info=True)
-    @property
-    def hooks(self) -> "CurrentStrategy":
-        return self
-
-    @property
-    def live_state_hooks(self) -> "CurrentStrategy":
-        return self
-
     @property
     def config(self) -> CurrentStrategyConfig:
         return self._config
@@ -328,8 +319,7 @@ class CurrentStrategy:
                     pause_trading=True,
                     pause_reason="sports_live_state_no_source",
                 )
-        with active_ports_scope(self._ports):
-            result = self._quant_decider.decide(context)
+        result = self._quant_decider.decide(context)
         if not result.actions:
             return result
         enriched = tuple(

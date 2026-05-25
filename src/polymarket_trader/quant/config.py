@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Mapping
 
-from polymarket_trader.config import load_extension_config
+from polymarket_trader.config import load_strategy_config
 from polymarket_trader.quant.tail import (
     ExecutionPermission,
     SportsMarketType,
@@ -517,4 +517,4 @@ def load_current_strategy_config(config_path: str | None) -> CurrentStrategyConf
         解析后的 ``CurrentStrategyConfig``。
     """
 
-    return load_extension_config(CurrentStrategyConfig, config_path) or default_strategy_config()
+    return load_strategy_config(CurrentStrategyConfig, config_path) or default_strategy_config()

@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
 from contextlib import suppress
 from dataclasses import dataclass, field
 from decimal import Decimal
 import hashlib
 import logging
-import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -20,16 +18,20 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from polymarket_trader.api.routes.stream import SseSubscriptionRegistry
+from polymarket_trader.app.audit_retention import purge_audit_events_once
+from polymarket_trader.app.dead_records_retention import purge_dead_records_once
+from polymarket_trader.app.entry_metadata_providers import (
+    build_entry_metadata_for_event_provider,
+    build_entry_metadata_for_market_provider,
+)
 from polymarket_trader.app.market_service import MarketService
-from polymarket_trader.app.ports import bind_extension_season_state, build_extension_ports
+from polymarket_trader.app.ports import bind_runtime_season_state, build_runtime_ports
 from polymarket_trader.app.reconcile_service import ReconcileService
+from polymarket_trader.app.settlement_scanner import SettlementScannerService
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
 from polymarket_trader.app.trading_service import TradingService
-from polymarket_trader.config import ConfigIssue, ConfigLoadError, Settings, StartupReadiness, load_settings
-from polymarket_trader.domain.account import AccountSnapshot
-from polymarket_trader.domain.allocation import current_exposure_usdc
+from polymarket_trader.config import ConfigLoadError, Settings, StartupReadiness, load_settings
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
-from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.market import Market
 from polymarket_trader.infra.db import (
     AccountSnapshotRepository,
@@ -52,7 +54,7 @@ from polymarket_trader.infra.polymarket.order_executor import (
     InMemoryPolymarketOrderClient,
     PolymarketOrderExecutor,
 )
-from polymarket_trader.app.paper import PaperSubmitOnlyOrderClient, PaperVirtualLedger
+from polymarket_trader.app.paper import PaperVirtualLedger
 from polymarket_trader.infra.sports.goalserve_lazy_client import GoalserveLazyClient
 from polymarket_trader.infra.sports import (
     GoalserveInplayClient,
@@ -105,19 +107,20 @@ from polymarket_trader.workers.sports_season_odds_worker import SportsSeasonOdds
 from polymarket_trader.workers.game_odds_worker import GameOddsWorker
 from polymarket_trader.workers.goalserve_pregame_worker import GoalservePregameWorker
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
-from polymarket_trader.quant.strategy import CurrentStrategy as _CurrentStrategy
+from polymarket_trader.quant.config import load_current_strategy_config
+from polymarket_trader.quant.identity import STRATEGY_ID
+from polymarket_trader.quant.strategy import CurrentStrategy
 from polymarket_trader.workers.user_ws import UserWsWorker
 from polymarket_trader.infra.sports.game_odds_client import (
     GameOddsClient,
     TheOddsApiGameOddsClient,
 )
-from polymarket_trader.infra.sports.goalserve_livescore_client import (
-    SPORT_CODE_TO_FEED_KEYS,
+from polymarket_trader.runtime.paper_runtime import build_paper_runtime
+from polymarket_trader.runtime.sports_polling_demand import (
+    build_inplay_active_sports_provider,
+    build_livescore_active_sports_provider,
 )
-# composition root 直接读策略侧运动分类：livescore demand-driven 轮询需要把
-# tracked market 映射到运动码，再映射到 feed key。polymarket_trader.quant 是当前装配
-# 的业务扩展实现，main.py 作为 composition root 在此处接线属预期范围。
-from polymarket_trader.quant.live_state import _market_sport_codes
+from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +139,7 @@ _RECONCILE_BATCH_SIZE_LIMIT = 256
 class RuntimeComponents:
     settings: Settings
     readiness: StartupReadiness
-    strategy: _CurrentStrategy
+    strategy: CurrentStrategy
     logging_runtime: LoggingRuntime
     gamma_client: GammaClient
     clob_client: ClobClient
@@ -193,109 +196,6 @@ class RuntimeComponents:
     # 累计 fee / 已实现 + 浮动 PnL，复盘必查。
     paper_ledger: "PaperVirtualLedger | None" = None
     goalserve_lazy_client: "GoalserveLazyClient | None" = None
-
-
-def _build_livescore_active_sports_provider(
-    registry: MarketRegistry,
-) -> Callable[[], frozenset[str]]:
-    """构建 livescore demand-driven 轮询的 active_sports_provider。
-
-    每轮轮询调用一次，遍历 tracked-market registry，返回"有需求"的 _SPORT_FEEDS
-    key 集合：某市场 live（已开赛且未结束）或将在 60 分钟内开赛时，把它的运动码
-    映射出的所有 feed key 纳入。无相关市场的运动整轮跳过 HTTP 抓取。
-
-    必须廉价（每轮都调）：只做一次 registry 快照遍历 + 内存判断，不做任何 I/O。
-    """
-
-    # 同 inplay provider:Polymarket end_date 对体育单场市场常 == start_time,
-    # 不能用 end > now 判 live。MLB/NBA/NHL/NFL/Tennis 单场 ≤ 6h + 1h buffer。
-    _LIVESCORE_GAME_WINDOW = timedelta(hours=7)
-
-    def _provider() -> frozenset[str]:
-        now = datetime.now(timezone.utc)
-        near_start_cutoff = now + timedelta(minutes=60)
-        active: set[str] = set()
-        for market in registry.snapshot().markets:
-            start = market.game_start_time
-            if start is not None and start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            end = market.end_date
-            if end is not None and end.tzinfo is None:
-                end = end.replace(tzinfo=timezone.utc)
-            # live：已开赛且在比赛持续期内(≤ 7h)。about-to-start：[now, now+60min]。
-            is_live = (
-                start is not None
-                and start <= now
-                and now <= start + _LIVESCORE_GAME_WINDOW
-            )
-            is_near_start = (
-                start is not None and now <= start <= near_start_cutoff
-            )
-            # game_start_time 缺失兜底:用 end_date 在未来 6h 内判定为进行中/临近。
-            start_unknown_active = start is None and (
-                end is None or now < end < now + timedelta(hours=6)
-            )
-            if not (is_live or is_near_start or start_unknown_active):
-                continue
-            for code in _market_sport_codes(market):
-                feed_keys = SPORT_CODE_TO_FEED_KEYS.get(code)
-                if feed_keys:
-                    active.update(feed_keys)
-        return frozenset(active)
-
-    return _provider
-
-
-def _build_inplay_active_sports_provider(
-    registry: MarketRegistry,
-) -> Callable[[], frozenset[str]]:
-    """构建 inplay GZIP feed demand-driven 轮询的 active_sports_provider。
-
-    与 _build_livescore_active_sports_provider 同样遍历 tracked-market registry，
-    但返回的是 _market_sport_codes 输出的**规范运动码**集合（football / basketball /
-    ice-hockey 等）——GoalserveInplayClient 自己用 SPORT_CODE_TO_INPLAY_KEYS 把
-    规范码映射到 feed 路径 token，因此这里不做 feed-key 映射。
-
-    必须廉价（每轮都调）：只做一次 registry 快照遍历 + 内存判断，不做任何 I/O。
-    """
-
-    # MLB/NBA/NHL/NFL/Tennis 单场比赛持续时间上限 ≤ 6 小时,加 1h buffer 保证
-    # 末段 inplay 仍拉。Polymarket end_date 对体育单场市场常 = game_start_time
-    # (Gamma API 字段语义混淆),不能用 end > now 判 live。
-    _GAME_INPLAY_WINDOW = timedelta(hours=7)
-
-    def _provider() -> frozenset[str]:
-        now = datetime.now(timezone.utc)
-        near_start_cutoff = now + timedelta(minutes=60)
-        active: set[str] = set()
-        for market in registry.snapshot().markets:
-            start = market.game_start_time
-            if start is not None and start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            end = market.end_date
-            if end is not None and end.tzinfo is None:
-                end = end.replace(tzinfo=timezone.utc)
-            # is_live: 比赛已开始且未超过 _GAME_INPLAY_WINDOW(默认 7h)。
-            # 之前用 end > now 是 bug — Polymarket end_date 对体育市场常 == start_time,
-            # 会让已开赛市场永远判 not-live → inplay 不拉 → 122 个 missing live state。
-            is_live = (
-                start is not None
-                and start <= now
-                and now <= start + _GAME_INPLAY_WINDOW
-            )
-            is_near_start = (
-                start is not None and now <= start <= near_start_cutoff
-            )
-            # game_start_time 缺失兜底:用 end_date 在未来 6h 内判定为进行中/临近。
-            start_unknown_active = start is None and (
-                end is None or now < end < now + timedelta(hours=6)
-            )
-            if not (is_live or is_near_start or start_unknown_active):
-                continue
-            active.update(_market_sport_codes(market))
-        return frozenset(active)
-
-    return _provider
 
 
 def _build_sports_live_state_client(
@@ -364,7 +264,7 @@ def _build_season_odds_worker(
     *,
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
-    strategy: _CurrentStrategy,
+    strategy: CurrentStrategy,
     event_bus: EventBus | None = None,
 ) -> tuple[SportsSeasonOddsWorker, SeasonOddsClient] | tuple[None, None]:
     """按 settings 装配 sports_season_odds_worker；缺 api_key 或未启用 outright 时返回 (None, None)。
@@ -415,7 +315,7 @@ def _build_game_odds_worker(
     *,
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
-    strategy: _CurrentStrategy,
+    strategy: CurrentStrategy,
     event_bus: EventBus | None = None,
 ) -> tuple[GameOddsWorker, GameOddsClient] | tuple[None, None]:
     """按 settings 装配 game_odds_worker；缺 api_key 时返回 (None, None)。"""
@@ -491,13 +391,6 @@ def _build_pregame_worker(
     return worker, client
 
 
-def _validate_strategy_config(strategy: _CurrentStrategy, settings: Settings) -> tuple[ConfigIssue, ...]:
-    """启动期收集策略侧配置拒绝原因，与 Settings.validate_startup_readiness 互补。"""
-
-    issues = strategy.validate_config(settings)
-    return tuple(issues) if issues else ()
-
-
 def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     settings = settings or load_settings()
     readiness = settings.validate_startup_readiness()
@@ -551,20 +444,17 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # 拿到第一个权威值前，bankroll=0 → Kelly 全拒，正是安全态。
     lifecycle_bus = InProcessLifecycleBus()
     parameter_store = ParameterStore(event_bus=event_bus)
-    runtime_ports = build_extension_ports(
+    runtime_ports = build_runtime_ports(
         lifecycle_bus=lifecycle_bus,
         parameter_store=parameter_store,
         metrics_registry=metrics,
     )
     # 直接装配 quant 策略——量化决策器就是这个交易系统本身。
-    from polymarket_trader.quant.strategy import CurrentStrategy
-    from polymarket_trader.quant.config import load_current_strategy_config
-    from polymarket_trader.quant.identity import STRATEGY_ID
-    strategy_config = load_current_strategy_config(settings.extension_config_path)
-    extension = CurrentStrategy(config=strategy_config, ports=runtime_ports)
-    extension_issues = _validate_strategy_config(extension, settings)
-    if extension_issues:
-        raise ConfigLoadError(list(extension_issues))
+    strategy_config = load_current_strategy_config(settings.strategy_config_path)
+    strategy = CurrentStrategy(config=strategy_config, ports=runtime_ports)
+    strategy_issues = strategy.validate_config(settings)
+    if strategy_issues:
+        raise ConfigLoadError(list(strategy_issues))
     parameter_store.bind_settings(settings)
     strategy_id = STRATEGY_ID
     persistence_worker = PersistenceWorker(
@@ -614,173 +504,18 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # trading_client。
     paper_ledger: PaperVirtualLedger | None = None
     goalserve_lazy_client: GoalserveLazyClient | None = None
+    # build_runtime 末尾透传给 RuntimeComponents.background_tasks，
+    # shutdown_runtime 统一 cancel + gather。
+    initial_background_tasks: dict[str, asyncio.Task[None]] = {}
     if settings.paper_trading_mode:
-        paper_ledger = PaperVirtualLedger()
-        paper_ledger.fund(settings.portfolio_budget_usdc)
-        # paper 模式禁用真签名：py-clob-client.sign_order 会调链上 balance check,
-        # 链上实际余额很少（多被 active orders 锁住）→ 立即报 "not enough balance"
-        # 阻塞所有下单。paper 模式不上链,签名走本地虚拟即可,不损失策略验证价值。
-        execution_client = PaperSubmitOnlyOrderClient(
-            real_sign_client=None,
-            market_lookup=registry.get_by_token_id,
-            orderbook_lookup=market_ws_worker.snapshot,
-            ledger=paper_ledger,
+        execution_client, paper_ledger, goalserve_lazy_client, paper_tasks = build_paper_runtime(
+            settings=settings,
+            account_state_store=account_state_store,
+            registry=registry,
+            market_ws_worker=market_ws_worker,
+            strategy_id=strategy_id,
         )
-        # account_state_store 必须用 paper_ledger 的虚拟余额，否则 RiskManager 看
-        # 链上真实余额（$0.x 锁在 active orders 后）→ "available_usdc_below..." 警告 +
-        # Kelly 算 stake=0 全部拒绝。初始一次性设值,启动一个后台 syncer 持续覆盖
-        # reconcile worker 周期写回的真链上余额。
-        account_state_store.update_balances(
-            balance_usdc=settings.portfolio_budget_usdc,
-            allowance_usdc=settings.portfolio_budget_usdc * Decimal("10"),
-        )
-
-        from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor as _SPM
-        async def _paper_balance_syncer() -> None:
-            """每秒把 paper_ledger 同步到 account_state_store（balance + positions）。
-
-            balance: paper_ledger.available_usdc → account_state_store.balance_usdc
-              （否则 reconcile 写回真链上 $0.x 余额阻塞 Kelly）
-            positions: paper_ledger.positions → account_state_store.positions
-              （否则策略读 stale account_state 持仓反复 reprice 已平仓 token，
-              触发 simulate_fill 卖空 ledger 持仓 → available 凭空涨的 bug）
-            """
-            from polymarket_trader.domain.position import Position
-            while True:
-                try:
-                    account_state_store.update_balances(
-                        balance_usdc=paper_ledger.available_usdc,
-                        allowance_usdc=settings.portfolio_budget_usdc * Decimal("10"),
-                    )
-                    # 把 ledger 持仓投射成 Position 同步回 account_state
-                    paper_positions: list[Position] = []
-                    for token_id, shares in paper_ledger.positions.items():
-                        if shares <= Decimal("0"):
-                            continue
-                        market = registry.get_by_token_id(token_id)
-                        if market is None:
-                            continue
-                        cost = paper_ledger.cost_basis_usdc.get(token_id, Decimal("0"))
-                        # 跟踪 per-token max_unrealized_loss（drawdown 时序统计指标）
-                        ob = market_ws_worker.snapshot(token_id)
-                        if ob is not None and ob.best_bid is not None and ob.sell_actionable:
-                            paper_ledger.observe_unrealized(token_id, ob.best_bid)
-                        paper_positions.append(Position(
-                            strategy_id=strategy_id,
-                            condition_id=market.condition_id,
-                            token_id=token_id,
-                            market_slug=market.market_slug,
-                            shares=shares,
-                            cost_usdc=cost,
-                        ))
-                    account_state_store.replace_positions(tuple(paper_positions))
-                    _SPM.get().worker_tick("paper_balance_syncer", expected_interval_s=1.0)
-                except Exception:
-                    pass
-                await asyncio.sleep(1)
-
-        paper_balance_syncer_task = asyncio.create_task(  # noqa: F841 - 保留引用防 GC
-            _paper_balance_syncer(), name="paper_balance_syncer"
-        )
-
-        # 资金曲线时序记录器：每 60s 写一条 equity_snapshot 到 paper_ledger，
-        # 供 /runtime/equity-curve 画图。in-memory，重启清零。最多保留 1440 条 (24h)。
-        async def _equity_curve_recorder() -> None:
-            from datetime import datetime, timezone
-            while True:
-                try:
-                    total_cost = Decimal("0")
-                    unrealized_value = Decimal("0")
-                    for tok, shares in paper_ledger.positions.items():
-                        cost = paper_ledger.cost_basis_usdc.get(tok, Decimal("0"))
-                        total_cost += cost
-                        ob = market_ws_worker.snapshot(tok)
-                        if ob and ob.best_bid is not None and ob.sell_actionable:
-                            unrealized_value += shares * ob.best_bid
-                    equity = paper_ledger.available_usdc + unrealized_value
-                    if not hasattr(paper_ledger, "equity_curve"):
-                        paper_ledger.equity_curve = []  # type: ignore[attr-defined]
-                    paper_ledger.equity_curve.append({  # type: ignore[attr-defined]
-                        "at": datetime.now(timezone.utc).isoformat(),
-                        "available_usdc": str(paper_ledger.available_usdc),
-                        "total_cost_usdc": str(total_cost),
-                        "unrealized_value_usdc": str(unrealized_value),
-                        "equity_usdc": str(equity),
-                        "positions_count": len(paper_ledger.positions),
-                        "fees_accrued_usdc": str(paper_ledger.fees_accrued_usdc),
-                    })
-                    # 30s 一次（720 点 = 6h，max 2880 点 = 24h）
-                    if len(paper_ledger.equity_curve) > 2880:  # type: ignore[attr-defined]
-                        paper_ledger.equity_curve = paper_ledger.equity_curve[-2880:]  # type: ignore[attr-defined]
-                    _SPM.get().worker_tick("equity_curve_recorder", expected_interval_s=30.0)
-                except Exception:
-                    pass
-                await asyncio.sleep(30)
-        equity_curve_task = asyncio.create_task(_equity_curve_recorder(), name="paper_equity_curve")  # noqa: F841 - 保留引用防 GC
-
-        # 系统性能采样后台任务（每 60s 采 RSS + 每 30s 采 PnL）
-        async def _system_perf_sampler() -> None:
-            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
-            import resource
-            import platform
-            mon = SystemPerfMonitor.get()
-            while True:
-                # 用 Python 内置 resource 模块（无 psutil 依赖）
-                try:
-                    ru = resource.getrusage(resource.RUSAGE_SELF)
-                    rss_bytes = ru.ru_maxrss if platform.system() == "Darwin" else ru.ru_maxrss * 1024
-                    mon.sample_memory(rss_bytes / 1024 / 1024)
-                except Exception:
-                    pass
-                # PnL: equity = avail + unrealized_value（用 equity_curve 最新点）
-                try:
-                    if hasattr(paper_ledger, "equity_curve") and paper_ledger.equity_curve:
-                        last = paper_ledger.equity_curve[-1]
-                        pnl = float(last["equity_usdc"]) - float(settings.portfolio_budget_usdc)
-                        mon.sample_pnl(pnl)
-                except Exception:
-                    pass
-                await asyncio.sleep(30)
-        system_perf_sampler_task = asyncio.create_task(_system_perf_sampler(), name="system_perf_sampler")  # noqa: F841 - 保留引用防 GC
-
-        # event loop scheduler lag prober:每 2s await sleep(0.1),实际耗时 - 100 ms = loop 被卡多久
-        async def _eventloop_lag_prober() -> None:
-            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
-            mon = SystemPerfMonitor.get()
-            target_sleep_s = 0.1
-            while True:
-                t0 = time.perf_counter()
-                await asyncio.sleep(target_sleep_s)
-                actual_ms = (time.perf_counter() - t0) * 1000
-                lag_ms = actual_ms - target_sleep_s * 1000
-                mon.record_eventloop_lag(max(0.0, lag_ms))
-                # 单次 lag > 50ms → 记 slow_callback(说明 loop 被某个 callback 长时间占用)
-                if lag_ms > 50:
-                    mon.record_slow_callback(lag_ms, task_name="eventloop_lag_prober_observed")
-                await asyncio.sleep(2.0)
-        eventloop_lag_task = asyncio.create_task(_eventloop_lag_prober(), name="eventloop_lag_prober")  # noqa: F841 - 保留引用防 GC
-        # asyncio.loop.slow_callback_duration:默认 0.1s,超过会 warning.我们设 0.05
-        # 让 loop 自己检测+log,我们的 prober 兜底.
-        try:
-            asyncio.get_event_loop().slow_callback_duration = 0.05
-        except Exception:
-            pass
-
-        # GoalserveLazy 提供 schedule / h2h 等按需拉取（不轮询，仅 lookup 时调用）。
-        api_key_secret = settings.goalserve_api_key
-        api_key = api_key_secret.get_secret_value() if api_key_secret else None
-        if api_key:
-            goalserve_lazy_client = GoalserveLazyClient(
-                api_key=api_key,
-                proxy=settings.goalserve_proxy,
-                cache_ttl_s=3600.0,
-            )
-            logger.info("GoalserveLazy (schedule/h2h) started")
-        logger.warning(
-            "paper_trading_mode=true → PaperSubmitOnlyOrderClient + 本地签名 + 虚拟余额 %s USDC。"
-            "WS 盘口=market_ws_worker.snapshot, syncer 每秒同步 paper_ledger → account_state_store",
-            settings.portfolio_budget_usdc,
-        )
+        initial_background_tasks.update(paper_tasks)
     elif trading_client is not None:
         execution_client = PolymarketOrderExecutionClient(trading_client)
     else:
@@ -795,7 +530,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         metrics=metrics,
     )
     market_service = MarketService(
-        strategy=extension,
+        strategy=strategy,
         registry=registry,
         market_tracker=market_ws_worker,
         account_snapshot_provider=account_state_store.snapshot,
@@ -805,7 +540,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     )
     decision_recorder = DecisionEventRecorder(outbox=outbox, strategy_id=strategy_id)
     trading_decision_service = TradingDecisionService(
-        strategy=extension,
+        strategy=strategy,
         strategy_id=strategy_id,
         registry=registry,
         orderbook_reader=market_ws_worker.snapshot,
@@ -822,86 +557,14 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         account_state_store=account_state_store,
     )
 
-    _exposure_classifier = extension
-
-    def _portfolio_exposure_metadata(
-        snapshot: AccountSnapshot | None,
-        current_condition_id: str | None,
-        current_event_slug: str | None,
-    ) -> dict[str, str]:
-        """按 market family 聚合持仓 + open BUY 敞口，供策略风控读取。
-
-        跳过当前 market 自身持仓（risk check 用 proposed_amount 对比），
-        只聚合其他 outright / series market 的既有敞口。
-        在 entry_metadata 热路径同步执行：仅内存遍历 + O(1) registry 查询，无 IO。
-        """
-        if snapshot is None or _exposure_classifier is None:
-            return {}
-        positions = snapshot.positions
-        open_orders = snapshot.open_orders
-        if not positions and not open_orders:
-            return {}
-
-        orders_by_condition: dict[str, list] = {}
-        for order in open_orders:
-            orders_by_condition.setdefault(order.condition_id, []).append(order)
-
-        outright_total = Decimal("0")
-        outright_event = Decimal("0")
-        series_total = Decimal("0")
-        series_event = Decimal("0")
-
-        for position in positions:
-            if position.condition_id == current_condition_id:
-                continue
-            pos_market = registry.get_by_condition_id(position.condition_id)
-            if pos_market is None:
-                continue
-            family_label = _exposure_classifier.market_family_label(pos_market)
-            pos_orders = orders_by_condition.get(position.condition_id, ())
-            exposure = current_exposure_usdc(position, pos_orders)
-            if family_label == "outright":
-                outright_total += exposure
-                if current_event_slug and pos_market.event_slug == current_event_slug:
-                    outright_event += exposure
-            elif family_label == "series":
-                series_total += exposure
-                if current_event_slug and pos_market.event_slug == current_event_slug:
-                    series_event += exposure
-
-        result: dict[str, str] = {}
-        if outright_total:
-            result["outright_total_exposure_usdc"] = str(outright_total)
-            result["outright_event_exposure_usdc"] = str(outright_event)
-        if series_total:
-            result["series_total_exposure_usdc"] = str(series_total)
-            result["series_event_exposure_usdc"] = str(series_event)
-        return result
-
-    def entry_metadata_for_event(event, snapshot: AccountSnapshot | None):
-        market = None
-        if event.condition_id is not None:
-            market = registry.get_by_condition_id(event.condition_id)
-        if market is None and event.token_id is not None:
-            market = registry.get_by_token_id(event.token_id)
-        if market is None and event.market_slug is not None:
-            market = registry.get_by_slug(event.market_slug)
-        base = entry_metadata_store.metadata_for_event(event, market=market)
-        exposure = _portfolio_exposure_metadata(
-            snapshot,
-            current_condition_id=market.condition_id if market else event.condition_id,
-            current_event_slug=market.event_slug if market else event.event_slug,
-        )
-        if exposure:
-            return {**base, **exposure}
-        return base
-
-    def entry_metadata_for_market(market):
-        return entry_metadata_store.metadata_for(
-            condition_id=market.condition_id,
-            market_slug=market.market_slug,
-            event_slug=market.event_slug,
-        )
+    entry_metadata_for_event = build_entry_metadata_for_event_provider(
+        registry=registry,
+        entry_metadata_store=entry_metadata_store,
+        strategy=strategy,
+    )
+    entry_metadata_for_market = build_entry_metadata_for_market_provider(
+        entry_metadata_store=entry_metadata_store,
+    )
 
     trading_decision_worker = TradingDecisionWorker(
         event_bus=event_bus,
@@ -920,7 +583,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         parameter_store=parameter_store,
     )
     reconcile_service = ReconcileService(
-        strategy=extension,
+        strategy=strategy,
         strategy_id=strategy_id,
         entry_metadata_provider=entry_metadata_for_market,
         orderbook_reader=trading_decision_service.lookup_orderbook,
@@ -963,45 +626,33 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     sports_live_state_client: SportsLiveAggregateClient | None = None
     sports_live_state_worker: SportsLiveStateWorker | None = None
     if settings.sports_live_state_enabled:
-        live_state_hooks = extension
-        if live_state_hooks is None:
-            logger.warning(
-                "sports live state sync skipped because extension does not implement LiveStateHooks",
-                extra={"extension": "polymarket_trader.quant"},
-            )
-        else:
-            league_source_priority = live_state_hooks.league_source_affinity
-            sports_live_state_client = _build_sports_live_state_client(
-                settings,
-                league_source_priority=league_source_priority,
-                trusted_sources=None,  # 默认走 aggregate 内置 _DEFAULT_OFFICIAL_SOURCES
-                livescore_active_sports_provider=(
-                    _build_livescore_active_sports_provider(registry)
-                ),
-                inplay_active_sports_provider=(
-                    _build_inplay_active_sports_provider(registry)
-                ),
-            )
-            sports_live_state_worker = SportsLiveStateWorker(
-                snapshot_provider=sports_live_state_client.list_events,
-                match_live_state=live_state_hooks.match_live_state,
-                registry=registry,
-                entry_metadata_store=entry_metadata_store,
-                event_bus=event_bus,
-                market_tracker=market_ws_worker.track_market,
-                lifecycle_bus=lifecycle_bus,
-                market_pauser=account_state_store,
-                enabled=True,
-                source="sports_live_aggregate",
-                leagues=settings.sports_live_state_league_codes,
-                publish_entry_signals=settings.sports_live_state_publish_entry_signals,
-                # 60s audit 节流:state_hash dedupe 因 live_game 嵌套时间字段
-                # (seconds_remaining 等)每 5s 都变而失效.60s 颗粒度对复盘足够,
-                # P0 决策走内存不依赖 audit.30s→60s 省 50% sports_live_state audit.
-                audit_min_interval_s=60.0,
-            )
+        sports_live_state_client = _build_sports_live_state_client(
+            settings,
+            league_source_priority=strategy.league_source_affinity,
+            trusted_sources=None,  # 默认走 aggregate 内置 _DEFAULT_OFFICIAL_SOURCES
+            livescore_active_sports_provider=build_livescore_active_sports_provider(registry),
+            inplay_active_sports_provider=build_inplay_active_sports_provider(registry),
+        )
+        sports_live_state_worker = SportsLiveStateWorker(
+            snapshot_provider=sports_live_state_client.list_events,
+            match_live_state=strategy.match_live_state,
+            registry=registry,
+            entry_metadata_store=entry_metadata_store,
+            event_bus=event_bus,
+            market_tracker=market_ws_worker.track_market,
+            lifecycle_bus=lifecycle_bus,
+            market_pauser=account_state_store,
+            enabled=True,
+            source="sports_live_aggregate",
+            leagues=settings.sports_live_state_league_codes,
+            publish_entry_signals=settings.sports_live_state_publish_entry_signals,
+            # 60s audit 节流:state_hash dedupe 因 live_game 嵌套时间字段
+            # (seconds_remaining 等)每 5s 都变而失效.60s 颗粒度对复盘足够,
+            # P0 决策走内存不依赖 audit.30s→60s 省 50% sports_live_state audit.
+            audit_min_interval_s=60.0,
+        )
     season_state_store = SeasonStateStore()
-    bind_extension_season_state(runtime_ports, season_state_store)
+    bind_runtime_season_state(runtime_ports, season_state_store)
     # 注：ESPN-based season-state + series-state worker 已经删除（只服务传统
     # 体育，对当前 e-sports 100% 浪费）。store 保留，strategy ports 仍可绑，
     # 没有 writer 等于空 store——strategy 读到 None 时门控自然跳过。
@@ -1009,14 +660,14 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         settings,
         registry=registry,
         entry_metadata_store=entry_metadata_store,
-        strategy=extension,
+        strategy=strategy,
         event_bus=event_bus,
     )
     game_odds_worker, game_odds_client = _build_game_odds_worker(
         settings,
         registry=registry,
         entry_metadata_store=entry_metadata_store,
-        strategy=extension,
+        strategy=strategy,
         event_bus=event_bus,
     )
     # 注册 odds workers + user_ws 的 prune callbacks
@@ -1057,7 +708,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     return RuntimeComponents(
         settings=settings,
         readiness=readiness,
-        strategy=extension,
+        strategy=strategy,
         logging_runtime=logging_runtime,
         parameter_store=parameter_store,
         gamma_client=gamma_client,
@@ -1108,6 +759,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         sse_subscription_registry=sse_subscription_registry,
         paper_ledger=paper_ledger if settings.paper_trading_mode else None,
         goalserve_lazy_client=goalserve_lazy_client,
+        background_tasks=initial_background_tasks,
     )
 
 
@@ -1123,7 +775,6 @@ async def create_runtime(settings: Settings | None = None) -> RuntimeComponents:
 
 
 async def bootstrap_runtime(runtime: RuntimeComponents) -> RuntimeComponents:
-    from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
     _perf = SystemPerfMonitor.get()
     _perf.start_phase("bootstrap_total")
 
@@ -1340,8 +991,7 @@ async def _warmup_db_pool(
                 await session.execute(text("SELECT 1"))
         except Exception as exc:
             logger.warning("db pool warmup conn failed: %s", exc)
-    import asyncio as _asyncio
-    await _asyncio.gather(*[_one() for _ in range(n)], return_exceptions=True)
+    await asyncio.gather(*[_one() for _ in range(n)], return_exceptions=True)
 
 
 # _restore_account_reference_state / _restore_trackable_markets 已删：
@@ -1875,8 +1525,6 @@ async def _run_dead_records_purge(runtime: RuntimeComponents) -> None:
     """每天跑一次,按 condition_id 关联清死市场的 orders/fills/positions/
     audit/outbox 全部 trail,加时间兜底清无 cid 事件 + account_snapshots。"""
 
-    from polymarket_trader.app.dead_records_retention import purge_dead_records_once
-
     summary = await purge_dead_records_once(
         runtime.db_session_factory,
         dead_records_retention_days=runtime.settings.dead_records_retention_days,
@@ -1906,8 +1554,6 @@ async def _run_audit_retention_purge(runtime: RuntimeComponents) -> None:
     P3 后台任务——所有 DB 异常都在 purge_audit_events_once 内部 catch + 日志。
     """
 
-    from polymarket_trader.app.audit_retention import purge_audit_events_once
-
     summary = await purge_audit_events_once(
         runtime.db_session_factory,
         retention_days=runtime.settings.audit_retention_days,
@@ -1931,8 +1577,6 @@ async def _run_settlement_scan(runtime: RuntimeComponents) -> None:
     拉到内存）；幂等去重靠 service 内 in-process 集合 + outbox event_id
     (settlement:{cid}) 兜底，不再查 audit_events 表。
     """
-
-    from polymarket_trader.app.settlement_scanner import SettlementScannerService
 
     async def _gamma_by_condition(condition_id: str) -> Any | None:
         """统一通过 GammaClient.get_market_by_condition_id 反查。Gamma /markets/{id}

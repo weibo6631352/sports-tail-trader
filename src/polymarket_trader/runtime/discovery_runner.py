@@ -496,8 +496,8 @@ def _configured_discovery_queries(hooks: Any) -> tuple[DiscoveryQuery, ...]:
 def _live_game_discovery_queries(runtime: RuntimeComponents, hooks: Any) -> tuple[DiscoveryQuery, ...]:
     """从直播状态 worker 的最近比赛快照中提取策略高意图查询。
 
-    ``hooks`` 这里没用——live state 相关 hook 在 ``extension``，
-    策略未实现时直接跳过；framework 不再向核心 ExtensionHooks 强制 live state 接口。
+    ``hooks`` 形参未使用——live state discovery 直接走 ``runtime.strategy``，
+    保留参数只为与同模块其它 query builder 签名一致。
     """
 
     worker = runtime.sports_live_state_worker
@@ -506,12 +506,9 @@ def _live_game_discovery_queries(runtime: RuntimeComponents, hooks: Any) -> tupl
     events = tuple(worker.last_events())
     if not events:
         return ()
-    live_state_hooks = runtime.strategy
-    if live_state_hooks is None:
-        return ()
     return tuple(
         query
-        for query in live_state_hooks.discovery_queries_for_live_events(events)
+        for query in runtime.strategy.discovery_queries_for_live_events(events)
         if isinstance(query, DiscoveryQuery) and query.name.strip()
     )
 

@@ -14,7 +14,7 @@ from polymarket_trader.app.decision_recorder import (
     DecisionEventRecorder,
     build_decision_record_from_hook,
 )
-from polymarket_trader.app.extension_intent_builder import (
+from polymarket_trader.app.intent_builder import (
     decision_to_managed_intent,
     decision_to_trade_intent,
 )
@@ -50,7 +50,7 @@ class _KellySizingState:
 
 
 class TradingDecisionService:
-    """Bridge extension hooks into framework plans and managed order intents."""
+    """Bridge strategy decisions into framework plans and managed order intents."""
 
     def __init__(
         self,
@@ -63,7 +63,7 @@ class TradingDecisionService:
     ) -> None:
         if not strategy_id:
             raise ValueError("TradingDecisionService requires non-empty strategy_id")
-        self._extension_hooks = strategy
+        self._strategy = strategy
         self._strategy_id = strategy_id
         self._registry = registry
         self._orderbook_reader = orderbook_reader
@@ -193,7 +193,7 @@ class TradingDecisionService:
         )
         import time as _time
         _t0 = _time.perf_counter()
-        quant_decision = self._extension_hooks.quant_decide(quant_context)
+        quant_decision = self._strategy.quant_decide(quant_context)
         try:
             from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
             SystemPerfMonitor.get().record_strategy_hook(
@@ -390,7 +390,7 @@ class TradingDecisionService:
         """
         import time as _time
         t0 = _time.perf_counter()
-        decision = self._extension_hooks.quant_decide(context)
+        decision = self._strategy.quant_decide(context)
         self._record_hook_latency("quant_decide", _time.perf_counter() - t0)
         self._record(hook_name="quant_decide", context=context, decision=decision)
         return decision

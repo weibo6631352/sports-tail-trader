@@ -8,47 +8,25 @@
 frozen dataclass，启动期校验后不应再被替换。Override 是 runtime 临时探索值，
 不能跨重启存活——单独走 port 让职责清晰。
 
-两种解析入口：
-- ``effective_*(ports, key, default)``：显式传 ports；调用方持有引用时用。
-- ``effective_*(None, key, default)``：用 ``ContextVar`` 取 strategy 在 hook
-  入口注册的"当前激活 ports"。这条路径让 ``_tail_price_cap`` 等深层 helper
-  不必把 ports 一路 plumb 到所有调用点。
+所有 ``effective_*`` 入口都显式接 ``ports`` 参数（``None`` 表示无 override，
+直接返回 default）；调用方负责把 ports 从子策略入口一路传到具体 helper。
 """
 
 from __future__ import annotations
 
 import logging
-from contextlib import contextmanager
-from contextvars import ContextVar
 from decimal import Decimal, InvalidOperation
-from typing import Any, Iterator
+from typing import Any
 
 from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
 logger = logging.getLogger(__name__)
 
 
-_active_ports: ContextVar[RuntimePorts | None] = ContextVar(
-    "polymarket_trader.quant.active_ports", default=None
-)
-
-
-@contextmanager
-def active_ports_scope(ports: RuntimePorts | None) -> Iterator[None]:
-    """在 strategy hook 入口处包一层；嵌套调用安全（ContextVar.reset）。"""
-
-    token = _active_ports.set(ports)
-    try:
-        yield
-    finally:
-        _active_ports.reset(token)
-
-
 def _resolve(ports: RuntimePorts | None, key: str, default: Any) -> Any:
-    effective_ports = ports if ports is not None else _active_ports.get()
-    if effective_ports is None:
+    if ports is None:
         return default
-    port = effective_ports.parameter
+    port = ports.parameter
     if port is None:
         return default
     try:

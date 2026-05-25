@@ -8,9 +8,9 @@
 4. 输出 ``ShadowSessionReport``：决策序列 + 累计 ledger 状态 + fees 总额 +
    每事件成交快照
 
-不与现有 ``replay_harness.py`` / ``trade_replay.py`` / ``extension_host/replay.py``
-重复：那些是离线决策 diff / 成交聚合 / fixture entry replay；shadow_runner 是
-"事件流时序推进 + 撮合 + ledger 累计"，新职责。
+不与现有 ``replay_harness.py`` / ``trade_replay.py`` 重复：那些是离线决策
+diff / 成交聚合；shadow_runner 是"事件流时序推进 + 撮合 + ledger 累计"，
+新职责。
 """
 
 from __future__ import annotations

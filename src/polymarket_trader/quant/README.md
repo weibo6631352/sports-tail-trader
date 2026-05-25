@@ -7,7 +7,7 @@
 - `config.py`：策略配置 dataclass
 - `identity.py`：策略身份
 - `allocation.py` / `discovery.py`：候选预算分配 / 远端 discovery 查询构造
-- `parameter_overrides.py`：策略侧 ParameterPort scope；让深层 helper 通过 ContextVar 读 runtime override 值
+- `parameter_overrides.py`：策略侧 ParameterPort 入口；`effective_int/decimal/str_enum(ports, key, default)` 显式接 ports，无 override 时返回 default
 - `calibration.py` / `live_sample_validation.py`：calibration 与活样本质量校验
 - `tail/`：体育扫尾候选家族（types / core / slug / mlb / tennis / evaluator 子模块）
 - `outright/`：长周期 outright 与系列赛家族（types / match / pricing / evaluator / risk 子模块）
@@ -61,7 +61,7 @@
 ## 设计约束
 
 - 这个目录只放策略自身语义，不放框架通用能力。
-- 策略通过 `polymarket_trader.extension_api` 提供的契约与框架交互。
+- 策略通过 `polymarket_trader.domain.decisions` 的 TradingDecision / QuantDecision / DecisionContext 等一等 domain 类型与框架交互。
 - 远端 discovery 粗筛通过 `CurrentStrategy.discovery_queries()` 暴露；当前实现从 `config.py` 的 `discovery_tag_slugs` 为每个 tag slug 发 3 个定向查询(`live=true` / `start_time` 进行中窗口 / `start_time` 未来 24h),复用 Polymarket 官方 sports/live 页面的发现方法。
 - 体育扫尾策略默认覆盖 `Totals`、`Moneyline`、`Spreads` 和单场 `Yes/No` prop；没有专用胜率模型的 prop 只能 record-only 进入候选诊断，不能直接自动执行。
 - `single_game` 不是总体业务边界，只是单场直播比分源可直接匹配的 market family；系列赛、冠军归属、球员下家/奖项等长期市场后续应接入专用数据源和定价模型，不能误用单场比分源。

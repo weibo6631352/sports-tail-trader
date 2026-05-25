@@ -86,7 +86,7 @@ class SeasonStatePort:
         )
 
 
-def build_extension_ports(
+def build_runtime_ports(
     *,
     lifecycle_bus: InProcessLifecycleBus | None = None,
     parameter_store: Any | None = None,
@@ -105,7 +105,7 @@ def build_extension_ports(
     )
 
 
-def bind_extension_season_state(
+def bind_runtime_season_state(
     ports: RuntimePorts,
     season_state_store: Any | None,
 ) -> None:

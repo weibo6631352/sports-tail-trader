@@ -306,8 +306,8 @@ class AdminRuntimeView:
         if not isinstance(settings, Settings):
             return None
         budget: Decimal | None = settings.portfolio_budget_usdc
-        extension = self.runtime.strategy if self.runtime else None
-        kelly = extension.config if extension is not None else CurrentStrategyConfig()
+        strategy = self.runtime.strategy if self.runtime else None
+        kelly = strategy.config if strategy is not None else CurrentStrategyConfig()
         max_position_fraction = kelly.kelly_max_position_fraction
         min_stake = kelly.kelly_min_stake_usdc
         candidates: list[Decimal] = []
@@ -338,8 +338,14 @@ class AdminRuntimeView:
         # 生产路径 settings 是 polymarket_trader.config.Settings（含 sanitized_dump
         # 脱敏 secret 字段）。test stub 可能传 SimpleNamespace → 走 jsonable 兜底。
         if isinstance(settings, Settings):
-            return settings.sanitized_dump()
-        return jsonable(settings)
+            payload = settings.sanitized_dump()
+        else:
+            payload = jsonable(settings)
+        # strategy_id 是策略侧常量（不在 Settings 内），在 settings payload 里
+        # 顺手 expose 给 frontend——/runtime 页面顶栏 + strategy bundle 路由用。
+        from polymarket_trader.quant.identity import STRATEGY_ID
+        payload["strategy_id"] = STRATEGY_ID
+        return payload
 
     async def _identity_snapshot(self) -> dict[str, Any]:
         # 60s TTL cache(module-level,因 AdminRuntimeView 是 frozen dataclass):

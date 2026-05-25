@@ -1,8 +1,8 @@
 """当前策略身份常量。
 
-``STRATEGY_ID`` 是策略实例在框架契约层 (extension_api, DB schema, 查询过滤)
-中的唯一标识；框架按该值作为 orders / fills / positions / allocations /
-audit_events / decision_records 等 SCOPE 表的归属键。
+``STRATEGY_ID`` 是策略实例在 DB schema / 查询过滤层的唯一标识；
+框架按该值作为 orders / fills / positions / allocations / audit_events /
+decision_records 等 SCOPE 表的归属键。
 
 一旦确定，禁止运行时变更；如需迁移到新策略实例，必须新建包并使用新 id。
 """

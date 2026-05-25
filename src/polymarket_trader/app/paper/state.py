@@ -38,6 +38,9 @@ class PaperVirtualLedger:
     # 限制每个 token 最多 120 个采样点（约 60 分钟 × 30s 间隔）。
     position_price_history: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
     _last_price_sample_at: dict[str, datetime_t] = field(default_factory=dict)
+    # 资金曲线时间序列，由 runtime.paper_background_tasks.equity_curve_recorder 每 30s 追加。
+    # 上限由 recorder 控制（默认 2880 ≈ 24h）。供 admin /runtime/equity-curve 端点画图。
+    equity_curve: list[dict] = field(default_factory=list)
 
     def fund(self, amount_usdc: Decimal) -> None:
         """初始化或追加可用余额。"""

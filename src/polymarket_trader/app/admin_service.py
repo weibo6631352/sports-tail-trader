@@ -1928,7 +1928,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
     def _order_controller(self) -> AdminOrderController:
         strategy_id = self._runtime_strategy_id()
         if not strategy_id:
-            raise RuntimeError("runtime extension missing strategy_id")
+            raise RuntimeError("runtime strategy missing strategy_id")
         return AdminOrderController(
             runtime=self.runtime,
             strategy_id=strategy_id,
@@ -1951,7 +1951,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         manual_confirmation: "ManualConfirmation | None" = None,
     ):
         # runtime.settings 是 main.py 启动后绑定的强字段——admin 路径不可能在
-        # settings 缺失时执行。kelly_* 从策略侧 ConfiguredExtension.config 读取；
+        # settings 缺失时执行。kelly_* 从策略侧 CurrentStrategy.config 读取；
         # 策略配置是 kelly_* 的唯一真相来源，不再走框架 Settings。
         settings = self.runtime.settings
         strategy_config = self.runtime.strategy.config
@@ -2153,7 +2153,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             return
         strategy_id = self._runtime_strategy_id()
         if not strategy_id:
-            raise RuntimeError("runtime extension missing strategy_id")
+            raise RuntimeError("runtime strategy missing strategy_id")
         projector = AccountStateProjector(account_state, strategy_id=strategy_id)
         projector.apply_buy_result(review.order_result, snapshot=snapshot)
         projector.apply_result_flags(review.order_result, snapshot=snapshot)

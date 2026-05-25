@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     polymarket_signature_type: int = Field(default=0, ge=0, le=2)
     polymarket_funder_address: str | None = None
     # 策略配置文件路径（TOML / JSON），保留作为策略 config 的可选加载入口。
-    extension_config_path: str | None = None
+    strategy_config_path: str | None = None
 
     # portfolio_budget_usdc 语义：bankroll 软上限。实际 bankroll = min(链上可用 USDC,
     # portfolio_budget_usdc)。设 0 时 Kelly 拒新仓（启动安全态）。Kelly 引擎在
@@ -249,7 +249,7 @@ class Settings(BaseSettings):
         "polymarket_funder_address",
         "database_password",
         "database_url_override",
-        "extension_config_path",
+        "strategy_config_path",
         "goalserve_api_key",
         mode="before",
     )
@@ -452,9 +452,8 @@ def _csv_codes(value: str) -> tuple[str, ...]:
     return tuple(result)
 
 
-# ===== from former contracts/errors.py + contracts/config_loader.py =====
 class ConfigFileLoadError(RuntimeError):
-    """Raised when a business extension cannot be loaded or validated."""
+    """策略 / 配置文件加载或校验失败时抛出。"""
 
 
 T = TypeVar("T")
@@ -463,25 +462,27 @@ T = TypeVar("T")
 def load_mapping_file(config_path: str) -> dict[str, Any]:
     path = Path(config_path)
     if not path.exists():
-        raise ConfigFileLoadError(f"extension file not found: {path}")
+        raise ConfigFileLoadError(f"config file not found: {path}")
     if path.suffix == ".json":
         data = json.loads(path.read_text(encoding="utf-8"))
     elif path.suffix == ".toml":
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     else:
         raise ConfigFileLoadError(
-            f"unsupported extension file format '{path.suffix or '<none>'}', expected .json or .toml"
+            f"unsupported config file format '{path.suffix or '<none>'}', expected .json or .toml"
         )
     if not isinstance(data, dict):
-        raise ConfigFileLoadError(f"extension file must contain an object at top level: {path}")
+        raise ConfigFileLoadError(f"config file must contain an object at top level: {path}")
     return data
 
 
-def load_extension_config(config_type: type[T], config_path: str | None) -> T | None:
+def load_strategy_config(config_type: type[T], config_path: str | None) -> T | None:
+    """从 TOML/JSON 文件加载策略配置 dataclass。config_path=None 直接返回 None。"""
+
     if config_path is None:
         return None
     if not is_dataclass(config_type):
-        raise ConfigFileLoadError(f"extension config type must be a dataclass: {config_type!r}")
+        raise ConfigFileLoadError(f"strategy config type must be a dataclass: {config_type!r}")
     data = load_mapping_file(config_path)
     allowed = {field.name for field in fields(config_type)}
     values = {key: value for key, value in data.items() if key in allowed}
