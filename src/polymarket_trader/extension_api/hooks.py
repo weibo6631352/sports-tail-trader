@@ -9,8 +9,6 @@ from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
 from polymarket_trader.extension_api.context import AccountSnapshotView, ExtensionContext
 from polymarket_trader.extension_api.live_state import SeriesState
 from polymarket_trader.extension_api.decisions import (
-    EntrySizing,
-    ExtensionDecision,
     QuantDecision,
     UniverseDecision,
 )
@@ -28,10 +26,6 @@ class ExtensionHooks(Protocol):
     def discovery_queries(self) -> tuple[DiscoveryQuery, ...]: ...
 
     def select_market(self, market: Market) -> UniverseDecision: ...
-
-    def size_entry(self, context: ExtensionContext) -> EntrySizing: ...
-
-    def decide_entry(self, context: ExtensionContext) -> ExtensionDecision: ...
 
     def quant_decide(self, context: ExtensionContext) -> QuantDecision:
         """量化决策器——所有交易动作（BUY/SELL/cancel/replace）的统一决策入口。

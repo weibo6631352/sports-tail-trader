@@ -76,17 +76,45 @@ class QuantDecider:
         return QuantDecision(actions=(decision,), reason=decision.reason)
 
     def _decide_entry_attempt(self, context: ExtensionContext) -> ExtensionDecision:
-        """无持仓时的入场决策：跑 Kelly + 构造 BUY intent。
+        """无持仓时的入场决策：按 market family 分派 sizing + 构造 BUY intent。
 
-        现阶段委托给原 ``size_entry`` + ``decide_entry`` 函数（位于
-        trading/hooks.py），后续直接把核心逻辑搬进类内。
+        - ``OUTRIGHT`` / ``SERIES`` → 走各自子策略（赛季冠军 / 系列赛 winner）
+        - ``ESPORTS`` → 直接 skip（不自动交易）
+        - ``SINGLE_GAME`` / 未识别 → 走 ``trading.size_entry`` + ``trading.decide_entry``
         """
         from dataclasses import replace
+        from strategies.current.outcomes import SportsMarketFamily, describe_sports_market
+        from strategies.current.outright import (
+            decide_outright_entry,
+            size_outright_entry,
+        )
+        from strategies.current.series import (
+            decide_series_entry,
+            size_series_entry,
+        )
         from strategies.current.trading import decide_entry, size_entry
 
         if context.market is None or context.orderbook is None:
             return ExtensionDecision.skip(reason="missing_market_state")
-        sizing = size_entry(self._config, context)
+
+        descriptor = describe_sports_market(context.market)
+        family = descriptor.market_family
+
+        if family == SportsMarketFamily.ESPORTS:
+            return ExtensionDecision.skip(
+                reason="esports_not_auto_tradable",
+                metadata={"market_family": SportsMarketFamily.ESPORTS.value},
+            )
+
+        # family-specific sizer + decider 路由
+        if family == SportsMarketFamily.OUTRIGHT:
+            sizing = size_outright_entry(self._config, context, self._ports)
+        elif family == SportsMarketFamily.SERIES:
+            sizing = size_series_entry(self._config, context, self._ports)
+        else:
+            # SINGLE_GAME 默认路径
+            sizing = size_entry(self._config, context)
+
         if sizing.allocation is None or sizing.allocation.buy_budget_usdc <= Decimal("0"):
             return ExtensionDecision.skip(reason=sizing.reason or "no_allocation")
         focus_context = replace(
@@ -95,6 +123,10 @@ class QuantDecider:
             allocation=sizing.allocation,
             allocation_plan=sizing.allocation_plan,
         )
+        if family == SportsMarketFamily.OUTRIGHT:
+            return decide_outright_entry(self._config, focus_context, self._ports)
+        if family == SportsMarketFamily.SERIES:
+            return decide_series_entry(self._config, focus_context, self._ports)
         return decide_entry(self._config, focus_context)
 
     def _decide_position_action(self, context: ExtensionContext) -> ExtensionDecision:

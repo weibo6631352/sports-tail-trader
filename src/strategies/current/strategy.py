@@ -7,9 +7,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Callable, Mapping
+from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import LiveEvent
@@ -17,13 +16,11 @@ from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
 from polymarket_trader.extension_api.live_state import SeriesState
 
 from polymarket_trader.extension_api.lifecycle import LifecycleEnvelope as _LifecycleEnvelope, LifecycleEvent as _LifecycleEvent
-from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.extension_api import (
     AccountSnapshotView,
     BusinessExtension,
     DecisionKind,
     DiscoveryQuery,
-    EntrySizing,
     ExtensionSpec,
     LiveStateHooks,
     LiveStateMatch,
@@ -48,24 +45,19 @@ from strategies.current.live_state import (
 )
 from strategies.current.outcomes import describe_sports_market, SportsMarketFamily
 from strategies.current.outright import (
-    decide_outright_entry,
     resolve_outright_reject_label,
-    size_outright_entry,
 )
 from strategies.current.outright.match import season_odds_from_metadata
 from strategies.current.outright.team_resolver import resolve_market_team_debug
 from strategies.current.parameter_overrides import active_ports_scope
 from strategies.current.series import (
-    decide_series_entry,
     resolve_series_reject_label,
     resolve_series_sub_type_label,
     series_state_from_metadata,
-    size_series_entry,
 )
 from strategies.current.series.classifier import classify_series_sub_type
 from strategies.current.series.types import SeriesSubType
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
-from strategies.current.trading import decide_entry, size_entry
 from strategies.current.trading.helpers import enrich_decision
 
 logger = logging.getLogger(__name__)
@@ -115,60 +107,6 @@ _METRIC_OUTRIGHT_DECISION = "strategy_outright_decision_total"
 _METRIC_OUTRIGHT_REJECT = "strategy_outright_reject_total"
 _METRIC_SERIES_DECISION = "strategy_series_decision_total"
 _METRIC_SERIES_REJECT = "strategy_series_reject_total"
-
-
-@dataclass(frozen=True, slots=True)
-class _FamilyHandler:
-    """单个 market family 的 sizing / decide 函数对，统一注册到 _FAMILY_HANDLERS。
-
-    新增 family 只需在 _FAMILY_HANDLERS 加一条，不改 CurrentStrategy 主逻辑。
-    """
-
-    sizer: Callable
-    decider: Callable
-
-
-def _esports_sizer(
-    config: CurrentStrategyConfig,
-    context: ExtensionContext,
-    ports: ExtensionPorts | None = None,
-) -> EntrySizing:
-    budget = context.portfolio_budget_usdc or Decimal("0")
-    return EntrySizing(
-        allocation_plan=AllocationPlan(
-            trace_id=context.trace_id,
-            total_budget_usdc=budget,
-            reason="esports_not_auto_tradable",
-        ),
-        reason="esports_not_auto_tradable",
-    )
-
-
-def _esports_decider(
-    config: CurrentStrategyConfig,
-    context: ExtensionContext,
-    ports: ExtensionPorts | None = None,
-) -> ExtensionDecision:
-    return ExtensionDecision.skip(
-        reason="esports_not_auto_tradable",
-        metadata={"market_family": SportsMarketFamily.ESPORTS.value},
-    )
-
-
-_FAMILY_HANDLERS: dict[SportsMarketFamily, _FamilyHandler] = {
-    SportsMarketFamily.OUTRIGHT: _FamilyHandler(
-        sizer=size_outright_entry,
-        decider=decide_outright_entry,
-    ),
-    SportsMarketFamily.SERIES: _FamilyHandler(
-        sizer=size_series_entry,
-        decider=decide_series_entry,
-    ),
-    SportsMarketFamily.ESPORTS: _FamilyHandler(
-        sizer=_esports_sizer,
-        decider=_esports_decider,
-    ),
-}
 
 
 class CurrentStrategy:
@@ -403,31 +341,6 @@ class CurrentStrategy:
         events: tuple[LiveEvent, ...],
     ) -> tuple[DiscoveryQuery, ...]:
         return build_live_event_discovery_queries(self._config, events)
-
-    def size_entry(self, context: ExtensionContext) -> EntrySizing:
-        """按 market family 分派 sizing；未注册 family 走 single_game 路径。"""
-        descriptor = describe_sports_market(context.market) if context.market else None
-        family = descriptor.market_family if descriptor is not None else None
-        handler = _FAMILY_HANDLERS.get(family) if family is not None else None
-        if handler is not None:
-            return handler.sizer(self._config, context, self._ports)
-        with active_ports_scope(self._ports):
-            return size_entry(self._config, context)
-
-    def decide_entry(self, context: ExtensionContext) -> ExtensionDecision:
-        """按 market family 分派决策；未注册 family 走 single_game 路径。"""
-        descriptor = describe_sports_market(context.market) if context.market else None
-        family = descriptor.market_family if descriptor is not None else None
-        handler = _FAMILY_HANDLERS.get(family) if family is not None else None
-        if handler is not None and family is not None:
-            decision = enrich_decision(
-                handler.decider(self._config, context, self._ports),
-                default_kind=DecisionKind.ENTRY,
-            )
-            self._record_family_decision_metric(family, decision)
-            return decision
-        with active_ports_scope(self._ports):
-            return enrich_decision(decide_entry(self._config, context), default_kind=DecisionKind.ENTRY)
 
     def quant_decide(self, context: ExtensionContext) -> QuantDecision:
         """量化决策器——按 trigger_kind 分派内部子流程。
