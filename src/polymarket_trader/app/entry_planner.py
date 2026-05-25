@@ -216,22 +216,40 @@ class EntryPlanner:
                     metadata=base_metadata,
                     manual_confirmation=manual_confirmation,
                 )
-                # signal_at 在 decide_entry 返回后立即捕获——这是"策略信号产生"
+                # signal_at 在 quant_decide 返回后立即捕获——这是"策略信号产生"
                 # 的时刻；后续 risk→executor 的链路时延以此为基准，由 OrderExecutor
                 # 发布到 entry_signal_to_submit_ms gauge 供 supervisor 削载决策。
+                #
+                # 真正量化形态：所有交易决策（包括 BUY）走单一 QuantDecider class。
+                # 这里把入场决策的 hook 调用从 decide_entry 切换到 quant_decide——
+                # CurrentStrategy.quant_decide 内部 _decide_entry_attempt 分支处理
+                # 无持仓 + amount_usdc 已知场景，返回 BUY ExtensionDecision。
                 import time as _time
+                from dataclasses import replace as _ctx_replace
                 _t0 = _time.perf_counter()
-                decision = self._extension_hooks.decide_entry(entry_context)
+                quant_context = _ctx_replace(entry_context, quant_trigger_kind="market_tick")
+                quant_decision = self._extension_hooks.quant_decide(quant_context)
                 try:
                     from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
                     SystemPerfMonitor.get().record_strategy_hook(
-                        "decide_entry", (_time.perf_counter() - _t0) * 1000
+                        "quant_decide", (_time.perf_counter() - _t0) * 1000
                     )
                 except Exception: pass
                 signal_at = utc_now()
+                # 从 QuantDecision.actions 抽 BUY 动作。当前 QuantDecider 同一 tick
+                # 最多输出 1 个动作（BUY 或 SELL/replace 二选一）。
+                from polymarket_trader.extension_api import ExtensionAction, ExtensionDecision
+                decision = next(
+                    (a for a in quant_decision.actions if a.action == ExtensionAction.BUY),
+                    None,
+                )
+                if decision is None:
+                    decision = ExtensionDecision.skip(
+                        reason=quant_decision.reason or "quant_no_buy_action",
+                    )
                 self._record_decision(
-                    hook_name="decide_entry",
-                    context=entry_context,
+                    hook_name="quant_decide",
+                    context=quant_context,
                     decision=decision,
                 )
                 plan_metadata.update(decision.metadata)
