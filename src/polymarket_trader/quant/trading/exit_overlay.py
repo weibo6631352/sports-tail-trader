@@ -11,7 +11,7 @@ from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.sports_live import BaseballGameState, TennisGameState, VolleyballGameState
 from polymarket_trader.domain.decisions import DecisionContext
 
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 from polymarket_trader.quant.position_plan import cap_price_to_clob_limit
 from polymarket_trader.quant.outcomes import target_for_token
 from polymarket_trader.quant.tail import SportsMarketSide
@@ -165,7 +165,7 @@ class DynamicExitDecision:
 
 
 def evaluate_dynamic_exit(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     *,
     token_id: str | None,
@@ -874,7 +874,7 @@ def _implied_prob_field(
 
 
 def _capital_efficiency_gate(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     *,
     entry_price: Decimal,
@@ -958,7 +958,7 @@ def _capital_efficiency_gate(
 
 
 def _estimated_settlement_hold_minutes(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
 ) -> int:
     """单场比赛等待结算的资金占用时间估算（分钟）。
@@ -1002,7 +1002,7 @@ def _estimated_settlement_hold_minutes(
 
 
 def _series_settlement_hold_minutes_if_active(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
 ) -> int | None:
     """若 metadata 含系列赛热态且系列赛未完结，返回估算到结算的分钟数；否则返回 None。
@@ -1198,7 +1198,7 @@ def _volleyball_seconds_remaining(state: VolleyballGameState) -> int | None:
 
 
 def _profit_take_metadata(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     *,
     entry_price: Decimal,
@@ -1245,7 +1245,7 @@ def _bid_depth_usdc(context: DecisionContext) -> Decimal | None:
 
 
 def _estimated_profit_take_fill_minutes(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
 ) -> int:
     """按 bid 侧深度估算止盈 GTC SELL 的预期成交时间。

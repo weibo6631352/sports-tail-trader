@@ -56,8 +56,6 @@ class ExecutionTimestamps:
 
 @dataclass(frozen=True, slots=True)
 class BuyOrderIntent:
-    # strategy_id 必填——下单意图必须携带策略身份，避免后续 audit/order 记录漏归属。
-    strategy_id: str
     trace_id: str
     condition_id: str
     token_id: str
@@ -86,7 +84,6 @@ class BuyOrderIntent:
 
 @dataclass(frozen=True, slots=True)
 class SellOrderIntent:
-    strategy_id: str
     trace_id: str
     condition_id: str
     token_id: str
@@ -114,7 +111,6 @@ class SellOrderIntent:
 
 @dataclass(frozen=True, slots=True)
 class CancelOrderIntent:
-    strategy_id: str
     trace_id: str
     condition_id: str
     token_id: str
@@ -127,7 +123,6 @@ class CancelOrderIntent:
 
 @dataclass(frozen=True, slots=True)
 class ReplaceOrderIntent:
-    strategy_id: str
     trace_id: str
     condition_id: str
     token_id: str
@@ -151,9 +146,7 @@ ManagedOrderIntent: TypeAlias = TradableOrderIntent | OrderControlIntent
 
 @dataclass(frozen=True, slots=True)
 class OrderRecord:
-    # strategy_id 必填，无默认值。框架/策略边界处必须显式提供；缺失直接抛错。
     # 该字段标识订单归属的策略实例，用于审计、查询过滤、跨策略数据隔离。
-    strategy_id: str
     condition_id: str
     token_id: str
     side: OrderSide
@@ -193,7 +186,6 @@ Order = OrderRecord
 
 @dataclass(frozen=True, slots=True)
 class OrderResult:
-    strategy_id: str
     trace_id: str
     condition_id: str
     token_id: str

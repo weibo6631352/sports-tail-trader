@@ -193,7 +193,7 @@ def _runtime_strategy(runtime: RuntimeComponents) -> Any | None:
     """
 
     try:
-        return runtime.strategy
+        return runtime.workflow
     except (RuntimeError, AttributeError):
         pass
     try:

@@ -11,7 +11,7 @@ from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.domain.decisions import DecisionContext, QuantDecision, TradingDecision
 
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 from polymarket_trader.quant.position_plan import cap_price_to_clob_limit, build_position_plan_metadata
 from polymarket_trader.quant.outcomes import describe_sports_market, SportsMarketFamily, tail_token_targets
 from polymarket_trader.quant.tail import LiveGameStatus, live_game_state_from_metadata
@@ -19,7 +19,7 @@ from polymarket_trader.quant.trading.helpers import resolve_tick_size
 
 
 def build_recovery_quant_decision(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
 ) -> QuantDecision:
     """reconcile_cycle 触发：清理僵尸订单 / 历史 profit-take / pause 信号。
@@ -162,7 +162,7 @@ def _is_open_entry_order(order: Order) -> bool:
 
 
 def _should_cancel_open_entry_order(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     order: Order,
 ) -> bool:
@@ -204,7 +204,7 @@ def _open_order_shares(order: Order) -> Decimal:
 
 
 def _recovery_profit_take_action(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     position: Position,
     *,
@@ -311,7 +311,7 @@ def _decimal_metadata_text(value: Decimal) -> str:
 
 
 def _stale_no_live_state_pause_reason(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
 ) -> str | None:
     """检测「赛事起始已过 stale 阈值但完全无直播状态」的 stale market。
@@ -345,7 +345,7 @@ def _stale_no_live_state_pause_reason(
 
 
 def _abnormal_live_state_pause_reason(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
 ) -> str | None:
     """根据已接入的直播状态判断是否需要暂停新增交易。"""
@@ -381,7 +381,7 @@ def _live_state_age_seconds(context: DecisionContext, observed_at: datetime) -> 
     return (current_time.astimezone(timezone.utc) - observed_at.astimezone(timezone.utc)).total_seconds()
 
 
-def _max_live_state_age_seconds(config: CurrentStrategyConfig, game: LiveEvent) -> int:
+def _max_live_state_age_seconds(config: TradingWorkflowConfig, game: LiveEvent) -> int:
     """按运动项目选择恢复侧的新鲜度窗口。"""
 
     league = game.league.strip().lower()
@@ -406,7 +406,7 @@ def _max_live_state_age_seconds(config: CurrentStrategyConfig, game: LiveEvent) 
 
 
 def _recovery_metadata(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     *,
     abnormal_pause_reason: str | None,

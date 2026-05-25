@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from polymarket_trader.quant.strategy import CurrentStrategy
+    from polymarket_trader.quant.workflow import TradingWorkflow
 
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -55,7 +55,7 @@ class TradingDecisionService:
     def __init__(
         self,
         *,
-        strategy: "CurrentStrategy",
+        strategy: "TradingWorkflow",
         strategy_id: str,
         registry: MarketRegistry | None = None,
         orderbook_reader: OrderbookReader | None = None,
@@ -63,7 +63,7 @@ class TradingDecisionService:
     ) -> None:
         if not strategy_id:
             raise ValueError("TradingDecisionService requires non-empty strategy_id")
-        self._strategy = strategy
+        self._workflow = strategy
         self._strategy_id = strategy_id
         self._registry = registry
         self._orderbook_reader = orderbook_reader
@@ -193,7 +193,7 @@ class TradingDecisionService:
         )
         import time as _time
         _t0 = _time.perf_counter()
-        quant_decision = self._strategy.quant_decide(quant_context)
+        quant_decision = self._workflow.quant_decide(quant_context)
         try:
             from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
             SystemPerfMonitor.get().record_strategy_hook(
@@ -390,7 +390,7 @@ class TradingDecisionService:
         """
         import time as _time
         t0 = _time.perf_counter()
-        decision = self._strategy.quant_decide(context)
+        decision = self._workflow.quant_decide(context)
         self._record_hook_latency("quant_decide", _time.perf_counter() - t0)
         self._record(hook_name="quant_decide", context=context, decision=decision)
         return decision

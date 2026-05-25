@@ -11,7 +11,7 @@ from polymarket_trader.domain.decisions import DecisionContext, EntrySizing
 from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot, ProbView, kelly_plan
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 from polymarket_trader.quant.outright.match import season_odds_from_metadata
 from polymarket_trader.quant.outright.pricing import outright_fair_value
 from polymarket_trader.quant.parameter_overrides import effective_decimal
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def size_outright_entry(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     ports: RuntimePorts | None = None,
 ) -> EntrySizing:

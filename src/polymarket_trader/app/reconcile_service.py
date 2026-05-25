@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from polymarket_trader.quant.strategy import CurrentStrategy
+    from polymarket_trader.quant.workflow import TradingWorkflow
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -119,14 +119,14 @@ class ReconcileService:
     def __init__(
         self,
         *,
-        strategy: "CurrentStrategy",
+        strategy: "TradingWorkflow",
         strategy_id: str,
         entry_metadata_provider: Callable[[Market], Mapping[str, Any]] | None = None,
         orderbook_reader: Callable[[str], OrderbookSnapshot | None] | None = None,
     ) -> None:
         if not strategy_id:
             raise ValueError("ReconcileService requires non-empty strategy_id")
-        self._strategy = strategy
+        self._workflow = strategy
         self._strategy_id = strategy_id
         self._entry_metadata_provider = entry_metadata_provider
         self._orderbook_reader = orderbook_reader
@@ -211,7 +211,7 @@ class ReconcileService:
             account_pause=account_pause,
         )
         metadata = self._metadata_for_market(market)
-        recovery = self._strategy.quant_decide(
+        recovery = self._workflow.quant_decide(
             DecisionContext(
                 trace_id=trace_id,
                 strategy_id=self._strategy_id,
@@ -352,7 +352,7 @@ class ReconcileService:
             adjusted_position = position.with_open_sell_shares(
                 max(position.open_sell_shares, open_sell_shares)
             )
-            quant_decision = self._strategy.quant_decide(
+            quant_decision = self._workflow.quant_decide(
                 DecisionContext(
                     trace_id=trace_id,
                     strategy_id=self._strategy_id,

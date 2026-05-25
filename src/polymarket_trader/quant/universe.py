@@ -14,10 +14,10 @@ from polymarket_trader.domain.decisions import UniverseDecision
 from polymarket_trader.quant.tail import SportsMarketFamily, SportsMarketType
 from polymarket_trader.sports.slug import is_unsupported_period_total
 
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 
 
-def select_market(config: CurrentStrategyConfig, market: Market) -> UniverseDecision:
+def select_market(config: TradingWorkflowConfig, market: Market) -> UniverseDecision:
     """判断某个 market 是否属于当前策略 universe。
 
     参数：

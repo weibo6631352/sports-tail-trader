@@ -5,7 +5,7 @@
 new / operator / applied_at`` 完整审计链。
 
 设计取向：
-- ``Settings`` / ``CurrentStrategyConfig`` 是启动期不变量；``ParameterStore`` 是
+- ``Settings`` / ``TradingWorkflowConfig`` 是启动期不变量；``ParameterStore`` 是
   runtime 覆盖层，受白名单约束。
 - 读侧：caller 主动 ``store.get(scope, key, default)`` 取覆盖值；没有 override
   时返回 default。不改变现有 Settings 注入方式，影响面可控。
@@ -173,7 +173,7 @@ _register(ParameterSpec(
     coerce=_coerce_positive_int,
 ))
 
-# 策略级阈值。键名对齐 CurrentStrategyConfig 实际字段——agent 调参时清楚知道
+# 策略级阈值。键名对齐 TradingWorkflowConfig 实际字段——agent 调参时清楚知道
 # 自己在调哪一个 frozen 字段的 runtime 覆盖。
 _register(ParameterSpec(
     scope="strategy",

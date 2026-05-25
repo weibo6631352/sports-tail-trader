@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +26,7 @@ class SportsRiskDecision:
 
 
 def check_tail_entry_risk(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     *,
     metadata: Mapping[str, object],
 ) -> SportsRiskDecision:

@@ -14,7 +14,7 @@ from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.domain.decisions import DecisionContext, EntryCandidate
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 from polymarket_trader.quant.identity import STRATEGY_ID
 from polymarket_trader.quant.outcomes import describe_sports_market, is_primary_token
 from polymarket_trader.sports import SportsMarketFamily
@@ -113,7 +113,7 @@ def _entry_candidate_to_snapshot(candidate: EntryCandidate) -> AllocationMarketS
 
 
 def _allocation_skip_reason(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     snapshot: AllocationMarketSnapshot,
     *,

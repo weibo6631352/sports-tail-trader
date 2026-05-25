@@ -28,7 +28,7 @@ from polymarket_trader.quant.allocation import (
     ProbView,
     kelly_plan,
 )
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 from polymarket_trader.quant.position_plan import build_position_plan_metadata
 from polymarket_trader.quant.trading.allocation import (
     _allocation_skip_reason,
@@ -58,7 +58,7 @@ def _utc_now() -> datetime:
 
 
 def _maybe_reprice_stale_sell(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     *,
     now: datetime,
@@ -234,7 +234,7 @@ def _math_lock_prob_view(
     )
 
 
-def size_entry(config: CurrentStrategyConfig, context: DecisionContext) -> EntrySizing:
+def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> EntrySizing:
     """为当前 market 计算本轮可用入场预算（Kelly sizing）。
 
     流程：
@@ -388,7 +388,7 @@ def size_entry(config: CurrentStrategyConfig, context: DecisionContext) -> Entry
     )
 
 
-def decide_entry(config: CurrentStrategyConfig, context: DecisionContext) -> TradingDecision:
+def decide_entry(config: TradingWorkflowConfig, context: DecisionContext) -> TradingDecision:
     """根据盘口和预算生成 BUY 决策。
 
     门禁已在 size_entry / _allocation_skip_reason 通过——这里只负责落 BUY intent
@@ -488,7 +488,7 @@ class QuantDecider:
     def __init__(
         self,
         *,
-        config: CurrentStrategyConfig,
+        config: TradingWorkflowConfig,
         ports: RuntimePorts | None = None,
     ) -> None:
         self._config = config

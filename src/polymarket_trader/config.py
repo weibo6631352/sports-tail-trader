@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     polymarket_signature_type: int = Field(default=0, ge=0, le=2)
     polymarket_funder_address: str | None = None
     # 策略配置文件路径（TOML / JSON），保留作为策略 config 的可选加载入口。
-    strategy_config_path: str | None = None
+    workflow_config_path: str | None = None
 
     # portfolio_budget_usdc 语义：bankroll 软上限。实际 bankroll = min(链上可用 USDC,
     # portfolio_budget_usdc)。设 0 时 Kelly 拒新仓（启动安全态）。Kelly 引擎在
@@ -249,7 +249,7 @@ class Settings(BaseSettings):
         "polymarket_funder_address",
         "database_password",
         "database_url_override",
-        "strategy_config_path",
+        "workflow_config_path",
         "goalserve_api_key",
         mode="before",
     )

@@ -1,10 +1,10 @@
 """策略内的 ParameterPort 解析器。
 
 策略关键阈值（``min_edge_bps`` / ``kelly_fraction_cap`` / ``min_profit_per_share``
-等）默认从 frozen ``CurrentStrategyConfig`` 读；如果框架注入了 ``ParameterPort``
+等）默认从 frozen ``TradingWorkflowConfig`` 读；如果框架注入了 ``ParameterPort``
 且该参数有 active override，本模块返回 override 值。
 
-为什么不在 ``CurrentStrategyConfig`` 内部解析：``CurrentStrategyConfig`` 是
+为什么不在 ``TradingWorkflowConfig`` 内部解析：``TradingWorkflowConfig`` 是
 frozen dataclass，启动期校验后不应再被替换。Override 是 runtime 临时探索值，
 不能跨重启存活——单独走 port 让职责清晰。
 

@@ -23,7 +23,7 @@ from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.runtime.status import RuntimeSnapshot
 from polymarket_trader.runtime.supervisor import Supervisor
 from polymarket_trader.serialization import utc_now
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 
 logger = logging.getLogger(__name__)
 _RUNTIME_MARKET_SAMPLE_LIMIT = 20
@@ -306,8 +306,8 @@ class AdminRuntimeView:
         if not isinstance(settings, Settings):
             return None
         budget: Decimal | None = settings.portfolio_budget_usdc
-        strategy = self.runtime.strategy if self.runtime else None
-        kelly = strategy.config if strategy is not None else CurrentStrategyConfig()
+        strategy = self.runtime.workflow if self.runtime else None
+        kelly = strategy.config if strategy is not None else TradingWorkflowConfig()
         max_position_fraction = kelly.kelly_max_position_fraction
         min_stake = kelly.kelly_min_stake_usdc
         candidates: list[Decimal] = []

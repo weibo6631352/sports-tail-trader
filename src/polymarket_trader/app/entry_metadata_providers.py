@@ -19,7 +19,7 @@ from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.allocation import current_exposure_usdc
 
 if TYPE_CHECKING:
-    from polymarket_trader.quant.strategy import CurrentStrategy
+    from polymarket_trader.quant.workflow import TradingWorkflow
     from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
     from polymarket_trader.runtime.registry import MarketRegistry
 
@@ -28,7 +28,7 @@ def build_entry_metadata_for_event_provider(
     *,
     registry: "MarketRegistry",
     entry_metadata_store: "EntryMetadataStore",
-    strategy: "CurrentStrategy",
+    strategy: "TradingWorkflow",
 ) -> Callable[[Any, AccountSnapshot | None], Mapping[str, Any]]:
     """构造 ``trading_decision_worker`` 所用的 entry_metadata_provider。
 

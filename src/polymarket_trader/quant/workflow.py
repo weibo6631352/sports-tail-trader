@@ -17,7 +17,7 @@ from polymarket_trader.domain.sports_live import LiveStateMatch
 from polymarket_trader.runtime.discovery_runner import DiscoveryQuery
 from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
-from polymarket_trader.quant.config import CurrentStrategyConfig, load_current_strategy_config
+from polymarket_trader.quant.config import TradingWorkflowConfig, load_workflow_config
 from polymarket_trader.quant.discovery import (
     build_configured_discovery_queries,
     build_live_event_discovery_queries,
@@ -93,7 +93,7 @@ _METRIC_SERIES_DECISION = "strategy_series_decision_total"
 _METRIC_SERIES_REJECT = "strategy_series_reject_total"
 
 
-class CurrentStrategy:
+class TradingWorkflow:
     """当前默认策略的主对象。
 
     这个类本身尽量保持"薄"：
@@ -108,7 +108,7 @@ class CurrentStrategy:
     def __init__(
         self,
         *,
-        config: CurrentStrategyConfig,
+        config: TradingWorkflowConfig,
         ports: RuntimePorts | None = None,
     ) -> None:
         self._config = config
@@ -131,7 +131,7 @@ class CurrentStrategy:
             except Exception:
                 logger.warning("strategy.lifecycle_subscribe_failed", exc_info=True)
     @property
-    def config(self) -> CurrentStrategyConfig:
+    def config(self) -> TradingWorkflowConfig:
         return self._config
 
     @property
@@ -473,12 +473,12 @@ class CurrentStrategy:
                 )
 
 
-def build_strategy(
+def build_workflow(
     *,
     ports: RuntimePorts | None = None,
     config_path: str | None = None,
-) -> "CurrentStrategy":
-    return CurrentStrategy(
-        config=load_current_strategy_config(config_path),
+) -> "TradingWorkflow":
+    return TradingWorkflow(
+        config=load_workflow_config(config_path),
         ports=ports,
     )

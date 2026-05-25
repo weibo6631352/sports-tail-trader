@@ -1951,10 +1951,10 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         manual_confirmation: "ManualConfirmation | None" = None,
     ):
         # runtime.settings 是 main.py 启动后绑定的强字段——admin 路径不可能在
-        # settings 缺失时执行。kelly_* 从策略侧 CurrentStrategy.config 读取；
+        # settings 缺失时执行。kelly_* 从策略侧 TradingWorkflow.config 读取；
         # 策略配置是 kelly_* 的唯一真相来源，不再走框架 Settings。
         settings = self.runtime.settings
-        strategy_config = self.runtime.strategy.config
+        strategy_config = self.runtime.workflow.config
         return self._trading_decision_service().build_entry_plan(
             market=market,
             orderbook=orderbook,

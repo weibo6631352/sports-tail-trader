@@ -373,9 +373,7 @@ class DecisionContext:
     """框架向策略 hook 输入的上下文。所有字段直接读取，不通过 sub-view 属性中转。"""
 
     trace_id: str
-    # strategy_id 是框架/策略契约的强字段——所有 hook 调用必须显式提供。
     # 框架内部禁止填默认值；策略 manifest/spec 提供单一来源（CLAUDE.md §10）。
-    strategy_id: str
     market: Market | None = None
     token_id: str | None = None
     orderbook: OrderbookSnapshot | None = None
@@ -430,7 +428,6 @@ def _decision_record_normalize_datetime(value: datetime | None) -> datetime:
 class DecisionRecord:
     """单次 hook 调用录制条目（持久化到 decision_records 表）。"""
 
-    strategy_id: str
     trace_id: str
     condition_id: str
     decision_input: Mapping[str, Any]

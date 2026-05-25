@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.runtime.discovery_runner import DiscoveryQuery
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 
 
-def build_configured_discovery_queries(config: CurrentStrategyConfig) -> tuple[DiscoveryQuery, ...]:
+def build_configured_discovery_queries(config: TradingWorkflowConfig) -> tuple[DiscoveryQuery, ...]:
     """生成 Gamma 粗筛查询——只用 polymarket 官方 ``live=true`` 标志。
 
     polymarket 自己标记 ``live=true`` 的事件即"当下真正可交易的直播比赛",
@@ -42,7 +42,7 @@ def build_configured_discovery_queries(config: CurrentStrategyConfig) -> tuple[D
 
 
 def build_live_event_discovery_queries(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     events: tuple[LiveEvent, ...],
 ) -> tuple[DiscoveryQuery, ...]:
     """不再由直播源驱动发现——返回空。

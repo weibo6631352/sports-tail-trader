@@ -480,7 +480,7 @@ _FRAMEWORK_DISCOVERY_PARAM_KEYS = {"limit", "after_cursor"}
 
 
 def _discovery_queries(runtime: RuntimeComponents) -> tuple[DiscoveryQuery, ...]:
-    hooks = runtime.strategy
+    hooks = runtime.workflow
     queries = (*_live_game_discovery_queries(runtime, hooks), *_configured_discovery_queries(hooks))
     return _dedupe_discovery_queries(queries) or (DEFAULT_DISCOVERY_QUERY,)
 
@@ -496,7 +496,7 @@ def _configured_discovery_queries(hooks: Any) -> tuple[DiscoveryQuery, ...]:
 def _live_game_discovery_queries(runtime: RuntimeComponents, hooks: Any) -> tuple[DiscoveryQuery, ...]:
     """从直播状态 worker 的最近比赛快照中提取策略高意图查询。
 
-    ``hooks`` 形参未使用——live state discovery 直接走 ``runtime.strategy``，
+    ``hooks`` 形参未使用——live state discovery 直接走 ``runtime.workflow``，
     保留参数只为与同模块其它 query builder 签名一致。
     """
 
@@ -508,7 +508,7 @@ def _live_game_discovery_queries(runtime: RuntimeComponents, hooks: Any) -> tupl
         return ()
     return tuple(
         query
-        for query in runtime.strategy.discovery_queries_for_live_events(events)
+        for query in runtime.workflow.discovery_queries_for_live_events(events)
         if isinstance(query, DiscoveryQuery) and query.name.strip()
     )
 

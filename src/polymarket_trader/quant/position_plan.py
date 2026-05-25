@@ -13,14 +13,14 @@ from typing import Mapping
 
 from polymarket_trader.domain.decisions import DecisionContext
 
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 
 
 POSITION_PLAN_VERSION = "1"
 
 
 def build_position_plan_metadata(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     *,
     token_id: str | None,
@@ -84,7 +84,7 @@ def build_position_plan_metadata(
 
 
 def exit_price_for_context(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     *,
     entry_price: Decimal | None = None,

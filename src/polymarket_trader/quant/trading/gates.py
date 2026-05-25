@@ -13,11 +13,11 @@ from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.domain.decisions import DecisionContext
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 
 
 def _tail_pre_orderbook_skip_reason(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     snapshot: AllocationMarketSnapshot,
 ) -> str:

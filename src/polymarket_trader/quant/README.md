@@ -62,7 +62,7 @@
 
 - 这个目录只放策略自身语义，不放框架通用能力。
 - 策略通过 `polymarket_trader.domain.decisions` 的 TradingDecision / QuantDecision / DecisionContext 等一等 domain 类型与框架交互。
-- 远端 discovery 粗筛通过 `CurrentStrategy.discovery_queries()` 暴露；当前实现从 `config.py` 的 `discovery_tag_slugs` 为每个 tag slug 发 3 个定向查询(`live=true` / `start_time` 进行中窗口 / `start_time` 未来 24h),复用 Polymarket 官方 sports/live 页面的发现方法。
+- 远端 discovery 粗筛通过 `TradingWorkflow.discovery_queries()` 暴露；当前实现从 `config.py` 的 `discovery_tag_slugs` 为每个 tag slug 发 3 个定向查询(`live=true` / `start_time` 进行中窗口 / `start_time` 未来 24h),复用 Polymarket 官方 sports/live 页面的发现方法。
 - 体育扫尾策略默认覆盖 `Totals`、`Moneyline`、`Spreads` 和单场 `Yes/No` prop；没有专用胜率模型的 prop 只能 record-only 进入候选诊断，不能直接自动执行。
 - `single_game` 不是总体业务边界，只是单场直播比分源可直接匹配的 market family；系列赛、冠军归属、球员下家/奖项等长期市场后续应接入专用数据源和定价模型，不能误用单场比分源。
 - 策略机会类型包括普通直播扫尾、已结束但未封盘和受控加仓；当前默认买入后等待权威结算，不自动挂 follow-up SELL。

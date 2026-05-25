@@ -243,8 +243,6 @@ class DomainEvent(EventEnvelope):
 
 @dataclass(frozen=True, slots=True)
 class Fill:
-    # strategy_id 必填，无默认值。框架/策略边界处必须显式提供。
-    strategy_id: str
     trace_id: str
     event_type: DomainEventType | str = DomainEventType.TRADE_CONFIRMED
     event_id: str = ""
@@ -272,8 +270,6 @@ class Fill:
 
 @dataclass(frozen=True, slots=True, init=False)
 class AuditEvent:
-    # strategy_id 必填，无默认值。AuditEvent 自带 __init__ —— 缺失会抛 ValueError。
-    strategy_id: str
     trace_id: str
     event_id: str
     event_title: str
@@ -303,8 +299,6 @@ class AuditEvent:
         trace_id: str | None = None,
         created_at: datetime | None = None,
         payload: Mapping[str, Any] | None = None,
-        *,
-        strategy_id: str | None = None,
         **fields: Any,
     ) -> None:
         raw_response = fields.pop("raw_response", None)
@@ -320,12 +314,9 @@ class AuditEvent:
             trace_id = merged.pop("trace_id", None)
         if trace_id is None:
             raise ValueError("AuditEvent requires trace_id")
-        # strategy_id 与 trace_id 同级——框架/策略边界必填，缺失直接抛错。
-        if strategy_id is None:
-            strategy_id = merged.pop("strategy_id", None)
-        if strategy_id is None or not str(strategy_id).strip():
-            raise ValueError("AuditEvent requires strategy_id")
-        strategy_id = str(strategy_id)
+        # 历史调用方可能仍把 strategy_id 塞进 payload/fields——直接吞掉，
+        # 避免 dataclass 未声明字段引发 KeyError；后续审计无此字段。
+        merged.pop("strategy_id", None)
 
         created_at = _normalize_datetime(created_at or merged.pop("created_at", None))
         updated_at = merged.pop("updated_at", None) or created_at
@@ -338,7 +329,6 @@ class AuditEvent:
         event_slug = _text_or_none(merged.pop("event_slug", None))
 
         event_fields = {
-            "strategy_id": strategy_id,
             "trace_id": trace_id,
             "event_id": merged.pop("event_id", None) or uuid4().hex,
             "event_title": str(event_title),
@@ -368,7 +358,6 @@ class AuditEvent:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "strategy_id": self.strategy_id,
             "trace_id": self.trace_id,
             "event_id": self.event_id,
             "event_title": self.event_title,

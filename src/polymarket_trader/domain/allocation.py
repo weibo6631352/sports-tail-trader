@@ -10,8 +10,6 @@ from polymarket_trader.domain.position import Position
 
 @dataclass(frozen=True, slots=True)
 class Allocation:
-    # strategy_id 必填，无默认值。框架/策略边界处必须显式提供；缺失直接抛错。
-    strategy_id: str
     condition_id: str
     target_budget_usdc: Decimal
     buy_budget_usdc: Decimal

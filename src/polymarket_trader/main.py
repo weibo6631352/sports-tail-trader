@@ -107,9 +107,8 @@ from polymarket_trader.workers.sports_season_odds_worker import SportsSeasonOdds
 from polymarket_trader.workers.game_odds_worker import GameOddsWorker
 from polymarket_trader.workers.goalserve_pregame_worker import GoalservePregameWorker
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
-from polymarket_trader.quant.config import load_current_strategy_config
-from polymarket_trader.quant.identity import STRATEGY_ID
-from polymarket_trader.quant.strategy import CurrentStrategy
+from polymarket_trader.quant.config import load_workflow_config
+from polymarket_trader.quant.workflow import TradingWorkflow
 from polymarket_trader.workers.user_ws import UserWsWorker
 from polymarket_trader.infra.sports.game_odds_client import (
     GameOddsClient,
@@ -139,7 +138,7 @@ _RECONCILE_BATCH_SIZE_LIMIT = 256
 class RuntimeComponents:
     settings: Settings
     readiness: StartupReadiness
-    strategy: CurrentStrategy
+    workflow: TradingWorkflow
     logging_runtime: LoggingRuntime
     gamma_client: GammaClient
     clob_client: ClobClient
@@ -264,7 +263,7 @@ def _build_season_odds_worker(
     *,
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
-    strategy: CurrentStrategy,
+    workflow: TradingWorkflow,
     event_bus: EventBus | None = None,
 ) -> tuple[SportsSeasonOddsWorker, SeasonOddsClient] | tuple[None, None]:
     """按 settings 装配 sports_season_odds_worker；缺 api_key 或未启用 outright 时返回 (None, None)。
@@ -285,7 +284,7 @@ def _build_season_odds_worker(
             if r.strip()
         ),
     )
-    _classifier = strategy
+    _classifier = workflow
 
     def _is_outright(market: Market) -> bool:
         return _classifier.is_outright_market(market) if _classifier is not None else False
@@ -315,7 +314,7 @@ def _build_game_odds_worker(
     *,
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
-    strategy: CurrentStrategy,
+    workflow: TradingWorkflow,
     event_bus: EventBus | None = None,
 ) -> tuple[GameOddsWorker, GameOddsClient] | tuple[None, None]:
     """按 settings 装配 game_odds_worker；缺 api_key 时返回 (None, None)。"""
@@ -334,7 +333,7 @@ def _build_game_odds_worker(
         ),
     )
 
-    _classifier = strategy
+    _classifier = workflow
 
     def _sport_key(market: Market) -> str | None:
         return _classifier.sport_key_for_game_odds(market) if _classifier is not None else None
@@ -450,15 +449,13 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         metrics_registry=metrics,
     )
     # 直接装配 quant 策略——量化决策器就是这个交易系统本身。
-    strategy_config = load_current_strategy_config(settings.strategy_config_path)
-    strategy = CurrentStrategy(config=strategy_config, ports=runtime_ports)
-    strategy_issues = strategy.validate_config(settings)
-    if strategy_issues:
-        raise ConfigLoadError(list(strategy_issues))
+    workflow_config = load_workflow_config(settings.workflow_config_path)
+    workflow = TradingWorkflow(config=workflow_config, ports=runtime_ports)
+    workflow_issues = workflow.validate_config(settings)
+    if workflow_issues:
+        raise ConfigLoadError(list(workflow_issues))
     parameter_store.bind_settings(settings)
-    strategy_id = STRATEGY_ID
     persistence_worker = PersistenceWorker(
-        strategy_id=strategy_id,
         outbox=outbox,
         repository=persistence_repository,
     )
@@ -513,7 +510,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
             account_state_store=account_state_store,
             registry=registry,
             market_ws_worker=market_ws_worker,
-            strategy_id=strategy_id,
         )
         initial_background_tasks.update(paper_tasks)
     elif trading_client is not None:
@@ -530,7 +526,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         metrics=metrics,
     )
     market_service = MarketService(
-        strategy=strategy,
+        workflow=workflow,
         registry=registry,
         market_tracker=market_ws_worker,
         account_snapshot_provider=account_state_store.snapshot,
@@ -538,10 +534,9 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         # 5min 颗粒度对复盘"为什么这个市场被拒"足够,节省 80% audit 写入.
         filter_emit_min_interval_s=300.0,
     )
-    decision_recorder = DecisionEventRecorder(outbox=outbox, strategy_id=strategy_id)
+    decision_recorder = DecisionEventRecorder(outbox=outbox)
     trading_decision_service = TradingDecisionService(
-        strategy=strategy,
-        strategy_id=strategy_id,
+        workflow=workflow,
         registry=registry,
         orderbook_reader=market_ws_worker.snapshot,
         decision_recorder=decision_recorder,
@@ -552,7 +547,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         event_bus=event_bus,
     )
     user_ws_worker = UserWsWorker(
-        strategy_id=strategy_id,
         event_bus=event_bus,
         account_state_store=account_state_store,
     )
@@ -560,7 +554,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     entry_metadata_for_event = build_entry_metadata_for_event_provider(
         registry=registry,
         entry_metadata_store=entry_metadata_store,
-        strategy=strategy,
+        workflow=workflow,
     )
     entry_metadata_for_market = build_entry_metadata_for_market_provider(
         entry_metadata_store=entry_metadata_store,
@@ -572,19 +566,18 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         trading_service=trading_service,
         account_state_store=account_state_store,
         portfolio_budget_usdc=settings.portfolio_budget_usdc,
-        kelly_fraction=strategy_config.kelly_fraction,
-        kelly_max_position_fraction=strategy_config.kelly_max_position_fraction,
-        kelly_min_edge=strategy_config.kelly_min_edge,
-        kelly_min_stake_usdc=strategy_config.kelly_min_stake_usdc,
-        kelly_allow_round_up_to_market_min=strategy_config.kelly_allow_round_up_to_market_min,
-        kelly_round_up_max_overbet_ratio=strategy_config.kelly_round_up_max_overbet_ratio,
+        kelly_fraction=workflow_config.kelly_fraction,
+        kelly_max_position_fraction=workflow_config.kelly_max_position_fraction,
+        kelly_min_edge=workflow_config.kelly_min_edge,
+        kelly_min_stake_usdc=workflow_config.kelly_min_stake_usdc,
+        kelly_allow_round_up_to_market_min=workflow_config.kelly_allow_round_up_to_market_min,
+        kelly_round_up_max_overbet_ratio=workflow_config.kelly_round_up_max_overbet_ratio,
         entry_metadata_provider=entry_metadata_for_event,
         orderbook_direction_signal_reader=orderbook_delta_store.direction_signal,
         parameter_store=parameter_store,
     )
     reconcile_service = ReconcileService(
-        strategy=strategy,
-        strategy_id=strategy_id,
+        workflow=workflow,
         entry_metadata_provider=entry_metadata_for_market,
         orderbook_reader=trading_decision_service.lookup_orderbook,
     )
@@ -628,14 +621,14 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     if settings.sports_live_state_enabled:
         sports_live_state_client = _build_sports_live_state_client(
             settings,
-            league_source_priority=strategy.league_source_affinity,
+            league_source_priority=workflow.league_source_affinity,
             trusted_sources=None,  # 默认走 aggregate 内置 _DEFAULT_OFFICIAL_SOURCES
             livescore_active_sports_provider=build_livescore_active_sports_provider(registry),
             inplay_active_sports_provider=build_inplay_active_sports_provider(registry),
         )
         sports_live_state_worker = SportsLiveStateWorker(
             snapshot_provider=sports_live_state_client.list_events,
-            match_live_state=strategy.match_live_state,
+            match_live_state=workflow.match_live_state,
             registry=registry,
             entry_metadata_store=entry_metadata_store,
             event_bus=event_bus,
@@ -660,14 +653,14 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         settings,
         registry=registry,
         entry_metadata_store=entry_metadata_store,
-        strategy=strategy,
+        workflow=workflow,
         event_bus=event_bus,
     )
     game_odds_worker, game_odds_client = _build_game_odds_worker(
         settings,
         registry=registry,
         entry_metadata_store=entry_metadata_store,
-        strategy=strategy,
+        workflow=workflow,
         event_bus=event_bus,
     )
     # 注册 odds workers + user_ws 的 prune callbacks
@@ -708,7 +701,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     return RuntimeComponents(
         settings=settings,
         readiness=readiness,
-        strategy=strategy,
+        workflow=workflow,
         logging_runtime=logging_runtime,
         parameter_store=parameter_store,
         gamma_client=gamma_client,

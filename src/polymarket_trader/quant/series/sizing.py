@@ -14,7 +14,7 @@ from polymarket_trader.domain.decisions import DecisionContext, EntrySizing
 from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot, ProbView, kelly_plan
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 from polymarket_trader.quant.parameter_overrides import effective_decimal, effective_int, effective_str_enum
 from polymarket_trader.quant.series.classifier import classify_series_sub_type
 from polymarket_trader.quant.series.evaluator import SeriesEvaluatorInputs, evaluate_series_opportunity
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class SeriesSubTypeSettings:
-    """sub_type 维度的策略配置切片：解耦 sizing / decide 与 CurrentStrategyConfig。"""
+    """sub_type 维度的策略配置切片：解耦 sizing / decide 与 TradingWorkflowConfig。"""
 
     execution_permission: ExecutionPermission
     min_edge_bps: int
@@ -43,7 +43,7 @@ class SeriesSubTypeSettings:
 
 def series_subtype_settings(
     market: Market,
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     ports: RuntimePorts | None = None,
 ) -> tuple[SeriesSubType, SeriesSubTypeSettings]:
     """根据 market 的子类型分类返回对应配置包络。
@@ -111,7 +111,7 @@ def series_subtype_settings(
 
 
 def size_series_entry(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     ports: RuntimePorts | None = None,
 ) -> EntrySizing:

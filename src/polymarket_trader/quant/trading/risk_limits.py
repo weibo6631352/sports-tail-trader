@@ -14,13 +14,13 @@ from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.domain.decisions import DecisionContext
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 from polymarket_trader.quant.risk import check_tail_entry_risk
 from polymarket_trader.quant.trading.helpers import fill_notional_usdc
 
 
 def _apply_tail_risk_limits(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     *,
     plan: AllocationPlan,

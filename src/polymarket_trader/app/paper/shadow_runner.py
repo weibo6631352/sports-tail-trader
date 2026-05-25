@@ -110,7 +110,7 @@ async def run_shadow_session(
 ) -> ShadowSessionReport:
     """顺序消费事件流，返回完整 shadow 报告。
 
-    ``strategy`` 由调用方提供（生产场景从 CurrentStrategy 取，测试场景可
+    ``strategy`` 由调用方提供（生产场景从 TradingWorkflow 取，测试场景可
     构造任意 hooks）。``ledger`` 用于累计成交账本，调用方可读取。``virtual_clock``
     若为 None 则使用 EventTimestampClock 跟随事件时间戳。
     """

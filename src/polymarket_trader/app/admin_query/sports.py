@@ -226,7 +226,7 @@ class AdminSportsQueryMixin(_Base):
         还是文本归一化遗漏标点 / 别名。返回 ``None`` 时由路由层翻译成 404。
         """
 
-        strategy = self.runtime.strategy if self.runtime else None
+        strategy = self.runtime.workflow if self.runtime else None
         diagnostics = strategy if strategy is not None and hasattr(strategy, "resolve_outright_team_debug_payload") else None
         market = self._resolve_market(
             condition_id=condition_id,

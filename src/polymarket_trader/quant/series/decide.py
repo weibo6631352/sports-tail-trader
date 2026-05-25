@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from polymarket_trader.domain.decisions import DecisionContext, DecisionKind, MarketTokenView, TradingDecision
 from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
-from polymarket_trader.quant.config import CurrentStrategyConfig
+from polymarket_trader.quant.config import TradingWorkflowConfig
 from polymarket_trader.quant.series.evaluator import SeriesEvaluatorInputs, evaluate_series_opportunity
 from polymarket_trader.quant.series.risk import SeriesSubTypeRiskConfig, check_series_entry_risk
 from polymarket_trader.quant.series.sizing import series_subtype_settings
@@ -18,7 +18,7 @@ from polymarket_trader.quant.trading.helpers import decimal_from_metadata
 
 
 def decide_series_entry(
-    config: CurrentStrategyConfig,
+    config: TradingWorkflowConfig,
     context: DecisionContext,
     ports: RuntimePorts | None = None,
 ) -> TradingDecision:

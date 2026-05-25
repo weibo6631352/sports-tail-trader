@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from polymarket_trader.quant.strategy import CurrentStrategy
+    from polymarket_trader.quant.workflow import TradingWorkflow
 
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -46,7 +46,7 @@ class MarketService:
     def __init__(
         self,
         *,
-        strategy: "CurrentStrategy",
+        strategy: "TradingWorkflow",
         parser: MarketPayloadParser | None = None,
         registry: MarketRegistry | None = None,
         market_tracker: MarketTracker | None = None,
@@ -54,7 +54,7 @@ class MarketService:
         filter_emit_min_interval_s: float = 0.0,
     ) -> None:
         self._parser = parser or MarketPayloadParser()
-        self._strategy = strategy
+        self._workflow = strategy
         self._registry = registry
         self._market_tracker = market_tracker
         self._account_snapshot_provider = account_snapshot_provider
@@ -72,10 +72,10 @@ class MarketService:
         self._filter_ttl_seconds: float = 7_200.0
 
     @property
-    def strategy(self) -> "CurrentStrategy":
+    def strategy(self) -> "TradingWorkflow":
         """返回市场发现链路正在使用的扩展筛选 hooks。"""
 
-        return self._strategy
+        return self._workflow
 
     def ingest_raw_market(
         self,
@@ -137,7 +137,7 @@ class MarketService:
                 if existing_market is not None:
                     self._remove_market_tracking(existing_market)
             else:
-                universe_decision = self._strategy.select_market(candidate_market)
+                universe_decision = self._workflow.select_market(candidate_market)
                 # 时间窗口门禁：远期未开赛 / 早已结束的单场赛事不纳入 WS 跟踪——
                 # 否则 discovery 会 track 上万个远期市场、market WS 订阅追不上。
                 # 有账户敞口的市场走下方 retain-filtered 分支，仍保留跟踪。
@@ -387,7 +387,7 @@ class MarketService:
         market: Market,
         account_snapshot: AccountSnapshot | None,
     ) -> bool:
-        return self._strategy.should_keep_tracking(market, account_snapshot)
+        return self._workflow.should_keep_tracking(market, account_snapshot)
 
     def _build_retained_filtered_market(
         self,
@@ -396,7 +396,7 @@ class MarketService:
         existing_market: Market,
         reason: str,
     ) -> Market:
-        return self._strategy.build_filtered_tracking_market(
+        return self._workflow.build_filtered_tracking_market(
             candidate_market,
             existing_market=existing_market,
             reason=reason,

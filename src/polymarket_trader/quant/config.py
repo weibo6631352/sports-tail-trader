@@ -57,7 +57,7 @@ def _default_league_source_affinity() -> Mapping[str, tuple[str, ...]]:
 
 
 @dataclass(frozen=True, slots=True)
-class CurrentStrategyConfig:
+class TradingWorkflowConfig:
     """当前策略的静态配置。
 
     字段说明：
@@ -462,7 +462,7 @@ class CurrentStrategyConfig:
     )
 
 
-def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
+def tail_policy_from_config(config: TradingWorkflowConfig) -> TailPolicy:
     """把当前策略配置转换成体育扫尾纯业务策略参数。"""
 
     return TailPolicy(
@@ -495,17 +495,17 @@ def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
     )
 
 
-def default_strategy_config() -> CurrentStrategyConfig:
+def default_workflow_config() -> TradingWorkflowConfig:
     """返回内置默认配置。
 
     返回：
-        一份可直接用于生产装配的 ``CurrentStrategyConfig``。
+        一份可直接用于生产装配的 ``TradingWorkflowConfig``。
     """
 
-    return CurrentStrategyConfig()
+    return TradingWorkflowConfig()
 
 
-def load_current_strategy_config(config_path: str | None) -> CurrentStrategyConfig:
+def load_workflow_config(config_path: str | None) -> TradingWorkflowConfig:
     """从外部配置文件加载当前策略配置。
 
     参数：
@@ -514,7 +514,7 @@ def load_current_strategy_config(config_path: str | None) -> CurrentStrategyConf
             或者调用方没有提供配置文件，则退回默认配置。
 
     返回：
-        解析后的 ``CurrentStrategyConfig``。
+        解析后的 ``TradingWorkflowConfig``。
     """
 
-    return load_strategy_config(CurrentStrategyConfig, config_path) or default_strategy_config()
+    return load_strategy_config(TradingWorkflowConfig, config_path) or default_workflow_config()
