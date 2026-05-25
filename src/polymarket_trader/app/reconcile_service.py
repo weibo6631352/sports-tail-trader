@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from polymarket_trader.quant.strategy import CurrentStrategy
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -25,7 +29,7 @@ from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.extension_api import (
     ExtensionAction,
     ExtensionDecision,
-    ExtensionHooks,
+
     MarketTokenView,
     ExtensionContext,
 )
@@ -121,7 +125,7 @@ class ReconcileService:
     def __init__(
         self,
         *,
-        extension_hooks: ExtensionHooks,
+        extension_hooks: "CurrentStrategy",
         strategy_id: str,
         entry_metadata_provider: Callable[[Market], Mapping[str, Any]] | None = None,
         orderbook_reader: Callable[[str], OrderbookSnapshot | None] | None = None,

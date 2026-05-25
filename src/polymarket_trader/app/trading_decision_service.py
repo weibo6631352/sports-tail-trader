@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from polymarket_trader.quant.strategy import CurrentStrategy
+
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Callable, Iterable, Mapping
@@ -25,7 +29,7 @@ from polymarket_trader.extension_api import (
     EntryCandidate,
     ExtensionContext,
     ExtensionDecision,
-    ExtensionHooks,
+
     MarketTokenView,
 )
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
@@ -57,7 +61,7 @@ class TradingDecisionService:
     def __init__(
         self,
         *,
-        extension_hooks: ExtensionHooks,
+        extension_hooks: "CurrentStrategy",
         strategy_id: str,
         registry: MarketRegistry | None = None,
         orderbook_reader: OrderbookReader | None = None,

@@ -1,3 +1,10 @@
+"""量化决策器与框架共享的数据类型集合。
+
+历史上是"框架 + 策略插件"二次开发抽象层，现仅承载跨模块传递的数据类型
+（Context / Decision / Ports / lifecycle 事件等）。Protocol 类（ExtensionHooks /
+BusinessExtension / 各种 *Hooks）已删除——quant 策略直接装配，无插件层。
+"""
+
 from __future__ import annotations
 
 from polymarket_trader.extension_api.config_loader import load_extension_config, load_mapping_file
@@ -18,7 +25,6 @@ from polymarket_trader.extension_api.decisions import (
     UniverseDecision,
 )
 from polymarket_trader.extension_api.errors import ExtensionLoadError
-from polymarket_trader.extension_api.hooks import ExtensionHooks, LiveStateHooks, MarketClassificationHooks, SportsDiagnosticHooks
 from polymarket_trader.extension_api.lifecycle import (
     LifecycleBus,
     LifecycleCallback,
@@ -28,16 +34,6 @@ from polymarket_trader.extension_api.lifecycle import (
 )
 from polymarket_trader.extension_api.live_state import LiveStateMatch
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
-from polymarket_trader.extension_api.manifest import (
-    BusinessExtension,
-    ConfiguredExtension,
-    ConfigValidator,
-    ExtensionFactory,
-    ExtensionManifest,
-    ExtensionSpec,
-    KellyParams,
-    resolve_kelly_params,
-)
 from polymarket_trader.extension_api.ports import (
     AccountReadPort,
     ClockPort,
@@ -59,11 +55,8 @@ __all__ = (
     "AccountReadPort",
     "AccountSnapshotView",
     "AuditEvent",
-    "BusinessExtension",
     "ClockPort",
     "ConfigReadPort",
-    "ConfiguredExtension",
-    "ConfigValidator",
     "DecisionKind",
     "DomainEventType",
     "DiscoveryQuery",
@@ -72,23 +65,15 @@ __all__ = (
     "ExtensionAction",
     "ExtensionContext",
     "ExtensionDecision",
-    "ExtensionFactory",
-    "ExtensionHooks",
     "ExtensionLoadError",
-    "ExtensionManifest",
     "ExtensionPorts",
-    "ExtensionSpec",
     "Fill",
     "HistoryReadPort",
-    "KellyParams",
     "LifecycleBus",
     "LifecycleCallback",
     "LifecycleEnvelope",
     "LifecycleEvent",
-    "LiveStateHooks",
     "LiveStateMatch",
-    "MarketClassificationHooks",
-    "SportsDiagnosticHooks",
     "ManualConfirmation",
     "MarketReadPort",
     "MarketTokenView",
@@ -104,6 +89,5 @@ __all__ = (
     "UniverseDecision",
     "load_extension_config",
     "load_mapping_file",
-    "resolve_kelly_params",
     "toolkit",
 )

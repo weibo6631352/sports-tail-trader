@@ -15,7 +15,6 @@ from polymarket_trader.config import Settings
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.sports_live import SportsLiveSyncStatus
-from polymarket_trader.extension_api.manifest import _KELLY_DEFAULTS, resolve_kelly_params
 from polymarket_trader.infra.polymarket.clob_client import ClobClient
 from polymarket_trader.infra.polymarket.data_client import DataClient
 from polymarket_trader.infra.polymarket.gamma_client import GammaClient
@@ -24,6 +23,7 @@ from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.runtime.status import RuntimeSnapshot
 from polymarket_trader.runtime.supervisor import Supervisor
 from polymarket_trader.serialization import utc_now
+from polymarket_trader.quant.config import CurrentStrategyConfig
 
 logger = logging.getLogger(__name__)
 _RUNTIME_MARKET_SAMPLE_LIMIT = 20
@@ -307,7 +307,7 @@ class AdminRuntimeView:
             return None
         budget: Decimal | None = settings.portfolio_budget_usdc
         extension = self.runtime.extension if self.runtime else None
-        kelly = resolve_kelly_params(extension) if extension is not None else _KELLY_DEFAULTS
+        kelly = extension.config if extension is not None else CurrentStrategyConfig()
         max_position_fraction = kelly.kelly_max_position_fraction
         min_stake = kelly.kelly_min_stake_usdc
         candidates: list[Decimal] = []

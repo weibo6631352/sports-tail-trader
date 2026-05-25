@@ -1,8 +1,4 @@
-"""当前默认策略的装配入口。
-
-这个文件把 discovery、universe、trading、recovery、tracking 这些子模块
-组装成一个完整的 ``BusinessExtension`` 实现。
-"""
+"""量化策略主类——装配 discovery / universe / trading / recovery / tracking 子模块。"""
 
 from __future__ import annotations
 
@@ -18,11 +14,8 @@ from polymarket_trader.extension_api.live_state import SeriesState
 from polymarket_trader.extension_api.lifecycle import LifecycleEnvelope as _LifecycleEnvelope, LifecycleEvent as _LifecycleEvent
 from polymarket_trader.extension_api import (
     AccountSnapshotView,
-    BusinessExtension,
     DecisionKind,
     DiscoveryQuery,
-    ExtensionSpec,
-    LiveStateHooks,
     LiveStateMatch,
     QuantDecision,
     ExtensionContext,
@@ -32,7 +25,6 @@ from polymarket_trader.extension_api import (
 )
 
 from polymarket_trader.quant.config import CurrentStrategyConfig, load_current_strategy_config
-from polymarket_trader.quant.identity import STRATEGY_ID
 from polymarket_trader.quant.discovery import (
     build_configured_discovery_queries,
     build_live_event_discovery_queries,
@@ -146,32 +138,12 @@ class CurrentStrategy:
                 )
             except Exception:
                 logger.warning("strategy.lifecycle_subscribe_failed", exc_info=True)
-        self._spec = ExtensionSpec(
-            strategy_id=STRATEGY_ID,
-            name="current",
-            version="1",
-            description="Current runtime strategy implementation",
-            config_type=CurrentStrategyConfig,
-            capabilities=(
-                "universe",
-                "sizing",
-                "entry",
-                "exit",
-                "recovery",
-                "tracking",
-            ),
-        )
-
-    @property
-    def spec(self) -> ExtensionSpec:
-        return self._spec
-
     @property
     def hooks(self) -> "CurrentStrategy":
         return self
 
     @property
-    def live_state_hooks(self) -> "LiveStateHooks":
+    def live_state_hooks(self) -> "CurrentStrategy":
         return self
 
     @property
@@ -522,7 +494,7 @@ def build_strategy(
     *,
     ports: ExtensionPorts | None = None,
     config_path: str | None = None,
-) -> BusinessExtension:
+) -> "CurrentStrategy":
     return CurrentStrategy(
         config=load_current_strategy_config(config_path),
         ports=ports,

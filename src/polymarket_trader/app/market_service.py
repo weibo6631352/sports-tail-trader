@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from polymarket_trader.quant.strategy import CurrentStrategy
+
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,7 +20,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.observability.trace import ensure_trace_id
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistry
-from polymarket_trader.extension_api import ExtensionHooks, UniverseDecision
+from polymarket_trader.extension_api import UniverseDecision
 
 AccountSnapshotProvider = Callable[[], AccountSnapshot]
 
@@ -42,7 +46,7 @@ class MarketService:
     def __init__(
         self,
         *,
-        extension_hooks: ExtensionHooks,
+        extension_hooks: "CurrentStrategy",
         parser: MarketPayloadParser | None = None,
         registry: MarketRegistry | None = None,
         market_tracker: MarketTracker | None = None,
@@ -68,7 +72,7 @@ class MarketService:
         self._filter_ttl_seconds: float = 7_200.0
 
     @property
-    def extension_hooks(self) -> ExtensionHooks:
+    def extension_hooks(self) -> "CurrentStrategy":
         """返回市场发现链路正在使用的扩展筛选 hooks。"""
 
         return self._extension_hooks

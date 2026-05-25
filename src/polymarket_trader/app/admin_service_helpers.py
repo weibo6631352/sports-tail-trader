@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.extension_api.hooks import MarketClassificationHooks
 from polymarket_trader.infra.db import (
     AllocationRepository,
     AuditEventRepository,
@@ -177,11 +176,10 @@ def _live_source_gap_scope_markets(runtime: Any, markets: Sequence[Market]) -> t
             continue
         if not decision.selected:
             continue
-        if isinstance(hooks, MarketClassificationHooks):
-            family = hooks.market_family_label(market)
-            # outright / series / esports 不依赖单场直播源，本诊断不覆盖。
-            if family is not None and family != "single_game":
-                continue
+        family = hooks.market_family_label(market) if hasattr(hooks, "market_family_label") else None
+        # outright / series / esports 不依赖单场直播源，本诊断不覆盖。
+        if family is not None and family != "single_game":
+            continue
         scoped.append(market)
     return tuple(scoped)
 

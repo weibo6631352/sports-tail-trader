@@ -38,11 +38,11 @@ from polymarket_trader.domain.order import (
     SellOrderIntent,
 )
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
-from polymarket_trader.extension_api.manifest import _KELLY_DEFAULTS, resolve_kelly_params
 from polymarket_trader.app.decision_serialization import (
     snapshot_allowance,
     snapshot_available_usdc,
 )
+from polymarket_trader.quant.config import CurrentStrategyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +246,7 @@ class AdminControlsMixin:
                 "candidate": self._candidate_payload(market, token_id, plan),
             }
 
-        _kelly = resolve_kelly_params(self.runtime.extension) if self.runtime else _KELLY_DEFAULTS
+        _kelly = self.runtime.extension.config if self.runtime else CurrentStrategyConfig()
         review = await self._trading_service().review_intent(
             plan.intent,
             market=market,
@@ -717,7 +717,7 @@ class AdminControlsMixin:
             market_slug=market.market_slug,
             order_type=OrderType.GTC,
         )
-        _kelly = resolve_kelly_params(self.runtime.extension) if self.runtime else _KELLY_DEFAULTS
+        _kelly = self.runtime.extension.config if self.runtime else CurrentStrategyConfig()
         review = await trading_service.sell(
             intent,
             market=market,

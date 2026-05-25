@@ -96,7 +96,6 @@ from polymarket_trader.runtime.ws_loops import (
     run_market_ws as _run_market_ws,
     run_user_ws as _run_user_ws,
 )
-from polymarket_trader.extension_api.manifest import ConfigValidator
 from polymarket_trader.workers.market_discovery_worker import MarketDiscoveryWorker
 from polymarket_trader.workers.market_ws import MarketWsWorker
 from polymarket_trader.workers.persistence import PersistenceWorker
@@ -503,20 +502,10 @@ def _build_pregame_worker(
 
 
 def _validate_extension_config(extension: _CurrentStrategy, settings: Settings) -> tuple[ConfigIssue, ...]:
-    """如扩展实现了 ConfigValidator 协议，则在启动期收集其拒绝原因。
+    """启动期收集策略侧配置拒绝原因，与 Settings.validate_startup_readiness 互补。"""
 
-    与 ``Settings.validate_startup_readiness`` 互补：把策略侧的最小可执行集
-    校验（比如 discovery 列表是否为空）也前移到启动期，避免上线后才暴露。
-
-    ConfigValidator 是可选 Protocol；未实现的 extension 直接返回空 issues。
-    """
-
-    if not isinstance(extension, ConfigValidator):
-        return ()
     issues = extension.validate_config(settings)
-    if not issues:
-        return ()
-    return tuple(issues)
+    return tuple(issues) if issues else ()
 
 
 def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
@@ -1002,7 +991,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         if live_state_hooks is None:
             logger.warning(
                 "sports live state sync skipped because extension does not implement LiveStateHooks",
-                extra={"extension": extension.spec.name},
+                extra={"extension": "polymarket_trader.quant"},
             )
         else:
             league_source_priority = live_state_hooks.league_source_affinity

@@ -16,7 +16,6 @@ from polymarket_trader.app.admin_service_helpers import (
 )
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.time_filters import TimeRange
-from polymarket_trader.extension_api.hooks import SportsDiagnosticHooks
 from polymarket_trader.serialization import jsonable
 
 
@@ -228,7 +227,7 @@ class AdminSportsQueryMixin(_Base):
         """
 
         extension = self.runtime.extension if self.runtime else None
-        diagnostics = extension if isinstance(extension, SportsDiagnosticHooks) else None
+        diagnostics = extension if extension is not None and hasattr(extension, "resolve_outright_team_debug_payload") else None
         market = self._resolve_market(
             condition_id=condition_id,
             market_slug=market_slug,

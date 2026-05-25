@@ -7,7 +7,6 @@ from uuid import uuid4
 if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents
 
-from polymarket_trader.extension_api.manifest import resolve_kelly_params
 
 from polymarket_trader.app.admin_order_control import AdminOrderController
 from polymarket_trader.app.admin_runtime_view import AdminRuntimeView
@@ -1955,7 +1954,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         # settings 缺失时执行。kelly_* 从策略侧 ConfiguredExtension.config 读取；
         # 策略配置是 kelly_* 的唯一真相来源，不再走框架 Settings。
         settings = self.runtime.settings
-        strategy_config = resolve_kelly_params(self.runtime.extension)
+        strategy_config = self.runtime.extension.config
         return self._trading_decision_service().build_entry_plan(
             market=market,
             orderbook=orderbook,
@@ -2078,7 +2077,8 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             extension = self.runtime.extension
         except RuntimeError:
             return None
-        return extension.spec.strategy_id
+        from polymarket_trader.quant.identity import STRATEGY_ID
+        return STRATEGY_ID
 
     def _entry_metadata_for_market(self, market: Market) -> dict[str, Any]:
         store = self._entry_metadata_store()
