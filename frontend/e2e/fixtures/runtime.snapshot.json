@@ -1,7 +1,6 @@
 {
   "settings": {
-    "extension_module": "src.strategies.current",
-    "strategy_id": "tail_v1",
+    "strategy_id": "sports_tail",
     "phase": "running",
     "automatic_trading_enabled": true,
     "paper_trading": false

@@ -90,8 +90,8 @@ export function LiveOverviewPage() {
     queryFn: ({ signal }) => analyticsApi.executionQuality({ window_ms: 3_600_000 }, signal),
   })
 
-  const { extensionModule } = useRuntimeIdentity()
-  const strategyBundle = resolveStrategyBundle(extensionModule)
+  const { strategyId } = useRuntimeIdentity()
+  const strategyBundle = resolveStrategyBundle(strategyId)
   const widgets = strategyBundle.dashboardWidgets ?? []
 
   const blockingReasons: string[] = ready.data?.blocking_reasons ?? []

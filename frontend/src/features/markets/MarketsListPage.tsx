@@ -41,8 +41,8 @@ export function MarketsListPage() {
   })
 
   // 策略私有徽章——通用列表不知道当前策略关心什么（持仓 / 暂停 / 高费率…）。
-  const { extensionModule } = useRuntimeIdentity()
-  const strategyBundle = resolveStrategyBundle(extensionModule)
+  const { strategyId } = useRuntimeIdentity()
+  const strategyBundle = resolveStrategyBundle(strategyId)
   const renderBadges = strategyBundle.marketRowBadges
 
   const columns: ColumnDef<MarketView, unknown>[] = [

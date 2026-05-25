@@ -58,7 +58,7 @@ export type RuntimeIdentity = {
 }
 
 export type RuntimeSettings = {
-  extension_module?: string | null
+  strategy_id?: string | null
   strategy_id?: string | null
   paper_trading?: boolean
   [key: string]: unknown

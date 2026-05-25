@@ -3,7 +3,7 @@ import { Badge } from '@mantine/core'
 import type { MarketView } from '@core/api/types'
 import { toDecimal } from '@shared/format'
 
-// strategies.current 在通用市场列表 / 详情上叠加的徽章：持仓 / 已暂停 / 高费率。
+// sports_tail 策略在通用市场列表 / 详情上叠加的徽章：持仓 / 已暂停 / 高费率。
 // 仅基于 MarketView 已有字段判断，零额外请求。
 
 export function marketRowBadges(market: MarketView): ReactNode[] {

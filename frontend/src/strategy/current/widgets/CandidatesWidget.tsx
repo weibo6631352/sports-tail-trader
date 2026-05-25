@@ -8,7 +8,7 @@ import { StatusPill } from '@shared/ui/StatusPill'
 import { CopyableId } from '@shared/ui/CopyableId'
 
 // 盯盘总览的策略私有卡片：当前 confirmable 候选 top 5。
-// 通用壳不知道"候选"对当前策略意味着什么——这卡是 strategies.current 自己说话。
+// 通用壳不知道"候选"对当前策略意味着什么——这卡是 sports_tail 策略自己说话。
 
 export function CandidatesWidget() {
   const navigate = useNavigate()

@@ -1,11 +1,11 @@
 import type { StrategyBundle } from './api'
 import { currentStrategyBundle } from './current'
 
-// extension_module → 前端 bundle 映射。Fallback bundle 在未知 module 时使用，
+// strategy_id → 前端 bundle 映射。Fallback bundle 在未知 strategy 时使用，
 // 仍能让 /strategy/* 路由不 404，便于运维诊断。
 
 const REGISTRY: Record<string, StrategyBundle> = {
-  'strategies.current': currentStrategyBundle,
+  sports_tail: currentStrategyBundle,
 }
 
 const FALLBACK: StrategyBundle = {
@@ -13,9 +13,9 @@ const FALLBACK: StrategyBundle = {
   displayName: '未知策略',
 }
 
-export function resolveStrategyBundle(extensionModule: string | null | undefined): StrategyBundle {
-  if (!extensionModule) return FALLBACK
-  return REGISTRY[extensionModule] ?? FALLBACK
+export function resolveStrategyBundle(strategyId: string | null | undefined): StrategyBundle {
+  if (!strategyId) return FALLBACK
+  return REGISTRY[strategyId] ?? FALLBACK
 }
 
 export function listRegisteredStrategies(): StrategyBundle[] {

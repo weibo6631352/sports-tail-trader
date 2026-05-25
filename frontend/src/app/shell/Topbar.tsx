@@ -11,7 +11,7 @@ import styles from './Topbar.module.css'
 // 输入条件：trace_id（uuid 风格）或 condition_id（0x... 风格）→ 自动分发。
 
 export function Topbar() {
-  const { automaticTradingEnabled, phase, extensionModule } = useRuntimeIdentity()
+  const { automaticTradingEnabled, phase, strategyId } = useRuntimeIdentity()
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
 
@@ -60,9 +60,9 @@ export function Topbar() {
         </StatusPill>
       </Group>
       <Group gap="sm" wrap="nowrap">
-        {extensionModule ? (
+        {strategyId ? (
           <Text size="xs" c="dimmed">
-            策略：{extensionModule}
+            策略：{strategyId}
           </Text>
         ) : null}
         <SseStatusBadge />

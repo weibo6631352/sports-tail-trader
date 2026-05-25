@@ -14,7 +14,7 @@ import { formatIso } from '@shared/format'
 // 通用候选页在 /live/candidates，这里只是"策略侧"的浓缩视图。
 
 export function StrategyOverviewPage() {
-  const { extensionModule, automaticTradingEnabled } = useRuntimeIdentity()
+  const { strategyId, automaticTradingEnabled } = useRuntimeIdentity()
   const candidates = useQuery({
     queryKey: qk.candidates.list({ limit: 20 }),
     queryFn: ({ signal }) => candidatesApi.list({ limit: 20 }, signal),
@@ -28,7 +28,7 @@ export function StrategyOverviewPage() {
     <>
       <PageHeader
         title="策略概览"
-        subtitle={extensionModule ?? '未指定 extension_module'}
+        subtitle={strategyId ?? '未指定 strategy_id'}
         actions={
           <StatusPill tone={automaticTradingEnabled ? 'success' : 'warning'} size="sm">
             {automaticTradingEnabled ? '自动交易：开' : '自动交易：停'}

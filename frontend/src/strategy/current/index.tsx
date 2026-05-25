@@ -24,8 +24,8 @@ const ParameterSweepPage = lazyNamed(
 )
 
 export const currentStrategyBundle: StrategyBundle = {
-  id: 'strategies.current',
-  displayName: '当前策略 (strategies.current)',
+  id: 'sports_tail',
+  displayName: '体育扫尾量化策略 (sports_tail)',
   routes: [
     { index: true, element: <StrategyOverviewPage /> },
     { path: 'config', element: <StrategyConfigPage /> },
