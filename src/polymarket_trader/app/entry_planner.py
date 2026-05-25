@@ -9,7 +9,7 @@ from polymarket_trader.serialization import utc_now
 from polymarket_trader.app.extension_intent_builder import decision_to_trade_intent
 from polymarket_trader.app.entry_plan import EntryPlan
 from polymarket_trader.domain.account import AccountSnapshot
-from polymarket_trader.domain.allocation import Allocation, AllocationPlan
+from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
@@ -166,135 +166,93 @@ class EntryPlanner:
             kelly_allow_round_up_to_market_min=kelly_allow_round_up_to_market_min,
             kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
         )
-        sizing = self._extension_hooks.size_entry(
-            self._sizing_context(
-                trace_id=trace_id,
-                market=resolved_market,
-                token_id=resolved_token_id,
-                orderbook=resolved_orderbook,
-                account_snapshot=account_snapshot,
-                position=position_index.get((resolved_market.condition_id, focus_token_id)),
-                open_orders=_open_orders_for(open_orders, resolved_market.condition_id, focus_token_id),
-                entry_candidates=entry_candidates,
-                portfolio_budget_usdc=portfolio_budget_usdc,
-                available_usdc=available_usdc,
-                kelly_state=kelly_state,
-                metadata=base_metadata,
-                manual_confirmation=manual_confirmation,
+        # 单一决策调用——所有逻辑（candidate 过滤 / Kelly sizing / 价格判断 /
+        # capital efficiency / position_plan metadata）全部由 QuantDecider class 内部完成。
+        # 这层只负责 ① 拼上下文 ② 包装 QuantDecision 回 EntryPlan 形状给 worker / admin。
+        quant_context = self._quant_context(
+            trace_id=trace_id,
+            market=resolved_market,
+            token_id=resolved_token_id,
+            orderbook=resolved_orderbook,
+            account_snapshot=account_snapshot,
+            position=position_index.get((resolved_market.condition_id, focus_token_id)),
+            open_orders=_open_orders_for(open_orders, resolved_market.condition_id, focus_token_id),
+            entry_candidates=entry_candidates,
+            portfolio_budget_usdc=portfolio_budget_usdc,
+            available_usdc=available_usdc,
+            kelly_state=kelly_state,
+            metadata=base_metadata,
+            manual_confirmation=manual_confirmation,
+        )
+        import time as _time
+        _t0 = _time.perf_counter()
+        quant_decision = self._extension_hooks.quant_decide(quant_context)
+        try:
+            from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+            SystemPerfMonitor.get().record_strategy_hook(
+                "quant_decide", (_time.perf_counter() - _t0) * 1000
             )
+        except Exception: pass
+        signal_at = utc_now()
+        from polymarket_trader.extension_api import ExtensionAction, ExtensionDecision
+        decision = next(
+            (a for a in quant_decision.actions if a.action == ExtensionAction.BUY),
+            None,
         )
-        plan = sizing.allocation_plan
-        allocation = sizing.allocation or _pick_allocation(
-            plan.allocations,
-            resolved_market.condition_id,
-            focus_token_id,
+        if decision is None:
+            decision = ExtensionDecision.skip(
+                reason=quant_decision.reason or "quant_no_buy_action",
+            )
+        self._record_decision(
+            hook_name="quant_decide",
+            context=quant_context,
+            decision=decision,
         )
-        reason = sizing.reason or plan.reason
-        intent = None
-        decision_kind = None
-        summary = None
+        reason = decision.reason or quant_decision.reason
         plan_metadata: dict[str, Any] = dict(base_metadata)
-        plan_metadata.update(sizing.metadata or {})
-
-        if allocation is not None:
-            focus_token_id = allocation.token_id or focus_token_id
-            reason = allocation.reason or reason
-            if allocation.buy_budget_usdc > Decimal("0"):
-                entry_context = self._entry_decision_context(
-                    trace_id=trace_id,
-                    market=resolved_market,
-                    token_id=allocation.token_id or resolved_token_id,
-                    orderbook=resolved_orderbook,
-                    account_snapshot=account_snapshot,
-                    position=position_index.get((resolved_market.condition_id, focus_token_id)),
-                    open_orders=_open_orders_for(open_orders, resolved_market.condition_id, focus_token_id),
-                    portfolio_budget_usdc=portfolio_budget_usdc,
-                    available_usdc=available_usdc,
-                    kelly_state=kelly_state,
-                    allocation_plan=plan,
-                    allocation=allocation,
-                    metadata=base_metadata,
-                    manual_confirmation=manual_confirmation,
-                )
-                # signal_at 在 quant_decide 返回后立即捕获——这是"策略信号产生"
-                # 的时刻；后续 risk→executor 的链路时延以此为基准，由 OrderExecutor
-                # 发布到 entry_signal_to_submit_ms gauge 供 supervisor 削载决策。
-                #
-                # 真正量化形态：所有交易决策（包括 BUY）走单一 QuantDecider class。
-                # 这里把入场决策的 hook 调用从 decide_entry 切换到 quant_decide——
-                # CurrentStrategy.quant_decide 内部 _decide_entry_attempt 分支处理
-                # 无持仓 + amount_usdc 已知场景，返回 BUY ExtensionDecision。
-                import time as _time
-                from dataclasses import replace as _ctx_replace
-                _t0 = _time.perf_counter()
-                quant_context = _ctx_replace(entry_context, quant_trigger_kind="market_tick")
-                quant_decision = self._extension_hooks.quant_decide(quant_context)
-                try:
-                    from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
-                    SystemPerfMonitor.get().record_strategy_hook(
-                        "quant_decide", (_time.perf_counter() - _t0) * 1000
-                    )
-                except Exception: pass
-                signal_at = utc_now()
-                # 从 QuantDecision.actions 抽 BUY 动作。当前 QuantDecider 同一 tick
-                # 最多输出 1 个动作（BUY 或 SELL/replace 二选一）。
-                from polymarket_trader.extension_api import ExtensionAction, ExtensionDecision
-                decision = next(
-                    (a for a in quant_decision.actions if a.action == ExtensionAction.BUY),
-                    None,
-                )
-                if decision is None:
-                    decision = ExtensionDecision.skip(
-                        reason=quant_decision.reason or "quant_no_buy_action",
-                    )
-                self._record_decision(
-                    hook_name="quant_decide",
-                    context=quant_context,
-                    decision=decision,
-                )
-                plan_metadata.update(decision.metadata)
-                decision_kind = decision.decision_kind
-                summary = decision.summary
-                # 通过 decision.metadata 透传 signal_at 到 intent.metadata；
-                # decision_to_managed_intent 把 decision.metadata 原样赋给 intent.metadata。
-                merged_decision_metadata = dict(decision.metadata)
-                merged_decision_metadata["signal_at"] = signal_at
-                decision_with_signal = replace(decision, metadata=merged_decision_metadata)
-                intent = decision_to_trade_intent(
-                    trace_id=trace_id,
-                    strategy_id=self._strategy_id,
-                    market=resolved_market,
-                    default_token_id=focus_token_id,
-                    decision=decision_with_signal,
-                )
-                if intent is None and decision.reason:
-                    reason = decision.reason
-
-        # allocation 阶段被拒（无 allocation 或 buy_budget <= 0），decide_entry 没被调用
-        # → summary 此时为 None，但策略 size_entry 返回的 metadata（sizing.metadata）
-        # 含 market_family/market_type 等诊断信息，把它们投到 summary.extras 让
-        # admin/virtual_paper 能看到非 single_game 早期拒绝的可观测性。
-        if summary is None and (sizing.metadata or reason):
-            summary = _build_unavailable_summary(
-                reason=reason,
-                sizing_extras=sizing.metadata,
+        plan_metadata.update(decision.metadata)
+        decision_kind = decision.decision_kind
+        summary = decision.summary
+        intent = None
+        if decision.action == ExtensionAction.BUY:
+            merged_decision_metadata = dict(decision.metadata)
+            merged_decision_metadata["signal_at"] = signal_at
+            decision_with_signal = replace(decision, metadata=merged_decision_metadata)
+            intent = decision_to_trade_intent(
+                trace_id=trace_id,
+                strategy_id=self._strategy_id,
+                market=resolved_market,
+                default_token_id=focus_token_id,
+                decision=decision_with_signal,
             )
+            if intent is None and decision.reason:
+                reason = decision.reason
+        if summary is None and reason:
+            summary = StrategySummary(reason=reason)
 
+        # allocation_plan 字段保留为占位（empty）——历史下游 (worker audit / risk
+        # review) 仍读这字段；QuantDecider 单 market tick 视角下没有多候选分配的结构，
+        # 保留空 AllocationPlan 让下游不崩，allocation 本身从 decision.metadata 拿。
+        empty_plan = AllocationPlan(
+            trace_id=trace_id,
+            total_budget_usdc=portfolio_budget_usdc,
+            reason=reason or "",
+        )
         return EntryPlan(
             trace_id=trace_id,
             market=resolved_market,
             orderbook=resolved_orderbook,
-            allocation_plan=plan,
-            allocation=allocation,
+            allocation_plan=empty_plan,
+            allocation=None,
             intent=intent,
-            eligible_market_count=plan.eligible_market_count,
+            eligible_market_count=0,
             reason=reason,
             decision_kind=decision_kind,
             summary=summary,
             metadata=plan_metadata,
         )
 
-    def _sizing_context(
+    def _quant_context(
         self,
         *,
         trace_id: str,
@@ -311,6 +269,11 @@ class EntryPlanner:
         metadata: Mapping[str, Any],
         manual_confirmation: ManualConfirmation | None = None,
     ) -> ExtensionContext:
+        """构造给 quant_decide hook 用的单 market_tick ExtensionContext。
+
+        历史 ``_sizing_context`` + ``_entry_decision_context`` 两份在 size_entry/
+        decide_entry hook 分离时代各拼一遍；现在统一成一份，trigger_kind=market_tick。
+        """
         effective_available_usdc = available_usdc if available_usdc is not None else portfolio_budget_usdc
         # 只把"非 ExtensionContext 一等公民"的 budget 上下文塞进 metadata；Kelly 字段
         # 已在 ExtensionContext 上有专用 attribute，不再镜像到 metadata 避免双口径漂移。
@@ -346,66 +309,7 @@ class EntryPlanner:
             kelly_min_stake_usdc=kelly_state.kelly_min_stake_usdc,
             kelly_allow_round_up_to_market_min=kelly_state.kelly_allow_round_up_to_market_min,
             kelly_round_up_max_overbet_ratio=kelly_state.kelly_round_up_max_overbet_ratio,
-            manual_confirmation=manual_confirmation,
-            metadata=context_metadata,
-        )
-
-    def _entry_decision_context(
-        self,
-        *,
-        trace_id: str,
-        market: Market,
-        token_id: str | None,
-        orderbook: OrderbookSnapshot,
-        account_snapshot: AccountSnapshot | None,
-        position: Position | None,
-        open_orders: tuple[Order, ...],
-        portfolio_budget_usdc: Decimal,
-        available_usdc: Decimal | None,
-        kelly_state: _KellySizingState,
-        allocation_plan: AllocationPlan,
-        allocation: Allocation,
-        metadata: Mapping[str, Any],
-        manual_confirmation: ManualConfirmation | None = None,
-    ) -> ExtensionContext:
-        context_metadata: dict[str, Any] = dict(metadata)
-        context_metadata.update(
-            {
-                "allocation": allocation,
-                "allocation_plan": allocation_plan,
-                "amount_usdc": allocation.buy_budget_usdc,
-                "buy_budget_usdc": allocation.buy_budget_usdc,
-                "portfolio_budget_usdc": portfolio_budget_usdc,
-                "available_usdc": available_usdc,
-            }
-        )
-        return ExtensionContext(
-            trace_id=trace_id,
-            strategy_id=self._strategy_id,
-            market=market,
-            token_id=token_id,
-            orderbook=orderbook,
-            market_token_views=_market_token_views(
-                market,
-                orderbook_reader=self._orderbook_reader,
-                account_snapshot=account_snapshot,
-            ),
-            account_snapshot=account_snapshot,
-            position=position,
-            open_orders=open_orders,
-            now=orderbook.received_at,
-            portfolio_budget_usdc=portfolio_budget_usdc,
-            available_usdc=available_usdc,
-            bankroll_usdc=kelly_state.bankroll_usdc,
-            kelly_fraction=kelly_state.kelly_fraction,
-            kelly_max_position_fraction=kelly_state.kelly_max_position_fraction,
-            kelly_min_edge=kelly_state.kelly_min_edge,
-            kelly_min_stake_usdc=kelly_state.kelly_min_stake_usdc,
-            kelly_allow_round_up_to_market_min=kelly_state.kelly_allow_round_up_to_market_min,
-            kelly_round_up_max_overbet_ratio=kelly_state.kelly_round_up_max_overbet_ratio,
-            allocation_plan=allocation_plan,
-            allocation=allocation,
-            amount_usdc=allocation.buy_budget_usdc,
+            quant_trigger_kind="market_tick",
             manual_confirmation=manual_confirmation,
             metadata=context_metadata,
         )
@@ -621,17 +525,6 @@ def _open_orders_for(
         for order in open_orders
         if order.condition_id == condition_id and order.token_id == token_id
     )
-
-
-def _pick_allocation(
-    allocations: tuple[Allocation, ...],
-    condition_id: str,
-    token_id: str,
-) -> Allocation | None:
-    for allocation in allocations:
-        if allocation.condition_id == condition_id and allocation.token_id == token_id:
-            return allocation
-    return None
 
 
 def _candidate_token_ids(market: Market) -> tuple[str, ...]:
