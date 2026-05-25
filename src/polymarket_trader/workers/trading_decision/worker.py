@@ -802,11 +802,11 @@ class TradingDecisionWorker:
                 account_snapshot=snapshot,
                 position=position,
                 open_orders=open_orders,
-                quant_trigger_kind="orderbook_tick",
+                quant_trigger_kind="market_tick",
                 metadata=exit_metadata,
             )
         )
-        # orderbook_tick 路径下最多产出 1 个 action；为兼容旧 SELL/REPLACE
+        # market_tick 路径下最多产出 1 个 action；为兼容旧 SELL/REPLACE
         # 分发，把 QuantDecision 拆成单一 decision 给后续 intent 转换。
         if quant_decision.actions:
             decision = quant_decision.actions[0]

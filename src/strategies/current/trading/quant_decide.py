@@ -1,9 +1,8 @@
-"""量化决策器——Workflow 2 所有 WS / 周期触发的决策统一入口。
+"""量化决策器——所有 WS / 周期触发的决策统一入口。
 
 按 ``context.quant_trigger_kind`` 分派到内部子流程：
-- ``orderbook_tick``：盘口事件 → SELL 价跟随（_decide_orderbook_tick）
-- ``order_fill``：成交事件 → 无后续动作（当前策略让动态 SELL 链路接管）
-- ``reconcile_cycle``：周期扫账户 → 清理僵尸订单 / 历史高成本 profit-take / pause 信号
+- ``market_tick``：market_ws book / price_change → BUY / SELL / replace
+- ``reconcile_cycle``：周期扫账户 → 清理僵尸订单 / pause 信号
 
 所有子流程的输出统一包装成 QuantDecision；reconcile_cycle 可能附带 pause_trading 信号。
 """
@@ -26,21 +25,18 @@ def quant_decide(
     context: ExtensionContext,
 ) -> QuantDecision:
     trigger = context.quant_trigger_kind
-    if trigger == "orderbook_tick":
-        decision = _decide_orderbook_tick(config, context)
+    if trigger == "market_tick":
+        decision = _decide_market_tick(config, context)
         if decision.action.value == "skip":
             return QuantDecision(actions=(), reason=decision.reason)
         return QuantDecision(actions=(decision,), reason=decision.reason)
-    if trigger == "order_fill":
-        # BUY 成交后无静态 follow-up：让 orderbook_tick 路径接管 SELL 决策。
-        return QuantDecision(actions=(), reason="order_fill_no_follow_up")
     if trigger == "reconcile_cycle":
         from strategies.current.recovery import build_recovery_quant_decision
         return build_recovery_quant_decision(config, context)
     return QuantDecision(actions=(), reason=f"unknown_trigger_kind:{trigger}")
 
 
-def _decide_orderbook_tick(
+def _decide_market_tick(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
 ) -> ExtensionDecision:

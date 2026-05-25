@@ -364,7 +364,7 @@ class ReconcileService:
                     account_snapshot=account_snapshot,
                     position=adjusted_position,
                     open_orders=open_orders,
-                    quant_trigger_kind="orderbook_tick",
+                    quant_trigger_kind="market_tick",
                     metadata={
                         **dict(metadata),
                         "exit_trigger": "reconcile_position",

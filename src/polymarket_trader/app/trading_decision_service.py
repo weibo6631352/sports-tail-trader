@@ -95,11 +95,11 @@ class TradingDecisionService:
         )
 
     def quant_decide(self, context: ExtensionContext):
-        """量化决策器——Workflow 2 所有 WS / 周期触发统一走这里。
+        """量化决策器——所有 WS / 周期触发统一走这里。
 
-        ``context.quant_trigger_kind`` 由调用方填写（"orderbook_tick" /
-        "order_fill" / "reconcile_cycle"）。返回 QuantDecision；调用侧把
-        ``actions`` 转 intent 走统一 TradingService/RiskManager。
+        ``context.quant_trigger_kind`` 由调用方填写（"market_tick" / "reconcile_cycle"）。
+        返回 QuantDecision；调用侧把 ``actions`` 转 intent 走统一
+        TradingService/RiskManager。
         """
         import time as _time
         t0 = _time.perf_counter()

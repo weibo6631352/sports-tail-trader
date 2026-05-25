@@ -21,18 +21,14 @@ from polymarket_trader.domain.order import (
     SellOrderIntent,
 )
 from polymarket_trader.domain.state_machine import MarketLifecycle
-from polymarket_trader.extension_api import ExtensionContext, MarketTokenView
 from polymarket_trader.runtime.account_state import AccountStateStore
-from polymarket_trader.serialization import jsonable
 from .event_payloads import (
     TRADING_DECISION_WORKER_ORIGIN,
     coerce_order_result_from_event,
     result_event_type,
     serialize_control_intent,
-    serialize_intent,
     serialize_order_result,
     serialize_review,
-    snapshot_position,
 )
 from .result import TradingDecisionWorkerResult
 
@@ -350,83 +346,9 @@ class TradingOrderResultProcessor:
         follow_up_intents: list[ManagedOrderIntent],
         follow_up_results: list[TradingReviewResult],
     ) -> tuple[AccountSnapshot | None, DomainEvent]:
-        resolved_market = self._trading_decision_service.resolve_market(
-            condition_id=order_result.condition_id,
-            token_id=order_result.token_id,
-        )
-        quant_decision = self._trading_decision_service.quant_decide(
-            ExtensionContext(
-                trace_id=order_result.trace_id,
-                strategy_id=self._trading_decision_service.strategy_id,
-                market=resolved_market,
-                token_id=order_result.token_id,
-                market_token_views=tuple(
-                    MarketTokenView(
-                        token_id=outcome.token_id,
-                        outcome=outcome.outcome,
-                    )
-                    for outcome in (() if resolved_market is None else resolved_market.outcomes)
-                ),
-                account_snapshot=active_snapshot,
-                position=snapshot_position(
-                    active_snapshot,
-                    order_result.condition_id,
-                    order_result.token_id,
-                ),
-                open_orders=(
-                    active_snapshot.open_orders_for_market(
-                        order_result.condition_id,
-                        order_result.token_id,
-                    )
-                    if active_snapshot is not None
-                    else ()
-                ),
-                order_result=order_result,
-                quant_trigger_kind="order_fill",
-            )
-        )
-        follow_up_decisions = quant_decision.actions
-        for decision in follow_up_decisions:
-            intent = self._trading_decision_service.build_intent_from_decision(
-                trace_id=order_result.trace_id,
-                condition_id=order_result.condition_id,
-                market_slug=order_result.market_slug,
-                default_token_id=order_result.token_id,
-                decision=decision,
-            )
-            if intent is None:
-                continue
-            follow_up_intents.append(intent)
-            follow_up_review = await self._host._execute_managed_intent(
-                intent,
-                snapshot=active_snapshot,
-            )
-            follow_up_results.append(follow_up_review)
-            result_event = await self._host._publish(
-                DomainEventType.ORDER_SUBMITTED,
-                trace_id=intent.trace_id,
-                market_slug=intent.market_slug,
-                condition_id=intent.condition_id,
-                token_id=intent.token_id,
-                reason=(
-                    ""
-                    if follow_up_review.order_result is None
-                    else follow_up_review.order_result.reason
-                ),
-                payload={
-                    "origin": TRADING_DECISION_WORKER_ORIGIN,
-                    "phase": "follow_up",
-                    "source_order_result": serialize_order_result(order_result),
-                    "decision_metadata": jsonable(decision.metadata),
-                    "intent": serialize_intent(intent),
-                    "review": serialize_review(follow_up_review),
-                },
-            )
-            active_snapshot = self._apply_follow_up_result(
-                follow_up_review,
-                intent=intent,
-                active_snapshot=active_snapshot,
-            )
+        # 真正量化形态：user_ws fill 是过去决策的结果，不携带新市场信息——
+        # 不再调用 quant_decide。下次 market_ws book/price_change tick 时
+        # 量化决策器会自然读到最新 AccountSnapshot + 盘口做下一步决策。
         return active_snapshot, result_event
 
     def _apply_follow_up_result(

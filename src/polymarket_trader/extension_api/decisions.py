@@ -22,12 +22,18 @@ class ExtensionAction(StrEnum):
 
 
 class QuantTriggerKind(StrEnum):
-    """量化决策器触发源——决定 quant_decide 内部该看什么、产出什么动作。"""
+    """量化决策器触发源。
 
-    # market_ws book / price_change tick：每个盘口事件触发；持仓 token 才有意义。
-    ORDERBOOK_TICK = "orderbook_tick"
-    # user_ws order fill：BUY/SELL 成交后立即触发；用来挂跟单 SELL / 处理部分成交。
-    ORDER_FILL = "order_fill"
+    真正量化形态：仅两类触发——
+    - market_ws book / price_change（盘口变化，可能 BUY / SELL / replace）
+    - reconcile 周期（兜底 + 清理僵尸订单 + pause 信号）
+
+    user_ws fill / order 事件不触发量化器：fill 是过去决策的结果，下次 market
+    tick 时量化器自然读最新 AccountSnapshot 决策。
+    """
+
+    # market_ws book + price_change 合并：盘口变化（成交 / 挂单 / 撤单）
+    MARKET_TICK = "market_tick"
     # reconcile 周期（默认 40s）：用来清理僵尸订单 / 覆盖裸持仓 / 必要时 pause。
     RECONCILE_CYCLE = "reconcile_cycle"
 

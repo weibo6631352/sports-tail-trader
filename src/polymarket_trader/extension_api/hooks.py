@@ -34,12 +34,11 @@ class ExtensionHooks(Protocol):
     def decide_entry(self, context: ExtensionContext) -> ExtensionDecision: ...
 
     def quant_decide(self, context: ExtensionContext) -> QuantDecision:
-        """量化决策器——入场后所有 WS / 周期触发的决策统一入口。
+        """量化决策器——所有交易动作（BUY/SELL/cancel/replace）的统一决策入口。
 
         ``context.quant_trigger_kind`` 指明本次触发源：
-        - ``"orderbook_tick"``：market_ws 盘口事件，主要做 SELL 价跟随
-        - ``"order_fill"``：成交事件，主要做跟单（BUY 后挂 GTC SELL）
-        - ``"reconcile_cycle"``：周期性扫账户，主要做 recovery（清理僵尸 / 覆盖裸单）
+        - ``"market_tick"``：market_ws book / price_change（盘口变化，可能 BUY/SELL/replace）
+        - ``"reconcile_cycle"``：周期性扫账户（清理僵尸订单 / pause 信号兜底）
 
         返回 QuantDecision，actions 可为 0/1/N 个 intent。
         """

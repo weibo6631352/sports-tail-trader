@@ -430,9 +430,9 @@ class CurrentStrategy:
     def quant_decide(self, context: ExtensionContext) -> QuantDecision:
         """量化决策器——按 trigger_kind 分派内部子流程。
 
-        ``context.quant_trigger_kind`` ∈ {"orderbook_tick", "order_fill",
-        "reconcile_cycle"}；reconcile 路径下还会处理 single_game live source
-        全断 → pause_trading 的全局降级信号。
+        ``context.quant_trigger_kind`` ∈ {"market_tick", "reconcile_cycle"}；
+        reconcile 路径下还会处理 single_game live source 全断 → pause_trading
+        的全局降级信号。
         """
         # 全源不可用时，single_game 市场主动暂停交易（仅 reconcile_cycle 触发时有意义）。
         if (
