@@ -179,7 +179,7 @@
 - `/metrics` 中 `strategy_outright_reject_total{reason=...}` /
   `strategy_series_reject_total{sub_type=...,reason=...}` 某条原因激增。
 
-新增可审计拒绝原因（出现在 ExtensionDecision.metadata + metrics 维度）：
+新增可审计拒绝原因（出现在 TradingDecision.metadata + metrics 维度）：
 
 - Outright：
   - `outright_team_not_resolved`：market 文本里没有 snapshot 球队，或命中歧义
