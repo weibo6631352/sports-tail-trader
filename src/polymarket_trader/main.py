@@ -118,9 +118,9 @@ from polymarket_trader.infra.sports.goalserve_livescore_client import (
     SPORT_CODE_TO_FEED_KEYS,
 )
 # composition root 直接读策略侧运动分类：livescore demand-driven 轮询需要把
-# tracked market 映射到运动码，再映射到 feed key。strategies.current 是当前装配
+# tracked market 映射到运动码，再映射到 feed key。polymarket_trader.quant 是当前装配
 # 的业务扩展实现，main.py 作为 composition root 在此处接线属预期范围。
-from strategies.current.live_state import _market_sport_codes
+from polymarket_trader.quant.live_state import _market_sport_codes
 
 logger = logging.getLogger(__name__)
 
