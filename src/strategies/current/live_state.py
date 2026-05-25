@@ -310,7 +310,7 @@ def _extract_goalserve_moneyline(event: LiveEvent) -> dict[str, Any] | None:
     outcomes = ml_market.get("outcomes", [])
     home_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("home", "1")), None)
     away_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("away", "2")), None)
-    # 3-way 运动（足球整场）必须把 draw outcome 也抽出来——否则 odds_gap 走
+    # 3-way 运动（足球整场）必须把 draw outcome 也抽出来——否则 N-way devig 走
     # 2-way devig 会丢掉 draw 的 vig 份额，高估 home/away 0.15-0.20。
     # 2-way 运动（棒球/篮球/网球）outcomes 里没有 draw，自然为 None。
     draw_outcome = next((o for o in outcomes if o.get("name", "").lower() in ("draw", "x", "tie")), None)

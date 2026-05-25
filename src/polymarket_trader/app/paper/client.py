@@ -123,7 +123,6 @@ class PaperSubmitOnlyOrderClient:
             order_id=request.order_id,
             post_only=request.post_only,
             reason=request.reason,
-            retry_count=request.retry_count,
             timestamps=request.timestamps,
         )
         market = self._market_lookup(request.token_id)

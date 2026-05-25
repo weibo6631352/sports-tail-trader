@@ -15,6 +15,7 @@ export const qk = {
   },
 
   markets: {
+    trackingBreakdown: () => ['markets', 'tracking-breakdown'] as const,
     list: (params: Record<string, unknown>) => ['markets', 'list', params] as const,
     detail: (params: Record<string, unknown>) => ['markets', 'detail', params] as const,
     orderbook: (tokenId: string) => ['markets', 'orderbook', tokenId] as const,

@@ -98,8 +98,10 @@ export const DEFAULT_EVENT_ROUTES: EventRoute[] = [
     invalidate: [qkRoots.parameters, qkRoots.auditEvents],
   },
   // ---- Reconcile ----
+  // reconcile_diff_detected = 实际持仓/订单有变化，需刷新 positions/orders/portfolio。
+  // reconcile_applied / reconcile_started = 例行汇报，不代表数据变化，只刷新 operations/outbox。
   {
-    match: eventTypeMatch('reconcile_started', 'reconcile_diff_detected', 'reconcile_applied'),
+    match: eventTypeMatch('reconcile_diff_detected'),
     invalidate: [
       qkRoots.operations,
       qkRoots.positions,
@@ -107,6 +109,10 @@ export const DEFAULT_EVENT_ROUTES: EventRoute[] = [
       qkRoots.portfolio,
       qkRoots.outbox,
     ],
+  },
+  {
+    match: eventTypeMatch('reconcile_started', 'reconcile_applied'),
+    invalidate: [qkRoots.operations, qkRoots.outbox],
   },
   // 注：orderbook / orderbook_snapshot_updated 高频，不做全 root invalidate；
   //     orderbook 数据是按 token_id 拉取，需要时各页自行查询。

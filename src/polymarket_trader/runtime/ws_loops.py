@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import suppress
-from datetime import datetime, timezone
+from datetime import timezone
 from typing import TYPE_CHECKING, Any, Mapping
 from uuid import uuid4
 
@@ -18,29 +18,65 @@ from polymarket_trader.runtime.status import WorkerLifecycleState
 logger = logging.getLogger(__name__)
 
 _SUBSCRIPTION_REFRESH_SECONDS = 5.0
-_MARKET_WS_LIVE_STATUSES = {"live", "ended"}
-_MARKET_WS_TAIL_WINDOW_SECONDS = 3600.0
-# market WS 盘口订阅的生命周期窗口（基于 end_date≈game_start_time）：
-#   - 开赛前 30 分钟内才开始订阅（PREGAME_LEAD）——不预订几小时/几天后的赛事；
-#   - 开赛后 6h 内保持订阅（INPLAY_GRACE，覆盖各运动比赛全程）；
-#   - 更早 / 更晚都不占订阅名额。
-# 有持仓/挂单的市场在调用侧已提前放行，不受此窗口限制。
-_MARKET_WS_PREGAME_LEAD_SECONDS = 1_800.0   # 开赛前 30 分钟
-# 开赛后 3 小时窗口:MLB ~3h、NBA ~2.5h、NFL ~3.5h、足球 ~2h、网球 BO3 ~2-3h
-# 已 cover 全场。原 6h 覆盖率过多冗余,WS 订阅量上去队列 saturate(实测 958 token
-# 的 WS 推送速率 > trader 消费速率 → queue 满 drop → 服务器关连接)。
-_MARKET_WS_INPLAY_GRACE_SECONDS = 10_800.0
-# 订阅数上限（按 token 计）——纯安全护栏，防止失控时把全量 registry 压垮
-# Polymarket WS。订阅集已由 market_outside_trade_window（只跟踪开赛 [-6h,+30min]
-# 的近期赛事）+ _market_requires_market_ws（live/敞口/6h 窗口）双重收窄，实际
-# 近期相关市场 token 数典型 1500–4000；美国黄金时段多联赛叠加也远低于此上限。
-# 旧值 200 会把 ~7/8 的直播市场截断成 missing_best_ask、卡掉成交机会（违反
-# §17）。8000 给足余量，且远低于实测可用的 ~15000 token。超出时按 end_date
-# 升序截断（最快结束 / 正在直播的优先保留）。
+# 订阅数上限（按 token 计）——安全护栏，防止 registry 全量压垮 Polymarket WS。
+# 订阅 gate 直接从 entry_metadata 实时算（live phase + signal_allowed），不再
+# 依赖 Market.ws_eligible flag；超出时按 end_date 升序截断（最快结束的优先）。
 _MARKET_WS_MAX_SUBSCRIPTIONS = 8000
 # stream task 已启动后容忍订阅集的小幅变化，避免持续 cancel/reconnect。
 # 只有 added+removed > 此阈值才重建连接；新增 token 会在下次 reconnect 时补充。
 _MARKET_WS_RESUBSCRIBE_THRESHOLD = 10
+
+
+def should_subscribe_ws(
+    market: Any,
+    entry_metadata: Any,
+    has_exposure: bool,
+) -> bool:
+    """单一 WS 订阅 gate——CLAUDE.md §0 推 vs 拉、§19 简化反应式架构的应用。
+
+    决策逻辑：
+    1. **有持仓 / 挂单** → 必须订阅。即便比赛已结束，exit overlay / settlement 需要
+       盘口推送来决定最后挂单时机；持仓走 exposure override 绕过其他 gate。
+    2. **市场被人工/自动 pause** → 不订阅。trading_status != ELIGIBLE 表示框架明确
+       说"不要对这个市场下单"，订阅 WS 也没决策价值。
+    3. **没有 entry_metadata** → 不订阅。说明 live_state_worker 从来没匹配上这个
+       market（discovery 找到但没直播数据），盘口推送对决策没意义。
+    4. **live_state_signal_allowed=False** → 不订阅。worker 明确表示该 market
+       不应发交易信号（赔率缺失/未开始/等结算/等）。
+    5. **live_state_phase != "live"** → 不订阅。phase=ended/paused/scheduled 都
+       不该订阅。phase 缺失（""）只在 OUTRIGHT 等无直播概念市场出现——目前
+       不予订阅（OUTRIGHT 决策不依赖盘口高频推送，定期 reconcile 足够）。
+    6. **其余** → 订阅。phase=live + signal_allowed=True 表示"现在在打 + 可发信号"。
+    """
+
+    if has_exposure:
+        return True
+
+    # 显式 block：人工/自动 pause、已结算/已关闭，明确不该订阅。
+    trading_status = getattr(market, "trading_status", None)
+    status_value = getattr(trading_status, "value", trading_status)
+    if status_value in {"paused", "rejected", "closed", "resolved"}:
+        return False
+
+    if entry_metadata is None:
+        return False
+
+    signal_allowed = getattr(entry_metadata, "live_state_signal_allowed", None)
+    metadata = getattr(entry_metadata, "metadata", None)
+    has_season_odds = isinstance(metadata, dict) and "season_odds_snapshot" in metadata
+
+    # OUTRIGHT 路径：metadata 有 season_odds_snapshot → 订阅来捕获定价变动，
+    # 即便 signal_allowed=False（live_state_worker 对赛季级市场不发"在打"信号）。
+    if has_season_odds:
+        return True
+
+    # 非 OUTRIGHT：要求 signal_allowed=True（live_state_worker 明确放行）+
+    # phase=live（确实在打）。signal_allowed=None / False 一律拒绝——表示
+    # worker 还未对该 market 完成判断或显式拒绝。
+    if signal_allowed is not True:
+        return False
+    phase = (getattr(entry_metadata, "live_state_phase", "") or "").strip().lower()
+    return phase == "live"
 
 
 def _offer_to_ws_queue(
@@ -96,40 +132,34 @@ def _offer_to_ws_queue(
     )
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
 def market_ws_subscription_token_ids(runtime: Any) -> tuple[str, ...]:
     """返回 market WS 需要订阅的 token。
 
-    全量 market 发现负责扩大机会池；market WS 只承载交易热路径所需盘口。
-    收窄订阅范围避免把全量 registry 压到 Polymarket WS 限流。订阅条件：
-    1. 账户已有敞口
-    2. sports_live_state 已标记 live/ended（外部源覆盖时优先）
-    3. **Polymarket 自身 active+open + endDate 在 6h 窗口内**（兜底——
-       SofaScore 屏蔽 / ESPN 不覆盖 Challenger 时仍能订阅）
-
-    超 _MARKET_WS_MAX_SUBSCRIPTIONS 时按 end_date 升序截断（最近结束的优先）。
+    统一通过 :func:`should_subscribe_ws` gate 决定——实时读 entry_metadata 的
+    live_state_phase / signal_allowed + registry 的 trading_status + 账户 exposure。
+    不再依赖任何"flag 类型"的中间状态，避免 stale 卡住的问题。
+    超 _MARKET_WS_MAX_SUBSCRIPTIONS 时按 end_date 升序截断（最快结束的优先）。
     """
 
     account_snapshot = _account_snapshot(runtime)
     exposed_condition_ids, exposed_token_ids = _account_exposure_keys(account_snapshot)
-    now = _utc_now()
+    entry_metadata_store = getattr(runtime, "entry_metadata_store", None)
     candidates: list[tuple[float, tuple[str, ...]]] = []
     for market in runtime.registry.snapshot().markets:
-        if not _market_requires_market_ws(
-            runtime,
-            market,
-            exposed_condition_ids=exposed_condition_ids,
-            exposed_token_ids=exposed_token_ids,
-            now=now,
-        ):
+        has_exposure = (
+            market.condition_id in exposed_condition_ids
+            or any(tid in exposed_token_ids for tid in market.token_ids)
+        )
+        entry = (
+            entry_metadata_store.find(condition_id=market.condition_id)
+            if entry_metadata_store is not None
+            else None
+        )
+        if not should_subscribe_ws(market, entry, has_exposure):
             continue
-        market_token_ids = tuple(token_id for token_id in market.token_ids if token_id)
+        market_token_ids = tuple(tid for tid in market.token_ids if tid)
         if not market_token_ids:
             continue
-        # 按 end_date 升序排（near-end 优先）；缺 end_date 排到最后。
         end_ts = float("inf")
         end = market.end_date
         if end is not None:
@@ -178,112 +208,6 @@ def _account_exposure_keys(account_snapshot: AccountSnapshot | None) -> tuple[se
             token_ids.add(order.token_id)
     return condition_ids, token_ids
 
-
-def _market_requires_market_ws(
-    runtime: Any,
-    market: Any,
-    *,
-    exposed_condition_ids: set[str],
-    exposed_token_ids: set[str],
-    now: datetime | None = None,
-) -> bool:
-    if market.condition_id in exposed_condition_ids or any(
-        token_id in exposed_token_ids for token_id in market.token_ids
-    ):
-        return True
-    now = now or _utc_now()
-    record = _entry_metadata_record_for_market(runtime, market)
-    if record is not None:
-        # OUTRIGHT/SERIES 由专用 worker 写入 series_state/game_odds/season_odds_snapshot，
-        # 不依赖 live_state——先判，避免误写的 signal_allowed=False 永久封锁这类市场
-        # （市场重新分类时旧 False 记录会残留）。
-        metadata = record.metadata or {}
-        if metadata.get("series_state") or metadata.get("game_odds") or metadata.get("season_odds_snapshot"):
-            # OUTRIGHT/SERIES 是长期市场，没有单场"开赛时刻"——不套单场赛事
-            # 时间窗口，只要仍 ELIGIBLE 就订阅。
-            return _market_eligible_for_ws(market)
-        # 以下逻辑针对依赖 live_state 的市场（SINGLE_GAME）：
-        # 显式拒（signal_allowed=False）立刻返回，避免 polymarket 兜底误绕过。
-        if record.live_state_signal_allowed is False:
-            return False
-        phase = (record.live_state_phase or "").strip().lower()
-        if phase == "ended":
-            # 比赛已结束等结算的市场:无账户敞口不订 WS(line 176-178 已经放行
-            # 有敞口的)。ended 市场盘口推送对决策无价值——结算价已锁,exit
-            # overlay 也已挂好 SELL,WS 推送只徒增队列负担(实测一场 MLB ended
-            # 后 ~60 token 仍在推,4-5 场叠加 ~300 token 浪费)。
-            return False
-        if phase in _MARKET_WS_LIVE_STATUSES:
-            if record.live_state_signal_allowed is True:
-                return True
-            if _market_end_within_tail_window(market, now=now):
-                return True
-        # record 存在但仍是 scheduled 等未开赛态：按订阅时间窗口判定——
-        # 开赛前 30 分钟内才订阅，更早不预订。
-        return _market_active_in_polymarket(market, now=now)
-    # record 不存在 = 外部 live state 没覆盖（典型：ATP Challenger / WTA 125 / ITF
-    # 这些 ESPN 不收录、SofaScore 又被 Cloudflare 403 屏蔽的冷门赛事）。
-    # 用 Polymarket 自身 ELIGIBLE + 订阅时间窗口作为兜底订阅信号。
-    return _market_active_in_polymarket(market, now=now)
-
-
-def _market_eligible_for_ws(market: Any) -> bool:
-    """market 是否 ELIGIBLE（可交易）。
-
-    domain ``Market`` 没有 active/closed 字段，权威判 ``trading_status``：
-    只有 ELIGIBLE 才考虑订阅；CANDIDATE / PAUSED / CLOSED / RESOLVED / REJECTED 跳过。
-    """
-
-    from polymarket_trader.domain.market import TradingStatus  # 避免循环导入
-
-    return market.trading_status == TradingStatus.ELIGIBLE
-
-
-def _market_active_in_polymarket(market: Any, *, now: datetime) -> bool:
-    """单场赛事市场是否在 WS 订阅时间窗口内（开赛前 30 分钟 ~ 开赛后 6h）。"""
-
-    if not _market_eligible_for_ws(market):
-        return False
-    end = market.end_date
-    if end is None:
-        # 无 end_date 通常是赛季级 outright 市场——长期不订阅 WS 避免占用名额。
-        return False
-    if end.tzinfo is None:
-        end = end.replace(tzinfo=timezone.utc)
-    seconds_until_end = (end.astimezone(timezone.utc) - now.astimezone(timezone.utc)).total_seconds()
-    # 只在"开赛前 30 分钟"到"开赛后 6h"窗口内订阅 WS 盘口（end_date≈game_start_time）：
-    # 远期赛事不预订、早已结束的赛事不续订——这就是订阅的生命周期。
-    return (
-        -_MARKET_WS_INPLAY_GRACE_SECONDS
-        <= seconds_until_end
-        <= _MARKET_WS_PREGAME_LEAD_SECONDS
-    )
-
-
-def _market_end_within_tail_window(market: Any, *, now: datetime) -> bool:
-    """判断 live market 是否进入实时盘口订阅窗口。
-
-    全量扫描仍保留远期市场；这里只保护 market WS 热路径。已有持仓或挂单在
-    调用侧已提前放行，ended 未封盘市场也不受该窗口限制。
-    """
-
-    market_end = market.end_date
-    if market_end is None:
-        return True
-    if market_end.tzinfo is None:
-        market_end = market_end.replace(tzinfo=timezone.utc)
-    seconds_until_end = (market_end.astimezone(timezone.utc) - now.astimezone(timezone.utc)).total_seconds()
-    return seconds_until_end <= _MARKET_WS_TAIL_WINDOW_SECONDS
-
-
-def _entry_metadata_record_for_market(runtime: RuntimeComponents, market: Any) -> Any:
-    """读取 entry metadata 强类型记录；缺失时返回 None。"""
-
-    return runtime.entry_metadata_store.find(
-        condition_id=market.condition_id,
-        market_slug=market.market_slug,
-        event_slug=market.event_slug,
-    )
 
 
 def user_ws_subscription_condition_ids(runtime: Any) -> tuple[str, ...]:
@@ -565,21 +489,12 @@ async def run_market_ws(runtime: Any) -> None:
                     _drain_queue(queue)
                     if desired_token_ids:
                         runtime.market_ws_worker.build_subscription_request(desired_token_ids)
-                        # 实测启动时 refresh_rest_snapshots 并发 20 路预取上百个 token 仍要
-                        # 10-14s,期间阻塞 WS 连接建立 → market_ws_connected gate 推迟到预取
-                        # 完才解除 → trading_enabled 推迟 ~14s。WS 自己会推 book snapshot,
-                        # REST 预取只是"in-memory 头几秒就有完整 book"的加速,可后台并行跑。
-                        # WS 连接立即起 → on_connect 立即 set_connection_state(True) → gate
-                        # 立即解除。新交易在 reconcile_fresh 之前也不会下单,无风险窗口。
+                        # 不再做 REST prefetch——Polymarket WS 订阅后会自动推一条
+                        # 完整 book 消息（~1s 内）。原 prefetch 是"头几秒决策饥饿"
+                        # 的过度防御，但下游 readiness gate (reconcile_fresh) 本来
+                        # 就要等更久才允许下单，prefetch 节省的 1s 没业务价值。
+                        # 唯一保留的 REST 路径：worker.py 内 sequence_gap 兜底。
                         next_subscription_refresh_at = loop.time() + _SUBSCRIPTION_REFRESH_SECONDS
-                        prefetch_task = asyncio.create_task(
-                            runtime.market_ws_worker.refresh_rest_snapshots(desired_token_ids),
-                            name="trader:market-ws-rest-prefetch",
-                        )
-                        # 不存引用 set 防 GC——任务执行后让 GC 自然回收;长时跑没问题。
-                        prefetch_task.add_done_callback(
-                            lambda t: t.exception() if not t.cancelled() else None
-                        )
                         stream_task = asyncio.create_task(
                             stream_market_ws_messages(runtime, desired_token_ids, queue),
                             name="trader:market-ws-stream",
@@ -599,12 +514,9 @@ async def run_market_ws(runtime: Any) -> None:
                             detail="no_markets",
                         )
                         sync_runtime_metrics(runtime)
-                else:
-                    # delta <= threshold：不重建连接，但仍为新增 token 预取 REST 快照，
-                    # 避免它们在首条 WS 消息到达前以空盘口触发 missing_price_or_prob。
-                    new_token_ids = tuple(desired_set - subscribed_set)
-                    if new_token_ids:
-                        await runtime.market_ws_worker.refresh_rest_snapshots(new_token_ids)
+                # delta <= threshold：不重建连接、不预取 REST。新增 token 由 WS
+                # 订阅后下一条 book 消息（~1s）自然带快照。决策层在 orderbook
+                # 缺数据时本来就走 missing_price_or_prob 跳过，无业务风险。
 
             try:
                 message = await asyncio.wait_for(queue.get(), timeout=1.0)

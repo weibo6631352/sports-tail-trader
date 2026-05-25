@@ -83,7 +83,6 @@ def _request_idempotency_key(
     new_price: Decimal | None = None,
     post_only: bool = False,
     reason: str = "",
-    retry_count: int = 0,
     idempotency_key: str | None = None,
 ) -> str:
     if idempotency_key:
@@ -242,10 +241,55 @@ class PolymarketOrderExecutor:
         # 事件静默丢失（§7：审计副作用必须可靠承接，不阻塞主链路也不允许丢失）。
         # add_done_callback 在任务完成时同步从集合 discard——O(1) 不涉及 IO。
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        # UNKNOWN_TIMEOUT 异步确认窗口：submit 发出去但 ack 没回时，服务端可能
+        # 已收单也可能没。这段时间内同 condition 不再下新单——给 user_ws push
+        # 推 order_state 的时间。窗口过后 AccountStateStore.open_orders 应已收到
+        # 正确状态，RiskManager 的"open BUY 已存在"门控自然接管防重复下单。
+        # 这是**全非阻塞**：UNKNOWN_TIMEOUT 立即返回；后台 sleep 任务到期清除标记。
+        self._pending_timeout_confirmations: dict[str, asyncio.Task[None]] = {}
+        self._pending_timeout_window_s = 2.0
+
+    def is_pending_timeout_confirmation(self, condition_id: str | None) -> bool:
+        """RiskManager / 外部诊断可查询：此 condition 是否正处于 timeout 确认窗口。"""
+        if not condition_id:
+            return False
+        task = self._pending_timeout_confirmations.get(condition_id)
+        return task is not None and not task.done()
+
+    def _mark_pending_timeout_confirmation(self, condition_id: str | None) -> None:
+        """submit UNKNOWN_TIMEOUT 后调用。fire-and-forget 启一个 sleep 任务，
+        到期自动清除——不阻塞主链路。"""
+        if not condition_id:
+            return
+        existing = self._pending_timeout_confirmations.get(condition_id)
+        if existing is not None and not existing.done():
+            existing.cancel()
+
+        async def _clear_after_delay() -> None:
+            try:
+                await asyncio.sleep(self._pending_timeout_window_s)
+            except asyncio.CancelledError:
+                return
+            self._pending_timeout_confirmations.pop(condition_id, None)
+
+        task = asyncio.create_task(
+            _clear_after_delay(),
+            name=f"order_executor.pending_timeout_confirm.{condition_id[:8] if condition_id else 'na'}",
+        )
+        self._pending_timeout_confirmations[condition_id] = task
+        # 用 _background_tasks 持有强引用 + 关闭时 drain。
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._log_task_exception)
 
     async def submit(self, intent: OrderIntent) -> OrderResult:
         if not isinstance(intent, (BuyOrderIntent, SellOrderIntent)):
             raise TypeError(f"unsupported submit intent type: {type(intent)!r}")
+        # UNKNOWN_TIMEOUT 后的短暂确认窗口期：拒绝新 submit，让 user_ws 把上次的
+        # 真实 order_state 推到 AccountStateStore，下一次 entry 评估自然走 RiskManager
+        # 的 open-orders 检查。retryable=True 让调用方知道下次 signal 可重试。
+        if self.is_pending_timeout_confirmation(intent.condition_id):
+            return self._pending_timeout_skip_result(intent)
         request = self._build_submit_request(intent)
         return await self._execute(request, intent)
 
@@ -334,7 +378,6 @@ class PolymarketOrderExecutor:
                 amount_usdc=intent.amount_usdc,
                 size_shares=intent.size_shares,
                 post_only=intent.post_only,
-                retry_count=intent.retry_count,
                 idempotency_key=intent.idempotency_key,
             ),
             condition_id=intent.condition_id,
@@ -346,7 +389,6 @@ class PolymarketOrderExecutor:
             amount_usdc=intent.amount_usdc,
             size_shares=intent.size_shares,
             post_only=intent.post_only,
-            retry_count=intent.retry_count,
         )
 
     def _build_cancel_request(self, intent: CancelOrderIntent) -> OrderExecutionRequest:
@@ -719,6 +761,11 @@ class PolymarketOrderExecutor:
         started_at: datetime | None,
         reason: str | None = None,
     ) -> OrderResult:
+        # submit 超时（包括 critical_lock_timeout，因为锁拿不到时可能还没真发，但
+        # 谨慎起见也算）：标记 condition 进入 pending 窗口，阻止短时间内再发新单。
+        # 这是**异步触发，立即返回**——不阻塞当前调用者，由 sleep task 到期自动清。
+        if request.action == "submit":
+            self._mark_pending_timeout_confirmation(request.condition_id)
         return OrderResult(
             strategy_id=request.strategy_id,
             trace_id=request.trace_id,
@@ -739,6 +786,32 @@ class PolymarketOrderExecutor:
                 submitted_at=utc_now(),
                 ack_at=utc_now(),
             ),
+        )
+
+    def _pending_timeout_skip_result(
+        self,
+        intent: BuyOrderIntent | SellOrderIntent,
+    ) -> OrderResult:
+        """submit 进入时如果同 condition 还在 pending 窗口，立即返回 REJECTED。
+        retryable=True 让下次 entry signal 自然再来一次，那时窗口已过、
+        AccountStateStore 已被 user_ws push 更新到真值。"""
+        now = utc_now()
+        return OrderResult(
+            strategy_id=intent.strategy_id,
+            trace_id=intent.trace_id,
+            condition_id=intent.condition_id,
+            token_id=intent.token_id,
+            market_slug=intent.market_slug,
+            status=OrderResultStatus.REJECTED,
+            intent=intent,
+            side=intent.side,
+            order_type=intent.order_type,
+            price=intent.price,
+            requested_amount_usdc=intent.amount_usdc,
+            requested_size_shares=intent.size_shares,
+            reason="pending_timeout_confirmation",
+            retryable=True,
+            timestamps=ExecutionTimestamps(queued_at=now, ack_at=now),
         )
 
     async def _publish_lifecycle_event(

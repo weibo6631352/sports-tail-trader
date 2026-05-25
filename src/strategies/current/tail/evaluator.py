@@ -66,7 +66,6 @@ from .anytime_goalscorer import (
     _evaluate_anytime_goalscorer,
     is_anytime_goalscorer_market,
 )
-from .odds_gap import evaluate_odds_gap_opportunity
 from .esports import _evaluate_esports_moneyline, is_esports_game
 from .event_props import (
     evaluate_event_prop,
@@ -103,7 +102,7 @@ from .types import (
 def _entry_math_lock_veto(candidate: SportsTailCandidate) -> str | None:
     """所有 entry path 的最终一道闸门：math_lock 一票否决"已输方向"。
 
-    任何 evaluator（lockin / odds_gap / event_prop / 体育专属）在 ACCEPT 前都必须
+    任何 evaluator（lockin / event_prop / 体育专属）在 ACCEPT 前都必须
     经过这道闸门——只要 math_lock 公式判定当前 token 是"已输方向"
     （lock_probability ≤ 0.05 且 reason 含"输方"关键词），统一 veto。
 
@@ -191,14 +190,8 @@ def evaluate_tail_opportunity(
     if common_reject_reason:
         return _reject(candidate, common_reject_reason.value)
 
-    # 通用入场守卫（推广自 odds_gap）：覆盖 tail lockin / odds_gap / 所有 evaluator
-    # 路径。实盘案例：5 分钟连续买入 7 个 underdog 浮亏 -$26，根因是 BUY 路径
-    # 没看盘口风向 → 买在单边下杀方向。
+    # 通用入场守卫：盘口风向单边下杀直接拒。
     from decimal import Decimal as _Dec
-
-    # NO_EXIT_CHANNEL 守卫不放在这里——会拦截 tail lockin（lockin 入场不依赖
-    # 退出通道，可以等结算）。该守卫只在 odds_gap 路径内启用（概率性入场必须有
-    # 退出通道），见 odds_gap.evaluate_odds_gap_opportunity 顶部。
 
     ob_dir = market.metadata.get("orderbook_direction") if isinstance(market.metadata, dict) else None
     if isinstance(ob_dir, dict):
@@ -220,37 +213,12 @@ def evaluate_tail_opportunity(
                 },
             )
 
-    # 先评估扫尾锁定（结果数学锁定的确定性入场）；未命中再评估赔率差价。
+    # 扫尾锁定（结果数学锁定的确定性入场）——唯一入场路径。
     locked_evaluation = _dispatch_tail_lock(game, market, candidate, policy)
     if locked_evaluation.accepted:
         veto_reason = _entry_math_lock_veto(candidate)
         if veto_reason is not None:
             return _reject(candidate, veto_reason)
-        return locked_evaluation
-    # 扫尾锁定未命中 → 尝试赔率差价入场（CLAUDE.md §17 的第二条入场路径）。
-    # 价格/流动性/价差门禁已在 _common_reject_reason 通过，odds-gap 直接复用——
-    # 概率性入场必须保留这些门禁以保证有退出通道。
-    odds_gap_evaluation = evaluate_odds_gap_opportunity(candidate, policy)
-    if odds_gap_evaluation.accepted:
-        veto_reason = _entry_math_lock_veto(candidate)
-        if veto_reason is not None:
-            return _reject(candidate, veto_reason)
-        return odds_gap_evaluation
-    # 两条路径都未命中：返回扫尾锁定的拒绝原因（信息量更大，含具体未锁定原因）。
-    # 仅当锁定原因是泛化的 OUTCOME_NOT_LOCKED 时，换成赔率差价的拒绝原因
-    # （no_odds_gap / odds_gap_line_mismatch），让审计能区分"扫尾未锁 + 赔率差价也
-    # 不够"以及"totals/spread 盘口线对不上"。MONEYLINE/TOTALS/SPREADS 三类赔率差价
-    # 均覆盖；其它锁定原因（缺数据、缺线等）信息量更大，保留。
-    if (
-        market.market_type
-        in {
-            SportsMarketType.MONEYLINE,
-            SportsMarketType.TOTALS,
-            SportsMarketType.SPREADS,
-        }
-        and locked_evaluation.reason == TailRejectReason.OUTCOME_NOT_LOCKED.value
-    ):
-        return odds_gap_evaluation
     return locked_evaluation
 
 
@@ -565,12 +533,7 @@ def _common_reject_reason(
         return None
     if market.best_ask is None:
         return TailRejectReason.MISSING_BEST_ASK
-    if market.best_ask < policy.min_entry_price:
-        return TailRejectReason.PRICE_BELOW_MIN
-    if market.best_ask > _max_entry_price(game, market, policy):
-        return TailRejectReason.PRICE_ABOVE_MAX
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
-        return TailRejectReason.LIQUIDITY_BELOW_MIN
+    # price/liquidity 入场 gate 已删——宽进严管，持仓策略接管止盈止损。
     return None
 
 
@@ -590,12 +553,7 @@ def _market_data_reject_reason(
         return None
     if market.best_ask is None:
         return TailRejectReason.MISSING_BEST_ASK
-    if market.best_ask < policy.min_entry_price:
-        return TailRejectReason.PRICE_BELOW_MIN
-    if market.best_ask > _max_entry_price(game, market, policy):
-        return TailRejectReason.PRICE_ABOVE_MAX
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
-        return TailRejectReason.LIQUIDITY_BELOW_MIN
+    # price/liquidity 入场 gate 已删——同上。
     return None
 
 

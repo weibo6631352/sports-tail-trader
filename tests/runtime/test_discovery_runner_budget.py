@@ -18,7 +18,9 @@ from polymarket_trader.runtime import discovery_runner
 def test_full_market_discovery_defaults_keep_background_sla() -> None:
     assert discovery_runner._MARKET_DISCOVERY_REQUEST_BUDGET_PER_TICK == 2
     assert discovery_runner._MARKET_DISCOVERY_MAX_RUNTIME_MS == 200.0
-    assert discovery_runner.MARKET_DISCOVERY_TICK_SECONDS == 0.5
+    # 2.0s 是经过测算的稳态值：0.5s 实测浪费 80% 调用，新市场出现 2s 内捕获仍快于
+    # 大部分散户；如果未来策略对入场延迟更敏感，单调本常量即可。
+    assert discovery_runner.MARKET_DISCOVERY_TICK_SECONDS == 2.0
 
 
 def test_discovery_queries_prioritize_live_game_queries_before_broad_queries() -> None:
@@ -113,7 +115,10 @@ def test_record_page_does_not_reset_consecutive_failures_until_round_finishes() 
 def test_live_event_expansion_uses_stale_live_metadata_event_slugs() -> None:
     now = datetime(2026, 4, 29, 9, 20, tzinfo=timezone.utc)
     state = discovery_runner.FullMarketDiscoveryState()
-    state.live_event_expanded_at["atp-live-1"] = now - timedelta(seconds=31)
+    # 301s 刚超过新冷却阈值 _LIVE_EVENT_EXPANSION_REFRESH_SECONDS=300（之前 30s）。
+    # 跨洋链路下 30s 太短反复展开同一 event 浪费带宽，5 分钟内已有的 sub-market
+    # 不会变；keyset discovery 兜住任何漏的新分盘。
+    state.live_event_expanded_at["atp-live-1"] = now - timedelta(seconds=301)
     state.live_event_expanded_at["atp-live-2"] = now
     runtime = SimpleNamespace(
         market_discovery_scan=state,
@@ -192,13 +197,16 @@ def test_priority_condition_refresh_skips_settled_zero_positions() -> None:
 
 
 def test_refresh_priority_condition_ids_fetches_market_and_ingests() -> None:
-    """P3.1：对到期 priority 市场调用 gamma.get_market 并 ingest，更新 refreshed_at。"""
+    """P3.1：对到期 priority 市场调 gamma.get_market_by_condition_id 并 ingest，
+    更新 refreshed_at。走 condition_ids 过滤端点，避开 /markets/{id} 422 bug。"""
 
     ingested: list[str] = []
     fetched: list[str] = []
 
     class _FakeGammaClient:
-        async def get_market(self, condition_id: str, *, timeout_s: float) -> SimpleNamespace:
+        async def get_market_by_condition_id(
+            self, condition_id: str, *, timeout_s: float
+        ) -> SimpleNamespace:
             fetched.append(condition_id)
             return SimpleNamespace(raw={"condition_id": condition_id})
 
@@ -228,13 +236,54 @@ def test_refresh_priority_condition_ids_fetches_market_and_ingests() -> None:
     assert "cond-exp" in state.priority_condition_refreshed_at
 
 
+def test_refresh_priority_condition_ids_skips_when_gamma_returns_none() -> None:
+    """P3.1：condition 已被 gamma 下架（list/condition_ids 反查为空）→
+    不 ingest、不更新 refreshed_at。"""
+
+    ingested: list[str] = []
+    fetched: list[str] = []
+
+    class _FakeGammaClient:
+        async def get_market_by_condition_id(
+            self, condition_id: str, *, timeout_s: float
+        ) -> SimpleNamespace | None:
+            fetched.append(condition_id)
+            return None  # gamma 下架的 condition
+
+    state = discovery_runner.FullMarketDiscoveryState()
+    account_snapshot = SimpleNamespace(
+        positions=(
+            SimpleNamespace(condition_id="cond-dead", token_id="t", settled_zero_value=False),
+        ),
+        open_orders=(),
+    )
+
+    async def fake_ingest(page, *, source, trace_id):
+        ingested.append(source)
+
+    runtime = SimpleNamespace(
+        market_discovery_scan=state,
+        account_state_store=SimpleNamespace(snapshot=lambda: account_snapshot),
+        gamma_client=_FakeGammaClient(),
+        market_discovery_worker=SimpleNamespace(ingest_source_page=fake_ingest),
+    )
+
+    asyncio.run(discovery_runner.refresh_priority_condition_ids(runtime))
+
+    assert fetched == ["cond-dead"]
+    assert ingested == []
+    assert "cond-dead" not in state.priority_condition_refreshed_at
+
+
 def test_refresh_priority_condition_ids_caps_at_budget() -> None:
     """P3.1：单 tick 最多发 _PRIORITY_CONDITION_REFRESH_BUDGET_PER_TICK 次请求。"""
 
     fetched: list[str] = []
 
     class _FakeGammaClient:
-        async def get_market(self, condition_id: str, *, timeout_s: float) -> SimpleNamespace:
+        async def get_market_by_condition_id(
+            self, condition_id: str, *, timeout_s: float
+        ) -> SimpleNamespace:
             fetched.append(condition_id)
             return SimpleNamespace(raw={"condition_id": condition_id})
 

@@ -46,7 +46,6 @@ class OrderExecutionRequest:
     new_price: Decimal | None = None
     post_only: bool = False
     reason: str = ""
-    retry_count: int = 0
     timestamps: ExecutionTimestamps = field(default_factory=ExecutionTimestamps)
 
     def fingerprint(self) -> str:

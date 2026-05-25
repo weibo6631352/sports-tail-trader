@@ -111,12 +111,7 @@ def _evaluate_mlb_nrfi(
         return _reject(candidate, TailRejectReason.MISSING_BASEBALL_STATE.value)
     if market.best_ask is None:
         return _reject(candidate, TailRejectReason.MISSING_BEST_ASK.value)
-    if market.best_ask < policy.min_entry_price:
-        return _reject(candidate, TailRejectReason.PRICE_BELOW_MIN.value)
-    if market.best_ask > policy.totals_max_entry_price:
-        return _reject(candidate, TailRejectReason.PRICE_ABOVE_MAX.value)
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
-        return _reject(candidate, TailRejectReason.LIQUIDITY_BELOW_MIN.value)
+    # price/liquidity 入场 gate 已删——宽进严管，持仓策略接管止盈止损。
 
     home1 = state.home_inning_runs[0] if state.home_inning_runs else None
     away1 = state.away_inning_runs[0] if state.away_inning_runs else None

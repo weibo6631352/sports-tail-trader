@@ -164,13 +164,66 @@ def test_list_positions_uses_memory_after_reconcile_even_when_empty() -> None:
     assert payload["total"] == 0
 
 
-def test_list_positions_db_path_when_no_reconcile_and_empty_snapshot() -> None:
+def test_portfolio_exposure_paused_flag_only_true_for_manual_pause() -> None:
+    """仓位 payload 的 paused 字段只反映 MarketPauseSource.MANUAL；
+    后台 reconcile/risk/strategy 自动 pause 不应让 paused=True。"""
+    from polymarket_trader.domain.account import MarketPause, MarketPauseSource
+
+    pos_manual = Position(
+        strategy_id="sports_tail",
+        condition_id="cond-MANUAL",
+        token_id="tk-m",
+        shares=Decimal("10"),
+        cost_usdc=Decimal("5"),
+    )
+    pos_auto = Position(
+        strategy_id="sports_tail",
+        condition_id="cond-AUTO",
+        token_id="tk-a",
+        shares=Decimal("11"),
+        cost_usdc=Decimal("6"),
+    )
+    pos_clean = Position(
+        strategy_id="sports_tail",
+        condition_id="cond-CLEAN",
+        token_id="tk-c",
+        shares=Decimal("12"),
+        cost_usdc=Decimal("7"),
+    )
+    snap = AccountSnapshot(
+        positions=(pos_manual, pos_auto, pos_clean),
+        market_pauses=(
+            MarketPause(
+                condition_id="cond-MANUAL",
+                reason="manual_pause",
+                source=MarketPauseSource.MANUAL,
+                recoverable=False,
+            ),
+            MarketPause(
+                condition_id="cond-AUTO",
+                reason="auto_quarantine_dead_market",
+                source=MarketPauseSource.RECONCILE,
+                recoverable=False,
+            ),
+        ),
+    )
+    host = _Host(snapshot=snap)
+    payload = asyncio.run(host.portfolio_exposure())
+    by_cid = {item["condition_id"]: item for item in payload["items"]}
+    assert by_cid["cond-MANUAL"]["paused"] is True
+    assert by_cid["cond-AUTO"]["paused"] is False  # 后台自动 pause 不暴露
+    assert by_cid["cond-CLEAN"]["paused"] is False
+
+
+def test_list_positions_never_falls_back_to_db_even_before_first_reconcile() -> None:
+    # §3：内存快照是唯一真相来源；DB 只做审计/复盘，不作当前持仓 fallback。
+    # 启动竞态窗口（首次 reconcile 前）返回空，避免读到旧的 DB 投影把 24→0 闪烁。
     snap = AccountSnapshot(positions=(), last_reconcile_at=None)
     db_page = RepositoryPage(items=(_position("tk-x"),), total=1, limit=100, offset=0)
     host = _Host(snapshot=snap, has_db=True, db_page=db_page)
     payload = asyncio.run(host.list_positions())
-    assert payload["total"] == 1
-    assert payload["items"][0]["token_id"] == "tk-x"
+    assert payload["total"] == 0
+    assert payload["items"] == []
 
 
 def test_list_allocations_returns_empty_without_db() -> None:

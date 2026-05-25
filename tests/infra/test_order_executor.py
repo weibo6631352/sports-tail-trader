@@ -293,6 +293,51 @@ def test_client_exception_returns_failed_result() -> None:
 
 
 # ============================================================
+# UNKNOWN_TIMEOUT 异步确认窗口
+# ============================================================
+
+
+def test_submit_timeout_marks_condition_pending_and_blocks_immediate_resubmit() -> None:
+    """submit 触发 UNKNOWN_TIMEOUT → 同 condition 短时间内再 submit 被 REJECTED
+    (reason='pending_timeout_confirmation')。这是异步窗口，不阻塞返回。"""
+
+    async def slow_submit(_request: OrderExecutionRequest) -> OrderExecutionResponse:
+        # 让 sign+submit 整体超过 submit_timeout_ms，触发 UNKNOWN_TIMEOUT
+        await asyncio.sleep(0.1)
+        return OrderExecutionResponse(
+            status=OrderResultStatus.LIVE,
+            order_id="too-late",
+            raw_response={"action": "submit", "status": "live"},
+            reason="late",
+        )
+
+    sink = _CollectingOutboxSink()
+    client = InMemoryPolymarketOrderClient(submit_handler=slow_submit)
+    # submit_timeout_ms 设很小让第一笔超时
+    executor = PolymarketOrderExecutor(
+        client=client,
+        outbox=sink,
+        sign_timeout_ms=10,
+        submit_timeout_ms=10,
+    )
+    try:
+        async def run() -> None:
+            first = await executor.submit(_build_buy_intent(trace_id="trace-1"))
+            assert first.status == OrderResultStatus.UNKNOWN_TIMEOUT
+            assert executor.is_pending_timeout_confirmation(first.condition_id)
+
+            # 立即再来一笔同 condition：应被 pending 窗口拦下，不打到 client
+            second = await executor.submit(_build_buy_intent(trace_id="trace-2"))
+            assert second.status == OrderResultStatus.REJECTED
+            assert second.reason == "pending_timeout_confirmation"
+            assert second.retryable is True
+
+        _run(run())
+    finally:
+        executor.close()
+
+
+# ============================================================
 # 类型保护：submit 不接 Cancel/Replace intent
 # ============================================================
 

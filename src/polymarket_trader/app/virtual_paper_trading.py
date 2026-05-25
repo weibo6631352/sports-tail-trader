@@ -125,7 +125,6 @@ async def run_virtual_paper_trade(
                 _settings_value(runtime, "kelly_allow_round_up_to_market_min", default=True)
             ),
             kelly_round_up_max_overbet_ratio=_settings_decimal(runtime, "kelly_round_up_max_overbet_ratio") or Decimal("1"),
-            order_retry_limit=_settings_value(runtime, "order_retry_limit"),
         )
         event = DomainEvent(
             trace_id=f"paper-{uuid4().hex[:8]}",

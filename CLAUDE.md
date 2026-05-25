@@ -4,6 +4,59 @@ Sports Tail Trader 是一个跑实盘资金的 Polymarket 体育扫尾交易后�
 
 跨模块、可长期复用的规则写在这里；策略阈值、关键词、仓位参数、市场过滤等易变细节以 `src/strategies/current/` 和 [docs/](./docs/) 为准。
 
+## 0. 部署环境约束（**第一性原理，所有规则的根**）
+
+**部署位置：中国 → 代理 → 美国 Polymarket 服务器**
+**RTT：150–400ms（高且抖动）**
+**出口带宽：小（受代理限速）**
+
+### 0.0 核心矛盾：WS 是决策核心链路，所有其他网络 IO 都在和它抢带宽
+
+**Polymarket market WS 推送是整个交易系统的决策驱动源**——每条 `book / price_change / best_bid_ask` 都可能触发一笔下单。WS 决策链路的延迟 = 我们对市场反应的速度 = 抢扫尾机会的能力。
+
+但是：
+- **带宽小**——同一根管子里跑的所有 HTTP/WS payload 互相抢
+- **延迟高**——一个 200ms 的 gamma 请求期间，WS 上几条 price_change 可能还在路上
+- **asyncio 单线程**——cooperative，但下载 100KB gzip payload 期间事件循环没空读 WS 队列
+
+所以原则不是"省钱"，是 **任何非必要的网络 IO 都在 ms 级窃取 WS 决策反应速度**。这条要刻在脑子里。
+
+### 0.1 这意味着什么
+
+- **每多一次外部 REST 调用 = WS 上几条消息延迟解析**——尤其在 active market 推送密集时
+- **`asyncio.gather` 并发 N 个 REST 也没救**——总下载字节数是带宽瓶颈，N 路并发只是把 N 份 payload 挤同一根管子
+- **决策→下单链路必须独占一段干净时间**：在 risk → executor → clob.submit 这条 ~250ms RTT 路径上，**绝不允许任何后台 worker 同时发其他 REST**（否则 submit 排队等带宽）
+- **"更新鲜的数据"和"更少网络 IO"不冲突**——靠换形态实现：**推 > 拉、内存 store > 重复 fetch、demand-driven > broadcast、batch endpoint > N 次单调**
+
+### 0.1 设计每条链路时先问的 3 个问题
+
+1. **这条数据能不能换成 WS push？** WS 长连开 1 次，之后 0 RTT 拿增量。能用 WS 就用 WS。
+2. **这条数据能不能在一个 store 里被多个 consumer 共享？** 比如 gamma `/events` 嵌套的 `markets` 已经有完整 metadata，所有读者都从 `GammaMarketSnapshotStore` 读，不再每 condition 单独拉。
+3. **这条数据真的需要这么频繁吗？** 0.5s vs 2s 对决策几乎没影响，但 RTT 200ms 的链路上 0.5s 周期意味着 40% 时间在等网络。
+
+### 0.2 当前已上的优化（按这条约束做的）
+
+- discovery `/events` 周期 0.5s → **2s**（−80% 调用）
+- gamma `/markets/{slug}` 周期性 fetch → **从 `gamma_snapshot_store` 读**（命中即 0 RTT）
+- reconcile `/book` 周期性"trust but verify" → **完全删除**，WS 是盘口唯一真相源
+- user-side `/positions` + `/balance-allowance` 同步在 reconcile 主路径 → 拆到独立 `UserAccountPoller`（不阻塞主循环）
+- 无 tracked sport 时仍轮询 PBP / standings → **demand-driven**，无需求 0 调用
+- 启动期读 DB 预热 → **删除**，等 Polymarket 反正要拉一遍，DB 预热浪费 5 秒
+
+实测累计：稳态出站 **5 req/s → 0.7 req/s（−85%）**。
+
+### 0.3 还能继续做的（按 ROI 排）
+
+1. **机房迁移到 Polymarket 同区**（AWS us-east-1 / Cloudflare Workers 边缘）——RTT **250ms → 30ms** 是数量级提升，所有现有 worker 自动受益。这是单笔最大杠杆。
+2. **HTTP/2 multiplexing + connection keepalive 检查**：确保 httpx 复用 TCP，避免每次 fetch 走完整 TLS 握手（~100ms 节省）。
+3. **响应 gzip / brotli**：Polymarket REST 默认应该支持 `Accept-Encoding: gzip`，验证客户端开了；Goalserve inplay 已经是 .gz。
+4. **ETag / If-Modified-Since**：对 metadata（gamma /events）加条件请求头——服务端没变就 304，省 payload。Polymarket 是否支持需要试。
+5. **POST batch endpoints**（如 `/markets?condition_ids=cid1,cid2,...`）：一次拉多个 condition 而不是 N 次单调。Polymarket gamma 已支持，重构成批量。
+
+### 0.4 任何加重网络负担的改动需要明确权衡
+
+新增"每 N 秒调外部 API"或"每事件触发 REST"前，必须答完 §19.10 的 7 个问题。如果无法在 0 RTT 路径（WS / 内存 / cache）上解决问题，**说明白为什么这条新增 RTT 是必要的、值得多少 ms 决策延迟**。不要"为了完整性"或"为了双保险"加。
+
 ## 1. 项目速览
 
 - 主包 [src/polymarket_trader](./src/polymarket_trader)：分 `api / app / domain / infra / observability / runtime / workers / extension_api`。
@@ -39,9 +92,9 @@ Sports Tail Trader 是一个跑实盘资金的 Polymarket 体育扫尾交易后�
 
 1. Polymarket 实时事件与权威快照
 2. 本地内存状态
-3. PostgreSQL 审计与快照
+3. PostgreSQL **仅审计**
 
-数据库只用于审计、复盘、查询和恢复参考，**不是交易状态唯一真相来源**。
+数据库**不参与运行时**——包括程序启动管道、所有 worker、所有 scheduler job 都不得读 DB 拉运行时数据（balance / positions / orders / markets 等）。运行时数据**只能**来自 Polymarket 官方 API 或内存快照。**启动期不允许任何 DB 预热**——`balance/positions` 等空白窗口由 readiness gate（`reconcile_fresh`）兜住，不会下错单。DB 读取**只允许出现在 audit/admin API 端点**（操作员主动查历史）。详细规则见 §19。
 
 **Domain 纯度**：Domain 不依赖 FastAPI / SQLAlchemy / Polymarket SDK / WebSocket client / 环境变量 / 数据库查询。Domain 内金额和价格用 `Decimal`，不用浮点。
 
@@ -293,3 +346,82 @@ Goalserve 覆盖面极广，任何主要联赛/赛事在 Goalserve 上几乎必�
   - 我方发现了市场但无 live state → 直播源映射缺口（参照 §16/§18）。
   - 有 live state 但 candidate 被拒 → 核对拒绝原因是否合理（参照 §17 门禁复盘），区分"真实无 edge"与"门禁过保守误杀"。
   - 只有逐项确认每个差异都有合理解释，才能判定确实无机会；任何无法解释的差异都按 bug 排查修复。
+
+## 19. 外部数据源与状态真相源（**反复犯过的错都记这里**）
+
+所有以下规则都是从实盘事故 + 性能审计踩出来的，**重新设计或新增数据源前先读完**。
+
+### 19.1 数据库只做审计，不做运行时
+
+- **启动期**：不读 DB 预热任何运行时状态（balance / positions / orders / markets / account_snapshot 都不读）。Polymarket 第一轮 reconcile（秒级）会拉回所有权威值；readiness gate 阻挡空窗期下单。
+- **运行时**：所有 workers / schedulers / supervisor 路径都不允许 `db_session_factory()` 读取（dead_records_purge 这种 DB 自身 retention 维护是例外）。
+- **唯一允许**：admin/audit API 端点同步读 DB 历史（操作员主动查询），不参与决策回路。
+- 违规典型：曾经的 `_load_reference_state` 启动期读 `account_snapshots`、`settlement_scanner` 用 audit_events 查幂等——都已删。
+
+### 19.2 WS 是盘口唯一真相源，REST `/book` 只剩 sequence_gap 兜底
+
+- **不要**为盘口数据加任何"周期性 REST 校准"——Polymarket WS 订阅后 ~1s 自动推完整 `book` 消息，之后 `price_change`/`book` 持续推送。
+- **不要**在 ws_loops 订阅时 `refresh_rest_snapshots` 预取——决策 gate 本来就要等 reconcile_fresh，"头几秒数据饥饿"不是真问题。
+- **不要**在 reconcile authority refresh 里调 `get_orderbook`——`AuthoritativeMarketRefresh` 已不带 `orderbook_snapshots` 字段。
+- **唯一允许 REST 调 /book 的路径**：`market_ws_worker._handle_sequence_gap`（WS 真漏推消息时重建一致状态）。正常稳态出现 0 次/小时。
+- 违规典型：曾经 reconcile 每 N 秒对所有 tracked tokens 调 /book "trust but verify"——实测占总出站流量 65%，已全删。
+
+### 19.3 paper_mode 与 live_mode：account_state_store 必须只有一个 writer
+
+- **paper_mode**：`paper_balance_syncer` 每秒从 `paper_ledger` 投影回 `AccountStateStore`。reconcile authority `refresh_account` 必须早退（已通过 `paper_mode=True` 守住）。
+- **live_mode**：`UserAccountPoller` 是唯一 writer，reconcile 主循环（`refresh()`）通过 `refresh_account_inline=False` 跳过用户态拉取。
+- **绝对不允许两个 writer 同时写同一份状态**——之前 paper_balance_syncer 和 reconcile authority 抢同一份 store 导致"24 个幽灵持仓时有时无"。每次新增写者必须问"我会和谁抢？"。
+- 违规典型：在 paper 模式下 reconcile authority 还调 `data_client.list_positions()` 写 store——已修。
+
+### 19.4 gamma `/events` 已含 nested markets，不要双调 `/markets`
+
+- `GammaEventDTO.markets` 是 `tuple[GammaMarketDTO, ...]`，**完整字段**（tick_size / fee / outcomes / closed / token_ids）。
+- discovery 每 N 秒拉 `/events?live=true` 后顺手把 `event.markets` 写进 `GammaMarketSnapshotStore`。
+- 所有 reconcile/settlement/enrich 路径**先读 store**（`gamma_snapshot_store.get_dto_if_fresh(cid, max_age_s=30)`），命中直接用；只有 cache miss/stale 才 fallback 走 `/markets?condition_ids=` 反查。
+- **不要**给每个 tracked market 都单调一次 `/markets?slug=...`——之前 200 markets × 串行 = 30s 阻塞，全是浪费。
+- 唯一需要 `/markets?condition_ids=` 直查的场景：已 settled 市场（`closed=true` 不在 `live=true` 范围）+ 孤儿 condition 反查。
+
+### 19.5 gamma `/markets/{id}` 只接受 Polymarket 内部数值 id
+
+- **不要**给这个端点传 condition_id 或 slug——会 422。
+- 用 condition_id 反查市场：`gamma_client.get_market_by_condition_id(cid)` （内部走 `/markets?condition_ids=cid&limit=1`）。
+- 这个坑封装在 `GammaClient` 里，调用方禁止重新手拼 condition_ids 参数。
+
+### 19.6 仓位状态 ≠ 市场状态，前后端都不能混
+
+- **仓位 payload 字段**（PortfolioExposureItem）只承载仓位生命周期：`shares / avg_price / cur_price / cash_pnl / redeemable / settled_zero_value`。**`paused` 字段只反映 `MarketPauseSource.MANUAL`**（人工 click 触发），后台 reconcile/risk/strategy 自动 pause 不进仓位 payload。
+- **市场状态**（`trading_status`、自动 quarantine 等）只从 `/markets` 端点返回，不挂在仓位上。
+- 前端 badge 三/四态：`归零 / 暂停(人工) / 可赎回 / 持有`——不掺杂市场状态。
+- 违规典型：之前 `portfolio_exposure` 用 `snapshot.is_market_paused(cid)` 给仓位行打"暂停"标签，把自动 quarantine 显示成仓位被暂停——已修。
+
+### 19.7 redeemable 持仓必须用 gamma outcomePrices 派定胜负
+
+- Polymarket data API 返回的 `redeemable=True` 仅说明"市场关了、可领"，**不说赢方是谁**。
+- `Position.cur_price` 默认从 data API drop（避免 stale 数据骗 worker MTM），所以 redeemable 仓位刚拉到时 cur_price=None。
+- `_enrich_redeemable_positions` 在 reconcile 拉到 redeemable 持仓时立即并发调 gamma `get_market_by_condition_id` → 读 outcomePrices → 用 `apply_outcome_to_position` 派定胜方 token_id → cur_price=1（赢）/ 0（输）。
+- 输方 cur_price=0 + redeemable=True → `settled_zero_value` 自动为 True → UI 默认隐藏（对齐 Polymarket portfolio）。
+
+### 19.8 不订阅就不轮询（demand-driven）
+
+- 所有 sport-specific 数据源（goalserve inplay / livescore / pregame）必须按"tracked market 实际涉及的 sport"启停。
+- **不要**起一个全运动 polling worker 在所有 sport 上跑，无视 tracked market 是否在那个 sport 上有头寸。
+- 违规典型：删除前 MLB/NBA PBP 客户端 paper 模式下 2s 周期跑，可当时 0 个 MLB/NBA tracked market；ESPN standings/series-state 同理——全删。新增数据源前先想"什么 condition 会触发轮询"。
+
+### 19.9 周期 cadence 校准原则
+
+- **discovery `/events`**：2s（曾经 0.5s 浪费 80%）。新市场上线 2s 内捕获仍快于散户。
+- **gamma snapshot store 新鲜度阈值**：30s（discovery 跑 2s 一次，30s 内一定有写入）。
+- **WS orderbook 新鲜度阈值**：30s（WS 正常每秒至少推一条；30s 没动静才视为"WS 真死了"触发 REST 兜底）。
+- **user_account_poll**：和 `market_sync_interval_seconds` 同 cadence（默认 20s），独立 scheduler job。
+- **settlement_scanner**：5 分钟（结算事件低频，足够）。
+- 改 cadence 前先回答："这个数据真的会在新 cadence 周期内变化吗？变化但没及时拉到，损失是什么？" 大部分情况是过频。
+
+### 19.10 任何新增外部 API 客户端前的强制问题清单
+
+1. 这个数据有没有 WS 推送版本？有就别用 REST 轮询。
+2. 加这条调用预计每小时调多少次？是否 demand-driven（无 tracked 时不跑）？
+3. 写入哪个 in-memory store？同一 store 是否已有别的 writer（race 风险）？
+4. 读取方是 P0 决策路径还是后台 worker？P0 上不允许同步等网络。
+5. 数据是否进 DB？如果"是"——确认是 audit/persistence 单向写入，不在运行时回读。
+6. 同一数据如果已经在某个内存 store 里，能否走 store 命中后再 fallback 网络？
+7. 失败兜底是什么？stale 多久后该降级 / 报警 / quarantine？

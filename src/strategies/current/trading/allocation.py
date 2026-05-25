@@ -17,14 +17,14 @@ from strategies.current.allocation import AllocationMarketSnapshot
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.identity import STRATEGY_ID
 from strategies.current.outcomes import describe_sports_market, is_primary_token
-from strategies.current.universe import select_market
+from strategies.sports_framework import SportsMarketFamily
+from strategies.sports_framework.parsing import live_game_state_from_metadata
 
 from .gates import (
     _ask_depth_notional,
     _has_open_order,
     _tail_pre_orderbook_skip_reason,
 )
-from .pricing import _tail_locked_outcome_signal, _tail_price_cap
 
 
 def _empty_sizing_plan(context: ExtensionContext, reason: str) -> AllocationPlan:
@@ -132,11 +132,21 @@ def _allocation_skip_reason(
         and not snapshot.scale_in_allowed
     ):
         return "position_already_open"
-    universe_decision = select_market(config, snapshot.market)
-    if not universe_decision.selected:
-        return universe_decision.reason or "market_out_of_universe"
+    # ws_eligible 已删——市场的 universe / 时间窗口判断由 discovery + market_service
+    # 一次写入 registry，trading_status != ELIGIBLE 才是真正的"不可交易"信号。
+    # 走到 allocation 这一步说明 worker 已收到 entry_signal_published（live_state
+    # 工作者明确 signal_allowed=True），无需在策略层二次门控。
     if not is_primary_token(snapshot.market, snapshot.token_id):
         return "unsupported_outcome"
+    # 直播源状态审查：没直播源 / 直播源未适配 → 拒绝入场。
+    # 决策必须基于活的直播状态（数学锁定 / 末段守卫 / 概率视图都依赖 LiveGameState）；
+    # 缺直播源等于盲下，缺解析适配等于"看得到数据但读不懂"，两种都视作高风险，宁可错过。
+    descriptor = describe_sports_market(snapshot.market)
+    if descriptor.market_family == SportsMarketFamily.UNSUPPORTED or descriptor.market_type is None:
+        return "unsupported_market_family"
+    if descriptor.market_family == SportsMarketFamily.SINGLE_GAME:
+        if live_game_state_from_metadata(context.metadata) is None:
+            return "missing_live_game_state"
     tail_pre_orderbook_reason = _tail_pre_orderbook_skip_reason(config, context, snapshot)
     if tail_pre_orderbook_reason:
         return tail_pre_orderbook_reason
@@ -158,30 +168,15 @@ def _allocation_skip_reason(
         return "risk_limit_reached"
 
     best_ask = snapshot.effective_best_ask
-    locked_outcome_signal = _tail_locked_outcome_signal(context)
-    price_cap = _tail_price_cap(
-        config,
-        snapshot.market,
-        snapshot.token_id,
-        locked_outcome_signal=locked_outcome_signal,
-    )
     if best_ask is None:
         return "missing_best_ask"
-    if best_ask > price_cap:
-        return "price_above_entry_max"
 
-    spread = snapshot.effective_spread
-    if (
-        config.max_spread is not None
-        and spread is not None
-        and spread > config.max_spread
-        and not locked_outcome_signal
-    ):
-        return "spread_above_max"
-
-    if buyable_liquidity_usdc < config.min_liquidity_usdc:
-        return "liquidity_below_min"
-
+    # 入场端只保留"物理/状态硬约束"——价格上限/下限、价差、流动性等门槛已删，
+    # 交给入场后的持仓策略 + exit overlay 管控（宽进严管哲学）。
+    # 之前曾经存在的：
+    #   - price_above_entry_max  → 删（持仓后 take_profit/stop_loss 接管）
+    #   - spread_above_max       → 删（持仓后流动性问题由 exit overlay 处理）
+    #   - liquidity_below_min    → 删（同上）
     return ""
 
 

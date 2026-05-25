@@ -10,7 +10,7 @@ power method—— 它假设 vig 按概率非均匀分布（赢面大的结果 v
 为什么不止于 2-way：足球整场胜负盘 home/away/draw 三结果，2-way devig 丢
 掉 draw_implied，会把 home/away 高估约 0.20（举例 home_eu=2.0 away_eu=4.0
 draw_eu=3.0：2-way 给 home_true_p=0.667，3-way 给 0.462）。任何包含 draw、
-平局退款、多线总分等盘口都必须 N-way devig，否则 odds_gap 算出虚假 edge。
+平局退款、多线总分等盘口都必须 N-way devig，否则算出虚假概率。
 """
 
 from __future__ import annotations

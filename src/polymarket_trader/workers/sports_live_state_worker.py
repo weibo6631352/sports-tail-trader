@@ -268,6 +268,10 @@ class SportsLiveStateWorker:
                 live_state_payload=dict(match.payload),
             )
             records_written += 1
+            # WS 订阅决策不再写 market 上的 flag——ws_loops.should_subscribe_ws
+            # 实时读 entry_metadata（上一行 upsert 写入的）+ trading_status 做单一
+            # gate。这样 phase=ended 自然让下次订阅刷新时 gate 失败 → 取消订阅，
+            # 无需 worker 主动清理任何标志位。
             self._record_match_sources(match)
             self._track_entry_signal_market(match=match)
             entry_signals += await self._publish_entry_signal_events(match=match)
@@ -288,6 +292,9 @@ class SportsLiveStateWorker:
                 if companion is not None:
                     companion.last_gap_recorded_minute = None
                 continue
+            # 本轮没匹配到（比赛结束 / Goalserve 不再返回 / event_slug 改名）。
+            # 不再写任何 flag——entry_metadata 自然衰老（worker 不更新 phase），
+            # ws_loops 下次刷新时 gate 失败自动取消订阅。
             # 只对 game_start_time 已过去的市场（比赛应该正在进行）记录 gap。
             if market.game_start_time is None or market.game_start_time > now:
                 continue

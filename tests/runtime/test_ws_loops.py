@@ -11,29 +11,21 @@ from polymarket_trader.runtime import ws_loops
 from polymarket_trader.runtime.entry_metadata import EntryMetadataRecord
 from polymarket_trader.workers.market_ws import MarketWsWorker
 from polymarket_trader.workers.user_ws import UserWsWorker
-
-
 class _FakeSupervisor:
     def heartbeat_worker(self, *_args: Any, **_kwargs: Any) -> None:
         pass
-
-
 class _FakeScheduler:
     def __init__(self) -> None:
         self.triggers: list[str] = []
 
     def trigger_now(self, name: str) -> None:
         self.triggers.append(name)
-
-
 class _FakeRegistry:
     def __init__(self, markets: tuple[Market, ...]) -> None:
         self._markets = markets
 
     def snapshot(self) -> SimpleNamespace:
         return SimpleNamespace(markets=self._markets)
-
-
 class _FakeEntryMetadataStore:
     def __init__(self, record: EntryMetadataRecord) -> None:
         self._record = record
@@ -43,8 +35,6 @@ class _FakeEntryMetadataStore:
 
     def find(self, **_kwargs: Any) -> EntryMetadataRecord:
         return self._record
-
-
 class _FakePolymarketWsClient:
     async def stream_market_messages(
         self,
@@ -79,8 +69,6 @@ class _FakePolymarketWsClient:
         await on_connect(0)
         if False:
             yield SimpleNamespace(payload={}, raw={})
-
-
 def test_stream_user_ws_messages_triggers_reconcile_after_connect(monkeypatch) -> None:
     monkeypatch.setattr(ws_loops, "sync_runtime_metrics", lambda _runtime: None)
     scheduler = _FakeScheduler()
@@ -102,8 +90,6 @@ def test_stream_user_ws_messages_triggers_reconcile_after_connect(monkeypatch) -
     asyncio.run(run())
 
     assert scheduler.triggers == ["periodic_reconcile"]
-
-
 def test_stream_market_ws_messages_clears_stale_error_after_connect(monkeypatch) -> None:
     monkeypatch.setattr(ws_loops, "sync_runtime_metrics", lambda _runtime: None)
     worker = MarketWsWorker()
@@ -124,8 +110,6 @@ def test_stream_market_ws_messages_clears_stale_error_after_connect(monkeypatch)
     asyncio.run(run())
 
     assert worker.status_snapshot(include_subscriptions=False).last_error is None
-
-
 def test_market_ws_subscribes_strategy_allowed_tail_signal_even_when_gamma_end_date_is_far() -> None:
     market = Market(
         condition_id="tennis-first-set-condition",
@@ -135,7 +119,7 @@ def test_market_ws_subscribes_strategy_allowed_tail_signal_even_when_gamma_end_d
         outcomes=(
             MarketOutcome(token_id="erhard-token", outcome="Erhard"),
             MarketOutcome(token_id="nedic-token", outcome="Nedic"),
-        ),
+        ),  # sports_live_state_worker 已写入 phase=live, signal_allowed=True
     )
     runtime = SimpleNamespace(
         registry=_FakeRegistry((market,)),
@@ -155,8 +139,6 @@ def test_market_ws_subscribes_strategy_allowed_tail_signal_even_when_gamma_end_d
     token_ids = ws_loops.market_ws_subscription_token_ids(runtime)
 
     assert token_ids == ("erhard-token", "nedic-token")
-
-
 def test_market_ws_subscribes_live_market_with_signal_allowed() -> None:
     market = Market(
         condition_id="tennis-live-condition",
@@ -166,7 +148,7 @@ def test_market_ws_subscribes_live_market_with_signal_allowed() -> None:
         outcomes=(
             MarketOutcome(token_id="ghibaudo-token", outcome="Ghibaudo"),
             MarketOutcome(token_id="pieri-token", outcome="Pieri"),
-        ),
+        ),  # sports_live_state_worker 已写入 phase=live, signal_allowed=True
     )
     runtime = SimpleNamespace(
         registry=_FakeRegistry((market,)),
@@ -186,8 +168,6 @@ def test_market_ws_subscribes_live_market_with_signal_allowed() -> None:
     token_ids = ws_loops.market_ws_subscription_token_ids(runtime)
 
     assert token_ids == ("ghibaudo-token", "pieri-token")
-
-
 def test_market_ws_subscribes_outright_with_season_odds_despite_signal_allowed_false() -> None:
     """OUTRIGHT 市场有 season_odds_snapshot 时，signal_allowed=False 不应封锁订阅。
 
@@ -204,7 +184,7 @@ def test_market_ws_subscribes_outright_with_season_odds_despite_signal_allowed_f
         outcomes=(
             MarketOutcome(token_id="celtics-token", outcome="Boston Celtics"),
             MarketOutcome(token_id="lakers-token", outcome="LA Lakers"),
-        ),
+        ),  # OUTRIGHT 市场在 discovery 时 Universe 通过即置 True；live_state_worker 不覆盖 OUTRIGHT
     )
     runtime = SimpleNamespace(
         registry=_FakeRegistry((market,)),
@@ -224,8 +204,6 @@ def test_market_ws_subscribes_outright_with_season_odds_despite_signal_allowed_f
     token_ids = ws_loops.market_ws_subscription_token_ids(runtime)
 
     assert token_ids == ("celtics-token", "lakers-token")
-
-
 def test_market_ws_blocks_single_game_with_signal_allowed_false() -> None:
     """SINGLE_GAME 的 signal_allowed=False 应保持封锁不变（scheduled/unknown 状态）。"""
     market = Market(
@@ -257,8 +235,6 @@ def test_market_ws_blocks_single_game_with_signal_allowed_false() -> None:
     token_ids = ws_loops.market_ws_subscription_token_ids(runtime)
 
     assert token_ids == ()
-
-
 def test_market_ws_priority_token_ids_returns_exposed_tokens() -> None:
     """P3.2：持仓/挂单的 token_id 应出现在 priority 集合中。"""
 
@@ -279,8 +255,6 @@ def test_market_ws_priority_token_ids_returns_exposed_tokens() -> None:
 
     assert "tok-1" in priority
     assert "tok-2" in priority
-
-
 def test_market_ws_priority_token_ids_empty_without_account_store() -> None:
     """P3.2：无账户存储时 priority 集合为空（安全降级）。"""
 
@@ -289,8 +263,6 @@ def test_market_ws_priority_token_ids_empty_without_account_store() -> None:
     priority = ws_loops.market_ws_priority_token_ids(runtime)
 
     assert priority == frozenset()
-
-
 def test_market_ws_priority_token_ids_excludes_settled_zero() -> None:
     """P3.2：settled_zero_value=True 的仓位不列入 priority。"""
 
@@ -310,8 +282,6 @@ def test_market_ws_priority_token_ids_excludes_settled_zero() -> None:
 
     assert "tok-a" not in priority
     assert "tok-b" in priority
-
-
 def test_position_book_update_triggers_exit_reconcile() -> None:
     """持仓 token 的盘口更新事件 → 立即唤醒 periodic_reconcile（事件驱动退出）。"""
 
@@ -335,8 +305,6 @@ def test_position_book_update_triggers_exit_reconcile() -> None:
 
     asyncio.run(run())
     assert scheduler.triggers == ["periodic_reconcile"]
-
-
 def test_non_position_book_update_does_not_trigger_exit_reconcile() -> None:
     """非持仓 token 的盘口更新不触发 reconcile——只对有持仓的 token 事件驱动。"""
 

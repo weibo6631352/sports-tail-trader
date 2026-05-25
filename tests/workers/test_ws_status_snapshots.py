@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -8,7 +7,6 @@ from types import SimpleNamespace
 from freezegun import freeze_time
 
 from polymarket_trader.domain.market import Market, MarketOutcome
-from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.position import Position
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
@@ -22,8 +20,6 @@ from polymarket_trader.workers.user_ws import UserWsWorker
 
 # 固定 snapshot 时间戳；snapshot.received_at 仅作 metadata。
 _FIXED_NOW = datetime(2026, 5, 12, 0, 0, 0, tzinfo=timezone.utc)
-
-
 def test_market_ws_status_can_return_lightweight_summary() -> None:
     worker = MarketWsWorker()
     worker.track_market(_market())
@@ -35,8 +31,6 @@ def test_market_ws_status_can_return_lightweight_summary() -> None:
     assert status.subscription_count == 2
     assert status.tracked_token_ids == ()
     assert status.subscriptions == ()
-
-
 def test_market_ws_status_connected_reflects_lifecycle_not_absence_of_error() -> None:
     """N12：worker 在 starting 阶段从未握手时，connected 必须为 False。
 
@@ -59,8 +53,6 @@ def test_market_ws_status_connected_reflects_lifecycle_not_absence_of_error() ->
 
     worker.set_connection_state(False)
     assert worker.status_snapshot(include_subscriptions=False).connected is False
-
-
 def test_market_ws_status_subscription_count_excludes_unsubscribed_tracked_markets() -> None:
     """F6：track_market 但未发起 WS 订阅时，subscription_count 不应包含这些 token。
 
@@ -80,8 +72,6 @@ def test_market_ws_status_subscription_count_excludes_unsubscribed_tracked_marke
     status_after = worker.status_snapshot(include_subscriptions=False)
     assert status_after.tracked_market_count == 4
     assert status_after.subscription_count == 2
-
-
 def test_user_ws_status_can_return_lightweight_summary() -> None:
     worker = UserWsWorker(strategy_id="sports_tail", )
     worker.build_subscription_request(
@@ -94,13 +84,13 @@ def test_user_ws_status_can_return_lightweight_summary() -> None:
     assert status.subscription_count == 2
     assert status.subscribed_condition_ids == ()
     assert status.subscriptions == ()
-
-
 @freeze_time("2026-05-12T00:00:00Z")
 def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None:
     now = datetime.now(timezone.utc)
     registry = MarketRegistry()
     registry.upsert(_market(index=1))
+    # condition-1 的 entry_metadata 下面会被设成 phase=live + signal_allowed=True，
+    # should_subscribe_ws gate 自然通过；不再需要 flag。
     registry.upsert(_market(index=2))
     registry.upsert(_market(index=3))
     registry.upsert(_market(index=4, end_date=now + timedelta(hours=2)))
@@ -192,37 +182,6 @@ def test_market_ws_subscription_helper_keeps_only_live_or_held_markets() -> None
         "condition-5",
         "condition-6",
     )
-
-
-def test_market_ws_worker_prefetches_rest_snapshot_for_empty_tracked_token() -> None:
-    async def run() -> tuple[int, OrderbookSnapshot | None]:
-        async def load_snapshot(token_id: str) -> OrderbookSnapshot:
-            return OrderbookSnapshot(
-                token_id=token_id,
-                condition_id="condition-1",
-                market_slug="nba-game-1-moneyline",
-                best_bid=Decimal("0.52"),
-                best_ask=Decimal("0.53"),
-                best_bid_size=Decimal("100"),
-                best_ask_size=Decimal("200"),
-                bids=(PriceLevel(price=Decimal("0.52"), size=Decimal("100")),),
-                asks=(PriceLevel(price=Decimal("0.53"), size=Decimal("200")),),
-                received_at=_FIXED_NOW,
-            )
-
-        worker = MarketWsWorker(rest_snapshot_loader=load_snapshot)
-        worker.track_market(_market())
-        refreshed = await worker.refresh_rest_snapshots(("token-1-yes",))
-        return refreshed, worker.snapshot("token-1-yes")
-
-    refreshed, snapshot = asyncio.run(run())
-
-    assert refreshed == 1
-    assert snapshot is not None
-    assert snapshot.best_bid == Decimal("0.52")
-    assert snapshot.best_ask == Decimal("0.53")
-
-
 def _market(index: int = 1, *, end_date: datetime | None = None) -> Market:
     return Market(
         condition_id=f"condition-{index}",

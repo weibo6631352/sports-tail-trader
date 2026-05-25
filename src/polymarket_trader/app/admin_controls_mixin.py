@@ -260,7 +260,6 @@ class AdminControlsMixin:
             bankroll_usdc=_resolve_admin_bankroll(account, self._settings_value("portfolio_budget_usdc")),
             kelly_max_position_fraction=_kelly.kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=_kelly.kelly_round_up_max_overbet_ratio,
-            order_retry_limit=self._settings_value("order_retry_limit"),
             operation="admin_confirm_entry",
         )
         self._project_manual_entry_result(review, snapshot=account)
@@ -731,7 +730,6 @@ class AdminControlsMixin:
             bankroll_usdc=_resolve_admin_bankroll(account, self._settings_value("portfolio_budget_usdc")),
             kelly_max_position_fraction=_kelly.kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=_kelly.kelly_round_up_max_overbet_ratio,
-            order_retry_limit=self._settings_value("order_retry_limit"),
         )
         result = review.order_result
         failed = result is None or result.status in {

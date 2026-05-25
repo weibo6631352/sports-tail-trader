@@ -283,9 +283,10 @@ def test_refresh_collects_failure_when_gamma_call_times_out() -> None:
     assert "timeout" in failure_reasons
 
 
-def test_refresh_applies_orderbook_snapshot_when_clob_returns_book() -> None:
-    """clob.get_orderbook 返回 DTO → summary.refreshed_orderbooks 计入 token 数。"""
-    market = _market(1, fee_rate_bps=10)  # 已有 fee_rate_bps，跳过 fee_rate 拉取
+def test_refresh_never_fetches_orderbook_rest_ws_is_sole_source_of_truth() -> None:
+    """reconcile 不再拉 /book REST——盘口由 market_ws push 维护，
+    refreshed_orderbooks 永远 0。WS 漏推由 worker.py sequence_gap repair 兜底。"""
+    market = _market(1, fee_rate_bps=10)
     account_state = AccountStateStore()
     account_state.upsert_position(
         Position(
@@ -296,12 +297,10 @@ def test_refresh_applies_orderbook_snapshot_when_clob_returns_book() -> None:
             cost_usdc=Decimal("0.5"),
         )
     )
-    orderbook_yes = _orderbook(market.token_ids[0])
-    orderbook_no = _orderbook(market.token_ids[1])
     clob = _StubClobClient(
         orderbook_by_token={
-            market.token_ids[0]: orderbook_yes,
-            market.token_ids[1]: orderbook_no,
+            market.token_ids[0]: _orderbook(market.token_ids[0]),
+            market.token_ids[1]: _orderbook(market.token_ids[1]),
         }
     )
     refresher = ReconcileAuthorityRefresher(
@@ -311,12 +310,11 @@ def test_refresh_applies_orderbook_snapshot_when_clob_returns_book() -> None:
         clob_client=clob,
     )
 
-    summary = asyncio.run(refresher.refresh(trace_id="trace-book"))
+    summary = asyncio.run(refresher.refresh(trace_id="trace-no-book"))
 
-    # 两个 token 都调过 orderbook，summary 计入 2
-    assert sorted(clob.orderbook_calls) == sorted(list(market.token_ids))
-    assert summary.refreshed_orderbooks == 2
-    assert clob.fee_rate_calls == []  # 已有 fee_rate，不应再拉
+    # 不再调 /book，refreshed_orderbooks 始终为 0
+    assert clob.orderbook_calls == []
+    assert summary.refreshed_orderbooks == 0
 
 
 def test_refresh_pulls_fee_rate_when_market_lacks_fee_metadata() -> None:
@@ -470,3 +468,375 @@ def test_refresh_collects_failure_when_gamma_raises_general_exception() -> None:
     assert summary.refreshed_markets == 0
     failure_reasons = {failure.reason for failure in summary.failures}
     assert "exception" in failure_reasons
+
+
+# ============================================================
+# 死链回收：auto_quarantine_dead_market + 无敞口 → 从 registry remove
+# ============================================================
+
+
+def test_refresh_skips_inline_account_fetch_when_external_polling_enabled() -> None:
+    """refresh_account_inline=False 时 refresh() 主路径不再触发 data/clob fetch。
+
+    UserAccountPoller 独立轮询时这个开关被打开；保证 reconcile 主循环不抢
+    AccountStateStore，跟 paper_balance_syncer 的 race 一样的语义被一般化。
+    """
+
+    market = _market(1)
+
+    class _SpyData:
+        has_auth_client = True
+        calls = 0
+
+        async def list_positions(self) -> tuple[Any, ...]:
+            type(self).calls += 1
+            return ()
+
+    class _SpyClob:
+        has_auth_client = True
+        balance_calls = 0
+        orders_calls = 0
+        fills_calls = 0
+
+        async def get_orderbook(self, *args: Any, **kwargs: Any) -> Any:
+            return None
+
+        async def get_fee_rate(self, *args: Any, **kwargs: Any) -> int | None:
+            return None
+
+        async def list_open_orders(self) -> tuple[Any, ...]:
+            type(self).orders_calls += 1
+            return ()
+
+        async def list_fills(self) -> tuple[Any, ...]:
+            type(self).fills_calls += 1
+            return ()
+
+        async def get_balance_allowance(self) -> Any:
+            type(self).balance_calls += 1
+            return None
+
+    account_state = AccountStateStore()
+    account_state.upsert_position(
+        Position(
+            strategy_id="sports_tail",
+            condition_id=market.condition_id,
+            token_id=market.token_ids[0],
+            shares=Decimal("1"),
+            cost_usdc=Decimal("0.5"),
+        )
+    )
+    spy_data = _SpyData()
+    spy_clob = _SpyClob()
+    refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
+        registry_snapshot_provider=lambda: MarketRegistrySnapshot((market,)),
+        account_state_store=account_state,
+        gamma_client=_StubGammaClient(markets_by_slug={market.market_slug: market}),
+        clob_client=spy_clob,
+        data_client=spy_data,
+        refresh_account_inline=False,
+    )
+
+    summary = asyncio.run(refresher.refresh(trace_id="trace-no-inline"))
+
+    # refresh() 主路径没触达任何用户态 client
+    assert summary.user_refresh_enabled is False
+    assert _SpyData.calls == 0
+    assert _SpyClob.balance_calls == 0
+    assert _SpyClob.orders_calls == 0
+    assert _SpyClob.fills_calls == 0
+
+    # refresh_account 仍可被 UserAccountPoller 直接调用——验证这条路径活着
+    asyncio.run(refresher.refresh_account(trace_id="trace-direct", markets=()))
+    assert _SpyData.calls == 1
+    assert _SpyClob.balance_calls == 1
+
+
+def test_fetch_gamma_market_skips_network_when_snapshot_store_has_fresh_entry() -> None:
+    """gamma_snapshot_store 命中 → refresh_market_authority 完全不调 list_markets。
+
+    收益验证：discovery 每 0.5s 已经把 /events.markets 的完整 DTO 写进 store，
+    reconcile 不必再为每个 tracked market 单调 /markets——节省 90% gamma 调用。
+    """
+    from polymarket_trader.runtime.gamma_snapshot_store import GammaMarketSnapshotStore
+
+    market = _market(1)
+
+    class _StubCachedDTO:
+        condition_id = market.condition_id
+        clob_enabled = True
+        raw: dict[str, Any] = {}
+
+        def to_market(self) -> Market:
+            return market.with_trading_status(TradingStatus.ELIGIBLE)
+
+    store = GammaMarketSnapshotStore()
+    store.upsert(_StubCachedDTO())
+
+    class _FailingGamma:
+        """如果 refresher 触达网络就立即失败——cache 命中场景不该走到这里。"""
+
+        async def list_markets(self, **kwargs: Any) -> tuple[Any, ...]:
+            raise AssertionError("snapshot cache hit should bypass /markets call")
+
+        async def get_market_by_condition_id(
+            self, condition_id: str, *, timeout_s: float | None = None
+        ) -> Any | None:
+            raise AssertionError("snapshot cache hit should bypass /markets call")
+
+    account_state = AccountStateStore()
+    account_state.upsert_position(
+        Position(
+            strategy_id="sports_tail",
+            condition_id=market.condition_id,
+            token_id=market.token_ids[0],
+            shares=Decimal("1"),
+            cost_usdc=Decimal("0.5"),
+        )
+    )
+    refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
+        registry_snapshot_provider=lambda: MarketRegistrySnapshot((market,)),
+        account_state_store=account_state,
+        gamma_client=_FailingGamma(),
+        gamma_snapshot_store=store,
+    )
+
+    summary = asyncio.run(refresher.refresh(trace_id="trace-cache-hit"))
+
+    # cache 命中，gamma 没爆 → refreshed_markets 计数照常
+    assert summary.refreshed_markets == 1
+    assert all(f.component != "gamma" for f in summary.failures)
+
+
+def test_fetch_gamma_market_falls_back_to_network_when_snapshot_stale_or_missing() -> None:
+    """snapshot 缺失（或 stale）时退回 /markets?slug= 直查——孤儿 condition 兜底。"""
+    from polymarket_trader.runtime.gamma_snapshot_store import GammaMarketSnapshotStore
+
+    market = _market(1)
+    refreshed = market.with_trading_status(TradingStatus.ELIGIBLE)
+    gamma = _StubGammaClient(markets_by_slug={market.market_slug: refreshed})
+    account_state = AccountStateStore()
+    account_state.upsert_position(
+        Position(
+            strategy_id="sports_tail",
+            condition_id=market.condition_id,
+            token_id=market.token_ids[0],
+            shares=Decimal("1"),
+            cost_usdc=Decimal("0.5"),
+        )
+    )
+    empty_store = GammaMarketSnapshotStore()  # 没有 cache
+    refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
+        registry_snapshot_provider=lambda: MarketRegistrySnapshot((market,)),
+        account_state_store=account_state,
+        gamma_client=gamma,
+        gamma_snapshot_store=empty_store,
+    )
+
+    asyncio.run(refresher.refresh(trace_id="trace-cache-miss"))
+
+    # cache miss → 仍然打 list_markets fallback
+    assert market.market_slug in gamma.slugs_called
+
+
+def test_fetched_redeemable_position_is_enriched_via_gamma_outcome_before_store_write() -> None:
+    """data API 返回 redeemable=True + cur_price=None 的持仓，refresh_account 内
+    会用 gamma outcomePrices 派定胜负后再写 AccountStateStore——避免在 5-min
+    settlement_scanner 跑之前 UI 显示错误"可赎回 + 按 cost 算名义"状态。"""
+
+    win_market = _market(1)
+    lose_market = _market(2)
+    win_token = win_market.token_ids[0]
+    lose_token = lose_market.token_ids[1]  # 我们持的是输方
+
+    class _SettledCandidate:
+        """带 outcomePrices 的 stub，让 _resolve_from_gamma_payload 能派定胜负。"""
+
+        def __init__(self, market: Market, winning_idx: int) -> None:
+            outcome_prices = ["1", "0"] if winning_idx == 0 else ["0", "1"]
+            self.raw = {"outcomePrices": outcome_prices}
+            self.outcomes = market.outcomes
+            self.closed = True
+            self._market = market
+            self.condition_id = market.condition_id
+            self.market_slug = market.market_slug
+            self.clob_enabled = True
+
+        def to_market(self) -> Market:
+            return self._market
+
+    class _GammaSettled:
+        async def list_markets(self, **kwargs: Any) -> tuple[Any, ...]:
+            return ()
+
+        async def get_market_by_condition_id(
+            self, condition_id: str, *, timeout_s: float | None = None
+        ) -> Any | None:
+            if condition_id == win_market.condition_id:
+                return _SettledCandidate(win_market, winning_idx=0)
+            if condition_id == lose_market.condition_id:
+                return _SettledCandidate(lose_market, winning_idx=0)
+            return None
+
+    class _DataWithRedeemable:
+        """data API stub：把 redeemable=True 标在两个持仓上，cur_price 不设。"""
+
+        has_auth_client = True
+
+        async def list_positions(self) -> tuple[Any, ...]:
+            class _P:
+                def __init__(self, market: Market, token_id: str) -> None:
+                    self._market = market
+                    self._token = token_id
+
+                def to_position(self, *, strategy_id: str) -> Position:
+                    return Position(
+                        strategy_id=strategy_id,
+                        condition_id=self._market.condition_id,
+                        token_id=self._token,
+                        shares=Decimal("10"),
+                        cost_usdc=Decimal("3"),
+                        cur_price=None,
+                        current_value=None,
+                        redeemable=True,
+                    )
+
+            return (_P(win_market, win_token), _P(lose_market, lose_token))
+
+    account_state = AccountStateStore()
+    refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
+        registry_snapshot_provider=lambda: MarketRegistrySnapshot((win_market, lose_market)),
+        account_state_store=account_state,
+        data_client=_DataWithRedeemable(),
+        gamma_client=_GammaSettled(),
+    )
+
+    asyncio.run(
+        refresher.refresh_account(trace_id="trace-enrich", markets=(win_market, lose_market))
+    )
+
+    snap = account_state.snapshot()
+    by_cid = {p.condition_id: p for p in snap.positions}
+    winner = by_cid[win_market.condition_id]
+    loser = by_cid[lose_market.condition_id]
+
+    # 胜方：cur_price=1，cash_pnl=10*1 - 3 = 7
+    assert winner.cur_price == Decimal("1")
+    assert winner.current_value == Decimal("10")
+    assert winner.cash_pnl == Decimal("7")
+    assert winner.settled_zero_value is False
+
+    # 输方：cur_price=0，cash_pnl=-3，settled_zero_value=True
+    assert loser.cur_price == Decimal("0")
+    assert loser.current_value == Decimal("0")
+    assert loser.cash_pnl == Decimal("-3")
+    assert loser.settled_zero_value is True
+
+
+def test_paper_mode_skips_user_account_refresh_to_avoid_paper_ledger_race() -> None:
+    """paper_mode=True 时 refresh_account 直接早退、不调任何 user-side fetch、
+    不触碰 AccountStateStore——避免与 paper_balance_syncer 抢同一份状态。"""
+
+    market = _market(1)
+    account_state = AccountStateStore()
+    # 预置 paper-side 持仓（模拟 paper_balance_syncer 刚写过）
+    account_state.upsert_position(
+        Position(
+            strategy_id="sports_tail",
+            condition_id=market.condition_id,
+            token_id=market.token_ids[0],
+            shares=Decimal("100"),  # paper 持仓
+            cost_usdc=Decimal("50"),
+        )
+    )
+
+    class _GhostDataClient:
+        """data API 会返回 24 个旧链上仓位——paper 模式下不应被调用。"""
+
+        has_auth_client = True
+        called = False
+
+        async def list_positions(self) -> tuple[Any, ...]:
+            type(self).called = True  # pragma: no cover - 应该不调用
+            raise AssertionError("paper mode must not call data_client.list_positions")
+
+    ghost = _GhostDataClient()
+    refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
+        registry_snapshot_provider=lambda: MarketRegistrySnapshot((market,)),
+        account_state_store=account_state,
+        data_client=ghost,
+        paper_mode=True,
+    )
+
+    summary = asyncio.run(refresher.refresh_account(trace_id="trace-paper", markets=(market,)))
+
+    assert summary.user_refresh_enabled is False
+    assert summary.refreshed_positions == 0
+    assert _GhostDataClient.called is False
+    # paper 持仓未被覆盖
+    snap = account_state.snapshot()
+    assert len(snap.positions) == 1
+    assert snap.positions[0].shares == Decimal("100")
+
+
+def test_quarantined_market_without_exposure_is_pruned_from_registry() -> None:
+    """已 quarantine 且无任何持仓/挂单 → refresh 时直接从 registry 删，不再永久挂 PAUSED。"""
+    dead = _market(1).with_trading_status(
+        TradingStatus.PAUSED, reject_reason="auto_quarantine_dead_market"
+    )
+    registry = MarketRegistry()
+    registry.upsert(dead)
+    assert registry.get_by_condition_id(dead.condition_id) is not None
+
+    account_state = AccountStateStore()  # 无 position 无 open order
+    refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
+        registry_snapshot_provider=lambda: MarketRegistrySnapshot((dead,)),
+        account_state_store=account_state,
+        registry=registry,
+    )
+
+    asyncio.run(
+        refresher.refresh(trace_id="trace-prune", condition_ids=(dead.condition_id,))
+    )
+
+    assert registry.get_by_condition_id(dead.condition_id) is None
+
+
+def test_quarantined_market_with_shares_is_kept_paused_not_pruned() -> None:
+    """已 quarantine 但持仓 shares>0 → 保留 PAUSED 簿记，不能 prune（可能等结算/redeem）。"""
+    dead = _market(1).with_trading_status(
+        TradingStatus.PAUSED, reject_reason="auto_quarantine_dead_market"
+    )
+    registry = MarketRegistry()
+    registry.upsert(dead)
+
+    account_state = AccountStateStore()
+    account_state.upsert_position(
+        Position(
+            strategy_id="sports_tail",
+            condition_id=dead.condition_id,
+            token_id=dead.token_ids[0],
+            shares=Decimal("3.5"),
+            cost_usdc=Decimal("1.0"),
+        )
+    )
+    refresher = ReconcileAuthorityRefresher(
+        strategy_id="sports_tail",
+        registry_snapshot_provider=lambda: MarketRegistrySnapshot((dead,)),
+        account_state_store=account_state,
+        registry=registry,
+    )
+
+    asyncio.run(
+        refresher.refresh(trace_id="trace-keep", condition_ids=(dead.condition_id,))
+    )
+
+    kept = registry.get_by_condition_id(dead.condition_id)
+    assert kept is not None
+    assert kept.trading_status == TradingStatus.PAUSED

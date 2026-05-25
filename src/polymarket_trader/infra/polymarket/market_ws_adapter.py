@@ -204,7 +204,7 @@ def worst_ask(levels: tuple[PriceLevel, ...]) -> Decimal | None:
 
     实盘 bug case: j2100-fuj-iwa Fuj-YES asks 数组含 $0.01 size=4207 地板单 +
     真挂单 $0.97-$0.99 各 5-30 万 size。`min(price)` 取到 $0.01 (天花板单),
-    导致 best_ask=$0.01 严重错,污染 microprice / odds_gap edge / reprice
+    导致 best_ask=$0.01 严重错,污染 microprice / reprice
     等所有下游决策。
 
     实际 best_ask 应为 asks 中**最低且不是地板单**的价位。简单守卫:

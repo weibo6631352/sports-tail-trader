@@ -1261,6 +1261,9 @@ export type PortfolioExposureItem = {
   percent_pnl: DecimalStr | null
   realized_pnl: DecimalStr | null
   open_buy_reserved_usdc: DecimalStr
+  /** 仅当人工 click 触发的暂停（MarketPauseSource.MANUAL）才为 true。
+   * 后台 reconcile/risk/strategy 自动 pause 不在此暴露——它们是市场状态，
+   * 与仓位生命周期无关。 */
   paused: boolean
   redeemable: boolean | null
   settled_zero_value: boolean

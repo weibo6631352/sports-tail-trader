@@ -27,14 +27,13 @@ from uuid import uuid4
 if TYPE_CHECKING:
     from polymarket_trader.domain.position import Position
     from polymarket_trader.infra.polymarket.schemas import GammaMarketDTO
+    from polymarket_trader.runtime.account_state import AccountStateStore
 
 from polymarket_trader.domain.events import (
-    AuditEvent,
     DomainEvent,
     DomainEventType,
     OutboxPriority,
 )
-from polymarket_trader.infra.db import RepositoryPage
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +56,6 @@ class _ResolvedMarket:
 
 GammaMarketByConditionLookup = Callable[[str], Awaitable["GammaMarketDTO | None"]]
 PositionsProvider = Callable[[], Iterable["Position"]]
-# AuditEventRepository.list_audit_events_snapshot 返回 RepositoryPage[AuditEvent]——
-# 收紧契约让 callsite 不需要 hasattr/dict 兼容兜底（之前 Any 的双形态歧义）。
-AuditEventsQuery = Callable[..., Awaitable[RepositoryPage[AuditEvent]]]
 EventBus = Any  # 与 main.RuntimeComponents.event_bus 一致
 
 
@@ -71,8 +67,8 @@ class SettlementScannerService:
         *,
         gamma_market_by_condition: GammaMarketByConditionLookup,
         positions_provider: PositionsProvider,
-        audit_events_query: AuditEventsQuery,
         event_bus: EventBus,
+        account_state_store: "AccountStateStore | None" = None,
         max_markets_per_run: int = 50,
     ) -> None:
         # Gamma ``/markets/{id}`` 用的是 Polymarket 内部 id 而不是 condition_id；
@@ -80,9 +76,17 @@ class SettlementScannerService:
         # 转换的 callable，本服务不依赖 GammaClient 的具体形状。
         self._lookup_by_condition = gamma_market_by_condition
         self._positions_provider = positions_provider
-        self._audit_events_query = audit_events_query
         self._event_bus = event_bus
+        # 可选 account_state_store：检测到 resolved 时把胜负结果回写到对应 Position，
+        # 这样 redeemable / cur_price / settled_zero_value 不再等 Polymarket data
+        # API 返回（data API 对老 NEG_RISK 死链经常 redeemable=null），UI 可立即
+        # 按官方做法过滤掉价值 0 的"僵尸持仓"。
+        self._account_state_store = account_state_store
         self._max_markets_per_run = max(1, max_markets_per_run)
+        # 本进程内已经发过 MARKET_SETTLED 事件的 condition_id；重启会清空，
+        # 重复发的 event_id 用 settlement:{cid} 由 outbox 兜底去重。
+        # 注：不再查 DB audit_events 做幂等——DB 仅审计、不做运行时数据源。
+        self._published_settlements: set[str] = set()
 
     async def run_once(self) -> SettlementScanResult:
         positions = tuple(self._positions_provider() or ())
@@ -103,17 +107,7 @@ class SettlementScannerService:
         detected = 0
         failed = 0
         for cid in condition_ids:
-            try:
-                already = await self._has_settlement_event(cid)
-            except Exception:
-                logger.warning(
-                    "settlement_scanner.audit_query_failed",
-                    extra={"condition_id": cid},
-                    exc_info=True,
-                )
-                failed += 1
-                continue
-            if already:
+            if cid in self._published_settlements:
                 skipped += 1
                 continue
             try:
@@ -129,6 +123,8 @@ class SettlementScannerService:
             if resolved is None or not resolved.closed:
                 continue
             await self._publish_settlement(resolved)
+            self._enrich_account_positions(resolved)
+            self._published_settlements.add(cid)
             detected += 1
         return SettlementScanResult(
             scanned=len(condition_ids),
@@ -137,20 +133,28 @@ class SettlementScannerService:
             failed_lookups=failed,
         )
 
-    async def _has_settlement_event(self, condition_id: str) -> bool:
-        page = await self._audit_events_query(
-            limit=1,
-            offset=0,
-            event_title=DomainEventType.MARKET_SETTLED.value,
-            condition_id=condition_id,
-        )
-        return bool(page.items)
-
     async def _lookup_resolution(self, condition_id: str) -> _ResolvedMarket | None:
         payload = await self._lookup_by_condition(condition_id)
         if payload is None:
             return None
         return _resolve_from_gamma_payload(condition_id, payload)
+
+    def _enrich_account_positions(self, resolved: _ResolvedMarket) -> None:
+        """把 gamma 结算结果回写到 AccountStateStore 内的对应 Position。"""
+
+        if self._account_state_store is None:
+            return
+        if resolved.winning_token_id is None:
+            return
+        snapshot = self._account_state_store.snapshot()
+        for pos in snapshot.positions:
+            if pos.condition_id != resolved.condition_id:
+                continue
+            if pos.shares <= Decimal("0"):
+                continue
+            updated = apply_outcome_to_position(pos, winning_token_id=resolved.winning_token_id)
+            if updated is not None:
+                self._account_state_store.upsert_position(updated)
 
     async def _publish_settlement(self, resolved: _ResolvedMarket) -> None:
         try:
@@ -178,6 +182,45 @@ class SettlementScannerService:
                 extra={"condition_id": resolved.condition_id},
                 exc_info=True,
             )
+
+
+def apply_outcome_to_position(position: "Position", *, winning_token_id: str) -> "Position | None":
+    """根据胜方 token_id 把 position 标成可赎回 + 重算 MTM 字段。
+
+    返回新的 Position（不可变）：
+    - 胜方 (token_id == winning_token_id)：redeemable=True、cur_price=1、
+      current_value=shares、cash_pnl=current_value-cost。
+    - 输方：redeemable=True、cur_price=0、current_value=0、cash_pnl=-cost
+      → 由此 Position.settled_zero_value 自动为 True（property 判定的依据）。
+
+    shares <= 0 返回 None（无意义）。供 settlement_scanner（账户态 enrich）
+    和 reconcile authority_refresher（拉到 redeemable=True 持仓即时 enrich）
+    共用——两路都靠 gamma outcomePrices 派定胜负，逻辑必须一致。
+    """
+
+    if position.shares <= Decimal("0"):
+        return None
+    is_winner = position.token_id == winning_token_id
+    cur_price = Decimal("1") if is_winner else Decimal("0")
+    current_value = position.shares * cur_price
+    cash_pnl: Decimal | None
+    percent_pnl: Decimal | None
+    if position.cost_usdc > Decimal("0"):
+        cash_pnl = current_value - position.cost_usdc
+        percent_pnl = cash_pnl / position.cost_usdc * Decimal("100")
+    else:
+        cash_pnl = None
+        percent_pnl = None
+    from dataclasses import replace
+
+    return replace(
+        position,
+        redeemable=True,
+        cur_price=cur_price,
+        current_value=current_value,
+        cash_pnl=cash_pnl,
+        percent_pnl=percent_pnl,
+    )
 
 
 def _resolve_from_gamma_payload(condition_id: str, payload: "GammaMarketDTO") -> _ResolvedMarket | None:

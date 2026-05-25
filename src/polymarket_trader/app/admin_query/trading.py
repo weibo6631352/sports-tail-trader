@@ -8,7 +8,11 @@ from typing import Any
 
 from polymarket_trader.app.admin_serialization import decimal_text, page_payload
 from polymarket_trader.app.admin_service_helpers import _RepositoryGroup
-from polymarket_trader.domain.account import _open_buy_order_reserved_usdc
+from polymarket_trader.domain.account import (
+    AccountSnapshot,
+    MarketPauseSource,
+    _open_buy_order_reserved_usdc,
+)
 from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
@@ -137,30 +141,18 @@ class AdminTradingQueryMixin:
         token_id: str | None = None,
         strategy_id: str | None = None,
     ) -> dict[str, Any]:
+        # 内存快照是唯一真相来源（§3）；DB 仅审计/复盘，不作当前持仓 fallback。
+        # 启动竞态窗口（首次 reconcile 前）返回空而不是旧快照，避免 React Query 缓存旧数据后
+        # 每次 reconcile_applied SSE 触发 invalidate 时产生 24→0 闪烁。
         snapshot = self._account_snapshot()
-        # 已完成权威账户同步后，空持仓本身就是当前交易事实；DB 只保留审计/恢复参考，
-        # 不能在热状态为空时把旧快照重新投影成“当前持仓”。
-        if snapshot.positions or snapshot.last_reconcile_at is not None or not self._has_db_session_factory():
-            positions = [
-                position
-                for position in snapshot.positions
-                if (condition_id is None or position.condition_id == condition_id)
-                and (token_id is None or position.token_id == token_id)
-                and (strategy_id is None or position.strategy_id == strategy_id)
-            ]
-            page = self._slice_sequence(positions, limit=limit, offset=offset)
-            return page_payload(page, serializer=self._serializer().position)
-
-        async def _query(repos: _RepositoryGroup) -> RepositoryPage[Any]:
-            return await repos.position.list_positions_snapshot(
-                limit=limit,
-                offset=offset,
-                condition_id=condition_id,
-                token_id=token_id,
-                strategy_id=strategy_id,
-            )
-
-        page = await self._with_repositories(_query)
+        positions = [
+            position
+            for position in snapshot.positions
+            if (condition_id is None or position.condition_id == condition_id)
+            and (token_id is None or position.token_id == token_id)
+            and (strategy_id is None or position.strategy_id == strategy_id)
+        ]
+        page = self._slice_sequence(positions, limit=limit, offset=offset)
         return page_payload(page, serializer=self._serializer().position)
 
     async def list_allocations(
@@ -352,7 +344,10 @@ class AdminTradingQueryMixin:
                 "percent_pnl": decimal_text(pos.percent_pnl) if pos.percent_pnl is not None else None,
                 "realized_pnl": decimal_text(pos.realized_pnl) if pos.realized_pnl is not None else None,
                 "open_buy_reserved_usdc": decimal_text(reserved),
-                "paused": snapshot.is_market_paused(pos.condition_id),
+                # paused 字段只反映"人工点击触发"的暂停（MarketPauseSource.MANUAL）。
+                # 后台 reconcile / risk / strategy 自动 pause 是内部交易控制状态，
+                # 与"我手上的仓位"无关，不在这里暴露——查这些状态走 /markets。
+                "paused": _is_manually_paused(snapshot, pos.condition_id),
                 "redeemable": pos.redeemable,
                 "settled_zero_value": pos.settled_zero_value,
             })
@@ -368,6 +363,17 @@ class AdminTradingQueryMixin:
             "balance_usdc": decimal_text(snapshot.balance_usdc),
             "equity_usdc": decimal_text(snapshot.equity_usdc),
         }
+
+
+def _is_manually_paused(snapshot: AccountSnapshot, condition_id: str) -> bool:
+    """仓位 payload 的 paused 字段语义：仅在人工 click pause 时为 True。
+
+    后台自动 pause（reconcile/risk/strategy 触发的 auto_quarantine_dead_market /
+    market_not_tradable / unexpected_resting_order 等）属于内部交易控制状态，
+    与"我手上的仓位"无关，不在仓位行展示——避免把"市场状态"挤进"仓位状态"。
+    """
+    pause = snapshot.pause_for_market(condition_id)
+    return pause is not None and pause.source == MarketPauseSource.MANUAL
 
 
 __all__ = ["AdminTradingQueryMixin"]

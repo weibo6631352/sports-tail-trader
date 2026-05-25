@@ -162,21 +162,6 @@ async def get_pregame_snapshot(
     }
 
 
-@router.get("/admin/series/state")
-async def admin_series_state(
-    limit: int = Query(default=200, ge=1, le=2000),
-    offset: int = Query(default=0, ge=0),
-    service: AdminService = Depends(get_admin_service),
-) -> dict[str, object]:
-    """列出当前 ``EntryMetadataStore`` 中所有 series_state 快照。
-
-    用于线上验证 ``series_state_worker`` 是否正常刷新比分；空 store 返回空数组
-    （非 404），便于运维区分"worker 没跑"与"还没有 series 市场"。
-    """
-
-    return await service.list_series_state_snapshots(limit=limit, offset=offset)
-
-
 @router.get("/admin/outright/team-resolution")
 async def admin_outright_team_resolution(
     condition_id: str | None = Query(default=None, min_length=1),

@@ -40,14 +40,6 @@ _message_type = market_ws_adapter.message_type
 _extract_token_candidates = market_ws_adapter.extract_token_candidates
 
 
-def _snapshot_has_quotes(snapshot: OrderbookSnapshot) -> bool:
-    return (
-        snapshot.best_bid is not None
-        or snapshot.best_ask is not None
-        or bool(snapshot.bids)
-        or bool(snapshot.asks)
-    )
-
 
 @dataclass(frozen=True, slots=True)
 class MarketWsResultSummary:
@@ -331,45 +323,6 @@ class MarketWsWorker:
             source=source,
             reason="rest_snapshot",
         )
-
-    async def refresh_rest_snapshots(self, token_ids: tuple[str, ...] | list[str]) -> int:
-        """为刚进入订阅集合但仍为空的热态盘口预取 REST 快照。
-
-        该方法只把权威 REST 盘口写回 Market WS worker 的热态缓存，并发布正常的
-        orderbook snapshot 事件；交易决策仍然只读取统一热态，不新增下单旁路。
-        并发获取（最多 20 路）避免 200 token 顺序拉取阻塞 WS 握手 100+ 秒。
-        """
-
-        import asyncio as _asyncio
-
-        if self._rest_snapshot_loader is None:
-            return 0
-        tokens = tuple(str(item).strip() for item in token_ids if str(item).strip())
-        tokens = tuple(
-            t for t in tokens
-            if not (self._states.get(t) is not None and _snapshot_has_quotes(self._states[t].snapshot))
-        )
-        if not tokens:
-            return 0
-
-        _CONCURRENCY = 20
-        sem = _asyncio.Semaphore(_CONCURRENCY)
-        refreshed_count = 0
-        loader = self._rest_snapshot_loader  # captured before closure so mypy tracks non-None
-
-        async def _fetch_one(token_id: str) -> None:
-            nonlocal refreshed_count
-            async with sem:
-                try:
-                    snapshot = await loader(token_id)
-                except Exception as exc:
-                    self.record_error(str(exc), token_id=token_id)
-                    return
-                await self.apply_rest_snapshot(token_id, snapshot, source="subscription_rest_prefetch")
-                refreshed_count += 1
-
-        await _asyncio.gather(*(_fetch_one(t) for t in tokens))
-        return refreshed_count
 
     def snapshot(self, token_id: str) -> OrderbookSnapshot | None:
         state = self._states.get(token_id)

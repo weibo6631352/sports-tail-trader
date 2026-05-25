@@ -44,8 +44,6 @@ class SportsTailOpportunityType(StrEnum):
     LIVE_TAIL = "live_tail"
     ENDED_NOT_CLOSED = "ended_not_closed"
     SCALE_IN_ADVANTAGE = "scale_in_advantage"
-    # 赔率差价入场：Goalserve 去抽水真实概率显著高于 Polymarket ask（CLAUDE.md §17）。
-    ODDS_GAP = "odds_gap"
 
 
 class TailRejectReason(StrEnum):
@@ -136,11 +134,6 @@ class TailRejectReason(StrEnum):
     # 板球 prop（掷币胜方、最佳击球手、最多六分球等）：需要逐球员板球数据，
     # 本系统未接入；给精确可审计原因，不强行建模。
     UNSUPPORTED_CRICKET_PROP = "unsupported_cricket_prop"
-    # 既不构成扫尾锁定、也没有可入场的赔率差价。
-    NO_ODDS_GAP = "no_odds_gap"
-    # totals/spread 赔率差价：Goalserve 盘口线/范围与 Polymarket 市场不一致，
-    # 两侧概率不可直接比较——单独标记以便审计区分"线对不上"与"edge 不足"。
-    ODDS_GAP_LINE_MISMATCH = "odds_gap_line_mismatch"
     # 足球 anytime-goalscorer（球员是否在比赛中进球）扫尾锁定原因。
     # 球员名称匹配是该家族唯一的关键正确性环节——CLAUDE.md §18 要求名称
     # 解析失败必须给可审计原因，不静默归到泛化 OUTCOME_NOT_LOCKED。
@@ -154,7 +147,7 @@ class TailRejectReason(StrEnum):
     # 末段低赔率 underdog 买入守卫：BUY price < 0.30 且比赛进入末段时，
     # 胜负基本已收敛，underdog 翻盘概率极低 → 买入大概率砸手里。
     # baseball 8th+ inning / basket 4th quarter 末段 / tennis 决胜盘 /
-    # soccer 80+ min 触发；规则源自实战经验（odds_gap 末段下注亏损案例）。
+    # soccer 80+ min 触发；规则源自实战经验。
     LATE_GAME_LOW_PRICE_UNDERDOG = "late_game_low_price_underdog"
     # 盘口单边下杀守卫：orderbook_direction 10s 窗口显示 direction_label="no"
     # 且 confidence >= 0.5 → 买盘正在被吃 / microprice 持续下滑，此时入场会
@@ -165,9 +158,7 @@ class TailRejectReason(StrEnum):
     # 只能 hold 到结算或亏到 0。冷盘口（如 exact-score 精确比分）常见此态。
     NO_EXIT_CHANNEL = "no_exit_channel"
     # 负 EV 价位守卫：实证数据（/runtime/win-rate）显示 0.4-0.8 价位
-    # 长期 -$77 损失（PF 0.27/0.38）。0.4-0.6 胜率仅 27%，0.6-0.8 虽胜率 67%
-    # 但 avg_loss 远大于 avg_win。0.0-0.4 winrate 42-55% PF 1.62-1.94 真赚钱,
-    # 0.8+ 是 lockin 区。中间价位的 odds_gap 入场 EV 显著为负 → 直接拦截。
+    # 长期 -$77 损失（PF 0.27/0.38）。中间价位入场 EV 显著为负 → 直接拦截。
     PRICE_NEGATIVE_EV_ZONE = "price_negative_ev_zone"
 
 
@@ -213,20 +204,6 @@ class TailPolicy:
     mlb_eighth_moneyline_min_lead: int = 2
     mlb_ninth_moneyline_min_lead: int = 3
     min_spread_safety_margin: Decimal = Decimal("2")
-    # 赔率差价入场（odds-gap）：去抽水真实概率高出 Polymarket ask 多少才入场。
-    # 0.06 需覆盖约 3% taker 手续费 + 安全余量；低于此差价不下单。
-    odds_gap_min_edge: Decimal = Decimal("0.06")
-    # 赔率差价候选的执行权限；默认 AUTO_EXECUTE，与扫尾锁定一致走完整入场链路。
-    odds_gap_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
-    # 小流动性盘口 odds_gap 禁用阈值: ask 深度 < N USDC 时拒 odds_gap 入场,
-    # 只允许 tail lockin(数学锁定 → 不依赖盘口流动性退出,等结算)。用户要求:
-    # "资金太小的盘口,只跑尾盘"——减少冷盘口风险敞口。
-    odds_gap_min_liquidity_usdc: Decimal = Decimal("300")
-    # live feed stale 阈值（秒）：LiveGameState.server_clock_at 距 utc_now() 超过
-    # 此值视为陈旧数据，odds_gap 入场拒绝。inplay feed 1.2s 轮询 + 网络 < 2s 正常
-    # ≤ 4s；> 15s 说明 server / 网络 / 解析有问题，宁可错过机会也不基于陈旧数据
-    # 下单（陈旧数据可能让我们买在已锁定输方）。
-    odds_gap_max_live_feed_lag_seconds: int = 15
 
 
 @dataclass(frozen=True, slots=True)

@@ -21,6 +21,7 @@ from polymarket_trader.domain.events import DomainEvent, DomainEventType, Outbox
 from polymarket_trader.domain.market import Market
 from polymarket_trader.extension_api.lifecycle import LifecycleEvent
 from polymarket_trader.runtime.account_state import AccountStateStore
+from polymarket_trader.runtime.gamma_snapshot_store import GammaMarketSnapshotStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.lifecycle_bus import LifecyclePublisher
 from polymarket_trader.runtime.registry import MarketRegistry, MarketRegistrySnapshot
@@ -109,6 +110,9 @@ class ReconcileWorker:
         data_client: DataAuthorityClient | None = None,
         trading_client: TradingAuthorityClient | None = None,
         lifecycle_bus: "LifecyclePublisher | None" = None,
+        paper_mode: bool = False,
+        gamma_snapshot_store: GammaMarketSnapshotStore | None = None,
+        refresh_account_inline: bool = True,
     ) -> None:
         self._event_bus = event_bus
         self._lifecycle_bus = lifecycle_bus
@@ -131,6 +135,9 @@ class ReconcileWorker:
             clob_client=clob_client,
             data_client=data_client,
             trading_client=trading_client,
+            paper_mode=paper_mode,
+            gamma_snapshot_store=gamma_snapshot_store,
+            refresh_account_inline=refresh_account_inline,
         )
         self._running = False
         self._last_trace_id: str | None = None

@@ -114,42 +114,6 @@ async def clv_snapshot(service: AdminService = Depends(get_admin_service)) -> di
     return snapshot
 
 
-@router.get("/runtime/mlb-playbyplay")
-async def mlb_playbyplay_snapshot(
-    game_id: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
-) -> dict[str, object]:
-    """MLB 逐球事件流（每球，仅观测）。paper 模式启用。"""
-    snapshot = service.mlb_playbyplay_snapshot(game_id=game_id)
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail="MLB play-by-play not active")
-    return snapshot
-
-
-@router.get("/runtime/mlb-schedule")
-async def mlb_schedule(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """MLB 全赛季 fixtures（lazy fetch + 1h cache）。"""
-    d = await service.mlb_schedule_snapshot()
-    if d is None: raise HTTPException(status_code=404, detail="goalserve lazy client not active")
-    return d
-
-
-@router.get("/runtime/mlb-standings")
-async def mlb_standings(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """MLB 排名 + 强弱队 prior（lazy fetch + 1h cache）。"""
-    d = await service.mlb_standings_snapshot()
-    if d is None: raise HTTPException(status_code=404, detail="goalserve lazy client not active")
-    return d
-
-
-@router.get("/runtime/nba-standings")
-async def nba_standings(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """NBA 排名（lazy fetch + 1h cache）。"""
-    d = await service.nba_standings_snapshot()
-    if d is None: raise HTTPException(status_code=404, detail="goalserve lazy client not active")
-    return d
-
-
 @router.get("/runtime/derived-metrics")
 async def derived_metrics(
     market_slug: str | None = Query(default=None),
@@ -241,14 +205,24 @@ async def markets_tracking_breakdown(
     by_sport: Counter[str] = Counter()
     by_status: Counter[str] = Counter()
     by_window: Counter[str] = Counter()
-    by_live_state: Counter[str] = Counter()
+    by_live_phase: Counter[str] = Counter()
     elapsed_samples: list[dict[str, Any]] = []
 
     ws_tracked_tokens = set(getattr(ws_worker, "_tracked_markets", {}).keys()) if ws_worker else set()
-    metadata_cids = (
-        {r.condition_id for r in metadata_store.records() if r.condition_id}
-        if metadata_store else set()
-    )
+    # 真正经过 should_subscribe_ws gate 通过、会被订阅的 token 数。
+    # 比 total_ws_tracked_tokens（registry × 2）更准确——前端"WS 订阅"指标用这个。
+    from polymarket_trader.runtime.ws_loops import market_ws_subscription_token_ids
+    try:
+        subscribed_token_ids = market_ws_subscription_token_ids(runtime)
+    except Exception:
+        subscribed_token_ids = ()
+
+    # 预构建 metadata 索引：cid → record，用于 phase 分布统计
+    metadata_by_cid: dict[str, Any] = {}
+    if metadata_store:
+        for r in metadata_store.records():
+            if r.condition_id:
+                metadata_by_cid[r.condition_id] = r
 
     for market in markets:
         # by_sport: 按 slug 前缀 (粗略)
@@ -295,24 +269,26 @@ async def markets_tracking_breakdown(
                     })
         by_window[window_key] += 1
 
-        # by_live_state (按 cid 查 metadata_store)
-        if market.condition_id in metadata_cids:
-            by_live_state["has_metadata"] += 1
-        else:
-            by_live_state["no_metadata"] += 1
+        # by_live_phase: live_state_worker 写入的 entry_metadata.live_state_phase 分布
+        rec = metadata_by_cid.get(market.condition_id)
+        phase = (getattr(rec, "live_state_phase", None) or "no_metadata") if rec else "no_metadata"
+        by_live_phase[phase] += 1
 
     return {
         "available": True,
         "total_registry": len(markets),
         "total_ws_tracked_tokens": len(ws_tracked_tokens),
-        "total_entry_metadata": len(metadata_cids),
+        "total_entry_metadata": len(metadata_by_cid),
+        # 真实订阅 token 数——已通过 should_subscribe_ws gate
+        # （phase=live + signal_allowed + status=eligible 或 exposure override）。
+        "ws_subscribed_token_count": len(subscribed_token_ids),
         "by_sport": dict(by_sport.most_common(30)),
         "by_trading_status": dict(by_status),
         "by_trade_window": dict(by_window),
-        "by_live_state": dict(by_live_state),
+        "by_live_phase": dict(by_live_phase),
         "elapsed_samples": elapsed_samples,
-        "note": "对照 https://polymarket.com/zh/sports/live - in_progress 应该是真正 live, "
-                "elapsed 是应被 prune 的, upcoming_far 是 discovery 拉了远期市场.",
+        "note": "ws_subscribed_token_count = should_subscribe_ws gate 通过的真实订阅数。"
+                "对照 https://polymarket.com/zh/sports/live",
     }
 
 

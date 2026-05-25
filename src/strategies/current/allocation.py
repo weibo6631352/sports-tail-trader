@@ -196,57 +196,11 @@ def kelly_plan(
 
     eligible.sort(key=lambda item: item.estimate_f_star, reverse=True)
 
-    # 互斥盘口去重 — 仅限同一 condition_id (同一个完整 market) 内的多 outcome
-    # 互斥；不同 condition 间独立(ML + spread + totals + 分段 prop 可同时入)。
-    #
-    # 旧设计 bug: key = (event_slug, "_team_yes") 把同一场比赛所有 team-side 的
-    # candidate (ML home/away + spread home/away + 分段 winner 等)全部塞进同一
-    # 互斥组,导致一场比赛只能买一个 candidate,严重浪费独立 edge。
-    # 实盘 case: mlb-oak-sd ML Athletics 入场后, oak-sd spread/totals 全部
-    # 触发 mutually_exclusive_loser 被拒。
-    #
-    # 新设计: 互斥范围 = 同 condition_id。语义对齐"一个 condition 内多 outcome
-    # 必有 N-1 个输,买两边/三边 = 必输 vig"。3-way prop (halftime home/draw/away)
-    # 共享同 condition_id,仍互斥保留。NO outcome 不参与互斥(home-NO + away-NO
-    # 可同时成立,不存在"必有一负"约束)。
-    excluded_by_mutex: dict[int, str] = {}
-    seen_mutex_groups: dict[str, "_Candidate"] = {}
-    for candidate in eligible:
-        market = candidate.snapshot.market
-        if not market.condition_id:
-            continue
-        outcome = market.get_outcome_by_token_id(candidate.snapshot.token_id)
-        if outcome is None:
-            continue
-        outcome_label = outcome.outcome.strip().lower()
-        if outcome_label in {"no"}:
-            continue
-        key = market.condition_id
-        existing = seen_mutex_groups.get(key)
-        if existing is None:
-            seen_mutex_groups[key] = candidate
-        elif candidate.estimate_f_star > existing.estimate_f_star:
-            excluded_by_mutex[id(existing)] = (
-                f"mutually_exclusive_loser:{market.condition_id}"
-            )
-            seen_mutex_groups[key] = candidate
-        else:
-            excluded_by_mutex[id(candidate)] = (
-                f"mutually_exclusive_loser:{market.condition_id}"
-            )
+    # mutually_exclusive_loser gate 已删——宽进严管：即便同 condition 多 outcome
+    # 各自有 edge 信号也允许同时下单，由持仓策略 + Kelly 自身的 fraction 管控
+    # 总暴露。3-way prop / NEG_RISK 同 market 多 token 都按独立 candidate 评估。
 
     for candidate in eligible:
-        if id(candidate) in excluded_by_mutex:
-            allocations.append(
-                _reject_allocation(
-                    candidate.snapshot,
-                    exposure_usdc=candidate.exposure_usdc,
-                    reason=excluded_by_mutex[id(candidate)],
-                    prob_view=candidate.prob_view,
-                    price_c=candidate.price_c,
-                )
-            )
-            continue
         snapshot = candidate.snapshot
         prob_view = candidate.prob_view
         price_c = candidate.price_c

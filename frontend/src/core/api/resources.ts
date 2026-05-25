@@ -115,6 +115,15 @@ export const decisionsApi = {
 // ---------- 市场 ----------
 
 export const marketsApi = {
+  trackingBreakdown: (signal?: AbortSignal) =>
+    apiClient.get<{
+      available: boolean
+      total_registry?: number
+      total_ws_tracked_tokens?: number
+      ws_subscribed_token_count?: number
+      total_entry_metadata?: number
+      by_live_phase?: Record<string, number>
+    }>('/markets/tracking-breakdown', { signal }),
   liquidity: (
     params: { token_id: string; condition_id?: string; market_slug?: string; depth_ticks?: number },
     signal?: AbortSignal,

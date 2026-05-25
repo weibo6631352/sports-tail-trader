@@ -214,61 +214,6 @@ class AdminSportsQueryMixin(_Base):
         )
         return payload
 
-    async def list_series_state_snapshots(
-        self,
-        *,
-        limit: int = 200,
-        offset: int = 0,
-        now: datetime | None = None,
-    ) -> dict[str, Any]:
-        """返回 ``EntryMetadataStore`` 中所有 ``series_state`` 快照。
-
-        线上验证 ``series_state_worker`` 是否在持续刷新比分；如果某场系列赛
-        ``age_seconds`` 长期超出 ``tail_series_winner_max_state_age_seconds``，
-        说明 ESPN 抓取链路出问题，evaluator 会以 ``STALE_SERIES_STATE``/
-        ``MISSING_SERIES_STATE`` 拒绝该市场。
-        """
-
-        store = self._entry_metadata_store()
-        if store is None:
-            page = self._slice_sequence((), limit=limit, offset=offset)
-            payload = page_payload(page, serializer=lambda item: item)
-            payload["total_records"] = 0
-            return payload
-        if now is None:
-            now = datetime.now(timezone.utc)
-        extension = self.runtime.extension if self.runtime else None
-        diagnostics = extension if isinstance(extension, SportsDiagnosticHooks) else None
-        items: list[dict[str, Any]] = []
-        for record in store.records():
-            state = None if diagnostics is None else diagnostics.series_state_from_metadata(record.metadata)
-            if state is None:
-                continue
-            age_seconds = max(0.0, (now - state.observed_at).total_seconds())
-            items.append(
-                {
-                    "condition_id": record.condition_id,
-                    "market_slug": record.market_slug,
-                    "event_slug": record.event_slug,
-                    "team_a": state.team_a,
-                    "team_b": state.team_b,
-                    "wins_a": state.wins_a,
-                    "wins_b": state.wins_b,
-                    "best_of": state.best_of,
-                    "next_game_at": jsonable(state.next_game_at),
-                    "observed_at": jsonable(state.observed_at),
-                    "age_seconds": age_seconds,
-                    "source": record.source,
-                    "updated_at": jsonable(record.updated_at),
-                }
-            )
-        # observed_at 最新的排前面：诊断时优先看最新写入的。
-        items.sort(key=lambda item: item["observed_at"] or "", reverse=True)
-        page = self._slice_sequence(tuple(items), limit=limit, offset=offset)
-        payload = page_payload(page, serializer=lambda item: item)
-        payload["total_records"] = len(items)
-        return payload
-
     async def outright_team_resolution(
         self,
         *,

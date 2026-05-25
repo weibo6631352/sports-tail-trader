@@ -23,7 +23,6 @@ from strategies.current.allocation import (
 )
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.exit_plan import build_exit_plan_metadata, exit_price_for_context
-from strategies.current.tail import SportsTailOpportunityType
 
 from .allocation import (
     _allocation_skip_reason,
@@ -255,6 +254,12 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
     if portfolio_budget_usdc is None:
         return _empty_sizing(context, reason="missing_portfolio_budget")
 
+    # 可用现金硬下限：低于 $5 不入场。读 context.available_usdc 内存值，不调 API。
+    # 现金过低时即便 Kelly 算出 stake 也凑不出最小订单 + 留不出 fee buffer，
+    # 直接早退避免后续候选枚举/评估浪费。
+    if context.available_usdc is not None and context.available_usdc < Decimal("5"):
+        return _empty_sizing(context, reason="insufficient_available_cash")
+
     candidate_snapshots = _candidate_snapshots(context)
     if not candidate_snapshots:
         return EntrySizing(
@@ -292,10 +297,6 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
     skipped_allocations: dict[tuple[str, str], Allocation] = {}
     sizing_metadata: dict[str, object] = {}
     snapshot_price_cap: dict[tuple[str, str], Decimal] = {}
-    # 赔率差价候选的去抽水真实概率视图（按 condition/token 键）。Kelly 必须用
-    # 去抽水 true_p 定注，而不是扫尾锁定路径反推的 implied≈1.0——后者会在
-    # 概率性入场上严重 over-bet。
-    odds_gap_prob_views: dict[tuple[str, str], ProbView] = {}
     for snapshot in candidate_snapshots:
         price_cap = _tail_price_cap(
             config,
@@ -337,19 +338,6 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
                 )
             if _is_focus_snapshot(context, snapshot):
                 sizing_metadata.update(tail_metadata)
-            # 赔率差价候选：把去抽水 true_p 作为 Kelly 的 prob_p。conf=1.0——
-            # true_p 来自博彩市场去抽水后的真实概率估计，本身已是市场共识，
-            # 不像扫尾 implied 反推那样需要额外抑制不确定性。
-            if not skip_reason and tail_metadata.get("opportunity_type") == (
-                SportsTailOpportunityType.ODDS_GAP.value
-            ):
-                true_p_raw = tail_metadata.get("odds_gap_true_p")
-                if true_p_raw is not None:
-                    odds_gap_prob_views[(snapshot.condition_id, snapshot.token_id)] = ProbView(
-                        prob_p=Decimal(str(true_p_raw)),
-                        prob_confidence=Decimal("1"),
-                        source="odds_gap_devigged",
-                    )
         if skip_reason:
             if _is_focus_snapshot(context, snapshot) and "tail_reason" not in sizing_metadata:
                 sizing_metadata.update(_market_skip_metadata(snapshot, skip_reason))
@@ -366,40 +354,9 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
     spread_widening = config.tail_implied_conf_spread_widening
 
     def _prob_provider(snap: AllocationMarketSnapshot) -> ProbView:
-        """Kelly probability source — 赔率源优先 + 可与数学锁定结合:
+        """Kelly probability source — math_lock 优先，fallback implied_fair_value。"""
 
-        1. Goalserve devig + math_lock 同时可用 → **结合**:p=odds_devig,
-           confidence = 0.7 + 0.3 × consistency(odds 和 math 越一致越高 conf)
-        2. 只 Goalserve devig: confidence=1.0
-        3. 只 math_lock: confidence=0.7
-        4. 都没有: fallback implied_fair_value_from_price_cap(confidence 已缩水)
-
-        结合的意义: 用户要求 "有赔率源优先用赔率,可结合数学锁定"。当 Goalserve
-        odds 和 math_lock 估计一致(差异 < 5%) → 真信号,confidence 加成;不一致
-        → odds 可能 stale,confidence 收紧让 Kelly fraction 变小。
-        """
-
-        odds_gap_view = odds_gap_prob_views.get((snap.condition_id, snap.token_id))
         math_view = _math_lock_prob_view(snap, context)
-
-        if odds_gap_view is not None and math_view is not None:
-            # 结合: odds_p 作 Kelly p; consistency 调整 confidence
-            odds_p = odds_gap_view.prob_p or Decimal("0")
-            math_p = math_view.prob_p or Decimal("0")
-            diff = abs(odds_p - math_p)
-            # diff <= 0.05: 高度一致,conf=1.0; diff >= 0.30: 完全不一致,conf=0.4
-            # 线性插值: conf = 1.0 - 2 × diff (clip [0.4, 1.0])
-            consistency_conf = max(Decimal("0.4"), min(Decimal("1"), Decimal("1") - Decimal("2") * diff))
-            return ProbView(
-                prob_p=odds_p,
-                prob_confidence=consistency_conf,
-                source=f"odds_gap+math_lock(diff={diff:.3f})",
-            )
-
-        if odds_gap_view is not None:
-            return odds_gap_view
-
-        # math_lock 单源
         if math_view is not None:
             return math_view
 
@@ -486,16 +443,12 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         if decision is not None:
             return decision
     else:
-        from strategies.current.parameter_overrides import effective_decimal
-
-        allowed_price = effective_decimal(None, "entry_no_price_max", config.entry_no_price_max)
         tail_metadata = {}
 
     best_ask = context.orderbook.best_ask
     if best_ask is None:
         return ExtensionDecision.skip(reason="missing_best_ask")
-    if best_ask > allowed_price:
-        return ExtensionDecision.skip(reason="price_above_entry_max")
+    # price_above_entry_max gate 已删——宽进严管，持仓策略接管止盈止损。
     entry_price = best_ask
 
     amount_usdc = context.amount_usdc

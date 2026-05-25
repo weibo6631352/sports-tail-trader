@@ -509,7 +509,7 @@ def _has_open_order(snapshot: AllocationMarketSnapshot, side: OrderSide) -> bool
 def _goalserve_odds_metadata(context: ExtensionContext) -> dict[str, object]:
     """从 context.metadata 抽出 Goalserve 盘口赔率，透传给 SportsMarketSnapshot。
 
-    赔率差价评估器（odds_gap.py）需要 ``goalserve_moneyline`` 的去抽水原料，但
+    去抽水概率视图需要 ``goalserve_moneyline`` 的原料，但
     evaluator 只接收 SportsMarketSnapshot；通过 snapshot.metadata 这一既有通道把
     赔率带进纯领域评估器，避免给评估器加 Goalserve 专属参数。
     """

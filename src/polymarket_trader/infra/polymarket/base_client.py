@@ -251,6 +251,10 @@ class PolymarketRestClientBase:
             "timeout": timeout_s,
             "headers": dict(headers or {}),
             "trust_env": False,
+            # HTTP/2 multiplexing：单 TCP 连接上多个 stream 并发，HPACK 头部压缩
+            # 减少重复字节。中国→美国代理跨洋链路下，每减一次握手 + 头部就少
+            # 一次 RTT/带宽抢占——直接帮 WS 决策链路腾路。
+            "http2": True,
         }
         if proxy is not None:
             client_kwargs["proxy"] = proxy

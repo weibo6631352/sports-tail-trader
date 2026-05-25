@@ -17,11 +17,7 @@ from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.strategy import CurrentStrategy
-
-
 T0 = datetime(2026, 4, 27, 22, 0, 0, tzinfo=timezone.utc)
-
-
 def _market() -> Market:
     return Market(
         condition_id="totals-condition",
@@ -37,8 +33,6 @@ def _market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _orderbook(observed_at: datetime) -> OrderbookSnapshot:
     return OrderbookSnapshot(
         token_id="over",
@@ -51,8 +45,6 @@ def _orderbook(observed_at: datetime) -> OrderbookSnapshot:
         condition_id="totals-condition",
         tick_size=Decimal("0.01"),
     )
-
-
 def _event(observed_at: datetime, trace: str) -> ShadowEvent:
     return ShadowEvent(
         event_type="orderbook_snapshot_updated",
@@ -76,8 +68,6 @@ def _event(observed_at: datetime, trace: str) -> ShadowEvent:
             "source": "shadow_test",
         },
     )
-
-
 def _run(events: tuple[ShadowEvent, ...], *, ledger: PaperVirtualLedger | None = None):
     ledger = ledger or PaperVirtualLedger()
     return asyncio.run(
@@ -99,8 +89,6 @@ def _run(events: tuple[ShadowEvent, ...], *, ledger: PaperVirtualLedger | None =
             kelly_round_up_max_overbet_ratio=Decimal("1"),
         )
     ), ledger
-
-
 def test_single_event_triggers_buy_fill_and_updates_ledger() -> None:
     events = (_event(T0, "trace-1"),)
     report, ledger = _run(events)
@@ -122,8 +110,6 @@ def test_single_event_triggers_buy_fill_and_updates_ledger() -> None:
     assert ledger.available_usdc == Decimal("10") - spent
     assert ledger.position_for("over") > Decimal("0")
     assert ledger.cost_for("over") == spent
-
-
 def test_multiple_events_accumulate_in_ledger() -> None:
     events = (
         _event(T0, "trace-a"),
@@ -137,8 +123,6 @@ def test_multiple_events_accumulate_in_ledger() -> None:
     assert ledger.available_usdc >= Decimal("-0.0001")
     # 至少一次成交
     assert ledger.position_for("over") > Decimal("0")
-
-
 def test_shadow_run_is_deterministic_on_same_stream() -> None:
     events = (_event(T0, "trace-1"), _event(T0 + timedelta(seconds=30), "trace-2"))
 
@@ -160,8 +144,6 @@ def test_shadow_run_is_deterministic_on_same_stream() -> None:
         assert frame_a.available_usdc_after == frame_b.available_usdc_after
         assert frame_a.fees_accrued_after == frame_b.fees_accrued_after
         assert frame_a.error == frame_b.error
-
-
 def test_empty_stream_returns_empty_report() -> None:
     report, ledger = _run(())
     assert report.events_processed == 0

@@ -306,6 +306,13 @@ class Supervisor:
         # starting 阶段未握手时严格为 False；这里不再 fallback 到 "无 last_error"
         # 推断，否则会复现 N12 的"假性 connected"（CLAUDE.md §10 可审计原因）。
         market_ws_connected = _bool(market_ws, "connected")
+        # subscription_count=0 + no error = should_subscribe_ws gate 暂无通过的市场，正常待命态；
+        # 不应视为 disconnected——把无市场可订阅和连接失败区分开。
+        market_ws_idle_no_markets = (
+            not market_ws_connected
+            and _int(market_ws, "subscription_count") == 0
+            and not market_ws.get("last_error")
+        )
         user_ws_connected = _bool(user_ws, "connected", _bool(account_snapshot, "user_ws_connected"))
         last_reconcile_at = _datetime(account_snapshot, "last_reconcile_at") or _datetime(
             reconcile,
@@ -323,7 +330,7 @@ class Supervisor:
             blocking_reasons.append("db_not_ready")
         if not self._trading_client_ready:
             blocking_reasons.append("trading_client_not_ready")
-        if not market_ws_connected:
+        if not market_ws_connected and not market_ws_idle_no_markets:
             blocking_reasons.append("market_ws_not_connected")
         if not user_ws_connected:
             blocking_reasons.append("user_ws_not_connected")

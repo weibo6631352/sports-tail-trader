@@ -83,11 +83,8 @@ def test_minus_1pt5_locked_no_once_opponent_wins_a_set() -> None:
     m = _handicap_market(SportsMarketSide.HOME, "-1.5")
     ev = evaluate_tail_opportunity(game, m, policy=TailPolicy())
     assert not ev.accepted
-    # 数学锁定为 NO → 落到赔率差价拒绝原因（SPREADS 第二入场路径）。
-    assert ev.reason in {
-        TailRejectReason.NO_ODDS_GAP.value,
-        TailRejectReason.ODDS_GAP_LINE_MISMATCH.value,
-    }
+    # 数学锁定为 NO → outcome_not_locked。
+    assert ev.reason == TailRejectReason.OUTCOME_NOT_LOCKED.value
 
 
 def test_minus_1pt5_locked_no_even_when_opponent_only_leads() -> None:
@@ -120,7 +117,7 @@ def test_plus_1pt5_not_locked_before_any_set() -> None:
     assert not ev.accepted
     assert ev.reason in {
         TailRejectReason.TENNIS_NOT_LATE_ENOUGH.value,
-        TailRejectReason.NO_ODDS_GAP.value,
+        TailRejectReason.OUTCOME_NOT_LOCKED.value,
     }
 
 
@@ -224,8 +221,4 @@ def test_non_handicap_tennis_spread_still_rejected() -> None:
     )
     ev = evaluate_tail_opportunity(game, m, policy=TailPolicy())
     assert not ev.accepted
-    assert ev.reason in {
-        TailRejectReason.TENNIS_SPREADS_NOT_SUPPORTED.value,
-        TailRejectReason.NO_ODDS_GAP.value,
-        TailRejectReason.ODDS_GAP_LINE_MISMATCH.value,
-    }
+    assert ev.reason == TailRejectReason.TENNIS_SPREADS_NOT_SUPPORTED.value

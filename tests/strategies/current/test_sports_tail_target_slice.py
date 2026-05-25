@@ -50,14 +50,10 @@ from strategies.current.trading.exit_overlay import (
     reset_dynamic_exit_peaks,
 )
 from strategies.current.universe import select_market
-
-
 def _manual_moneyline_config() -> CurrentStrategyConfig:
     return CurrentStrategyConfig(
         tail_moneyline_execution_permission=ExecutionPermission.MANUAL_CONFIRM,
     )
-
-
 def test_config_expresses_complete_tail_policy() -> None:
     policy = tail_policy_from_config(CurrentStrategyConfig())
 
@@ -72,8 +68,6 @@ def test_config_expresses_complete_tail_policy() -> None:
     assert policy.spreads_execution_permission == ExecutionPermission.AUTO_EXECUTE
     assert policy.locked_outcome_max_entry_price == Decimal("0.98")
     assert policy.baseball_max_game_state_age_seconds == 120
-
-
 def test_live_game_metadata_preserves_scheduled_status() -> None:
     game = live_game_state_from_metadata(
         {
@@ -93,8 +87,6 @@ def test_live_game_metadata_preserves_scheduled_status() -> None:
 
     assert game is not None
     assert game.status == LiveGameStatus.SCHEDULED
-
-
 def test_universe_accepts_totals_moneyline_and_spreads_with_shared_descriptor_shape() -> None:
     config = CurrentStrategyConfig()
     markets = (
@@ -113,8 +105,6 @@ def test_universe_accepts_totals_moneyline_and_spreads_with_shared_descriptor_sh
         SportsMarketType.SPREADS,
     ]
     assert [decision.selected for decision in decisions] == [True, True, True]
-
-
 def test_universe_accepts_tennis_single_game_market_for_live_tail_scope() -> None:
     decision = select_market(CurrentStrategyConfig(), _tennis_totals_market())
     descriptor = describe_sports_market(_tennis_totals_market())
@@ -122,8 +112,6 @@ def test_universe_accepts_tennis_single_game_market_for_live_tail_scope() -> Non
     assert decision.selected is True
     assert descriptor.market_family == SportsMarketFamily.SINGLE_GAME
     assert descriptor.line == Decimal("21.5")
-
-
 def test_universe_accepts_tennis_first_set_totals_as_single_game_market() -> None:
     market = Market(
         condition_id="tennis-first-set-total-condition",
@@ -147,8 +135,6 @@ def test_universe_accepts_tennis_first_set_totals_as_single_game_market() -> Non
     assert descriptor.market_family == SportsMarketFamily.SINGLE_GAME
     assert descriptor.market_type == SportsMarketType.TOTALS
     assert descriptor.line == Decimal("9.5")
-
-
 def test_describe_sports_market_resolves_abbreviated_over_under_outcomes() -> None:
     """Polymarket 部分赛季 Win Totals 把 outcome 写成 "O 86.5" / "U 86.5"，
     历史代码只匹配完整 "over"/"under"，结果 30+ MLB Win Totals 市场以
@@ -181,8 +167,6 @@ def test_describe_sports_market_resolves_abbreviated_over_under_outcomes() -> No
     target_sides = {target.side for target in descriptor.targets}
     assert SportsMarketSide.OVER in target_sides
     assert SportsMarketSide.UNDER in target_sides
-
-
 def test_universe_accepts_single_game_binary_props_for_whole_market_coverage() -> None:
     market = _single_game_binary_prop_market()
 
@@ -194,8 +178,6 @@ def test_universe_accepts_single_game_binary_props_for_whole_market_coverage() -
     assert descriptor.market_type == SportsMarketType.BINARY_PROP
     assert [target.side for target in descriptor.targets] == [SportsMarketSide.YES, SportsMarketSide.NO]
     assert decision.selected is True
-
-
 def test_single_game_binary_props_are_rejected_until_specific_model_exists() -> None:
     # binary prop は tail が所有していないため SKIP（RECORD_ONLY ではない）。
     # 将来 binary_prop 専用 evaluator が実装されたとき上流で処理できるよう、
@@ -225,8 +207,6 @@ def test_single_game_binary_props_are_rejected_until_specific_model_exists() -> 
     assert result.accepted is False
     assert result.action == TailAction.REJECT
     assert result.reason == "binary_prop_no_tail_model"
-
-
 def test_player_next_team_yes_no_is_outright_not_single_game_binary_prop() -> None:
     market = Market(
         condition_id="player-next-team-condition",
@@ -251,8 +231,6 @@ def test_player_next_team_yes_no_is_outright_not_single_game_binary_prop() -> No
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
     assert decision.selected is True
     assert decision.metadata.get("market_family") == "outright"
-
-
 def test_league_winner_yes_no_is_outright_not_single_game_binary_prop() -> None:
     market = _league_winner_market()
 
@@ -264,8 +242,6 @@ def test_league_winner_yes_no_is_outright_not_single_game_binary_prop() -> None:
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
     assert decision.selected is True
     assert decision.metadata.get("market_family") == "outright"
-
-
 def test_league_winner_with_team_outcomes_is_outright_market() -> None:
     market = Market(
         condition_id="league-winner-team-outcomes-condition",
@@ -289,8 +265,6 @@ def test_league_winner_with_team_outcomes_is_outright_market() -> None:
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
     assert decision.selected is True
     assert decision.metadata.get("market_family") == "outright"
-
-
 def test_award_draft_trade_and_cba_props_are_outright_binary_props() -> None:
     markets = (
         Market(
@@ -361,8 +335,6 @@ def test_award_draft_trade_and_cba_props_are_outright_binary_props() -> None:
     # Outright 现在进入策略候选并由 outright 子包评估，不再静默排除。
     assert [decision.selected for decision in decisions] == [True] * 5
     assert all(decision.metadata.get("market_family") == "outright" for decision in decisions)
-
-
 def test_hyphenated_draft_prop_with_placeholder_v_is_not_single_game() -> None:
     market = Market(
         condition_id="draft-placeholder-condition",
@@ -385,8 +357,6 @@ def test_hyphenated_draft_prop_with_placeholder_v_is_not_single_game() -> None:
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
     assert decision.selected is True
     assert decision.metadata.get("market_family") == "outright"
-
-
 def test_playoff_advance_props_are_not_single_game_live_markets() -> None:
     market = Market(
         condition_id="playoff-advance-condition",
@@ -409,8 +379,6 @@ def test_playoff_advance_props_are_not_single_game_live_markets() -> None:
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
     assert decision.selected is True
     assert decision.metadata.get("market_family") == "outright"
-
-
 def test_universe_accepts_tennis_market_when_gamma_tags_are_missing_but_slug_has_league() -> None:
     market = Market(
         condition_id="tagless-tennis-condition",
@@ -431,8 +399,6 @@ def test_universe_accepts_tennis_market_when_gamma_tags_are_missing_but_slug_has
 
     assert decision.selected is True
     assert decision.reason == "market_selected"
-
-
 def test_universe_accepts_kbo_market_when_live_source_supports_baseball() -> None:
     market = Market(
         condition_id="kbo-condition",
@@ -453,8 +419,6 @@ def test_universe_accepts_kbo_market_when_live_source_supports_baseball() -> Non
 
     assert decision.selected is True
     assert decision.reason == "market_selected"
-
-
 def test_universe_accepts_wtt_table_tennis_market_for_live_state_coverage() -> None:
     market = Market(
         condition_id="wtt-condition",
@@ -478,8 +442,6 @@ def test_universe_accepts_wtt_table_tennis_market_for_live_state_coverage() -> N
     assert decision.reason == "market_selected"
     assert descriptor.accepted is True
     assert descriptor.market_family == SportsMarketFamily.SINGLE_GAME
-
-
 def test_market_descriptor_separates_single_game_from_series_outright_and_esports() -> None:
     single_game = _moneyline_market()
     series_winner = _series_winner_market()
@@ -500,8 +462,6 @@ def test_market_descriptor_separates_single_game_from_series_outright_and_esport
     assert descriptors["series_totals"].market_family == SportsMarketFamily.SERIES
     assert descriptors["outright"].market_family == SportsMarketFamily.OUTRIGHT
     assert descriptors["esports"].market_family == SportsMarketFamily.ESPORTS
-
-
 def test_universe_includes_series_and_excludes_esports() -> None:
     config = CurrentStrategyConfig()
 
@@ -523,8 +483,6 @@ def test_universe_includes_series_and_excludes_esports() -> None:
     # Esports 仍排除：没有专用定价和风控路径。
     assert decisions["esports"].selected is False
     assert decisions["esports"].reason == "esports_market_not_auto_tradable"
-
-
 def test_real_polymarket_top_goalscorer_yes_no_is_classified_as_outright_binary_prop() -> None:
     market = _epl_top_goalscorer_yes_no_market()
 
@@ -540,8 +498,6 @@ def test_real_polymarket_top_goalscorer_yes_no_is_classified_as_outright_binary_
     ]
     assert decision.selected is True
     assert decision.metadata.get("market_family") == "outright"
-
-
 def test_real_polymarket_ucl_winner_yes_no_is_classified_as_outright_binary_prop() -> None:
     market = _ucl_winner_yes_no_market()
 
@@ -554,8 +510,6 @@ def test_real_polymarket_ucl_winner_yes_no_is_classified_as_outright_binary_prop
     assert [target.side for target in descriptor.targets] == [SportsMarketSide.YES, SportsMarketSide.NO]
     assert decision.selected is True
     assert decision.metadata.get("market_family") == "outright"
-
-
 def test_real_polymarket_homepage_nba_champion_yes_no_is_classified_as_outright_binary_prop() -> None:
     market = _nba_champion_yes_no_market()
 
@@ -568,8 +522,6 @@ def test_real_polymarket_homepage_nba_champion_yes_no_is_classified_as_outright_
     assert [target.side for target in descriptor.targets] == [SportsMarketSide.YES, SportsMarketSide.NO]
     assert decision.selected is True
     assert decision.metadata.get("market_family") == "outright"
-
-
 def test_real_polymarket_season_award_and_leader_props_are_outright_binary_props() -> None:
     markets = (
         Market(
@@ -891,8 +843,6 @@ def test_real_polymarket_season_award_and_leader_props_are_outright_binary_props
         assert descriptor.market_type == SportsMarketType.BINARY_PROP
         assert decision.selected is True
         assert decision.metadata.get("market_family") == "outright"
-
-
 def test_real_polymarket_grand_slam_comparison_prop_is_outright_moneyline() -> None:
     market = Market(
         condition_id="grand-slam-comparison",
@@ -917,8 +867,6 @@ def test_real_polymarket_grand_slam_comparison_prop_is_outright_moneyline() -> N
     assert descriptor.market_type == SportsMarketType.MONEYLINE
     assert decision.selected is True
     assert decision.metadata.get("market_family") == "outright"
-
-
 def test_entry_rejects_series_market_before_single_game_live_score_can_create_buy() -> None:
     # 现在 series 分派由 ``CurrentStrategy.decide_entry`` 接管；``trading.decide_entry``
     # 仅作为 single_game 兜底路径，对 series family 应直接 SKIP 并带 family metadata。
@@ -941,8 +889,6 @@ def test_entry_rejects_series_market_before_single_game_live_score_can_create_bu
     assert decision.action.value == "skip"
     assert decision.reason == "series_market_pending_model"
     assert decision.metadata["market_family"] == "series"
-
-
 def test_sports_market_line_parser_handles_slug_decimal_without_using_event_date() -> None:
     market = Market(
         condition_id="slug-line-condition",
@@ -962,8 +908,6 @@ def test_sports_market_line_parser_handles_slug_decimal_without_using_event_date
 
     assert descriptor.accepted is True
     assert descriptor.line == Decimal("4.5")
-
-
 def test_sports_market_line_parser_handles_pt_decimal_without_truncating_integer() -> None:
     market = Market(
         condition_id="slug-pt-line-condition",
@@ -983,16 +927,12 @@ def test_sports_market_line_parser_handles_pt_decimal_without_truncating_integer
 
     assert descriptor.accepted is True
     assert descriptor.line == Decimal("214.5")
-
-
 def test_sports_market_line_parser_handles_total_games_pt_decimal_without_using_event_date() -> None:
     descriptor = describe_sports_market(_esports_series_market())
 
     assert descriptor.accepted is True
     assert descriptor.market_family == SportsMarketFamily.ESPORTS
     assert descriptor.line == Decimal("4.5")
-
-
 def test_entry_rejects_sports_market_without_live_game_state_before_creating_buy() -> None:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
@@ -1011,8 +951,6 @@ def test_entry_rejects_sports_market_without_live_game_state_before_creating_buy
 
     assert decision.action.value == "skip"
     assert decision.reason == "missing_live_game_state"
-
-
 def test_totals_over_locked_can_create_buy_only_after_full_tail_gate_passes() -> None:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
@@ -1051,8 +989,6 @@ def test_totals_over_locked_can_create_buy_only_after_full_tail_gate_passes() ->
     assert decision.post_only is False
     assert decision.metadata["tail_reason"] == "totals_over_locked"
     assert decision.metadata["execution_permission"] == "auto_execute"
-
-
 def test_ended_moneyline_can_create_buy_before_polymarket_closes_market() -> None:
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
@@ -1087,8 +1023,6 @@ def test_ended_moneyline_can_create_buy_before_polymarket_closes_market() -> Non
     assert decision.token_id == "home"
     assert decision.metadata["tail_reason"] == "ended_not_closed_moneyline"
     assert decision.metadata["opportunity_type"] == "ended_not_closed"
-
-
 def test_ended_totals_under_can_create_buy_when_final_score_is_below_line() -> None:
     market = _totals_market()
     orderbook = _orderbook(token_id="under", best_ask=Decimal("0.98"))
@@ -1123,8 +1057,6 @@ def test_ended_totals_under_can_create_buy_when_final_score_is_below_line() -> N
     assert decision.token_id == "under"
     assert decision.metadata["tail_reason"] == "ended_not_closed_totals_under"
     assert decision.metadata["opportunity_type"] == "ended_not_closed"
-
-
 def test_ended_tennis_first_set_total_is_not_treated_as_total_sets_under() -> None:
     market = Market(
         condition_id="tennis-first-set-total-condition",
@@ -1177,8 +1109,6 @@ def test_ended_tennis_first_set_total_is_not_treated_as_total_sets_under() -> No
 
     assert decision.action.value == "skip"
     assert decision.reason == "outcome_not_locked"
-
-
 def test_ended_tennis_first_set_total_under_uses_first_set_score() -> None:
     market = _tennis_first_set_total_market()
 
@@ -1219,8 +1149,6 @@ def test_ended_tennis_first_set_total_under_uses_first_set_score() -> None:
     assert decision.action.value == "buy"
     assert decision.token_id == "first-set-under"
     assert decision.metadata["tail_reason"] == "ended_not_closed_tennis_set_games_under"
-
-
 def test_ended_tennis_first_set_total_under_rejects_when_first_set_went_over() -> None:
     market = _tennis_first_set_total_market()
 
@@ -1260,8 +1188,6 @@ def test_ended_tennis_first_set_total_under_rejects_when_first_set_went_over() -
 
     assert decision.action.value == "skip"
     assert decision.reason == "outcome_not_locked"
-
-
 def test_live_tennis_first_set_total_over_uses_current_set_score() -> None:
     market = _tennis_first_set_total_market()
 
@@ -1304,8 +1230,6 @@ def test_live_tennis_first_set_total_over_uses_current_set_score() -> None:
     assert decision.metadata["tail_reason"] == "tennis_set_games_over_locked"
     assert decision.metadata["scope_type"] == "tennis_set_games"
     assert decision.metadata["scope_number"] == 1
-
-
 def test_live_tennis_first_set_total_under_uses_completed_first_set_score() -> None:
     market = _tennis_first_set_total_market().with_metadata(end_date=datetime(2026, 5, 7, tzinfo=timezone.utc))
 
@@ -1350,8 +1274,6 @@ def test_live_tennis_first_set_total_under_uses_completed_first_set_score() -> N
     assert decision.metadata["tail_reason"] == "tennis_set_games_under_locked"
     assert decision.metadata["scope_type"] == "tennis_set_games"
     assert decision.metadata["scope_number"] == 1
-
-
 def test_live_tennis_current_set_total_under_waits_until_set_completed() -> None:
     market = _tennis_first_set_total_market()
 
@@ -1391,8 +1313,6 @@ def test_live_tennis_current_set_total_under_waits_until_set_completed() -> None
 
     assert decision.action.value == "skip"
     assert decision.reason == "tennis_totals_under_not_supported"
-
-
 def test_period_total_market_is_not_treated_as_full_game_total() -> None:
     market = Market(
         condition_id="first-quarter-total-condition",
@@ -1437,8 +1357,6 @@ def test_period_total_market_is_not_treated_as_full_game_total() -> None:
 
     assert decision.action.value == "skip"
     assert decision.reason == "unsupported_market_scope"
-
-
 def test_ended_moneyline_tie_is_not_traded_as_deterministic_result() -> None:
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
@@ -1471,8 +1389,6 @@ def test_ended_moneyline_tie_is_not_traded_as_deterministic_result() -> None:
 
     assert decision.action.value == "skip"
     assert decision.reason == "outcome_not_locked"
-
-
 def test_moneyline_uses_live_home_away_names_instead_of_outcome_order() -> None:
     market = Market(
         condition_id="kbo-condition",
@@ -1535,12 +1451,10 @@ def test_moneyline_uses_live_home_away_names_instead_of_outcome_order() -> None:
     )
 
     assert losing_token.action.value == "skip"
-    assert losing_token.reason == "price_below_min"
+    assert losing_token.reason == "outcome_not_locked"
     assert winning_token.action.value == "buy"
     assert winning_token.token_id == "nc"
     assert winning_token.metadata["tail_reason"] == "ended_not_closed_moneyline"
-
-
 def test_entry_plan_preserves_event_metadata_through_application_entry_path() -> None:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
@@ -1589,8 +1503,6 @@ def test_entry_plan_preserves_event_metadata_through_application_entry_path() ->
     assert plan.metadata["execution_permission"] == "auto_execute"
     assert plan.metadata["exit_mode"] == "profit_take"
     assert plan.metadata["exit_plan"]["primary_action"] == "place_profit_take_gtc_sell_after_buy_fill"
-
-
 def test_follow_up_waits_for_settlement_when_auto_exit_disabled() -> None:
     market = _totals_market().with_tick_size(Decimal("0.01"))
     strategy = CurrentStrategy(config=CurrentStrategyConfig(auto_exit_enabled=False))
@@ -1619,8 +1531,6 @@ def test_follow_up_waits_for_settlement_when_auto_exit_disabled() -> None:
     )
 
     assert decisions == ()
-
-
 def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -> None:
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
@@ -1662,8 +1572,6 @@ def test_entry_plan_zeroes_budget_when_sports_permission_is_not_auto_execute() -
     assert plan.metadata is not None
     assert plan.metadata["tail_reason"] == "moneyline_late_lead"
     assert plan.metadata["execution_permission"] == "manual_confirm"
-
-
 def test_tennis_allocation_filters_opposite_side_before_kelly_budget() -> None:
     market = _tennis_moneyline_market()
     registry = MarketRegistry()
@@ -1724,8 +1632,6 @@ def test_tennis_allocation_filters_opposite_side_before_kelly_budget() -> None:
     assert plan.intent is not None
     assert plan.intent.token_id == "tennis-away"
     assert plan.intent.amount_usdc > Decimal("0")
-
-
 def test_tennis_moneyline_first_set_lead_is_not_tail_enough() -> None:
     market = _tennis_moneyline_market()
 
@@ -1762,8 +1668,6 @@ def test_tennis_moneyline_first_set_lead_is_not_tail_enough() -> None:
 
     assert decision.action.value == "skip"
     assert decision.reason == "tennis_not_late_enough"
-
-
 def test_tennis_moneyline_requires_current_set_tail_after_set_lead() -> None:
     market = _tennis_moneyline_market()
 
@@ -1797,8 +1701,6 @@ def test_tennis_moneyline_requires_current_set_tail_after_set_lead() -> None:
 
     assert decision.action.value == "skip"
     assert decision.reason == "tennis_not_late_enough"
-
-
 def test_tennis_moneyline_tail_bypasses_far_gamma_end_date() -> None:
     now = datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc)
     market = _tennis_moneyline_market().with_metadata(
@@ -1822,8 +1724,6 @@ def test_tennis_moneyline_tail_bypasses_far_gamma_end_date() -> None:
     assert decision.action.value == "buy"
     assert decision.reason == "strategy_entry"
     assert decision.metadata["tail_reason"] == "tennis_moneyline_near_locked"
-
-
 def test_low_settlement_efficiency_entry_uses_profit_take_exit_plan_when_viable() -> None:
     market = _totals_market().with_tick_size(Decimal("0.01"))
 
@@ -1863,8 +1763,6 @@ def test_low_settlement_efficiency_entry_uses_profit_take_exit_plan_when_viable(
     assert decision.metadata["profit_take_target_price"] == "0.99"
     assert decision.metadata["profit_take_expected_profit_usdc"] == "0.051020408163265306"
     assert decision.metadata["expected_settlement_profit_usdc"] == "0.102040816326530612"
-
-
 def test_settlement_efficient_entry_adds_profit_take_overlay_when_viable() -> None:
     market = Market(
         condition_id="mlb-settlement-overlay-condition",
@@ -1927,8 +1825,6 @@ def test_settlement_efficient_entry_adds_profit_take_overlay_when_viable() -> No
     assert decision.metadata["profit_take_target_price"] == "0.94"
     assert decision.metadata["profit_take_expected_profit_usdc"] == "0.053763440860215054"
     assert decision.metadata["exit_plan"]["primary_action"] == "place_profit_take_gtc_sell_after_buy_fill"
-
-
 def test_low_settlement_efficiency_entry_rejects_when_profit_take_is_not_viable() -> None:
     market = _totals_market().with_tick_size(Decimal("0.01"))
 
@@ -1966,8 +1862,6 @@ def test_low_settlement_efficiency_entry_rejects_when_profit_take_is_not_viable(
     assert decision.action.value == "skip"
     assert decision.reason == "profit_take_not_viable"
     assert decision.metadata["profit_take_expected_profit_usdc"] == "0.051020408163265306"
-
-
 def test_low_profit_entry_uses_profit_take_when_hourly_capital_efficiency_is_high() -> None:
     market = _totals_market().with_tick_size(Decimal("0.001"))
 
@@ -2010,8 +1904,6 @@ def test_low_profit_entry_uses_profit_take_when_hourly_capital_efficiency_is_hig
     assert decision.metadata["profit_take_expected_profit_usdc"] == "0.005025125628140704"
     assert decision.metadata["profit_take_expected_profit_per_hour_usdc"] == "0.150753768844221106"
     assert decision.metadata["capital_efficiency_reason"] == "profit_take_hourly_efficiency_high"
-
-
 def test_tennis_match_total_over_uses_minimum_possible_final_games_in_deciding_set() -> None:
     now = datetime(2026, 4, 29, 8, 25, tzinfo=timezone.utc)
     market = Market(
@@ -2069,8 +1961,6 @@ def test_tennis_match_total_over_uses_minimum_possible_final_games_in_deciding_s
     assert decision.action.value == "buy"
     assert decision.reason == "strategy_entry"
     assert decision.metadata["tail_reason"] == "tennis_totals_over_min_final_games_locked"
-
-
 def test_tennis_first_set_winner_current_set_near_locked_can_enter_before_set_ends() -> None:
     now = datetime(2026, 4, 29, 8, 41, tzinfo=timezone.utc)
     market = Market(
@@ -2130,8 +2020,6 @@ def test_tennis_first_set_winner_current_set_near_locked_can_enter_before_set_en
     assert decision.action.value == "buy"
     assert decision.reason == "strategy_entry"
     assert decision.metadata["tail_reason"] == "tennis_set_winner_current_set_near_locked"
-
-
 def test_tennis_first_set_winner_current_set_near_locked_accepts_strong_games_lead() -> None:
     now = datetime(2026, 4, 29, 9, 29, tzinfo=timezone.utc)
     market = Market(
@@ -2191,270 +2079,6 @@ def test_tennis_first_set_winner_current_set_near_locked_accepts_strong_games_le
     # 5-3 强局分领先即作为概率博弈提前入场——不再强求"发球且到 40/A"。
     assert decision.action.value == "buy"
     assert decision.metadata["tail_reason"] == "tennis_set_winner_current_set_near_locked"
-
-
-def test_tennis_first_set_winner_current_set_near_locked_rejects_ask_above_price_cap() -> None:
-    now = datetime(2026, 4, 29, 9, 19, tzinfo=timezone.utc)
-    market = Market(
-        condition_id="tennis-first-set-near-lock-maker-condition",
-        market_slug="atp-tomic-sharipo-2026-04-28-first-set-winner-Tomic-vs-Sharipov",
-        market_question="Set 1 Winner: Tomic vs Sharipov",
-        event_title="Jiujiang: Bernard Tomic vs Marat Sharipov",
-        event_slug="atp-tomic-sharipo-2026-04-28",
-        end_date=datetime(2026, 5, 5, 4, 30, tzinfo=timezone.utc),
-        category="Sports",
-        tags=("ATP", "Tennis"),
-        outcomes=(
-            MarketOutcome(token_id="tomic-first-set", outcome="Tomic"),
-            MarketOutcome(token_id="sharipov-first-set", outcome="Sharipov"),
-        ),
-        trading_status=TradingStatus.ELIGIBLE,
-    )
-
-    decision = decide_entry(
-        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
-        ExtensionContext(
-            strategy_id="sports_tail",
-            trace_id="trace-tennis-first-set-near-lock-maker",
-            market=market,
-            token_id="sharipov-first-set",
-            orderbook=_orderbook(token_id="sharipov-first-set", best_ask=Decimal("1")),
-            amount_usdc=Decimal("5"),
-            now=now,
-            metadata={
-                "entry_signal_reason": "live_tail_state_candidate",
-                "live_game": {
-                    "league": "ATP Challenger Jiujiang, China Men Singles",
-                    "home_name": "Bernard Tomic",
-                    "away_name": "Marat Sharipov",
-                    "home_score": 0,
-                    "away_score": 0,
-                    "period": "S1",
-                    "status": "live",
-                    "observed_at": "2026-04-29T09:18:58+00:00",
-                    "tennis_state": {
-                        "home_sets_won": 0,
-                        "away_sets_won": 0,
-                        "current_set": 1,
-                        "home_current_set_games": 2,
-                        "away_current_set_games": 5,
-                        "home_total_games": 2,
-                        "away_total_games": 5,
-                        "set_scores": ((2, 5),),
-                        "home_point": "0",
-                        "away_point": "40",
-                        "serving_side": "away",
-                    },
-                },
-            },
-        ),
-    )
-
-    assert decision.action.value == "skip"
-    assert decision.reason == "price_above_max"
-
-
-def test_tennis_completed_set_winner_rejects_market_ask_above_locked_price_cap() -> None:
-    now = datetime(2026, 4, 29, 8, 45, tzinfo=timezone.utc)
-    market = Market(
-        condition_id="tennis-first-set-locked-condition",
-        market_slug="atp-ghibaud-pieri-2026-04-29-first-set-winner-Ghibaudo-vs-Pieri",
-        market_question="Antoine Ghibaudo vs Samuele Pieri first set winner",
-        event_title="Shymkent 2: Antoine Ghibaudo vs Samuele Pieri",
-        event_slug="atp-ghibaud-pieri-2026-04-29",
-        end_date=datetime(2026, 5, 6, 8, 0, tzinfo=timezone.utc),
-        category="Sports",
-        tags=("ATP", "Tennis"),
-        outcomes=(
-            MarketOutcome(token_id="ghibaudo-first-set", outcome="Ghibaudo"),
-            MarketOutcome(token_id="pieri-first-set", outcome="Pieri"),
-        ),
-        trading_status=TradingStatus.ELIGIBLE,
-    ).with_tick_size(Decimal("0.001"))
-
-    decision = decide_entry(
-        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
-        ExtensionContext(
-            strategy_id="sports_tail",
-            trace_id="trace-tennis-first-set-locked-wide-spread",
-            market=market,
-            token_id="pieri-first-set",
-            orderbook=OrderbookSnapshot(
-                token_id="pieri-first-set",
-                best_bid=Decimal("0.001"),
-                best_ask=Decimal("0.999"),
-                bids=(PriceLevel(price=Decimal("0.001"), size=Decimal("20")),),
-                asks=(PriceLevel(price=Decimal("0.999"), size=Decimal("20")),),
-                received_at=now,
-                condition_id="tennis-first-set-locked-condition",
-            ),
-            amount_usdc=Decimal("5"),
-            now=now,
-            metadata={
-                "entry_signal_reason": "live_outcome_lock_candidate",
-                "live_game": {
-                    "league": "Shymkent 2, Kazakhstan",
-                    "home_name": "Antoine Ghibaudo",
-                    "away_name": "Samuele Pieri",
-                    "home_score": 0,
-                    "away_score": 1,
-                    "period": "S2",
-                    "status": "live",
-                    "observed_at": "2026-04-29T08:45:00+00:00",
-                    "tennis_state": {
-                        "home_sets_won": 0,
-                        "away_sets_won": 1,
-                        "current_set": 2,
-                        "home_current_set_games": 0,
-                        "away_current_set_games": 0,
-                        "home_total_games": 5,
-                        "away_total_games": 7,
-                        "set_scores": ((5, 7), (0, 0)),
-                    },
-                },
-            },
-        ),
-    )
-
-    assert decision.action.value == "skip"
-    assert decision.reason == "price_above_max"
-
-
-def test_tennis_completed_set_winner_rejects_ask_above_locked_price_cap() -> None:
-    now = datetime(2026, 4, 29, 8, 50, tzinfo=timezone.utc)
-    market = Market(
-        condition_id="tennis-first-set-ask-one-condition",
-        market_slug="atp-gaston-blanc-2026-04-29-first-set-winner-Gaston-vs-Blanch",
-        market_question="Hugo Gaston vs Darwin Blanch first set winner",
-        event_title="Mauthausen: Hugo Gaston vs Darwin Blanch",
-        event_slug="atp-gaston-blanc-2026-04-29",
-        end_date=datetime(2026, 5, 6, 8, 0, tzinfo=timezone.utc),
-        category="Sports",
-        tags=("ATP", "Tennis"),
-        outcomes=(
-            MarketOutcome(token_id="gaston-first-set", outcome="Gaston"),
-            MarketOutcome(token_id="blanch-first-set", outcome="Blanch"),
-        ),
-        trading_status=TradingStatus.ELIGIBLE,
-    ).with_tick_size(Decimal("0.001"))
-
-    decision = decide_entry(
-        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
-        ExtensionContext(
-            strategy_id="sports_tail",
-            trace_id="trace-tennis-first-set-ask-one",
-            market=market,
-            token_id="gaston-first-set",
-            orderbook=OrderbookSnapshot(
-                token_id="gaston-first-set",
-                best_bid=Decimal("0.001"),
-                best_ask=Decimal("1"),
-                bids=(PriceLevel(price=Decimal("0.001"), size=Decimal("20")),),
-                asks=(PriceLevel(price=Decimal("1"), size=Decimal("20")),),
-                received_at=now,
-                condition_id="tennis-first-set-ask-one-condition",
-            ),
-            amount_usdc=Decimal("5"),
-            now=now,
-            metadata={
-                "entry_signal_reason": "live_outcome_lock_candidate",
-                "live_game": {
-                    "league": "Mauthausen, Austria",
-                    "home_name": "Hugo Gaston",
-                    "away_name": "Darwin Blanch",
-                    "home_score": 1,
-                    "away_score": 0,
-                    "period": "S2",
-                    "status": "live",
-                    "observed_at": "2026-04-29T08:50:00+00:00",
-                    "tennis_state": {
-                        "home_sets_won": 1,
-                        "away_sets_won": 0,
-                        "current_set": 2,
-                        "home_current_set_games": 0,
-                        "away_current_set_games": 0,
-                        "home_total_games": 6,
-                        "away_total_games": 3,
-                        "set_scores": ((6, 3), (0, 0)),
-                    },
-                },
-            },
-        ),
-    )
-
-    assert decision.action.value == "skip"
-    assert decision.reason == "price_above_max"
-
-
-def test_tennis_completed_set_winner_rejects_missing_best_ask() -> None:
-    now = datetime(2026, 4, 29, 9, 4, tzinfo=timezone.utc)
-    market = Market(
-        condition_id="tennis-first-set-missing-ask-condition",
-        market_slug="atp-gaston-blanc-2026-04-29-first-set-winner-Gaston-vs-Blanch",
-        market_question="Hugo Gaston vs Darwin Blanch first set winner",
-        event_title="Mauthausen: Hugo Gaston vs Darwin Blanch",
-        event_slug="atp-gaston-blanc-2026-04-29",
-        end_date=datetime(2026, 5, 6, 8, 0, tzinfo=timezone.utc),
-        category="Sports",
-        tags=("ATP", "Tennis"),
-        outcomes=(
-            MarketOutcome(token_id="gaston-first-set", outcome="Gaston"),
-            MarketOutcome(token_id="blanch-first-set", outcome="Blanch"),
-        ),
-        trading_status=TradingStatus.ELIGIBLE,
-    ).with_tick_size(Decimal("0.001"))
-
-    decision = decide_entry(
-        CurrentStrategyConfig(tail_min_liquidity_usdc=Decimal("0.01")),
-        ExtensionContext(
-            strategy_id="sports_tail",
-            trace_id="trace-tennis-first-set-missing-ask",
-            market=market,
-            token_id="gaston-first-set",
-            orderbook=OrderbookSnapshot(
-                token_id="gaston-first-set",
-                best_bid=Decimal("0.001"),
-                best_ask=None,
-                bids=(PriceLevel(price=Decimal("0.001"), size=Decimal("20")),),
-                asks=(),
-                received_at=now,
-                condition_id="tennis-first-set-missing-ask-condition",
-            ),
-            amount_usdc=Decimal("5"),
-            now=now,
-            metadata={
-                "entry_signal_reason": "live_outcome_lock_candidate",
-                "live_game": {
-                    "league": "Mauthausen, Austria",
-                    "home_name": "Hugo Gaston",
-                    "away_name": "Darwin Blanch",
-                    "home_score": 1,
-                    "away_score": 0,
-                    "period": "S2",
-                    "status": "live",
-                    "observed_at": "2026-04-29T09:04:00+00:00",
-                    "tennis_state": {
-                        "home_sets_won": 1,
-                        "away_sets_won": 0,
-                        "current_set": 2,
-                        "home_current_set_games": 2,
-                        "away_current_set_games": 3,
-                        "home_total_games": 8,
-                        "away_total_games": 6,
-                        "set_scores": ((6, 3), (2, 3)),
-                    },
-                },
-            },
-        ),
-    )
-
-    # gates.py 启用 bid+tick fallback 后，best_ask 缺失但 best_bid+tick 可用时
-    # evaluator 用估算价（0.001+0.001=0.002）继续评估。估算价 0.002 低于
-    # min_entry_price=0.50，触发 price_below_min（先于 liquidity_below_min 检查）。
-    assert decision.action.value == "skip"
-    assert decision.reason == "price_below_min"
-
-
 def test_ended_moneyline_rejects_missing_best_ask() -> None:
     market = _moneyline_market().with_tick_size(Decimal("0.001"))
     now = datetime(2026, 4, 27, tzinfo=timezone.utc)
@@ -2496,85 +2120,6 @@ def test_ended_moneyline_rejects_missing_best_ask() -> None:
 
     assert decision.action.value == "skip"
     assert decision.reason == "missing_best_ask"
-
-
-def test_entry_plan_rejects_locked_set_winner_when_only_limit_bid_would_work() -> None:
-    now = datetime(2026, 4, 29, 8, 50, tzinfo=timezone.utc)
-    market = Market(
-        condition_id="tennis-first-set-plan-condition",
-        market_slug="atp-gaston-blanc-2026-04-29-first-set-winner-Gaston-vs-Blanch",
-        market_question="Hugo Gaston vs Darwin Blanch first set winner",
-        event_title="Mauthausen: Hugo Gaston vs Darwin Blanch",
-        event_slug="atp-gaston-blanc-2026-04-29",
-        end_date=datetime(2026, 5, 6, 8, 0, tzinfo=timezone.utc),
-        category="Sports",
-        tags=("ATP", "Tennis"),
-        outcomes=(
-            MarketOutcome(token_id="gaston-first-set", outcome="Gaston"),
-            MarketOutcome(token_id="blanch-first-set", outcome="Blanch"),
-        ),
-        trading_status=TradingStatus.ELIGIBLE,
-    ).with_tick_size(Decimal("0.001"))
-    service = TradingDecisionService(
-        strategy_id="sports_tail",
-        extension_hooks=CurrentStrategy(
-            config=CurrentStrategyConfig(
-                tail_min_liquidity_usdc=Decimal("0.01"),
-                tail_min_expected_profit_usdc=Decimal("0.001"),
-                tail_profit_take_min_profit_usdc=Decimal("0.001"),
-            ),
-        ).hooks,
-    )
-
-    plan = service.build_entry_plan(
-        market=market,
-        token_id="gaston-first-set",
-        orderbook=OrderbookSnapshot(
-            token_id="gaston-first-set",
-            best_bid=Decimal("0.001"),
-            best_ask=Decimal("1"),
-            bids=(PriceLevel(price=Decimal("0.001"), size=Decimal("20")),),
-            asks=(PriceLevel(price=Decimal("1"), size=Decimal("20")),),
-            received_at=now,
-            condition_id="tennis-first-set-plan-condition",
-        ),
-        trace_id="trace-tennis-first-set-plan",
-        portfolio_budget_usdc=Decimal("10"),
-        available_usdc=Decimal("10"),
-        kelly_fraction=Decimal("0.25"),
-        kelly_max_position_fraction=Decimal("1"),
-        kelly_min_edge=Decimal("0"),
-        kelly_min_stake_usdc=Decimal("1"),
-        metadata={
-            "entry_signal_reason": "live_outcome_lock_candidate",
-            "live_game": {
-                "league": "Mauthausen, Austria",
-                "home_name": "Hugo Gaston",
-                "away_name": "Darwin Blanch",
-                "home_score": 1,
-                "away_score": 0,
-                "period": "S2",
-                "status": "live",
-                "observed_at": "2026-04-29T08:50:00+00:00",
-                "tennis_state": {
-                    "home_sets_won": 1,
-                    "away_sets_won": 0,
-                    "current_set": 2,
-                    "home_current_set_games": 0,
-                    "away_current_set_games": 0,
-                    "home_total_games": 6,
-                    "away_total_games": 3,
-                    "set_scores": ((6, 3), (0, 0)),
-                },
-            },
-        },
-    )
-
-    assert plan.ready_to_trade is False
-    assert plan.intent is None
-    assert plan.reason == "price_above_entry_max"
-
-
 def test_entry_plan_rejects_ended_moneyline_when_best_ask_is_missing() -> None:
     market = _moneyline_market().with_tick_size(Decimal("0.001"))
     now = datetime(2026, 4, 27, tzinfo=timezone.utc)
@@ -2627,8 +2172,6 @@ def test_entry_plan_rejects_ended_moneyline_when_best_ask_is_missing() -> None:
     assert plan.ready_to_trade is False
     assert plan.intent is None
     assert plan.reason == "missing_best_ask"
-
-
 def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
     from polymarket_trader.extension_api import ManualConfirmation
 
@@ -2666,8 +2209,6 @@ def test_entry_plan_creates_intent_after_manual_confirmation_metadata() -> None:
     assert plan.summary.confirmed_by == "operator-1"
     assert plan.summary.confirm_reason == "score_verified"
 
-
-
 def test_strategy_risk_blocks_consecutive_loss_pause() -> None:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
@@ -2698,8 +2239,6 @@ def test_strategy_risk_blocks_consecutive_loss_pause() -> None:
     assert plan.allocation.reason == "consecutive_loss_pause"
     assert plan.metadata is not None
     assert plan.metadata["consecutive_losses"] == 3
-
-
 def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_order() -> None:
     market = _tennis_moneyline_market()
     position = Position(
@@ -2751,8 +2290,6 @@ def test_entry_plan_does_not_reenter_market_with_existing_position_and_exit_orde
     assert plan.allocation.reason == "open_exit_detected"
     assert plan.metadata is not None
     assert plan.metadata["tail_reason"] == "open_exit_detected"
-
-
 def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_advantage_strengthens() -> None:
     market = _moneyline_market()
     position = Position(
@@ -2831,8 +2368,6 @@ def test_entry_plan_allows_scale_in_without_exit_order_in_settlement_mode_when_a
     assert plan.metadata["tail_reason"] == "scale_in_moneyline_advantage"
     assert plan.metadata["opportunity_type"] == "scale_in_advantage"
     assert plan.metadata["scale_in_budget_cap_usdc"] == "6.0"
-
-
 def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
     market = _tennis_totals_market()
     position = Position(
@@ -2935,8 +2470,6 @@ def test_entry_plan_uses_tennis_total_games_when_scaling_in_totals() -> None:
     assert plan.metadata["tail_reason"] == "scale_in_tennis_totals_over_advantage"
     assert plan.metadata["opportunity_type"] == "scale_in_advantage"
     assert plan.metadata["scale_in_budget_cap_usdc"] == "6.0"
-
-
 def test_admin_candidates_use_runtime_metadata_source_not_full_registry() -> None:
     result = asyncio.run(_run_admin_candidate_metadata_source_flow())
 
@@ -2944,8 +2477,6 @@ def test_admin_candidates_use_runtime_metadata_source_not_full_registry() -> Non
     assert result["total"] == 2
     assert result["has_more"] is False
     assert result["source_markets"] == 2
-
-
 def test_admin_live_source_gap_diagnostics_groups_tracked_markets_without_live_state() -> None:
     result = asyncio.run(_run_admin_live_source_gap_diagnostics_flow())
 
@@ -2964,8 +2495,6 @@ def test_admin_live_source_gap_diagnostics_groups_tracked_markets_without_live_s
         "mlb-test-gap-2026-05-01",
     ]
     assert result["items"][0]["gap_urgency"] == "started_or_past_due"
-
-
 def test_admin_live_source_gap_diagnostics_uses_market_service_hooks_when_extension_absent() -> None:
     result = asyncio.run(_run_admin_live_source_gap_with_market_service_hooks_flow())
 
@@ -2975,8 +2504,6 @@ def test_admin_live_source_gap_diagnostics_uses_market_service_hooks_when_extens
     assert [item["market_slug"] for item in result["items"]] == [
         "mlb-test-gap-2026-05-01",
     ]
-
-
 def test_admin_confirmation_refuses_non_confirmable_candidate() -> None:
     result = asyncio.run(_run_admin_auto_candidate_confirmation_attempt())
 
@@ -2987,8 +2514,6 @@ def test_admin_confirmation_refuses_non_confirmable_candidate() -> None:
     assert result["confirmation"]["status"] == "failed"
     assert result["confirmation"]["reason"] == "candidate_not_confirmable"
     assert result["confirmation"]["candidate"]["confirmable"] is False
-
-
 def test_worker_publishes_skipped_plan_metadata_for_candidate_replay() -> None:
     result = asyncio.run(_run_worker_without_live_game_state())
 
@@ -3005,8 +2530,6 @@ def test_worker_publishes_skipped_plan_metadata_for_candidate_replay() -> None:
     assert result.emitted_event.payload["plan_metadata"]["strategy_payload"]["provider_marker"] == "from_provider"
     assert result.emitted_event.payload["plan_metadata"]["strategy_payload"]["tail_reason"] == "missing_live_game_state"
     assert result.emitted_event.payload["plan_metadata"]["strategy_payload"]["tail_action"] == "reject"
-
-
 def test_worker_treats_live_state_entry_signal_as_entry_replay_trigger() -> None:
     result = asyncio.run(_run_worker_with_live_state_entry_signal())
 
@@ -3016,8 +2539,6 @@ def test_worker_treats_live_state_entry_signal_as_entry_replay_trigger() -> None
     assert result.plan.intent is not None
     assert result.plan.intent.token_id == "over"
     assert result.plan.metadata["tail_reason"] == "totals_over_locked"
-
-
 def test_moneyline_default_permission_enters_auto_buy_path() -> None:
     market = _moneyline_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.96"))
@@ -3052,8 +2573,6 @@ def test_moneyline_default_permission_enters_auto_buy_path() -> None:
     assert decision.token_id == "home"
     assert decision.price == Decimal("0.96")
     assert decision.metadata["execution_permission"] == "auto_execute"
-
-
 def test_live_market_more_than_one_hour_from_close_is_not_tail_candidate() -> None:
     now = datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc)
     market = _moneyline_market().with_metadata(end_date=datetime(2026, 4, 27, 2, 1, tzinfo=timezone.utc))
@@ -3088,8 +2607,6 @@ def test_live_market_more_than_one_hour_from_close_is_not_tail_candidate() -> No
     assert decision.action.value == "skip"
     assert decision.reason == "game_not_late_enough"
     assert decision.metadata["tail_reason"] == "game_not_late_enough"
-
-
 def test_live_mlb_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gate() -> None:
     now = datetime(2026, 4, 30, 0, 42, tzinfo=timezone.utc)
     market = Market(
@@ -3148,8 +2665,6 @@ def test_live_mlb_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
     assert decision.action.value == "skip"
     assert decision.reason == "baseball_not_late_enough"
     assert decision.metadata["tail_reason"] == "baseball_not_late_enough"
-
-
 def test_live_kbo_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gate() -> None:
     now = datetime(2026, 4, 30, 10, 18, tzinfo=timezone.utc)
     market = Market(
@@ -3209,8 +2724,6 @@ def test_live_kbo_uses_baseball_state_not_gamma_settlement_end_date_for_tail_gat
     assert decision.action.value == "skip"
     assert decision.reason == "baseball_not_late_enough"
     assert decision.metadata["tail_reason"] == "baseball_not_late_enough"
-
-
 def test_mlb_structured_tail_state_allows_official_source_age_above_generic_limit() -> None:
     now = datetime(2026, 4, 30, 1, 40, 55, tzinfo=timezone.utc)
     market = Market(
@@ -3269,8 +2782,6 @@ def test_mlb_structured_tail_state_allows_official_source_age_above_generic_limi
 
     assert decision.action.value == "buy"
     assert decision.metadata["tail_reason"] == "mlb_moneyline_ninth_lead"
-
-
 def test_mlb_moneyline_eighth_inning_leader_can_enter_when_no_scoring_threat() -> None:
     now = datetime(2026, 4, 30, 2, 5, 55, tzinfo=timezone.utc)
     market = Market(
@@ -3333,8 +2844,6 @@ def test_mlb_moneyline_eighth_inning_leader_can_enter_when_no_scoring_threat() -
 
     assert decision.action.value == "buy"
     assert decision.metadata["tail_reason"] == "mlb_moneyline_eighth_lead"
-
-
 def test_mlb_moneyline_eighth_inning_rejects_scoring_position_threat() -> None:
     now = datetime(2026, 4, 30, 2, 5, 55, tzinfo=timezone.utc)
     market = Market(
@@ -3393,8 +2902,6 @@ def test_mlb_moneyline_eighth_inning_rejects_scoring_position_threat() -> None:
 
     assert decision.action.value == "skip"
     assert decision.reason == "baseball_threat_on_base"
-
-
 def test_totals_over_locked_bypasses_far_market_end_window() -> None:
     now = datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc)
     market = _totals_market().with_metadata(end_date=datetime(2026, 4, 27, 2, 1, tzinfo=timezone.utc))
@@ -3428,8 +2935,6 @@ def test_totals_over_locked_bypasses_far_market_end_window() -> None:
 
     assert decision.action.value == "buy"
     assert decision.metadata["tail_reason"] == "totals_over_locked"
-
-
 def test_allocation_reports_far_close_before_missing_best_ask() -> None:
     now = datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc)
     market = _moneyline_market().with_metadata(end_date=datetime(2026, 4, 27, 2, 1, tzinfo=timezone.utc))
@@ -3474,8 +2979,6 @@ def test_allocation_reports_far_close_before_missing_best_ask() -> None:
     assert plan.allocation is not None
     assert plan.allocation.reason == "missing_best_ask"
     assert plan.metadata["tail_reason"] == "missing_best_ask"
-
-
 def test_spreads_default_permission_enters_auto_buy_path() -> None:
     market = _spreads_market()
     orderbook = _orderbook(token_id="home", best_ask=Decimal("0.95"))
@@ -3511,8 +3014,6 @@ def test_spreads_default_permission_enters_auto_buy_path() -> None:
     assert decision.price == Decimal("0.95")
     assert decision.metadata["tail_reason"] == "spreads_late_cover"
     assert decision.metadata["execution_permission"] == "auto_execute"
-
-
 def test_follow_up_sell_is_not_created_after_buy_fill_in_settlement_only_mode() -> None:
     market = _totals_market()
     strategy = CurrentStrategy(config=CurrentStrategyConfig(auto_exit_enabled=False))
@@ -3536,8 +3037,6 @@ def test_follow_up_sell_is_not_created_after_buy_fill_in_settlement_only_mode() 
     )
 
     assert decisions == ()
-
-
 def test_follow_up_does_not_place_exit_sell_after_profit_take_tagged_buy_fill() -> None:
     """退出统一由动态 ``decide_exit`` 负责，follow_up 不再挂静态止盈 SELL。"""
 
@@ -3579,8 +3078,6 @@ def test_follow_up_does_not_place_exit_sell_after_profit_take_tagged_buy_fill() 
     )
 
     assert decisions == ()
-
-
 def test_follow_up_does_not_place_exit_sell_after_settlement_buy_fill() -> None:
     """带 profit-take overlay 的 settlement 买入成交后也不再由 follow_up 挂 SELL。"""
 
@@ -3623,8 +3120,6 @@ def test_follow_up_does_not_place_exit_sell_after_settlement_buy_fill() -> None:
     )
 
     assert decisions == ()
-
-
 def test_position_exit_waits_for_settlement_when_auto_exit_disabled() -> None:
     market = _totals_market()
     strategy = CurrentStrategy(config=CurrentStrategyConfig(auto_exit_enabled=False))
@@ -3649,8 +3144,6 @@ def test_position_exit_waits_for_settlement_when_auto_exit_disabled() -> None:
 
     assert decision.action.value == "skip"
     assert decision.reason == "settlement_only_exit_disabled"
-
-
 def _dynamic_exit_orderbook(
     market: Market,
     *,
@@ -3676,8 +3169,6 @@ def _dynamic_exit_orderbook(
         received_at=datetime(2026, 5, 22, tzinfo=timezone.utc),
         tick_size=Decimal("0.01"),
     )
-
-
 def _dynamic_exit_context(
     market: Market,
     orderbook: OrderbookSnapshot | None,
@@ -3706,8 +3197,6 @@ def _dynamic_exit_context(
         ),
         metadata=metadata or {},
     )
-
-
 def test_dynamic_exit_rides_uptrend_when_bid_makes_new_high() -> None:
     """顺势上行 HOLD：best bid 创新高 → 即使在止盈区也 HOLD，骑住动量。"""
 
@@ -3731,8 +3220,6 @@ def test_dynamic_exit_rides_uptrend_when_bid_makes_new_high() -> None:
     assert decision.reason == "dynamic_exit_hold"
     assert decision.metadata["dynamic_exit_decision"] == "hold"
     assert decision.metadata["dynamic_exit_trigger"] == "riding_uptrend"
-
-
 def test_dynamic_exit_takes_profit_on_trailing_reversal_after_peak() -> None:
     """回撤反转 EXIT：先创峰值，再从峰值回撤 ≥4% 且在止盈区 → 按 bid 止盈。"""
 
@@ -3769,8 +3256,6 @@ def test_dynamic_exit_takes_profit_on_trailing_reversal_after_peak() -> None:
     assert decision.size_shares == Decimal("10")
     assert decision.metadata["dynamic_exit_decision"] == "take_profit"
     assert decision.metadata["dynamic_exit_trigger"] == "trailing_reversal"
-
-
 def test_dynamic_exit_takes_profit_on_capital_efficiency() -> None:
     """资金效率 EXIT：bid 高但非新高、回撤不足、结算慢 → 按 bid 止盈腾资金。"""
 
@@ -3816,8 +3301,6 @@ def test_dynamic_exit_takes_profit_on_capital_efficiency() -> None:
     assert decision.price == Decimal("0.97")
     assert decision.metadata["dynamic_exit_decision"] == "take_profit"
     assert decision.metadata["dynamic_exit_trigger"] == "capital_efficiency"
-
-
 def test_dynamic_exit_takes_profit_when_book_is_settled() -> None:
     """已结算 EXIT：best bid ≥ 0.99（盘口几乎结算到 1）→ 直接吃掉 bid。"""
 
@@ -3842,8 +3325,6 @@ def test_dynamic_exit_takes_profit_when_book_is_settled() -> None:
     assert decision.price == Decimal("0.99")
     assert decision.metadata["dynamic_exit_decision"] == "take_profit"
     assert decision.metadata["dynamic_exit_trigger"] == "settled"
-
-
 def test_dynamic_exit_stops_loss_when_fair_value_collapses_below_entry_half() -> None:
     """不利退出：fair value 跌破买入价 × 0.5 + 多信号联立 → 触发数据驱动止损。
 
@@ -3895,8 +3376,6 @@ def test_dynamic_exit_stops_loss_when_fair_value_collapses_below_entry_half() ->
     assert decision.price == Decimal("0.600")
     assert decision.size_shares == Decimal("10")
     assert decision.metadata["dynamic_exit_decision"] == "stop_loss_thin_book"
-
-
 def test_dynamic_exit_holds_below_entry_when_not_stop_loss() -> None:
     """水下 HOLD：best bid ≤ 买入价但未触止损 → 本周期不挂 SELL。"""
 
@@ -3920,8 +3399,6 @@ def test_dynamic_exit_holds_below_entry_when_not_stop_loss() -> None:
     assert decision.reason == "dynamic_exit_hold"
     assert decision.metadata["dynamic_exit_decision"] == "hold"
     assert decision.metadata["dynamic_exit_trigger"] == "below_entry"
-
-
 def test_dynamic_exit_falls_back_to_static_price_when_no_orderbook() -> None:
     """无盘口兜底：缺实时盘口时不产出动态决策，退回静态退出价。"""
 
@@ -3946,8 +3423,6 @@ def test_dynamic_exit_falls_back_to_static_price_when_no_orderbook() -> None:
     # 无盘口时退回静态退出价（exit_no_price 0.995 对齐到 0.99 tick）。
     assert decision.price == Decimal("0.99")
     assert "dynamic_exit_decision" not in decision.metadata
-
-
 def test_dynamic_exit_uses_goalserve_implied_prob_as_fair_value() -> None:
     """Goalserve 赔率优先：metadata 有我方方向隐含概率时用它作 fair value。"""
 
@@ -3993,8 +3468,6 @@ def test_dynamic_exit_uses_goalserve_implied_prob_as_fair_value() -> None:
     assert decision.metadata["dynamic_exit_fair_value"] == "0.55"
     assert decision.metadata["dynamic_exit_trigger"] == "trailing_reversal"
     assert decision.price == Decimal("0.58")
-
-
 def test_depth_walked_exit_partial_and_full_coverage() -> None:
     """_depth_walked_exit 单元：逐档撮合，覆盖足够/不足两种情形。"""
 
@@ -4024,8 +3497,6 @@ def test_depth_walked_exit_partial_and_full_coverage() -> None:
     assert clearing is None
     assert covered is False
     assert realized == Decimal("0")
-
-
 def test_dynamic_exit_take_profit_fires_on_deep_book() -> None:
     """深簿止盈：bid 簿足够厚 → realized_avg ≈ best_bid → 止盈正常触发。"""
 
@@ -4059,8 +3530,6 @@ def test_dynamic_exit_take_profit_fires_on_deep_book() -> None:
     assert decision.metadata["dynamic_exit_trigger"] == "trailing_reversal"
     assert decision.price == Decimal("0.85")
     assert decision.metadata["dynamic_exit_realized_avg"] == "0.85"
-
-
 def test_dynamic_exit_take_profit_holds_for_depth_on_thin_book() -> None:
     """薄簿止盈 HOLD：bid 簿太薄、滑点超限 → 非紧急止盈改为 awaiting_bid_depth。"""
 
@@ -4106,8 +3575,6 @@ def test_dynamic_exit_take_profit_holds_for_depth_on_thin_book() -> None:
     assert decision.metadata["dynamic_exit_decision"] == "hold"
     assert decision.metadata["dynamic_exit_trigger"] == "awaiting_bid_depth"
     assert decision.metadata["dynamic_exit_blocked_trigger"] == "trailing_reversal"
-
-
 def test_dynamic_exit_stop_loss_still_exits_on_thin_book() -> None:
     """薄簿止损：簿薄、滑点大也照样止损——割肉优先于滑点。"""
 
@@ -4156,8 +3623,6 @@ def test_dynamic_exit_stop_loss_still_exits_on_thin_book() -> None:
     assert decision.reason == "dynamic_exit_stop_loss_thin_book"
     assert decision.metadata["dynamic_exit_decision"] == "stop_loss_thin_book"
     assert decision.price == Decimal("0.600")
-
-
 def test_dynamic_exit_takes_profit_on_depth_imbalance_reversal() -> None:
     """双侧深度失衡反转止盈：浮盈中失衡比从峰值向卖方倾斜下降 ≥0.20
     （买方撤离 + 卖方堆单 = 风向逆转）→ 抢在价格被砸下来前兑现。"""
@@ -4206,8 +3671,6 @@ def test_dynamic_exit_takes_profit_on_depth_imbalance_reversal() -> None:
     assert decision.metadata["dynamic_exit_decision"] == "take_profit"
     assert decision.metadata["dynamic_exit_trigger"] == "depth_imbalance_reversal"
     assert decision.price == Decimal("0.84")
-
-
 def test_recovery_keeps_ended_single_game_open_for_ended_not_closed_scan() -> None:
     market = _totals_market()
 
@@ -4236,8 +3699,6 @@ def test_recovery_keeps_ended_single_game_open_for_ended_not_closed_scan() -> No
 
     assert decision.pause_trading is False
     assert decision.pause_reason == ""
-
-
 def test_recovery_pauses_new_entries_when_live_state_is_abnormal() -> None:
     market = _totals_market()
 
@@ -4266,8 +3727,6 @@ def test_recovery_pauses_new_entries_when_live_state_is_abnormal() -> None:
 
     assert decision.pause_trading is True
     assert decision.pause_reason == "sports_live_state_postponed"
-
-
 def test_recovery_manages_all_sports_target_tokens_instead_of_fixed_primary_token() -> None:
     market = _moneyline_market()
     position = Position(
@@ -4307,8 +3766,6 @@ def test_recovery_manages_all_sports_target_tokens_instead_of_fixed_primary_toke
     assert [(action.action.value, action.token_id) for action in decision.actions] == [
         ("cancel", "home"),
     ]
-
-
 def test_recovery_does_not_create_exit_order_in_settlement_only_mode() -> None:
     market = _moneyline_market()
     position = Position(
@@ -4332,8 +3789,6 @@ def test_recovery_does_not_create_exit_order_in_settlement_only_mode() -> None:
 
     assert decision.reason == "strategy_recovery"
     assert decision.actions == ()
-
-
 def test_recovery_places_profit_take_for_near_settlement_position_missing_overlay() -> None:
     market = _moneyline_market().with_tick_size(Decimal("0.01"))
     position = Position(
@@ -4362,8 +3817,6 @@ def test_recovery_places_profit_take_for_near_settlement_position_missing_overla
     assert decision.actions[0].price == Decimal("0.94")
     assert decision.actions[0].size_shares == Decimal("5.376342")
     assert decision.actions[0].metadata["profit_take_expected_profit_usdc"] == "0.05376342"
-
-
 def test_recovery_places_profit_take_for_high_price_uncovered_position() -> None:
     market = _totals_market().with_tick_size(Decimal("0.01"))
     position = Position(
@@ -4394,8 +3847,6 @@ def test_recovery_places_profit_take_for_high_price_uncovered_position() -> None
     assert decision.actions[0].size_shares == Decimal("5.0505")
     assert decision.actions[0].metadata["exit_mode"] == "profit_take"
     assert decision.actions[0].metadata["profit_take_expected_profit_usdc"] == "0.059995"
-
-
 def test_recovery_uses_profitable_best_bid_when_one_tick_profit_is_too_small() -> None:
     market = _totals_market().with_tick_size(Decimal("0.001"))
     position = Position(
@@ -4437,8 +3888,6 @@ def test_recovery_uses_profitable_best_bid_when_one_tick_profit_is_too_small() -
     assert decision.actions[0].price == Decimal("0.999")
     assert decision.actions[0].metadata["profit_take_price_source"] == "best_bid"
     assert decision.actions[0].metadata["profit_take_expected_profit_usdc"] == "0.0455495"
-
-
 def test_recovery_places_profit_take_for_unknown_legacy_high_price_position() -> None:
     market = _unknown_legacy_market().with_tick_size(Decimal("0.01"))
     position = Position(
@@ -4468,8 +3917,6 @@ def test_recovery_places_profit_take_for_unknown_legacy_high_price_position() ->
     assert decision.actions[0].token_id == "legacy"
     assert decision.actions[0].price == Decimal("0.99")
     assert decision.actions[0].size_shares == Decimal("5.0505")
-
-
 def test_recovery_does_not_repeat_profit_take_for_unknown_candidate_without_orderbook() -> None:
     market = _unknown_legacy_market().with_trading_status(TradingStatus.CANDIDATE).with_tick_size(Decimal("0.01"))
     position = Position(
@@ -4494,8 +3941,6 @@ def test_recovery_does_not_repeat_profit_take_for_unknown_candidate_without_orde
     assert decision.pause_trading is True
     assert decision.pause_reason == "missing_target"
     assert decision.actions == ()
-
-
 def test_recovery_does_not_profit_take_unknown_legacy_low_price_position() -> None:
     market = _unknown_legacy_market().with_tick_size(Decimal("0.01"))
     position = Position(
@@ -4520,8 +3965,6 @@ def test_recovery_does_not_profit_take_unknown_legacy_low_price_position() -> No
     assert decision.pause_trading is True
     assert decision.pause_reason == "missing_target"
     assert decision.actions == ()
-
-
 def test_recovery_keeps_existing_profit_take_exit_order_in_settlement_only_mode() -> None:
     market = _totals_market().with_tick_size(Decimal("0.01"))
     open_sell = Order(
@@ -4551,8 +3994,6 @@ def test_recovery_keeps_existing_profit_take_exit_order_in_settlement_only_mode(
 
     assert decision.reason == "strategy_recovery"
     assert decision.actions == ()
-
-
 def test_recovery_cancels_historical_open_exit_order_in_settlement_only_mode() -> None:
     market = _moneyline_market()
     open_sell = Order(
@@ -4582,8 +4023,6 @@ def test_recovery_cancels_historical_open_exit_order_in_settlement_only_mode() -
     assert [(action.action.value, action.reason, action.order_id) for action in decision.actions] == [
         ("cancel", "settlement_only_open_exit_order_detected", "sell-1"),
     ]
-
-
 def test_recovery_keeps_fresh_open_entry_order_within_strategy_ttl() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
@@ -4614,8 +4053,6 @@ def test_recovery_keeps_fresh_open_entry_order_within_strategy_ttl() -> None:
     )
 
     assert decision.actions == ()
-
-
 def test_recovery_default_keeps_profit_take_entry_order_for_one_minute_window() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
@@ -4646,8 +4083,6 @@ def test_recovery_default_keeps_profit_take_entry_order_for_one_minute_window() 
     )
 
     assert decision.actions == ()
-
-
 def test_recovery_keeps_open_entry_order_when_exchange_snapshot_lacks_timestamp() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
@@ -4677,8 +4112,6 @@ def test_recovery_keeps_open_entry_order_when_exchange_snapshot_lacks_timestamp(
     )
 
     assert decision.actions == ()
-
-
 def test_recovery_default_cancels_open_entry_order_after_one_minute_window() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
@@ -4711,8 +4144,6 @@ def test_recovery_default_cancels_open_entry_order_after_one_minute_window() -> 
     assert [(action.action.value, action.reason, action.order_id) for action in decision.actions] == [
         ("cancel", "open_entry_order_detected", "buy-1"),
     ]
-
-
 def test_recovery_cancels_stale_open_entry_order_after_strategy_ttl() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = _moneyline_market()
@@ -4745,8 +4176,6 @@ def test_recovery_cancels_stale_open_entry_order_after_strategy_ttl() -> None:
     assert [(action.action.value, action.reason, action.order_id) for action in decision.actions] == [
         ("cancel", "open_entry_order_detected", "buy-1"),
     ]
-
-
 def test_recovery_cancels_stale_open_entry_order_even_when_market_has_no_strategy_target() -> None:
     now = datetime(2026, 4, 30, 7, 40, 20, tzinfo=timezone.utc)
     market = Market(
@@ -4783,8 +4212,6 @@ def test_recovery_cancels_stale_open_entry_order_even_when_market_has_no_strateg
     assert [(action.action.value, action.reason, action.order_id) for action in decision.actions] == [
         ("cancel", "open_entry_order_detected", "orphan-buy"),
     ]
-
-
 def test_recovery_does_not_place_static_exit_sell_for_uncovered_position() -> None:
     """auto_exit 开启时，未覆盖持仓由动态 ``decide_exit`` 处理，恢复侧不挂静态 SELL。"""
 
@@ -4809,8 +4236,6 @@ def test_recovery_does_not_place_static_exit_sell_for_uncovered_position() -> No
     )
 
     assert decision.actions == ()
-
-
 def _totals_market() -> Market:
     return Market(
         condition_id="totals-condition",
@@ -4825,8 +4250,6 @@ def _totals_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _unknown_legacy_market() -> Market:
     return Market(
         condition_id="legacy-condition",
@@ -4838,8 +4261,6 @@ def _unknown_legacy_market() -> Market:
         outcomes=(MarketOutcome(token_id="legacy", outcome=""),),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _yes_no_single_game_moneyline_market() -> Market:
     """Polymarket 把单场胜负盘编码成单个 Yes/No 市场的真实形态。"""
     return Market(
@@ -4856,8 +4277,6 @@ def _yes_no_single_game_moneyline_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def test_yes_no_single_game_moneyline_is_classified_as_moneyline() -> None:
     """单个 Yes/No 市场编码的单场胜负盘必须归为 MONEYLINE，而非 BINARY_PROP。"""
     market = _yes_no_single_game_moneyline_market()
@@ -4873,8 +4292,6 @@ def test_yes_no_single_game_moneyline_is_classified_as_moneyline() -> None:
     assert targets["lakers-win-yes"].invert_side is False
     assert targets["lakers-win-no"].label == "los angeles lakers"
     assert targets["lakers-win-no"].invert_side is True
-
-
 def test_yes_no_single_game_moneyline_maps_tokens_to_correct_live_sides() -> None:
     """Yes token → 点名球队所在 HOME/AWAY；No token → 对手所在 HOME/AWAY。"""
     market = _yes_no_single_game_moneyline_market()
@@ -4906,8 +4323,6 @@ def test_yes_no_single_game_moneyline_maps_tokens_to_correct_live_sides() -> Non
     # Lakers 是直播源主队 → Yes=HOME；No 结算对手获胜 → AWAY。
     assert yes_target is not None and yes_target.side == SportsMarketSide.HOME
     assert no_target is not None and no_target.side == SportsMarketSide.AWAY
-
-
 def test_yes_no_single_game_moneyline_maps_sides_when_named_team_is_away() -> None:
     """点名球队是直播源客队时，Yes→AWAY、No→HOME，方向不能错配。"""
     market = Market(
@@ -4945,8 +4360,6 @@ def test_yes_no_single_game_moneyline_maps_sides_when_named_team_is_away() -> No
 
     assert yes_target is not None and yes_target.side == SportsMarketSide.AWAY
     assert no_target is not None and no_target.side == SportsMarketSide.HOME
-
-
 def test_yes_no_outright_championship_is_not_classified_as_moneyline() -> None:
     """"Will [team] win the championship?" 是 outright，不能被改判为 MONEYLINE。"""
     market = Market(
@@ -4969,8 +4382,6 @@ def test_yes_no_outright_championship_is_not_classified_as_moneyline() -> None:
     assert descriptor.accepted is True
     assert descriptor.market_type == SportsMarketType.BINARY_PROP
     assert descriptor.market_family == SportsMarketFamily.OUTRIGHT
-
-
 def test_yes_no_series_market_is_not_classified_as_single_game_moneyline() -> None:
     """系列赛"赢下系列赛"的 Yes/No 市场不归为单场胜负盘。"""
     market = Market(
@@ -4992,8 +4403,6 @@ def test_yes_no_series_market_is_not_classified_as_single_game_moneyline() -> No
 
     assert descriptor.market_type != SportsMarketType.MONEYLINE
     assert descriptor.market_family != SportsMarketFamily.SINGLE_GAME
-
-
 def test_team_name_outcome_moneyline_still_classified_as_moneyline() -> None:
     """两个球队名 outcome 的传统胜负盘路径不受 Yes/No 改动影响。"""
     market = _moneyline_market()
@@ -5009,8 +4418,6 @@ def test_team_name_outcome_moneyline_still_classified_as_moneyline() -> None:
     ]
     # team-name-outcome 胜负盘不走 invert_side 翻转逻辑。
     assert all(target.invert_side is False for target in descriptor.targets)
-
-
 def test_soccer_three_way_binary_prop_classification_unchanged() -> None:
     """足球 3-way 胜负盘仍是 BINARY_PROP，由 core 独立路径处理，不被改判。"""
     market = Market(
@@ -5031,8 +4438,6 @@ def test_soccer_three_way_binary_prop_classification_unchanged() -> None:
     descriptor = describe_sports_market(market)
 
     assert descriptor.market_type == SportsMarketType.BINARY_PROP
-
-
 def test_yes_no_single_game_moneyline_creates_buy_with_tail_lock_acceptance() -> None:
     """端到端：单场 Yes/No 胜负盘 + 大比分领先 → moneyline 扫尾锁定成交。"""
     market = _yes_no_single_game_moneyline_market()
@@ -5068,8 +4473,6 @@ def test_yes_no_single_game_moneyline_creates_buy_with_tail_lock_acceptance() ->
     assert decision.token_id == "lakers-win-yes"
     assert decision.metadata["tail_reason"] == "moneyline_late_lead"
     assert decision.metadata["execution_permission"] == "auto_execute"
-
-
 def _moneyline_market() -> Market:
     return Market(
         condition_id="moneyline-condition",
@@ -5084,8 +4487,6 @@ def _moneyline_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _moneyline_market_for_index(index: int) -> Market:
     return Market(
         condition_id=f"moneyline-condition-{index}",
@@ -5100,8 +4501,6 @@ def _moneyline_market_for_index(index: int) -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _moneyline_live_game() -> dict[str, object]:
     return {
         "league": "NBA",
@@ -5114,8 +4513,6 @@ def _moneyline_live_game() -> dict[str, object]:
         "status": "live",
         "observed_at": "2026-04-27T00:00:00+00:00",
     }
-
-
 def _totals_live_game() -> dict[str, object]:
     return {
         "league": "NHL",
@@ -5128,8 +4525,6 @@ def _totals_live_game() -> dict[str, object]:
         "status": "live",
         "observed_at": "2026-04-27T00:00:00+00:00",
     }
-
-
 def _tennis_near_locked_live_game() -> dict[str, object]:
     return {
         "league": "ATP",
@@ -5151,8 +4546,6 @@ def _tennis_near_locked_live_game() -> dict[str, object]:
             "set_scores": ((6, 3), (5, 3)),
         },
     }
-
-
 def _spreads_market() -> Market:
     return Market(
         condition_id="spreads-condition",
@@ -5167,8 +4560,6 @@ def _spreads_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _single_game_binary_prop_market() -> Market:
     return Market(
         condition_id="single-game-binary-prop-condition",
@@ -5184,8 +4575,6 @@ def _single_game_binary_prop_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _league_winner_market() -> Market:
     return Market(
         condition_id="league-winner-condition",
@@ -5201,8 +4590,6 @@ def _league_winner_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _series_winner_market() -> Market:
     return Market(
         condition_id="series-winner-condition",
@@ -5217,8 +4604,6 @@ def _series_winner_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _series_totals_market() -> Market:
     return Market(
         condition_id="series-total-condition",
@@ -5233,8 +4618,6 @@ def _series_totals_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _outright_market() -> Market:
     return Market(
         condition_id="outright-condition",
@@ -5249,8 +4632,6 @@ def _outright_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _esports_series_market() -> Market:
     return Market(
         condition_id="esports-condition",
@@ -5265,8 +4646,6 @@ def _esports_series_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _epl_top_goalscorer_yes_no_market() -> Market:
     return Market(
         condition_id="epl-top-goalscorer-condition",
@@ -5282,8 +4661,6 @@ def _epl_top_goalscorer_yes_no_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _ucl_winner_yes_no_market() -> Market:
     return Market(
         condition_id="ucl-winner-condition",
@@ -5299,8 +4676,6 @@ def _ucl_winner_yes_no_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _nba_champion_yes_no_market() -> Market:
     return Market(
         condition_id="nba-champion-condition",
@@ -5316,8 +4691,6 @@ def _nba_champion_yes_no_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _tennis_totals_market() -> Market:
     return Market(
         condition_id="tennis-total-condition",
@@ -5333,8 +4706,6 @@ def _tennis_totals_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _tennis_first_set_total_market() -> Market:
     return Market(
         condition_id="tennis-first-set-total-condition",
@@ -5350,8 +4721,6 @@ def _tennis_first_set_total_market() -> Market:
         ),
         trading_status=TradingStatus.ELIGIBLE,
     )
-
-
 def _tennis_moneyline_market() -> Market:
     return Market(
         condition_id="tennis-moneyline-condition",
@@ -5368,8 +4737,6 @@ def _tennis_moneyline_market() -> Market:
         trading_status=TradingStatus.ELIGIBLE,
         min_order_size=Decimal("5"),
     )
-
-
 def _orderbook(token_id: str, best_ask: Decimal) -> OrderbookSnapshot:
     return OrderbookSnapshot(
         token_id=token_id,
@@ -5380,16 +4747,12 @@ def _orderbook(token_id: str, best_ask: Decimal) -> OrderbookSnapshot:
         received_at=datetime(2026, 4, 27, tzinfo=timezone.utc),
         condition_id="condition",
     )
-
-
 class _MarketWs:
     def __init__(self, snapshots: dict[str, OrderbookSnapshot]) -> None:
         self._snapshots = snapshots
 
     def snapshot(self, token_id: str) -> OrderbookSnapshot | None:
         return self._snapshots.get(token_id)
-
-
 class _NoFillExecutor:
     async def submit(self, intent) -> OrderResult:
         return OrderResult(
@@ -5406,8 +4769,6 @@ class _NoFillExecutor:
             requested_amount_usdc=intent.amount_usdc,
             reason="unit_test_no_fill",
         )
-
-
 async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
@@ -5430,7 +4791,6 @@ async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
         runtime=SimpleNamespace(
             settings=SimpleNamespace(
                 portfolio_budget_usdc=Decimal("10"),
-                order_retry_limit=2,
             ),
             extension=_strategy,
             registry=registry,
@@ -5475,8 +4835,6 @@ async def _run_admin_auto_candidate_confirmation_attempt() -> dict[str, object]:
             note="should_not_submit",
         ),
     }
-
-
 async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
     registry = MarketRegistry()
     snapshots: dict[str, OrderbookSnapshot] = {}
@@ -5512,7 +4870,6 @@ async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
         runtime=SimpleNamespace(
             settings=SimpleNamespace(
                 portfolio_budget_usdc=Decimal("10"),
-                order_retry_limit=2,
             ),
             extension=_strategy,
             registry=registry,
@@ -5530,8 +4887,6 @@ async def _run_admin_candidate_metadata_source_flow() -> dict[str, object]:
         )
     )
     return await service.list_strategy_candidates(limit=2, offset=0)
-
-
 async def _run_admin_live_source_gap_diagnostics_flow() -> dict[str, object]:
     registry = MarketRegistry()
     live_store = EntryMetadataStore()
@@ -5586,8 +4941,6 @@ async def _run_admin_live_source_gap_diagnostics_flow() -> dict[str, object]:
         offset=0,
         now=datetime(2026, 4, 30, 6, 0, tzinfo=timezone.utc),
     )
-
-
 async def _run_admin_live_source_gap_with_market_service_hooks_flow() -> dict[str, object]:
     registry = MarketRegistry()
     live_store = EntryMetadataStore()
@@ -5636,8 +4989,6 @@ async def _run_admin_live_source_gap_with_market_service_hooks_flow() -> dict[st
         offset=0,
         now=datetime(2026, 4, 30, 6, 0, tzinfo=timezone.utc),
     )
-
-
 async def _run_worker_without_live_game_state():
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
@@ -5676,8 +5027,6 @@ async def _run_worker_without_live_game_state():
             payload={"source": "unit_test"},
         )
     )
-
-
 async def _run_worker_with_live_state_entry_signal():
     market = _totals_market()
     orderbook = _orderbook(token_id="over", best_ask=Decimal("0.98"))
@@ -5702,7 +5051,6 @@ async def _run_worker_with_live_state_entry_signal():
         kelly_max_position_fraction=Decimal("1"),
         kelly_min_edge=Decimal("0"),
         kelly_min_stake_usdc=Decimal("1"),
-        order_retry_limit=2,
         entry_metadata_provider=lambda event, snapshot: {
             "live_game": {
                 "league": "NHL",

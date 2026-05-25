@@ -361,7 +361,6 @@ class PolymarketOrderExecutionClient:
                 size_shares=request.size_shares,
                 post_only=request.post_only,
                 reason=request.reason,
-                retry_count=request.retry_count,
                 timestamps=request.timestamps,
             )
             signed_order = self._trading_client.create_signed_order(replacement_request)
@@ -430,7 +429,6 @@ class PolymarketOrderExecutionClient:
             size_shares=request.size_shares,
             post_only=request.post_only,
             reason=request.reason,
-            retry_count=request.retry_count,
             timestamps=request.timestamps,
         )
         with self._lock:

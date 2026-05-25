@@ -353,7 +353,7 @@ class LiveEvent:
     observed_at: datetime | None = None
     # HTTP `Date` response header（Goalserve server 生成响应时间）。
     # 配合 utc_now() 算 live_feed_lag_seconds = stale 程度，决策侧据此降级
-    # （exit_overlay / odds_gap 在 lag > 阈值时不基于陈旧状态决策）。
+    # （exit_overlay 在 lag > 阈值时不基于陈旧状态决策）。
     server_clock_at: datetime | None = None
     event_start_time: datetime | None = None
     event_name: str = ""

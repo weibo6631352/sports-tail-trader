@@ -16,8 +16,6 @@ from polymarket_trader.runtime.registry import MarketRegistry
 
 from strategies.current.config import CurrentStrategyConfig
 from strategies.current.strategy import CurrentStrategy
-
-
 def test_virtual_paper_trade_uses_real_runtime_and_only_virtualizes_final_submit() -> None:
     runtime = _runtime_with_real_like_candidate()
 
@@ -56,8 +54,6 @@ def test_virtual_paper_trade_uses_real_runtime_and_only_virtualizes_final_submit
     assert Decimal(result["paper_pnl"]["projected_net_pnl_usdc"]) > Decimal("0")
     # 测试用 Market 未配置 fee_rate_bps，所以 fee 为 0；Decimal("0").quantize 序列化为 "0E-18"
     assert Decimal(result["paper_pnl"]["fees_paid_usdc"]) == Decimal("0")
-
-
 def test_virtual_paper_trade_does_not_fabricate_trade_without_live_metadata() -> None:
     runtime = _runtime_with_real_like_candidate()
     runtime.entry_metadata_store = EntryMetadataStore()
@@ -71,8 +67,6 @@ def test_virtual_paper_trade_does_not_fabricate_trade_without_live_metadata() ->
     assert result["opportunity_funnel"]["auto_execute_count"] == 0
     assert result["rejection_summary"]["by_reason"]["missing_live_game_state"] == 1
     assert result["rejection_summary"]["by_stage"]["plan"] == 1
-
-
 def test_virtual_paper_trade_prioritizes_live_rejection_over_scheduled_single_game() -> None:
     runtime = _runtime_with_scheduled_and_live_single_game_rejections()
 
@@ -80,11 +74,9 @@ def test_virtual_paper_trade_prioritizes_live_rejection_over_scheduled_single_ga
 
     assert result["status"] == "no_trade"
     assert result["selection"]["market_slug"] == "nhl-live-tail-2026-04-28-total-10pt5"
-    # totals 盘口扫尾未锁定后会继续走赔率差价：无 Goalserve totals 数据 → no_odds_gap。
-    # 本用例只验证"live 拒绝优先于 scheduled 拒绝"，拒绝原因为 odds-gap 路径产物即可。
-    assert result["reason"] == "no_odds_gap"
-
-
+    # totals 盘口扫尾未锁定 → outcome_not_locked（唯一入场路径）。
+    # 本用例只验证"live 拒绝优先于 scheduled 拒绝"，具体拒绝原因不强依赖。
+    assert result["reason"] == "outcome_not_locked"
 # === F-3 显式 market 找不到时不静默 fallback ===
 
 def test_explicit_market_slug_not_found_returns_not_found_without_fallback() -> None:
@@ -103,8 +95,6 @@ def test_explicit_market_slug_not_found_returns_not_found_without_fallback() -> 
     assert selection["market_slug"] != "nhl-tb-mon-total-4-5"
     # 没有真实订单签名发生
     assert runtime.trading_client.signed_requests == []
-
-
 def test_explicit_condition_id_not_found_returns_not_found_without_fallback() -> None:
     runtime = _runtime_with_real_like_candidate()
 
@@ -115,8 +105,6 @@ def test_explicit_condition_id_not_found_returns_not_found_without_fallback() ->
     assert result["status"] == "no_trade"
     assert result["reason"] == "explicit_market_not_found"
     assert result["selection"]["metadata"]["requested_condition_id"] == "0xdeadbeefnotaregisteredcondition"
-
-
 def test_no_explicit_request_still_falls_back_to_registry_scan() -> None:
     # 三字段全 None 是 documented behavior：扫全部市场。F-3 修复不应影响这条路径。
     runtime = _runtime_with_real_like_candidate()
@@ -125,16 +113,12 @@ def test_no_explicit_request_still_falls_back_to_registry_scan() -> None:
 
     # 注册表里有一个 candidate，仍应跑通模拟
     assert result["status"] == "ok"
-
-
 class _MarketWs:
     def __init__(self, snapshots: dict[str, OrderbookSnapshot]) -> None:
         self._snapshots = snapshots
 
     def snapshot(self, token_id: str) -> OrderbookSnapshot | None:
         return self._snapshots.get(token_id)
-
-
 class _FakeTradingClient:
     """只实现真实签名阶段需要的最小生产客户端接口。"""
 
@@ -144,8 +128,6 @@ class _FakeTradingClient:
     def create_signed_order(self, request: Any) -> dict[str, Any]:
         self.signed_requests.append(request)
         return {"signed": True, "idempotency_key": request.idempotency_key}
-
-
 def _runtime_with_real_like_candidate() -> SimpleNamespace:
     observed_at = datetime(2026, 4, 27, tzinfo=timezone.utc)
     market = Market(
@@ -212,7 +194,6 @@ def _runtime_with_real_like_candidate() -> SimpleNamespace:
             kelly_min_stake_usdc=Decimal("1"),
             kelly_allow_round_up_to_market_min=True,
             kelly_round_up_max_overbet_ratio=Decimal("1"),
-            order_retry_limit=2,
         ),
         registry=registry,
         market_ws_worker=market_ws,
@@ -228,8 +209,6 @@ def _runtime_with_real_like_candidate() -> SimpleNamespace:
         db_session_factory=None,
         clob_client=None,
     )
-
-
 def _runtime_with_mixed_esports_and_scheduled_single_game() -> SimpleNamespace:
     runtime = _runtime_with_real_like_candidate()
     esports_market = Market(
@@ -339,8 +318,6 @@ def _runtime_with_mixed_esports_and_scheduled_single_game() -> SimpleNamespace:
         },
     )
     return runtime
-
-
 def _runtime_with_scheduled_and_live_single_game_rejections() -> SimpleNamespace:
     runtime = _runtime_with_mixed_esports_and_scheduled_single_game()
     observed_at = datetime(2026, 4, 27, tzinfo=timezone.utc)
@@ -404,8 +381,6 @@ def _runtime_with_scheduled_and_live_single_game_rejections() -> SimpleNamespace
         },
     )
     return runtime
-
-
 def test_orderbook_rest_fallback_returns_gracefully_when_clob_raises() -> None:
     """Exception path (line 933): REST clob failure → returns original ws snapshot, budget decremented."""
 

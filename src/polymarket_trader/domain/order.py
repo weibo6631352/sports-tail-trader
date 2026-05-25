@@ -67,7 +67,6 @@ class BuyOrderIntent:
     order_type: OrderType = OrderType.FAK
     idempotency_key: str | None = None
     post_only: bool = False
-    retry_count: int = 0
     allow_open_exit_overlap: bool = False
     intent_tags: frozenset[str] = field(default_factory=frozenset)
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -97,7 +96,6 @@ class SellOrderIntent:
     order_type: OrderType = OrderType.GTC
     idempotency_key: str | None = None
     post_only: bool = False
-    retry_count: int = 0
     intent_tags: frozenset[str] = field(default_factory=frozenset)
     metadata: Mapping[str, Any] = field(default_factory=dict)
 

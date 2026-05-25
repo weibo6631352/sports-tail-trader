@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   SimpleGrid,
@@ -34,7 +35,8 @@ import {
   formatPercent,
   toDecimal,
 } from '@shared/format'
-import type { PortfolioExposureItem } from '@core/api/types'
+import type { PortfolioExposure, PortfolioExposureItem } from '@core/api/types'
+import type { UseQueryResult } from '@tanstack/react-query'
 
 export function LiveOverviewPage() {
   const navigate = useNavigate()
@@ -70,6 +72,10 @@ export function LiveOverviewPage() {
   const pausedMarkets = useQuery({
     queryKey: qk.markets.list({ trading_status: 'paused', limit: 15 }),
     queryFn: ({ signal }) => marketsApi.list({ trading_status: 'paused', limit: 15 }, signal),
+  })
+  const trackingBreakdown = useQuery({
+    queryKey: qk.markets.trackingBreakdown(),
+    queryFn: ({ signal }) => marketsApi.trackingBreakdown(signal),
   })
   const dataFreshness = useQuery({
     queryKey: qk.candidates.dataFreshness(),
@@ -287,7 +293,7 @@ export function LiveOverviewPage() {
           ) : (
             <Stack gap={6}>
               <KV
-                k="追踪市场数"
+                k="候选扫描数"
                 v={String(dataFreshness.data?.item_count ?? '—')}
               />
               {(() => {
@@ -527,31 +533,45 @@ export function LiveOverviewPage() {
           )}
         </SectionCard>
 
-        {/* SSE / 订阅 */}
-        <SectionCard title="SSE / 订阅">
+        {/* 订阅状态：拆清两条链路 */}
+        <SectionCard
+          title="订阅状态"
+          description="浏览器→后端 SSE 流 与 后端→Polymarket WS 推送 是两条不同的链路"
+        >
           {metrics.error ? (
             <QueryErrorNotice error={metrics.error} compact />
           ) : (
-            <Stack gap={4}>
+            <Stack gap={6}>
+              <Text size="xs" c="dimmed" fw={500}>
+                Polymarket WS（盘口推送）
+              </Text>
               <KV
-                k="active subscribers"
+                k="订阅 token 数"
+                v={String(trackingBreakdown.data?.ws_subscribed_token_count ?? '—')}
+                tone={
+                  (trackingBreakdown.data?.ws_subscribed_token_count ?? 0) > 0
+                    ? 'pos'
+                    : 'neutral'
+                }
+              />
+              <KV
+                k="live phase markets"
+                v={String(trackingBreakdown.data?.by_live_phase?.live ?? '—')}
+              />
+              <Divider my={4} />
+              <Text size="xs" c="dimmed" fw={500}>
+                前端 SSE（浏览器订阅本后端推送）
+              </Text>
+              <KV
+                k="活跃浏览器连接"
                 v={String(metrics.data?.sse_active_subscribers ?? '—')}
               />
               <KV
-                k="dropped events"
+                k="丢弃事件"
                 v={String(metrics.data?.sse_dropped_events_total ?? '—')}
                 tone={
                   (metrics.data?.sse_dropped_events_total ?? 0) > 0 ? 'neg' : 'neutral'
                 }
-              />
-              <KV
-                k="追踪市场"
-                v={String(portfolio.data?.markets_tracked ?? '—')}
-              />
-              <KV
-                k="暂停计数"
-                v={String(portfolio.data?.pause_count ?? '—')}
-                tone={(portfolio.data?.pause_count ?? 0) > 0 ? 'neg' : 'neutral'}
               />
             </Stack>
           )}
@@ -559,55 +579,10 @@ export function LiveOverviewPage() {
 
         {/* 持仓敞口（全宽）*/}
         <div style={{ gridColumn: '1 / -1' }}>
-          <SectionCard
-            title="持仓敞口"
-            description={
-              exposure.data?.position_count != null
-                ? `${exposure.data.position_count} 个持仓 · 总名义 ${formatUsdc(exposure.data.total_notional_usdc)} · 未实现 PnL ${formatUsdc(exposure.data.total_cash_pnl)}`
-                : undefined
-            }
-            actions={
-              <Anchor size="xs" onClick={() => navigate('/live/positions')}>
-                → 持仓管理
-              </Anchor>
-            }
-          >
-            {exposure.error ? (
-              <QueryErrorNotice error={exposure.error} compact />
-            ) : (exposure.data?.items ?? []).length === 0 ? (
-              <Text c="dimmed" size="xs">
-                无开口持仓
-              </Text>
-            ) : (
-              <Stack gap={0}>
-                {/* 表头 */}
-                <Group
-                  justify="space-between"
-                  gap="xs"
-                  px={4}
-                  py={4}
-                  style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}
-                >
-                  {['市场', '仓位(shares)', '均价', '现价', '未实现PnL', '%', '状态'].map(
-                    (h) => (
-                      <Text key={h} size="xs" c="dimmed" fw={500} style={{ minWidth: 60 }}>
-                        {h}
-                      </Text>
-                    ),
-                  )}
-                </Group>
-                {(exposure.data?.items ?? [])
-                  .sort((a, b) => {
-                    const na = toDecimal(a.notional_usdc)?.toNumber() ?? 0
-                    const nb = toDecimal(b.notional_usdc)?.toNumber() ?? 0
-                    return nb - na
-                  })
-                  .map((item: PortfolioExposureItem) => (
-                    <PositionRow key={item.token_id} item={item} />
-                  ))}
-              </Stack>
-            )}
-          </SectionCard>
+          <ExposureSection
+            exposure={exposure}
+            onNavigate={() => navigate('/live/positions')}
+          />
         </div>
 
         {/* 策略私有 widgets */}
@@ -618,6 +593,95 @@ export function LiveOverviewPage() {
         ))}
       </SimpleGrid>
     </>
+  )
+}
+
+function ExposureSection({
+  exposure,
+  onNavigate,
+}: {
+  exposure: UseQueryResult<PortfolioExposure, Error>
+  onNavigate: () => void
+}) {
+  // 默认隐藏 settled_zero_value=true 的"归零仓位"——对齐 Polymarket portfolio：
+  // resolved + 输方 token 在官方 UI 不显示，被 redeem 后链上余额归零自然消失。
+  // 我们没自动 redeem 链上 token，但用 settlement_scanner 检测胜负后已经把
+  // cur_price/current_value 标到 0 → 这里前端 UI 层做同样的"价值过滤"。
+  const [showSettled, setShowSettled] = useState(false)
+  const allItems: PortfolioExposureItem[] = exposure.data?.items ?? []
+  const liveItems = showSettled
+    ? allItems
+    : allItems.filter((i) => i.settled_zero_value !== true)
+  const hiddenCount = allItems.length - liveItems.length
+  const totalNotional = liveItems.reduce(
+    (acc, i) => acc + (toDecimal(i.notional_usdc)?.toNumber() ?? 0),
+    0,
+  )
+  const totalCashPnl = liveItems.reduce(
+    (acc, i) => acc + (toDecimal(i.cash_pnl)?.toNumber() ?? 0),
+    0,
+  )
+
+  return (
+    <SectionCard
+      title="持仓敞口"
+      description={
+        exposure.data
+          ? `${liveItems.length} 个持仓 · 总名义 $${totalNotional.toFixed(2)} · 未实现 PnL $${totalCashPnl.toFixed(2)}${hiddenCount > 0 ? ` · ${hiddenCount} 个已归零隐藏` : ''}`
+          : undefined
+      }
+      actions={
+        <Group gap="md">
+          {hiddenCount > 0 && (
+            <Anchor size="xs" onClick={() => setShowSettled((v) => !v)}>
+              {showSettled ? '隐藏归零仓位' : `显示 ${hiddenCount} 个归零仓位`}
+            </Anchor>
+          )}
+          <Anchor size="xs" onClick={onNavigate}>
+            → 持仓管理
+          </Anchor>
+        </Group>
+      }
+    >
+      {exposure.error ? (
+        <QueryErrorNotice error={exposure.error} compact />
+      ) : liveItems.length === 0 ? (
+        <Text c="dimmed" size="xs">
+          {allItems.length === 0
+            ? '无开口持仓'
+            : '所有持仓已归零（点击右上方可查看）'}
+        </Text>
+      ) : (
+        <Stack gap={0}>
+          {/* 表头 */}
+          <Group
+            justify="space-between"
+            gap="xs"
+            px={4}
+            py={4}
+            style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}
+          >
+            {['市场', '仓位(shares)', '均价', '现价', '未实现PnL', '%', '状态'].map(
+              (h) => (
+                <Text key={h} size="xs" c="dimmed" fw={500} style={{ minWidth: 60 }}>
+                  {h}
+                </Text>
+              ),
+            )}
+          </Group>
+          {liveItems
+            .slice()
+            .sort((a, b) => {
+              const na = toDecimal(a.notional_usdc)?.toNumber() ?? 0
+              const nb = toDecimal(b.notional_usdc)?.toNumber() ?? 0
+              return nb - na
+            })
+            .map((item) => (
+              <PositionRow key={item.token_id} item={item} />
+            ))}
+        </Stack>
+      )}
+    </SectionCard>
   )
 }
 
@@ -636,17 +700,20 @@ function PositionRow({ item }: { item: PortfolioExposureItem }) {
       : pctPnlTone === 'neg'
         ? 'var(--color-danger)'
         : undefined
-  const statusBadge = item.paused ? (
+  // 仓位状态四态：归零 / 暂停（仅人工触发）/ 可赎回 / 持有。
+  // item.paused 只反映 MarketPauseSource.MANUAL——后台 reconcile/risk/strategy
+  // 自动 pause 不在仓位行展示，避免把"市场内部控制态"塞进"仓位生命周期"。
+  const statusBadge = item.settled_zero_value ? (
+    <Badge color="gray" size="xs" variant="light">
+      归零
+    </Badge>
+  ) : item.paused ? (
     <Badge color="red" size="xs" variant="light">
       暂停
     </Badge>
   ) : item.redeemable ? (
     <Badge color="teal" size="xs" variant="light">
       可赎回
-    </Badge>
-  ) : item.settled_zero_value ? (
-    <Badge color="gray" size="xs" variant="light">
-      归零
     </Badge>
   ) : (
     <Badge color="blue" size="xs" variant="light">

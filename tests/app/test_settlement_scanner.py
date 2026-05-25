@@ -55,22 +55,6 @@ class _SpyEventBus:
         self.published.append(event)
 
 
-@dataclass
-class _StubPage:
-    items: tuple[Any, ...]
-
-
-async def _empty_audit_query(**kwargs: Any) -> _StubPage:
-    return _StubPage(items=())
-
-
-async def _seeded_audit_query(condition_ids: set[str], **kwargs: Any) -> _StubPage:
-    cid = kwargs.get("condition_id")
-    if cid in condition_ids:
-        return _StubPage(items=("placeholder",))
-    return _StubPage(items=())
-
-
 def test_resolve_payload_with_outcome_prices_picks_winner() -> None:
     payload = _StubGammaPayload(
         raw={"outcomePrices": ["1", "0"]},
@@ -121,7 +105,6 @@ def test_scanner_skips_positions_with_zero_shares() -> None:
     service = SettlementScannerService(
         gamma_market_by_condition=_noop_gamma,
         positions_provider=lambda: (_StubPosition("c1", Decimal("0")),),
-        audit_events_query=_empty_audit_query,
         event_bus=bus,
     )
     result = asyncio.run(service.run_once())
@@ -130,27 +113,36 @@ def test_scanner_skips_positions_with_zero_shares() -> None:
     assert bus.published == []
 
 
-def test_scanner_skips_already_settled() -> None:
+def test_scanner_dedupes_within_session_via_in_memory_set() -> None:
+    """同一 service 实例的第二次扫描不再发同一 cid 的 MARKET_SETTLED。
+
+    §3 强化：不查 DB audit_events 做幂等，靠内存 set + outbox event_id 兜底。
+    """
     bus = _SpyEventBus()
-    settled = {"c1"}
+    fetch_count = 0
 
-    async def _audit(**kwargs: Any) -> _StubPage:
-        return await _seeded_audit_query(settled, **kwargs)
-
-    async def _fetch_should_not_be_called(cid: str) -> Any:  # pragma: no cover
-        raise AssertionError("should not fetch already-settled market")
+    async def _fetch(cid: str) -> Any:
+        nonlocal fetch_count
+        fetch_count += 1
+        return _StubGammaPayload(
+            raw={"outcomePrices": ["1", "0"]},
+            outcomes=(_StubOutcome("tok-yes", "Yes"), _StubOutcome("tok-no", "No")),
+            closed=True,
+        )
 
     service = SettlementScannerService(
-        gamma_market_by_condition=_fetch_should_not_be_called,
+        gamma_market_by_condition=_fetch,
         positions_provider=lambda: (_StubPosition("c1", Decimal("10")),),
-        audit_events_query=_audit,
         event_bus=bus,
     )
-    result = asyncio.run(service.run_once())
-    assert result.scanned == 1
-    assert result.skipped_already_settled == 1
-    assert result.detected == 0
-    assert bus.published == []
+    first = asyncio.run(service.run_once())
+    second = asyncio.run(service.run_once())
+    assert first.detected == 1
+    assert len(bus.published) == 1
+    assert second.detected == 0
+    assert second.skipped_already_settled == 1
+    assert len(bus.published) == 1  # 第二轮不再 publish
+    assert fetch_count == 1  # 第二轮也不再 gamma lookup
 
 
 def test_scanner_emits_settlement_event_for_resolved_market() -> None:
@@ -167,7 +159,6 @@ def test_scanner_emits_settlement_event_for_resolved_market() -> None:
     service = SettlementScannerService(
         gamma_market_by_condition=_fetch,
         positions_provider=lambda: (_StubPosition("c1", Decimal("10")),),
-        audit_events_query=_empty_audit_query,
         event_bus=bus,
     )
     result = asyncio.run(service.run_once())
@@ -188,13 +179,97 @@ def test_scanner_silent_on_fetch_failure() -> None:
     service = SettlementScannerService(
         gamma_market_by_condition=_fetch,
         positions_provider=lambda: (_StubPosition("c1", Decimal("10")),),
-        audit_events_query=_empty_audit_query,
         event_bus=bus,
     )
     result = asyncio.run(service.run_once())
     assert result.failed_lookups == 1
     assert result.detected == 0
     assert bus.published == []
+
+
+def test_scanner_enriches_winning_position_with_redeemable_and_price_one() -> None:
+    """检测到 resolved → AccountStateStore 中胜方 Position 被标 redeemable=True / cur_price=1。"""
+
+    from polymarket_trader.domain.position import Position
+    from polymarket_trader.runtime.account_state import AccountStateStore
+
+    account_state = AccountStateStore()
+    winner = Position(
+        strategy_id="sports_tail",
+        condition_id="c-win",
+        token_id="tok-yes",
+        shares=Decimal("10"),
+        cost_usdc=Decimal("4"),
+    )
+    account_state.upsert_position(winner)
+    bus = _SpyEventBus()
+    payload = _StubGammaPayload(
+        raw={"outcomePrices": ["1", "0"]},
+        outcomes=(_StubOutcome("tok-yes", "Yes"), _StubOutcome("tok-no", "No")),
+        closed=True,
+    )
+
+    async def _fetch(cid: str) -> Any:
+        return payload
+
+    service = SettlementScannerService(
+        gamma_market_by_condition=_fetch,
+        positions_provider=lambda: (_StubPosition("c-win", Decimal("10")),),
+        event_bus=bus,
+        account_state_store=account_state,
+    )
+    asyncio.run(service.run_once())
+
+    enriched = next(
+        p for p in account_state.snapshot().positions if p.condition_id == "c-win"
+    )
+    assert enriched.redeemable is True
+    assert enriched.cur_price == Decimal("1")
+    assert enriched.current_value == Decimal("10")
+    assert enriched.cash_pnl == Decimal("6")  # 10 - 4
+    assert enriched.settled_zero_value is False  # winner 有价值
+
+
+def test_scanner_enriches_losing_position_to_settled_zero_value() -> None:
+    """输方 Position 被标 redeemable=True / cur_price=0 → settled_zero_value=True。"""
+
+    from polymarket_trader.domain.position import Position
+    from polymarket_trader.runtime.account_state import AccountStateStore
+
+    account_state = AccountStateStore()
+    loser = Position(
+        strategy_id="sports_tail",
+        condition_id="c-lose",
+        token_id="tok-no",
+        shares=Decimal("11232"),
+        cost_usdc=Decimal("11"),
+    )
+    account_state.upsert_position(loser)
+    payload = _StubGammaPayload(
+        raw={"outcomePrices": ["1", "0"]},  # yes 赢，我们持的是 no
+        outcomes=(_StubOutcome("tok-yes", "Yes"), _StubOutcome("tok-no", "No")),
+        closed=True,
+    )
+
+    async def _fetch(cid: str) -> Any:
+        return payload
+
+    service = SettlementScannerService(
+        gamma_market_by_condition=_fetch,
+        positions_provider=lambda: (_StubPosition("c-lose", Decimal("11232")),),
+        event_bus=_SpyEventBus(),
+        account_state_store=account_state,
+    )
+    asyncio.run(service.run_once())
+
+    enriched = next(
+        p for p in account_state.snapshot().positions if p.condition_id == "c-lose"
+    )
+    assert enriched.redeemable is True
+    assert enriched.cur_price == Decimal("0")
+    assert enriched.current_value == Decimal("0")
+    assert enriched.cash_pnl == Decimal("-11")
+    assert enriched.settled_zero_value is True
 
 
 def test_scanner_dedupes_condition_ids_across_multiple_token_positions() -> None:
@@ -214,7 +289,6 @@ def test_scanner_dedupes_condition_ids_across_multiple_token_positions() -> None
     service = SettlementScannerService(
         gamma_market_by_condition=_fetch,
         positions_provider=lambda: positions,
-        audit_events_query=_empty_audit_query,
         event_bus=bus,
     )
     result = asyncio.run(service.run_once())

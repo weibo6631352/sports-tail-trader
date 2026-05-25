@@ -10,14 +10,22 @@ from polymarket_trader.app.order_projection import AccountStateProjector
 from polymarket_trader.domain.events import Fill
 from polymarket_trader.domain.market import Market, MarketOutcome, TradingStatus
 from polymarket_trader.domain.order import OrderRecord
-from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.runtime.account_state import AccountStateStore
+from polymarket_trader.runtime.gamma_snapshot_store import GammaMarketSnapshotStore
 from polymarket_trader.runtime.registry import MarketRegistry, MarketRegistrySnapshot
 from polymarket_trader.workers.market_ws import MarketWsWorker
 
 RegistrySnapshotProvider = Callable[[], MarketRegistrySnapshot]
 _AUTHORITY_CALL_TIMEOUT_S = 5.0
+# gamma 元数据快照新鲜度阈值。discovery 每 0.5s 刷一次 events.markets，所以
+# 30s 内的 entry 一定是 discovery 写入的，跳过 /markets 直查。stale 或 missing
+# 都走 fallback 路径——保证孤儿 condition / 已下架市场仍能被检测到。
+_GAMMA_SNAPSHOT_FRESH_WINDOW_S = 30.0
+# 市场 WS orderbook 新鲜度阈值。market_ws 实时推送 + gap repair 已经覆盖正常
+# 链路，reconcile 只在 WS 长时间没推送时做 REST 兜底（liveness probe）。
+# 30s 是保守阈值——WS 通常每秒至少一条；30s 没推说明真断了。
+_WS_ORDERBOOK_FRESH_WINDOW_S = 30.0
 _T = TypeVar("_T")
 
 
@@ -33,6 +41,10 @@ class MarketAuthorityClient(Protocol):
         offset: int = 0,
         timeout_s: float | None = None,
     ) -> tuple[GammaMarketCandidate, ...]: ...
+
+    async def get_market_by_condition_id(
+        self, condition_id: str, *, timeout_s: float | None = None
+    ) -> GammaMarketCandidate | None: ...
 
 
 class OrderAuthorityClient(Protocol):
@@ -100,7 +112,6 @@ class AuthoritativeRefreshFailure:
 class AuthoritativeMarketRefresh:
     requested_market: Market
     refreshed_market: Market | None
-    orderbook_snapshots: tuple[OrderbookSnapshot, ...] = ()
     fee_rate_refreshed: bool = False
     failures: tuple[AuthoritativeRefreshFailure, ...] = ()
 
@@ -151,6 +162,9 @@ class ReconcileAuthorityRefresher:
         trading_client: TradingAuthorityClient | None = None,
         authority_call_timeout_s: float | None = None,
         market_authority_concurrency: int = 8,
+        paper_mode: bool = False,
+        gamma_snapshot_store: GammaMarketSnapshotStore | None = None,
+        refresh_account_inline: bool = True,
     ) -> None:
         if not strategy_id:
             raise ValueError("ReconcileAuthorityRefresher requires non-empty strategy_id")
@@ -163,6 +177,23 @@ class ReconcileAuthorityRefresher:
         self._clob_client = clob_client
         self._data_client = data_client
         self._trading_client = trading_client
+        # discovery_runner 每 0.5s 拉一次 /events?live=true，nested markets 已含
+        # 完整 GammaMarketDTO；写入 gamma_snapshot_store 后，reconcile 这边 fetch
+        # 命中缓存就直接返回，**完全省掉每 market 一次 /markets 网络调用**。
+        # 缓存 miss 或 stale（>30s）才 fallback 走原来的 /markets?slug=...，覆盖
+        # 孤儿 condition / 已下架市场。
+        self._gamma_snapshot_store = gamma_snapshot_store
+        # refresh() 主循环是否内联调用 refresh_account。当 UserAccountPoller 独立
+        # 后台轮询用户态时设 False——reconcile 主链路只做 market 元数据刷新，不再
+        # 同步等 data API / clob balance 网络调用。refresh_account 仍可被 poller
+        # 直接调用，paper_mode 检查依然生效。
+        self._refresh_account_inline = refresh_account_inline
+        # paper 模式下 paper_ledger + paper_balance_syncer 是用户态唯一权威：
+        # account_state_store 的 balance/positions/orders/fills 都由 syncer 每秒
+        # 从 paper_ledger 投影回去。reconcile 这边再拉 Polymarket data API 会
+        # 把"链上真实持仓"（用户钱包里的旧仓位）写回，与 syncer 抢同一份状态
+        # → "时有时无的 24 个幽灵持仓"。paper 模式直接跳过 user-side fetch。
+        self._paper_mode = paper_mode
         self._authority_call_timeout_s = (
             _AUTHORITY_CALL_TIMEOUT_S
             if authority_call_timeout_s is None
@@ -218,18 +249,29 @@ class ReconcileAuthorityRefresher:
             if market_to_apply is not None:
                 refreshed_markets += 1
                 self._apply_refreshed_market(market_to_apply)
-            if item.orderbook_snapshots:
-                refreshed_orderbooks += len(item.orderbook_snapshots)
-                await self._apply_refreshed_orderbooks(
-                    item.refreshed_market or item.requested_market,
-                    item.orderbook_snapshots,
-                )
             if item.fee_rate_refreshed:
                 refreshed_fee_rates += 1
             refresh_failures.extend(item.failures)
 
-        account_summary = await self.refresh_account(trace_id=trace_id, markets=markets)
-        refresh_failures.extend(account_summary.failures)
+        if self._refresh_account_inline:
+            account_summary = await self.refresh_account(trace_id=trace_id, markets=markets)
+            refresh_failures.extend(account_summary.failures)
+        else:
+            # UserAccountPoller 在跑——主循环跳过用户态拉取，不抢同一份 store。
+            account_summary = AuthoritativeRefreshSummary(
+                trace_id=trace_id,
+                market_count=0,
+                refreshed_markets=0,
+                refreshed_orderbooks=0,
+                refreshed_fee_rates=0,
+                refreshed_positions=0,
+                refreshed_open_orders=0,
+                refreshed_fills=0,
+                refreshed_balance=False,
+                refreshed_allowance=False,
+                user_refresh_enabled=False,
+                failures=(),
+            )
 
         missing_exposure_targets = self._missing_account_exposure_targets(
             existing_markets=markets,
@@ -253,12 +295,6 @@ class ReconcileAuthorityRefresher:
             if market_to_apply is not None:
                 refreshed_markets += 1
                 self._apply_refreshed_market(market_to_apply)
-            if item.orderbook_snapshots:
-                refreshed_orderbooks += len(item.orderbook_snapshots)
-                await self._apply_refreshed_orderbooks(
-                    item.refreshed_market or item.requested_market,
-                    item.orderbook_snapshots,
-                )
             if item.fee_rate_refreshed:
                 refreshed_fee_rates += 1
             refresh_failures.extend(item.failures)
@@ -288,7 +324,9 @@ class ReconcileAuthorityRefresher:
         data_refresh_enabled = self._data_client is not None and self._data_client.has_auth_client
         clob_refresh_enabled = self._clob_client is not None and self._clob_client.has_auth_client
         user_refresh_enabled = bool(self._trading_client is not None or data_refresh_enabled or clob_refresh_enabled)
-        if not user_refresh_enabled:
+        # paper 模式下 user-side 状态 = paper_ledger（由 paper_balance_syncer 投影），
+        # reconcile 拉真链上余额/持仓只会 race-fight 这个 syncer。直接跳过。
+        if self._paper_mode or not user_refresh_enabled:
             return AuthoritativeRefreshSummary(
                 trace_id=trace_id,
                 market_count=len(markets),
@@ -304,6 +342,11 @@ class ReconcileAuthorityRefresher:
                 failures=(),
             )
 
+        # 4 个 user-side 端点全部拉取（positions / orders / fills / balance）。
+        # 虽然 user_ws 推送 orders + fills delta，但 Polymarket user_ws 不保证
+        # 推送 initial state，REST 周期 + 冷启动覆盖 push 漏推 / 冷启动空白。
+        # 频率由 user_account_poll cadence（默认 20s）控制，足够低保证不抢 WS
+        # 决策链路带宽。再省的话需要确认 user_ws initial state 行为。
         positions_task = asyncio.create_task(self._fetch_positions(failures))
         open_orders_task = asyncio.create_task(self._fetch_open_orders(failures))
         fills_task = asyncio.create_task(self._fetch_fills(failures))
@@ -315,6 +358,13 @@ class ReconcileAuthorityRefresher:
             balance_task,
         )
         balance, allowance, balance_refreshed, allowance_refreshed = balance_result
+
+        # data API 返回的 redeemable=True 持仓：cur_price/current_value 被
+        # to_position 故意 drop（避免 stale curPrice），到这里都是 None。在写入
+        # account_state 之前用 gamma 派定胜负 → cur_price=1/0 → settled_zero_value
+        # 即刻为 True/False，UI 不必等下一轮 5-min settlement_scanner 才看到正确语义。
+        if positions is not None and self._gamma_client is not None:
+            positions = await self._enrich_redeemable_positions(positions, failures)
 
         if self._account_state_store is not None:
             if positions is not None:
@@ -456,6 +506,20 @@ class ReconcileAuthorityRefresher:
     ) -> tuple[AuthoritativeMarketRefresh | BaseException, ...]:
         if not markets:
             return ()
+        # 死链回收 sweep：先把已 quarantine 且无敞口的 market 从 registry 删掉，
+        # 避免它们永久挂 PAUSED。两类来源都覆盖：
+        #   1. 本进程内 failure_count >= threshold（活跃 quarantine）
+        #   2. 跨进程重启后 failure_count 归零、但 market 仍带 auto_quarantine_dead_market
+        #      reject_reason（registry 持久化态）
+        # 有敞口（持仓 shares>0 或 open order）的不动，仍走 PAUSED 等结算/redeem。
+        if self._registry is not None:
+            for m in markets:
+                quarantined = (
+                    self._condition_failure_counts.get(m.condition_id, 0) >= self._quarantine_threshold
+                    or m.reject_reason == "auto_quarantine_dead_market"
+                )
+                if quarantined and self._has_no_chain_exposure(m.condition_id):
+                    self._registry.remove_market(m.condition_id)
         # 自动 quarantine 过滤：连续失败超阈值的 condition 直接跳过 refresh,
         # 让 reconcile failures 不再被这些死 market 撑爆触发 degraded。
         active_markets = tuple(
@@ -489,14 +553,13 @@ class ReconcileAuthorityRefresher:
                 fee_rate_updated_at=_utc_now(),
             )
             refreshed_market = market_for_orderbook
-        orderbook_snapshots = await self._fetch_orderbook_snapshots(
-            market_for_orderbook,
-            failures,
-        )
-        # 自动 quarantine 计数：refresh 整体看作"有效成功"= gamma 找到 market +
-        # orderbook 至少 1 个快照。任一缺失 → 失败计数 +1；超阈值 → 下次跳过。
-        # 成功则清零（market 可能临时不可用，恢复后立即解 quarantine）。
-        is_dead = refreshed_market is None and not orderbook_snapshots
+        # 不再拉 /book REST——盘口由 market_ws 实时 push 直接维护 in-memory
+        # state，reconcile 不复制这条数据。WS 是唯一真相源，sequence_gap 兜底
+        # 由 market_ws_worker 内部自管（worker.py:_handle_sequence_gap）。
+        # quarantine 活体信号：gamma 拿到 market + WS 有新鲜快照，任一成功即不算
+        # dead。两者都缺失才计入失败计数。
+        ws_alive = self._market_ws_has_fresh_snapshot(market_for_orderbook.token_ids)
+        is_dead = refreshed_market is None and not ws_alive
         if is_dead:
             self._condition_failure_counts[market.condition_id] = (
                 self._condition_failure_counts.get(market.condition_id, 0) + 1
@@ -508,19 +571,48 @@ class ReconcileAuthorityRefresher:
         return AuthoritativeMarketRefresh(
             requested_market=market,
             refreshed_market=refreshed_market,
-            orderbook_snapshots=orderbook_snapshots,
             fee_rate_refreshed=fee_rate_refreshed,
             failures=tuple(failures),
         )
 
     def _apply_quarantine_pause(self, market: Market) -> None:
-        """连续失败超阈值 → 标 market PAUSED 阻止下游再下单 + 触发 reconcile 跳过。"""
-        if self._registry is not None:
-            paused = market.with_trading_status(
-                TradingStatus.PAUSED,
-                reject_reason="auto_quarantine_dead_market",
-            )
-            self._registry.upsert(paused)
+        """连续失败超阈值 → 死链回收或标 PAUSED。
+
+        优先路径：无任何链上敞口（持仓 shares=0 且无 open order）→ 直接从
+        registry remove_market，不再永久挂 PAUSED 簿记。这是 §7 WS-driven
+        prune 的兜底——`auto_quarantine_dead_market` 只是标黑而不回收会让
+        registry 堆满 2 天前的死链，被 SSE 面板误读成"有头寸"。
+
+        保留 §15 红线：只要还有 shares > 0 或 open order，仍然只标 PAUSED，
+        因为可能在等结算/redeem，不能 prune。
+        """
+        if self._registry is None:
+            return
+        if self._has_no_chain_exposure(market.condition_id):
+            self._registry.remove_market(market.condition_id)
+            return
+        paused = market.with_trading_status(
+            TradingStatus.PAUSED,
+            reject_reason="auto_quarantine_dead_market",
+        )
+        self._registry.upsert(paused)
+
+    def _has_no_chain_exposure(self, condition_id: str) -> bool:
+        """判断 condition 是否完全无敞口可以安全 prune。
+
+        无 AccountStateStore 时保守返回 False（保留 PAUSED 簿记，留给后续
+        reconcile 周期再判断），避免错杀仍在 redeem 的持仓。
+        """
+        if self._account_state_store is None:
+            return False
+        snapshot = self._account_state_store.snapshot()
+        for position in snapshot.positions:
+            if position.condition_id == condition_id and position.shares > Decimal("0"):
+                return False
+        for order in snapshot.open_orders:
+            if order.condition_id == condition_id:
+                return False
+        return True
 
     async def _fetch_gamma_market(
         self,
@@ -529,6 +621,19 @@ class ReconcileAuthorityRefresher:
     ) -> Market | None:
         if self._gamma_client is None:
             return None
+        # 优先读 gamma_snapshot_store——discovery 每 0.5s 已经把 events.markets
+        # 写进去，30s 内的 entry 一定新鲜，跳过网络调用直接返回 merged Market。
+        if self._gamma_snapshot_store is not None:
+            cached = self._gamma_snapshot_store.get_dto_if_fresh(
+                market.condition_id, max_age_s=_GAMMA_SNAPSHOT_FRESH_WINDOW_S
+            )
+            if cached is not None:
+                clob_enabled = getattr(cached, "clob_enabled", True)
+                return self._merge_gamma_market(
+                    market,
+                    cached.to_market(),
+                    bool(clob_enabled) if clob_enabled is not None else True,
+                )
         for slug in (market.market_slug, market.event_slug):
             if not slug:
                 continue
@@ -567,45 +672,22 @@ class ReconcileAuthorityRefresher:
             return refreshed_market
         return None
 
-    async def _fetch_orderbook_snapshots(
-        self,
-        market: Market,
-        failures: list[AuthoritativeRefreshFailure],
-    ) -> tuple[OrderbookSnapshot, ...]:
-        if self._clob_client is None:
-            return ()
-        snapshots: list[OrderbookSnapshot] = []
-        for token_id in market.token_ids:
-            orderbook = await _await_authority(
-                component="clob",
-                operation="orderbook",
-                failures=failures,
-                awaitable=self._clob_client.get_orderbook(
-                    token_id,
-                    market_slug=market.market_slug,
-                    condition_id=market.condition_id,
-                ),
-                target=f"{market.condition_id}:{token_id}",
-                timeout_s=self._authority_call_timeout_s,
-            )
-            if orderbook is None:
-                continue
-            snapshots.append(orderbook.to_snapshot())
-        return tuple(snapshots)
+    def _market_ws_has_fresh_snapshot(self, token_ids: tuple[str, ...]) -> bool:
+        """市场至少有一个 token 拥有新鲜 WS 快照——liveness 信号。
 
-    async def _apply_refreshed_orderbooks(
-        self,
-        market: Market,
-        snapshots: tuple[OrderbookSnapshot, ...],
-    ) -> None:
-        if self._market_ws_worker is None:
-            return
-        for snapshot in snapshots:
-            await self._market_ws_worker.apply_rest_snapshot(
-                snapshot.token_id,
-                snapshot,
-                source="reconcile_rest",
-            )
+        用于 quarantine 判定：gamma 拿不到时，只要 WS 仍在推快照说明市场活着；
+        gamma + WS 都缺才计入失败计数。
+        """
+        if self._market_ws_worker is None or not token_ids:
+            return False
+        now = _utc_now()
+        for token_id in token_ids:
+            snap = self._market_ws_worker.snapshot(token_id)
+            if snap is None or snap.received_at is None:
+                continue
+            if (now - snap.received_at).total_seconds() <= _WS_ORDERBOOK_FRESH_WINDOW_S:
+                return True
+        return False
 
     def _apply_refreshed_market(self, market: Market) -> None:
         if self._market_ws_worker is not None:
@@ -698,6 +780,71 @@ class ReconcileAuthorityRefresher:
         if positions is None:
             return None
         return tuple(position.to_position(strategy_id=self._strategy_id) for position in positions)
+
+    async def _enrich_redeemable_positions(
+        self,
+        positions: tuple[Position, ...],
+        failures: list[AuthoritativeRefreshFailure],
+    ) -> tuple[Position, ...]:
+        """对 redeemable=True 且 cur_price=None 的持仓并发拉 gamma outcomePrices，
+        派定胜负后写 cur_price/current_value/cash_pnl/percent_pnl。
+
+        其它持仓直接透传。胜负 unknown（gamma 没返 outcomePrices 或失败）也透传
+        ——保守不动等下轮 settlement_scanner 周期兜底。
+        """
+        from polymarket_trader.app.settlement_scanner import (
+            _resolve_from_gamma_payload,
+            apply_outcome_to_position,
+        )
+
+        targets_idx = [
+            i
+            for i, p in enumerate(positions)
+            if p.redeemable is True and p.cur_price is None
+        ]
+        if not targets_idx:
+            return positions
+
+        # 同 condition_id 只查一次 gamma。
+        unique_cids: list[str] = []
+        seen_cids: set[str] = set()
+        for i in targets_idx:
+            cid = positions[i].condition_id
+            if cid and cid not in seen_cids:
+                seen_cids.add(cid)
+                unique_cids.append(cid)
+
+        async def _resolve(cid: str) -> tuple[str, str | None]:
+            candidate = await _await_authority(
+                component="gamma",
+                operation="resolve_by_condition",
+                failures=failures,
+                awaitable=self._gamma_client.get_market_by_condition_id(
+                    cid, timeout_s=self._authority_call_timeout_s
+                ),
+                target=cid,
+                timeout_s=self._authority_call_timeout_s,
+            )
+            if candidate is None:
+                return cid, None
+            resolved = _resolve_from_gamma_payload(cid, candidate)
+            if resolved is None or not resolved.closed:
+                return cid, None
+            return cid, resolved.winning_token_id
+
+        results = await asyncio.gather(*(_resolve(cid) for cid in unique_cids))
+        winner_by_cid: dict[str, str | None] = dict(results)
+
+        enriched_list = list(positions)
+        for i in targets_idx:
+            pos = enriched_list[i]
+            winning_token_id = winner_by_cid.get(pos.condition_id)
+            if winning_token_id is None:
+                continue
+            updated = apply_outcome_to_position(pos, winning_token_id=winning_token_id)
+            if updated is not None:
+                enriched_list[i] = updated
+        return tuple(enriched_list)
 
     async def _fetch_open_orders(
         self,

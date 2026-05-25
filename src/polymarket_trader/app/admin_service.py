@@ -575,33 +575,6 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             },
         }
 
-    def mlb_playbyplay_snapshot(self, game_id: str | None = None) -> dict[str, object] | None:
-        if self.runtime is None or self.runtime.mlb_pbp_client is None:
-            return None
-        client = self.runtime.mlb_pbp_client
-        return {"status": client.status(), "snapshot": client.snapshot(game_id=game_id)}
-
-    def nba_playbyplay_snapshot(self, game_id: str | None = None) -> dict[str, object] | None:
-        if self.runtime is None or self.runtime.nba_pbp_client is None:
-            return None
-        client = self.runtime.nba_pbp_client
-        return {"status": client.status(), "snapshot": client.snapshot(game_id=game_id)}
-
-    async def mlb_schedule_snapshot(self) -> dict[str, object] | None:
-        if self.runtime is None or self.runtime.goalserve_lazy_client is None:
-            return None
-        return await self.runtime.goalserve_lazy_client.mlb_schedule()
-
-    async def mlb_standings_snapshot(self) -> dict[str, object] | None:
-        if self.runtime is None or self.runtime.goalserve_lazy_client is None:
-            return None
-        return await self.runtime.goalserve_lazy_client.mlb_standings()
-
-    async def nba_standings_snapshot(self) -> dict[str, object] | None:
-        if self.runtime is None or self.runtime.goalserve_lazy_client is None:
-            return None
-        return await self.runtime.goalserve_lazy_client.nba_standings()
-
     async def h2h_snapshot(self, team1_id: str, team2_id: str) -> dict[str, object] | None:
         if self.runtime is None or self.runtime.goalserve_lazy_client is None:
             return None
@@ -846,26 +819,6 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
                 })
             except Exception as exc:
                 result.append({"source": "polymarket_market_ws", "error": str(exc)})
-        # mlb/nba pbp
-        for client_name, attr in (("mlb_pbp", "mlb_pbp_client"), ("nba_pbp", "nba_pbp_client")):
-            client = getattr(self.runtime, attr, None)
-            if client:
-                st = client.status()
-                from datetime import datetime as _dt2, timezone as _tz2
-                lag_s = None
-                if st.get("last_fetched_at"):
-                    try:
-                        last = _dt2.fromisoformat(st["last_fetched_at"])
-                        lag_s = round((_dt2.now(_tz2.utc) - last).total_seconds(), 2)
-                    except Exception: pass
-                result.append({
-                    "source": client_name,
-                    "last_fetched_at": st.get("last_fetched_at"),
-                    "lag_seconds": lag_s,
-                    "fetch_count": st.get("fetch_count"),
-                    "error_count": st.get("error_count"),
-                    "stale": (lag_s is not None and lag_s > st.get("poll_interval_s", 5) * 3),
-                })
         return {
             "sources_count": len(result),
             "healthy_count": sum(1 for r in result if not r.get("stale")),
@@ -1154,12 +1107,6 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         health: dict[str, object] = {"checked_at": now.isoformat()}
-
-        # MLB / NBA play-by-play
-        if self.runtime.mlb_pbp_client:
-            health["mlb_playbyplay"] = self.runtime.mlb_pbp_client.status()
-        if self.runtime.nba_pbp_client:
-            health["nba_playbyplay"] = self.runtime.nba_pbp_client.status()
 
         # Goalserve lazy（schedule/standings/h2h cache）
         if self.runtime.goalserve_lazy_client:

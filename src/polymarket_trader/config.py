@@ -101,7 +101,6 @@ class Settings(BaseSettings):
     # balance 仍需周期 query（USDC 余额、share allowance、未追踪持仓）。
     # 20s 平衡：太短 → CLOB API 限流压力；太长 → balance 显示滞后。
     market_sync_interval_seconds: int = Field(default=20, ge=1)
-    order_retry_limit: int = Field(default=2, ge=0)
 
     # audit_events 表保留期（天）。实测 sports_live_state_recorded + market_discovered
     # 每天累积百万级 row，长期运行会让查询变慢且占用大量磁盘。retention job 每天跑
@@ -166,27 +165,13 @@ class Settings(BaseSettings):
     # ts 增量拉取；每次只拿变化部分，300s 足以在 ts 未超期前更新一次。
     goalserve_pregame_interval_seconds: int = Field(default=300, ge=60)
 
-    # 赛季级状态子系统：服务于 outright 反向定价。cadence 小时级。
-    sports_season_state_enabled: bool = False
-    sports_season_state_sources: str = "espn"
-    sports_season_state_leagues: str = "nba,nhl,nfl,mlb"
-    sports_season_state_interval_seconds: int = Field(default=1800, ge=300)
-    sports_season_state_timeout_s: float = Field(default=10.0, ge=0.5)
+    # 赛季级赔率（the-odds-api 提供，独立于 ESPN）：服务于 outright 反向定价。
     sports_season_odds_provider: str = "theoddsapi"
     sports_season_odds_api_key: SecretStr | None = None
     sports_season_odds_base_url: str = "https://api.the-odds-api.com"
     sports_season_odds_regions: str = "us,eu"
     sports_season_odds_interval_seconds: int = Field(default=1800, ge=300)
     sports_season_odds_ttl_seconds: int = Field(default=1800, ge=60)
-
-    # 系列赛热态子系统：服务于 series WINNER 实盘定价。
-    # interval=60s：每分钟发一次入场信号（无比赛时 WS 不推盘口更新，需此信号补驱动）。
-    # ttl=600s：ESPN scoreboard 每 10 分钟重新拉取一次（减少外部请求）。
-    sports_series_state_enabled: bool = False
-    sports_series_state_base_url: str = "https://site.api.espn.com"
-    sports_series_state_interval_seconds: int = Field(default=60, ge=60)
-    sports_series_state_ttl_seconds: int = Field(default=600, ge=60)
-    sports_series_state_timeout_s: float = Field(default=5.0, ge=0.5)
 
     # 单场 h2h 赔率源：TheOddsAPI v4 markets=h2h，driving series winner p_per_game。
     sports_game_odds_provider: str = "theoddsapi"
@@ -406,16 +391,6 @@ class Settings(BaseSettings):
                     code="non_positive_limit",
                     message="bankroll 软上限 portfolio_budget_usdc 必须大于 0，启动阶段禁止自动下单",
                     value=self.portfolio_budget_usdc,
-                )
-            )
-
-        if self.order_retry_limit < 0:
-            blocking_issues.append(
-                ConfigIssue(
-                    field="order_retry_limit",
-                    code="negative_limit",
-                    message="ORDER_RETRY_LIMIT 不能为负数",
-                    value=self.order_retry_limit,
                 )
             )
 

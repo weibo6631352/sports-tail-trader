@@ -484,12 +484,7 @@ def _binary_prop_price_reject(
     """binary_prop 盘口的入场价/流动性自查（通用门禁对 binary_prop 跳过了这些）。"""
     if market.best_ask is None:
         return TailRejectReason.MISSING_BEST_ASK
-    if market.best_ask < policy.min_entry_price:
-        return TailRejectReason.PRICE_BELOW_MIN
-    if market.best_ask > policy.totals_max_entry_price:
-        return TailRejectReason.PRICE_ABOVE_MAX
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
-        return TailRejectReason.LIQUIDITY_BELOW_MIN
+    # price/liquidity 入场 gate 已删——宽进严管，持仓策略接管止盈止损。
     return None
 
 

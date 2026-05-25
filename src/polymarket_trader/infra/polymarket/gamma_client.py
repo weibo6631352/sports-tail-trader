@@ -227,6 +227,11 @@ class GammaClient(PolymarketRestClientBase):
         timeout_s: float | None = None,
         path: str | None = None,
     ) -> GammaMarketDTO:
+        """GET /markets/{id}——参数是 Polymarket 内部 **数值 id**，不是 condition_id。
+
+        用 condition_id 查市场必须走 :meth:`get_market_by_condition_id`（内部用
+        `/markets?condition_ids=...&limit=1` 反查），否则 422。
+        """
         market_path = path or f"{self._markets_path.rstrip('/')}/{market_id}"
         payload = await self.get_json(
             market_path,
@@ -236,6 +241,24 @@ class GammaClient(PolymarketRestClientBase):
         if isinstance(payload, Mapping):
             return normalize_gamma_market(payload)
         raise TypeError("gamma market response is not a mapping")
+
+    async def get_market_by_condition_id(
+        self,
+        condition_id: str,
+        *,
+        timeout_s: float | None = None,
+    ) -> GammaMarketDTO | None:
+        """通过 condition_id 反查单条市场。
+
+        Gamma 的 ``/markets/{id}`` 端点只接受内部数值 id（不是 condition_id 也不是 slug），
+        condition_id 反查必须走 list 端点 + ``condition_ids=`` 过滤。caller 拿到 None
+        说明 gamma 已经把这条 condition 下架（settled、closed、隐藏等）。
+        """
+        candidates = await self.list_markets_by_params(
+            {"condition_ids": condition_id, "limit": 1},
+            timeout_s=timeout_s,
+        )
+        return candidates[0] if candidates else None
 
     async def get_public_profile(
         self,

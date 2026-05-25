@@ -112,7 +112,7 @@ def _reject(
     metadata: Mapping[str, Any] | None = None,
 ) -> TailEvaluation:
     # candidate.metadata 为基础,显式 metadata 覆盖——拒绝原因相关的数值证据
-    # (如 odds_gap edge / true_p / best_ask)必须能写入审计 metadata,供
+    # (如 edge / true_p / best_ask)必须能写入审计 metadata,供
     # CLAUDE.md §17 门限复盘使用。此前 candidate 非空时显式 metadata 被丢弃。
     base = dict(candidate.metadata) if candidate is not None else {}
     if metadata:
@@ -432,12 +432,7 @@ def _evaluate_soccer_halftime_result(
         return _reject(candidate, TailRejectReason.SOCCER_HALFTIME_NOT_COMPLETE.value)
     if market.best_ask is None:
         return _reject(candidate, TailRejectReason.MISSING_BEST_ASK.value)
-    if market.best_ask < policy.min_entry_price:
-        return _reject(candidate, TailRejectReason.PRICE_BELOW_MIN.value)
-    if market.best_ask > policy.totals_max_entry_price:
-        return _reject(candidate, TailRejectReason.PRICE_ABOVE_MAX.value)
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
-        return _reject(candidate, TailRejectReason.LIQUIDITY_BELOW_MIN.value)
+    # price/liquidity 入场 gate 已删——宽进严管，持仓策略接管止盈止损。
 
     h = state.home_halftime_score
     a = state.away_halftime_score
@@ -476,12 +471,7 @@ def _evaluate_soccer_btts(
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
     if market.best_ask is None:
         return _reject(candidate, TailRejectReason.MISSING_BEST_ASK.value)
-    if market.best_ask < policy.min_entry_price:
-        return _reject(candidate, TailRejectReason.PRICE_BELOW_MIN.value)
-    if market.best_ask > policy.totals_max_entry_price:
-        return _reject(candidate, TailRejectReason.PRICE_ABOVE_MAX.value)
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
-        return _reject(candidate, TailRejectReason.LIQUIDITY_BELOW_MIN.value)
+    # price/liquidity 入场 gate 已删——宽进严管，持仓策略接管止盈止损。
 
     both_scored = game.home_score >= 1 and game.away_score >= 1
     if market.side == SportsMarketSide.YES:
@@ -555,12 +545,7 @@ def _evaluate_soccer_moneyline(
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SIDE.value)
     if market.best_ask is None:
         return _reject(candidate, TailRejectReason.MISSING_BEST_ASK.value)
-    if market.best_ask < policy.min_entry_price:
-        return _reject(candidate, TailRejectReason.PRICE_BELOW_MIN.value)
-    if market.best_ask > policy.moneyline_max_entry_price:
-        return _reject(candidate, TailRejectReason.PRICE_ABOVE_MAX.value)
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
-        return _reject(candidate, TailRejectReason.LIQUIDITY_BELOW_MIN.value)
+    # price/liquidity 入场 gate 已删——宽进严管，持仓策略接管止盈止损。
     if game.seconds_remaining is None:
         return _reject(candidate, TailRejectReason.MISSING_SECONDS_REMAINING.value)
     required = _soccer_moneyline_required_margin(game.seconds_remaining)
@@ -618,12 +603,7 @@ def _evaluate_soccer_exact_score(
         return _reject(candidate, TailRejectReason.UNSUPPORTED_MARKET_SCOPE.value)
     if market.best_ask is None:
         return _reject(candidate, TailRejectReason.MISSING_BEST_ASK.value)
-    if market.best_ask < policy.min_entry_price:
-        return _reject(candidate, TailRejectReason.PRICE_BELOW_MIN.value)
-    if market.best_ask > policy.totals_max_entry_price:
-        return _reject(candidate, TailRejectReason.PRICE_ABOVE_MAX.value)
-    if market.buyable_liquidity_usdc < policy.min_liquidity_usdc:
-        return _reject(candidate, TailRejectReason.LIQUIDITY_BELOW_MIN.value)
+    # price/liquidity 入场 gate 已删——宽进严管，持仓策略接管止盈止损。
 
     target_home, target_away = target
     # 任一方现有比分已超过目标 → 终场永不可能恰为该精确比分。

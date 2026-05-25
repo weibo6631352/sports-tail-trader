@@ -65,8 +65,6 @@ class RiskManager:
         allowance_usdc: Decimal | None = None,
         portfolio_total_invested_usdc: Decimal | None = None,
         open_orders_count: int | None = None,
-        retry_count: int = 0,
-        order_retry_limit: int | None = None,
         # Kelly 风控参数：bankroll 来自 ``min(account.available, settings.portfolio_budget)``；
         # max_position_fraction 替代旧 max_order/market/total_usdc 的三层硬上限；
         # round_up_max_overbet_ratio 同步放宽 RiskManager 的 effective cap，避免
@@ -168,15 +166,10 @@ class RiskManager:
         if decision is not None:
             return decision
 
-        decision = self._check_operational_limits(
-            intent,
-            checks,
-            retry_count=retry_count,
-            order_retry_limit=order_retry_limit,
-        )
-        if decision is not None:
-            return decision
-
+        # 旧的 _check_operational_limits（retry_count vs order_retry_limit gate）
+        # 已删——retry_count 字段从未在任何路径被递增过，这个 gate 是死代码。
+        # 真正的"防重复下单"保护已由 RiskManager 的 open-orders 检查 + OrderExecutor
+        # idempotency_index 双重承担，无需引入额外的 retry 状态机。
         decision = self._check_account_gates(
             intent,
             checks,
@@ -610,27 +603,6 @@ class RiskManager:
                 },
             )
         )
-        return None
-
-    def _check_operational_limits(
-        self,
-        intent: OrderIntent,
-        checks: list[RiskCheck],
-        *,
-        retry_count: int,
-        order_retry_limit: int | None,
-    ) -> RiskDecision | None:
-        if retry_count >= 0 and order_retry_limit is not None and retry_count >= order_retry_limit:
-            return self._fail(
-                trace_id=intent.trace_id,
-                checks=checks,
-                name="retry_gate",
-                reason="retry_limit_reached",
-                field="retry_count",
-                value={"retry_count": retry_count, "order_retry_limit": order_retry_limit},
-                suggested_action="wait",
-                retryable=False,
-            )
         return None
 
     def _check_account_gates(

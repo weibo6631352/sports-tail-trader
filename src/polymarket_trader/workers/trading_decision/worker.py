@@ -82,18 +82,14 @@ POSITION_INCREASE_LIFECYCLES = {
     MarketLifecycle.POSITION_OPEN,
     MarketLifecycle.FOLLOW_UP_ORDER_OPEN,
 }
-ENTRY_ATTEMPT_LIFECYCLES = {
-    MarketLifecycle.WATCHING_ORDERBOOK,
-    MarketLifecycle.ENTRY_READY,
-    # ENTRY_REJECTED 也允许重试：核心哲学是"失败积极重试"（§17），上一次失败后
-    # 不能永久死锁该 market——盘口/edge/账户敞口随时变化，新 ENTRY_SIGNAL 触发
-    # 时应让风控重新评估。trading_service.review_intent 每次都拉最新
-    # snapshot.open_orders，发现已存在 open BUY 会直接拒（避免重复下单副作用），
-    # 所以信任风控层防重入，不靠 lifecycle 死锁来"保护"。原"等 reconcile/人工"
-    # 设计让 KBO odds_gap 8 次 allocation accept $20-29 budget 0 单——把 ENTRY
-    # 路径堵死的代价远大于偶发额外评估开销。
-    MarketLifecycle.ENTRY_REJECTED,
-}
+# ENTRY_ATTEMPT_LIFECYCLES 集合已删——lifecycle 状态机不再充当"入场是否允许"
+# 的决策门控。所有"防重复下单 / 防资金重复占用"由 RiskManager 实时检查
+# AccountStateStore（open_orders + positions + balance）+ OrderExecutor 的
+# idempotency_index 双重承担。失败积极重试（§17 哲学）：下一次 WS push / signal
+# 自然触发新一轮评估，无需 lifecycle 集合判定。
+#
+# POSITION_INCREASE_LIFECYCLES 仍保留——"已有持仓时，加仓必须有策略显式标记"
+# 是真实业务规则（防止策略意图不明的二次买入），不是失败重试 gate。
 
 
 # 赔率时序 store（module-level，纯观测）：market_slug → deque[(ts_iso, ml_home_p, ml_away_p, tt_over_p, tt_under_p, sp_home_p, sp_away_p)]
@@ -242,7 +238,6 @@ class TradingDecisionWorker:
         kelly_min_stake_usdc: Decimal = Decimal("1"),
         kelly_allow_round_up_to_market_min: bool = True,
         kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
-        order_retry_limit: int | None = None,
         entry_metadata_provider: EntryMetadataProvider | None = None,
         orderbook_direction_signal_reader: "Callable[..., Any] | None" = None,
         parameter_store: "ParameterStore | None" = None,
@@ -266,7 +261,6 @@ class TradingDecisionWorker:
         self._kelly_min_stake_usdc_default = kelly_min_stake_usdc
         self._kelly_allow_round_up_default = kelly_allow_round_up_to_market_min
         self._kelly_round_up_max_overbet_ratio_default = kelly_round_up_max_overbet_ratio
-        self._order_retry_limit_default = order_retry_limit
         self._parameter_store = parameter_store
         self._entry_metadata_provider = entry_metadata_provider
         # 注入 OrderbookDeltaStore.direction_signal callable（保留 layering：
@@ -388,10 +382,6 @@ class TradingDecisionWorker:
             "kelly_round_up_max_overbet_ratio",
             self._kelly_round_up_max_overbet_ratio_default,
         )
-
-    @property
-    def _order_retry_limit(self) -> int | None:
-        return self._param_override("order_retry_limit", self._order_retry_limit_default)
 
     async def run(self) -> None:
         if self._event_bus is None:
@@ -668,7 +658,7 @@ class TradingDecisionWorker:
             ),
             kelly_max_position_fraction=self._kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
-            order_retry_limit=self._order_retry_limit,
+
             operation=plan.intent.side.value.lower(),
         )
         risk_event = await self._publish(
@@ -1353,8 +1343,11 @@ class TradingDecisionWorker:
                 self._pause_market(order_result.condition_id, reason="resting_buy_order")
             elif order_result.status == OrderResultStatus.NO_FILL:
                 self._transition_market_by_result(order_result, MarketLifecycle.ENTRY_READY)
-            elif order_result.status in {OrderResultStatus.REJECTED, OrderResultStatus.FAILED, OrderResultStatus.UNKNOWN_TIMEOUT}:
-                self._transition_market_by_result(order_result, MarketLifecycle.ENTRY_REJECTED)
+            # REJECTED/FAILED/UNKNOWN_TIMEOUT 不再触发 lifecycle 转换——失败本身已
+            # 通过 order_rejected/order_state_updated 落 audit，下次 WS push 会重新
+            # 评估，RiskManager 看 AccountStateStore 真实状态决定能否再下单。
+            # lifecycle 保持上次成功状态（如 WATCHING_ORDERBOOK / ENTRY_READY），
+            # 不再写 ENTRY_REJECTED 死状态。
         elif side == "SELL":
             if order_result.status in {OrderResultStatus.LIVE, OrderResultStatus.PARTIAL_FILL}:
                 self._transition_market_by_result(order_result, MarketLifecycle.FOLLOW_UP_ORDER_OPEN)
@@ -1460,7 +1453,7 @@ class TradingDecisionWorker:
             ),
             kelly_max_position_fraction=self._kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=self._kelly_round_up_max_overbet_ratio,
-            order_retry_limit=self._order_retry_limit,
+
             operation=intent.side.value.lower(),
         )
 
@@ -1505,14 +1498,23 @@ def _state_allows_position_increase(state: MarketLifecycle, plan: EntryPlan) -> 
 
 
 def _state_allows_entry_attempt(state: MarketLifecycle, plan: EntryPlan) -> bool:
-    """判断当前生命周期是否允许继续处理新的入场信号。
+    """是否允许新的入场信号进入主链路。
 
-    ENTRY_READY 表示上一轮没有形成外部持仓副作用，例如 FAK no-fill
-    或风控层可重试拒绝；后续盘口变好时应继续评估。已有持仓或退出单时，
-    仍只允许策略显式标记的受控加仓进入 BUY 主链路。
+    简化后只保留两条硬规则：
+    - PAUSED：人工/auto 暂停明确表达"系统不该对该 market 下单"，必须 block。
+    - 已有持仓（POSITION_OPEN / FOLLOW_UP_ORDER_OPEN）：加仓必须由策略 plan
+      显式标记，防止意图不明的二次买入。
+
+    其余状态（WATCHING_ORDERBOOK / ENTRY_READY / 失败后未转换的状态）一律允许
+    重新评估——失败重试由 §17 哲学 + RiskManager 实时看 AccountStateStore 把关，
+    不再用 lifecycle 状态机 lock 死。
     """
 
-    return state in ENTRY_ATTEMPT_LIFECYCLES or _state_allows_position_increase(state, plan)
+    if state == MarketLifecycle.PAUSED:
+        return False
+    if state in POSITION_INCREASE_LIFECYCLES:
+        return _plan_allows_position_increase(plan)
+    return True
 
 
 def _match_open_orders(

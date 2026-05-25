@@ -165,12 +165,6 @@ _register(ParameterSpec(
 ))
 _register(ParameterSpec(
     scope="settings",
-    key="order_retry_limit",
-    description="订单重试上限",
-    coerce=_coerce_positive_int,
-))
-_register(ParameterSpec(
-    scope="settings",
     key="audit_retention_days",
     description=(
         "audit_events 保留天数。daily purge job 删除 created_at < now - N days 的 row。"

@@ -248,7 +248,7 @@ class CurrentStrategyConfig:
     tail_max_game_state_age_seconds: int = 60
     # MLB/KBO baseball livescore feed 实测 30-90s 才推新比分（局间/换投手时段更慢），
     # 45s 阈值经常误标 sports_live_state_stale → reconcile pause market → 即使
-    # candidate accepted（odds_gap_entry / 扫尾锁定）也被 entry_planner 短路下不了单。
+    # candidate accepted（扫尾锁定）也被 entry_planner 短路下不了单。
     # 调到 120s 给 KBO/MLB 比赛足够 buffer，与 soccer 同口径。
     tail_baseball_max_game_state_age_seconds: int = 120
     # cricket/rugby/handball 等纯 livescore-only 运动（Goalserve inplay 不覆盖，
@@ -282,15 +282,6 @@ class CurrentStrategyConfig:
     tail_mlb_eighth_moneyline_min_lead: int = 2
     tail_mlb_ninth_moneyline_min_lead: int = 3
     tail_min_spread_safety_margin: Decimal = Decimal("2")
-    # 赔率差价入场（odds-gap，CLAUDE.md §17 第二条入场路径）：当 Goalserve 盘中
-    # 去抽水真实概率高出 Polymarket ask 至少此差值时入场。0.06 需覆盖约 3% taker
-    # 手续费 + 安全余量；低于此差价不下单。操盘手可经 ParameterStore override 调整。
-    # 0 = 无门槛: 只要 Goalserve 有 devig 真概率就视为 odds_gap 候选(Kelly 自决)。
-    # Kelly 内部用 net edge 算 fraction; net edge ≤ 0 时 Kelly reject, 否则按比例下注。
-    # 不在 Kelly 之上叠加额外阈值 cap。保留字段以便审计/A-B test;实测倾向永久 0。
-    tail_odds_gap_min_edge: Decimal = Decimal("0")
-    # 赔率差价候选执行权限；默认 AUTO_EXECUTE，与扫尾锁定一致走完整入场链路。
-    tail_odds_gap_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     # 单场景 (single-game tail) implied fair value 公式：``cap = fair × (1 - edge_required)``
     # 解出 fair。500 bps = 5% 表示策略相信"fair 比 cap 至少高 5%"。
     # 用于 Kelly sizing 的 prob_p。outright path 直接用 the-odds-api 真概率。
@@ -501,8 +492,6 @@ def tail_policy_from_config(config: CurrentStrategyConfig) -> TailPolicy:
         mlb_eighth_moneyline_min_lead=config.tail_mlb_eighth_moneyline_min_lead,
         mlb_ninth_moneyline_min_lead=config.tail_mlb_ninth_moneyline_min_lead,
         min_spread_safety_margin=config.tail_min_spread_safety_margin,
-        odds_gap_min_edge=config.tail_odds_gap_min_edge,
-        odds_gap_execution_permission=config.tail_odds_gap_execution_permission,
     )
 
 

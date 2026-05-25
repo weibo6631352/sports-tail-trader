@@ -2,7 +2,7 @@
 
 每类盘口的"剩余比赛能否让我方持仓输/赢"概率算法不同(MLB Totals 用单半局得分
 泊松分布、Soccer HT 用伤停时间、NBA ML 用剩余分钟+分差等),本模块用统一
-``MathLockResult`` 接口让上层(exit_overlay / odds_gap / entry gates)拿到归一化
+``MathLockResult`` 接口让上层(exit_overlay / entry gates)拿到归一化
 [0,1] 锁定度 + 关键变量,无需各自实现锁定算法。
 
 设计原则:
@@ -1314,7 +1314,7 @@ def evaluate_math_lock(
     #   - mlb NRFI → _baseball_nrfi_lock
     # 其余 sub-scope（tennis first-set-total / basketball 1H / quarter 等）尚无
     # 专用 math_lock 公式 → 在分派前先返回 UNSUPPORTED，让上层 evaluator 自己
-    # 处理（odds_gap 顶层 _math_lock_veto 对 unsupported 放行，§17 不放过可盈利市场）。
+    # 处理（顶层 _math_lock_veto 对 unsupported 放行，§17 不放过可盈利市场）。
     slug_lc = (market_slug or "").lower()
     if _is_sub_scope_without_dedicated_lock(slug_lc, market_type, sport, game):
         return MathLockResult(_ZERO, "sub_scope", "sub_scope_no_dedicated_lock", {"slug": market_slug})

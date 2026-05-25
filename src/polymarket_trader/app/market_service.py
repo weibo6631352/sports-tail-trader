@@ -144,6 +144,9 @@ class MarketService:
                         reason="game_outside_trade_window"
                     )
                 if universe_decision.selected:
+                    # Universe + 时间窗口通过——直接把 market 加入 registry。WS 订阅
+                    # 由 ws_loops.should_subscribe_ws 实时基于 entry_metadata 决定，
+                    # 不再写 market 上的中间 flag（避免 stale 维护）。
                     market = candidate_market
                     tracked_market = market
                     if self._registry is not None:

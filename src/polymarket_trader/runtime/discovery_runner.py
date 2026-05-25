@@ -13,13 +13,18 @@ from polymarket_trader.extension_api import DiscoveryQuery
 if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents
 
-_MARKET_DISCOVERY_EVENT_PAGE_LIMIT = 50
+# /events/keyset 单页大小：之前 50，每次返回 ~500KB raw / ~60KB gzip。我们大多数轮次
+# 只关心新事件，20 足够覆盖 sports 上线节奏；keyset cursor 已经保证不重复拉同一页。
+_MARKET_DISCOVERY_EVENT_PAGE_LIMIT = 20
 _MARKET_DISCOVERY_MARKET_BUDGET_PER_TICK = 1000
 _MARKET_DISCOVERY_REQUEST_BUDGET_PER_TICK = 2
 _MARKET_DISCOVERY_MAX_RUNTIME_MS = 200.0
 _LIVE_EVENT_EXPANSION_BUDGET_PER_TICK = 1
-_LIVE_EVENT_EXPANSION_REFRESH_SECONDS = 30.0
-MARKET_DISCOVERY_TICK_SECONDS = 0.5
+# event 全盘口展开（gamma /events?slug=）冷却：之前 30s 太短，反复展开同一 event 浪费。
+# 一旦 event 展开过、它下面的 markets 已经进了 registry/snapshot_store，5 分钟内不会
+# 有新增 sub-market 的可能；真有新分盘也会被下一轮 keyset discovery 兜住。
+_LIVE_EVENT_EXPANSION_REFRESH_SECONDS = 300.0
+MARKET_DISCOVERY_TICK_SECONDS = 2.0  # 之前 0.5s 浪费 80%——新上线市场 2s 内仍比散户快
 # P3.1：持仓/挂单市场独立快速刷新间隔。常规 Gamma 全量轮转可能几分钟才回到某个
 # condition_id；有持仓的市场每 15s 单独拉一次，确保盘口状态不滞后。
 _PRIORITY_CONDITION_REFRESH_SECONDS = 15.0
@@ -308,7 +313,10 @@ async def expand_live_event_market_discovery(runtime: RuntimeComponents) -> None
             timeout_s=2.0,
         )
         raw_events: list[Any] = []
+        store = getattr(runtime, "gamma_snapshot_store", None)
         for event in events:
+            if store is not None and event.markets:
+                store.upsert_many(event.markets)
             raw_events.extend(event.to_raw_market_events(source="gamma.events_slug"))
         if raw_events:
             await runtime.market_discovery_worker.ingest_source_page(
@@ -338,8 +346,12 @@ async def refresh_priority_condition_ids(runtime: RuntimeComponents) -> None:
     for condition_id in condition_ids:
         if fetched >= _PRIORITY_CONDITION_REFRESH_BUDGET_PER_TICK:
             break
+        # Gamma /markets/{id} 只认内部数值 id；用 condition_id 查必须走
+        # /markets?condition_ids= 反查（否则 422，每次 priority refresh 都浪费）。
         try:
-            market_dto = await gamma_client.get_market(condition_id, timeout_s=2.0)
+            market_dto = await gamma_client.get_market_by_condition_id(
+                condition_id, timeout_s=2.0
+            )
         except Exception as exc:
             logger.debug(
                 "priority_condition_refresh failed",
@@ -348,6 +360,19 @@ async def refresh_priority_condition_ids(runtime: RuntimeComponents) -> None:
             # 单次失败不中断其他 priority 市场的刷新，也不更新 refreshed_at，
             # 下次 tick 会自然重试。
             continue
+        if market_dto is None:
+            # gamma 已下架这条 condition（结算/隐藏等）。不更新 refreshed_at
+            # → 不会无限重试，但下次仍可能再扫到，最终由 quarantine + prune 清理。
+            logger.debug(
+                "priority_condition_refresh missing",
+                extra={"condition_id": condition_id},
+            )
+            continue
+        # priority refresh 也把单条结果回写 store，让后续 reconcile/settlement 读路径
+        # 命中而不必另外打 /markets。
+        store = getattr(runtime, "gamma_snapshot_store", None)
+        if store is not None:
+            store.upsert(market_dto)
         await runtime.market_discovery_worker.ingest_source_page(
             {"markets": [dict(market_dto.raw)]},
             source="gamma.priority_refresh",
@@ -426,7 +451,13 @@ async def fetch_full_market_discovery_page(
         params["after_cursor"] = after_cursor
     events, next_cursor = await runtime.gamma_client.list_events_keyset_by_params(params, timeout_s=2.0)
     raw_events: list[Any] = []
+    # events 端点返回的 nested markets 已经包含完整 GammaMarketDTO（tick/fee/
+    # outcomes/closed/token_ids），顺手写进 gamma_snapshot_store——下游 reconcile
+    # /settlement_scanner 不必再单独打 /markets 拉同一份数据。
+    store = getattr(runtime, "gamma_snapshot_store", None)
     for event in events:
+        if store is not None and event.markets:
+            store.upsert_many(event.markets)
         raw_events.extend(event.to_raw_market_events(source="gamma.events_keyset"))
     return tuple(raw_events), next_cursor
 
