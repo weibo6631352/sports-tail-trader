@@ -2069,13 +2069,9 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         }
 
     def _runtime_strategy_id(self) -> str | None:
-        """读取当前运行时加载的扩展策略 id，供候选过滤等内存视图使用。"""
+        """读取当前策略 id，供候选过滤等内存视图使用。"""
 
         if self.runtime is None:
-            return None
-        try:
-            extension = self.runtime.extension
-        except RuntimeError:
             return None
         from polymarket_trader.quant.identity import STRATEGY_ID
         return STRATEGY_ID

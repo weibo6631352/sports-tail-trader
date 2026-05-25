@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # 默认按 EOA 签名处理；如果使用代理钱包或 Safe，需要显式覆盖 signature type / funder。
     polymarket_signature_type: int = Field(default=0, ge=0, le=2)
     polymarket_funder_address: str | None = None
-    extension_module: str | None = None
+    # 策略配置文件路径（TOML / JSON），保留作为策略 config 的可选加载入口。
     extension_config_path: str | None = None
 
     # portfolio_budget_usdc 语义：bankroll 软上限。实际 bankroll = min(链上可用 USDC,
@@ -247,7 +247,6 @@ class Settings(BaseSettings):
         "polymarket_funder_address",
         "database_password",
         "database_url_override",
-        "extension_module",
         "extension_config_path",
         "goalserve_api_key",
         mode="before",
@@ -337,15 +336,6 @@ class Settings(BaseSettings):
                         message="密钥未配置，启动阶段禁止自动下单",
                     )
                 )
-
-        if self.extension_module is None or not self.extension_module.strip():
-            blocking_issues.append(
-                ConfigIssue(
-                    field="extension_module",
-                    code="missing_extension_module",
-                    message="必须显式配置二次开发业务扩展模块。",
-                )
-            )
 
         api_cred_fields = (
             "polymarket_api_key",

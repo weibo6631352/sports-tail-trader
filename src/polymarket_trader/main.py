@@ -568,18 +568,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         parameter_store=parameter_store,
         metrics_registry=metrics,
     )
-    if settings.extension_module is None:
-        raise ConfigLoadError(
-            [
-                ConfigIssue(
-                    field="extension_module",
-                    code="missing_extension_module",
-                    message="必须显式配置二次开发业务扩展模块。",
-                )
-            ]
-        )
-    # 直接装配 quant 策略——不再通过 EXTENSION_MODULE 动态加载（早期"框架+插件"二次开发
-    # 抽象已废除，量化决策器就是这个交易系统本身）。
+    # 直接装配 quant 策略——量化决策器就是这个交易系统本身。
     from polymarket_trader.quant.strategy import CurrentStrategy
     from polymarket_trader.quant.config import load_current_strategy_config
     from polymarket_trader.quant.identity import STRATEGY_ID
