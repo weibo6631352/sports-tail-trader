@@ -65,7 +65,7 @@ from strategies.current.series import (
 from strategies.current.series.classifier import classify_series_sub_type
 from strategies.current.series.types import SeriesSubType
 from strategies.current.tracking import build_filtered_tracking_market, should_keep_tracking
-from strategies.current.trading import decide_entry, quant_decide, size_entry
+from strategies.current.trading import decide_entry, size_entry
 from strategies.current.trading.helpers import enrich_decision
 
 logger = logging.getLogger(__name__)
@@ -194,6 +194,8 @@ class CurrentStrategy:
         self._live_event_filter_cache_events_id: int | None = None
         self._live_event_filter_cache: dict[tuple[tuple[str, ...], str | None], tuple[LiveEvent, ...]] = {}
         self._live_state_no_feasible_source: bool = False
+        from strategies.current.quant_decider import QuantDecider
+        self._quant_decider = QuantDecider(config=config, ports=self._ports)
         # 把策略配置注册给 parameter store，让 GET /parameters 能返回 strategy.* 字段
         # 的当前 default_value。框架因此无需读策略私有属性。
         if self._ports.parameter is not None:
@@ -449,7 +451,7 @@ class CurrentStrategy:
                     pause_reason="sports_live_state_no_source",
                 )
         with active_ports_scope(self._ports):
-            result = quant_decide(self._config, context)
+            result = self._quant_decider.decide(context)
         if not result.actions:
             return result
         enriched = tuple(
