@@ -35,28 +35,17 @@ from polymarket_trader.extension_api.lifecycle import (
 from polymarket_trader.extension_api.live_state import LiveStateMatch
 from polymarket_trader.extension_api.manual_confirmation import ManualConfirmation
 from polymarket_trader.extension_api.ports import (
-    AccountReadPort,
-    ClockPort,
-    ConfigReadPort,
-    HistoryReadPort,
-    MarketReadPort,
-    MetricsPort,
-    OrderbookReadPort,
-    RuntimeReadPort,
     ExtensionPorts,
-    TelemetryPort,
+    MetricsPort,
+    ParameterPort,
+    SeasonStateReadPort,
 )
 from polymarket_trader.extension_api.summary import StrategySummary
-from polymarket_trader.extension_api.telemetry import TelemetryEvent
-from polymarket_trader.extension_api import toolkit
 from polymarket_trader.domain.events import AuditEvent, DomainEventType, Fill
 
 __all__ = (
-    "AccountReadPort",
     "AccountSnapshotView",
     "AuditEvent",
-    "ClockPort",
-    "ConfigReadPort",
     "DecisionKind",
     "DomainEventType",
     "DiscoveryQuery",
@@ -68,26 +57,21 @@ __all__ = (
     "ExtensionLoadError",
     "ExtensionPorts",
     "Fill",
-    "HistoryReadPort",
     "LifecycleBus",
     "LifecycleCallback",
     "LifecycleEnvelope",
     "LifecycleEvent",
     "LiveStateMatch",
     "ManualConfirmation",
-    "MarketReadPort",
     "MarketTokenView",
     "MetricsPort",
-    "OrderbookReadPort",
+    "ParameterPort",
     "QuantDecision",
     "QuantTriggerKind",
-    "RuntimeReadPort",
+    "SeasonStateReadPort",
     "StrategySummary",
     "SubscriptionHandle",
-    "TelemetryEvent",
-    "TelemetryPort",
     "UniverseDecision",
     "load_extension_config",
     "load_mapping_file",
-    "toolkit",
 )

@@ -1,31 +1,15 @@
 from polymarket_trader.app.ports.extension_ports import (
-    AccountStatePort,
-    MarketDataPort,
     MetricsRegistryMetricsPort,
     NullMetricsPort,
-    NullTelemetryPort,
-    OrderHistoryPort,
-    RegistryStatePort,
-    RuntimeStatePort,
     SeasonStatePort,
-    UtcClockPort,
-    bind_extension_orderbook_reader,
     bind_extension_season_state,
     build_extension_ports,
 )
 
 __all__ = [
-    "AccountStatePort",
-    "MarketDataPort",
     "MetricsRegistryMetricsPort",
     "NullMetricsPort",
-    "NullTelemetryPort",
-    "OrderHistoryPort",
-    "RegistryStatePort",
-    "RuntimeStatePort",
     "SeasonStatePort",
-    "UtcClockPort",
-    "bind_extension_orderbook_reader",
     "bind_extension_season_state",
     "build_extension_ports",
 ]

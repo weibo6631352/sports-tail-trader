@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from polymarket_trader.api.routes.stream import SseSubscriptionRegistry
 from polymarket_trader.app.market_service import MarketService
-from polymarket_trader.app.ports import bind_extension_orderbook_reader, bind_extension_season_state, build_extension_ports
+from polymarket_trader.app.ports import bind_extension_season_state, build_extension_ports
 from polymarket_trader.app.reconcile_service import ReconcileService
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
 from polymarket_trader.app.trading_service import TradingService
@@ -562,8 +562,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     lifecycle_bus = InProcessLifecycleBus()
     parameter_store = ParameterStore(event_bus=event_bus)
     extension_ports = build_extension_ports(
-        registry=registry,
-        snapshot_provider=account_state_store.snapshot,
         lifecycle_bus=lifecycle_bus,
         parameter_store=parameter_store,
         metrics_registry=metrics,
@@ -806,7 +804,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         critical_lock_timeout_ms=settings.critical_lock_timeout_ms,
         metrics=metrics,
     )
-    bind_extension_orderbook_reader(extension_ports, market_ws_worker.snapshot)
     market_service = MarketService(
         extension_hooks=extension.hooks,
         registry=registry,
