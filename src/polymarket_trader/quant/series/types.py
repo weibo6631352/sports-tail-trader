@@ -16,7 +16,7 @@ from enum import StrEnum
 from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market
-from polymarket_trader.contracts.live_state import SeriesState as SeriesState  # re-export
+from polymarket_trader.domain.sports_live import SeriesState as SeriesState  # re-export
 
 
 class SeriesSubType(StrEnum):

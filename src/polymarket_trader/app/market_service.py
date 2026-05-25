@@ -20,7 +20,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.observability.trace import ensure_trace_id
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistry
-from polymarket_trader.contracts import UniverseDecision
+from polymarket_trader.domain.decisions import UniverseDecision
 
 AccountSnapshotProvider = Callable[[], AccountSnapshot]
 

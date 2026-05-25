@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from polymarket_trader.domain.market import Market
-from polymarket_trader.contracts import UniverseDecision
+from polymarket_trader.domain.decisions import UniverseDecision
 from polymarket_trader.quant.tail import SportsMarketFamily, SportsMarketType
 from polymarket_trader.sports.slug import is_unsupported_period_total
 

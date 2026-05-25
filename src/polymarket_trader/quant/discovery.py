@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from polymarket_trader.domain.sports_live import LiveEvent
-from polymarket_trader.contracts import DiscoveryQuery
+from polymarket_trader.runtime.discovery_runner import DiscoveryQuery
 from polymarket_trader.quant.config import CurrentStrategyConfig
 
 

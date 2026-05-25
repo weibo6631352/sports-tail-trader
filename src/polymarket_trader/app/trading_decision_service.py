@@ -25,15 +25,9 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import ManagedOrderIntent, Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
-from polymarket_trader.contracts import (
-    EntryCandidate,
-    DecisionContext,
-    TradingDecision,
-
-    MarketTokenView,
-)
-from polymarket_trader.contracts.manual_confirmation import ManualConfirmation
-from polymarket_trader.contracts.summary import StrategySummary
+from polymarket_trader.domain.decisions import DecisionContext, EntryCandidate, MarketTokenView, TradingDecision
+from polymarket_trader.domain.decisions import ManualConfirmation
+from polymarket_trader.domain.decisions import StrategySummary
 from polymarket_trader.observability.trace import ensure_trace_id
 from polymarket_trader.runtime.registry import MarketRegistry
 
@@ -207,7 +201,7 @@ class TradingDecisionService:
             )
         except Exception: pass
         signal_at = utc_now()
-        from polymarket_trader.contracts import TradeAction, TradingDecision
+        from polymarket_trader.domain.decisions import TradeAction, TradingDecision
         decision = next(
             (a for a in quant_decision.actions if a.action == TradeAction.BUY),
             None,

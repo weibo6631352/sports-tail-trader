@@ -6,9 +6,9 @@ import logging
 from decimal import Decimal
 
 from polymarket_trader.domain.allocation import AllocationPlan
-from polymarket_trader.contracts import EntrySizing, DecisionContext
+from polymarket_trader.domain.decisions import DecisionContext, EntrySizing
 
-from polymarket_trader.contracts import RuntimePorts
+from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot, ProbView, kelly_plan
 from polymarket_trader.quant.config import CurrentStrategyConfig

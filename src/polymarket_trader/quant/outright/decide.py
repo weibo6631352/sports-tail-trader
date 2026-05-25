@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.contracts import DecisionKind, DecisionContext, TradingDecision, RuntimePorts, MarketTokenView
+from polymarket_trader.domain.decisions import DecisionContext, DecisionKind, MarketTokenView, TradingDecision
+from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 from polymarket_trader.quant.outright.evaluator import evaluate_outright_opportunity

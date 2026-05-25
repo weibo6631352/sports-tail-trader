@@ -10,7 +10,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from polymarket_trader.domain.order import OrderSide
-from polymarket_trader.contracts import DecisionContext
+from polymarket_trader.domain.decisions import DecisionContext
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot
 from polymarket_trader.quant.config import CurrentStrategyConfig

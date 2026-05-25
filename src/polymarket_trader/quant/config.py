@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Mapping
 
-from polymarket_trader.contracts import load_extension_config
+from polymarket_trader.config import load_extension_config
 from polymarket_trader.quant.tail import (
     ExecutionPermission,
     SportsMarketType,

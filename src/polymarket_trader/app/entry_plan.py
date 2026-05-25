@@ -7,8 +7,8 @@ from polymarket_trader.domain.allocation import Allocation, AllocationPlan
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import TradableOrderIntent
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.contracts.decisions import DecisionKind
-from polymarket_trader.contracts.summary import StrategySummary
+from polymarket_trader.domain.decisions import DecisionKind
+from polymarket_trader.domain.decisions import StrategySummary
 
 
 @dataclass(frozen=True, slots=True)

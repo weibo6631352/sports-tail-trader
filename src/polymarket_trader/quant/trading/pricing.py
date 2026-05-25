@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from polymarket_trader.contracts import DecisionContext, RuntimePorts
+from polymarket_trader.domain.decisions import DecisionContext
+from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 from polymarket_trader.quant.outcomes import describe_sports_market, target_for_token

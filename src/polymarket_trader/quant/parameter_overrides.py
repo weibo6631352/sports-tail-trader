@@ -23,7 +23,7 @@ from contextvars import ContextVar
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterator
 
-from polymarket_trader.contracts import RuntimePorts
+from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
 logger = logging.getLogger(__name__)
 

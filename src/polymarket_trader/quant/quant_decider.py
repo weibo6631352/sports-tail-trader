@@ -20,13 +20,8 @@ from decimal import Decimal, ROUND_FLOOR
 from polymarket_trader.domain.allocation import Allocation, AllocationPlan
 from polymarket_trader.domain.kelly import implied_fair_value_from_price_cap
 from polymarket_trader.domain.order import OrderSide
-from polymarket_trader.contracts import (
-    EntrySizing,
-    DecisionContext,
-    TradingDecision,
-    RuntimePorts,
-    QuantDecision,
-)
+from polymarket_trader.domain.decisions import DecisionContext, EntrySizing, QuantDecision, TradingDecision
+from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
 from polymarket_trader.quant.allocation import (
     AllocationMarketSnapshot,
@@ -434,7 +429,7 @@ def decide_entry(config: CurrentStrategyConfig, context: DecisionContext) -> Tra
         )
     )
     _apply_profit_take_position_plan(decision_metadata)
-    from polymarket_trader.contracts.summary import StrategySummary
+    from polymarket_trader.domain.decisions import StrategySummary
     from polymarket_trader.quant.outcomes import describe_sports_market
     descriptor = describe_sports_market(context.market)
     summary = StrategySummary(

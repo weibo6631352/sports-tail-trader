@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Mapping
 
-from polymarket_trader.contracts import DecisionKind, DecisionContext, TradingDecision, RuntimePorts, MarketTokenView
+from polymarket_trader.domain.decisions import DecisionContext, DecisionKind, MarketTokenView, TradingDecision
+from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 from polymarket_trader.quant.series.evaluator import SeriesEvaluatorInputs, evaluate_series_opportunity

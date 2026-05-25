@@ -26,13 +26,7 @@ from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.account import AccountSnapshot, MarketPause
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
-from polymarket_trader.contracts import (
-    TradeAction,
-    TradingDecision,
-
-    MarketTokenView,
-    DecisionContext,
-)
+from polymarket_trader.domain.decisions import DecisionContext, MarketTokenView, TradeAction, TradingDecision
 from polymarket_trader.serialization import utc_now
 
 

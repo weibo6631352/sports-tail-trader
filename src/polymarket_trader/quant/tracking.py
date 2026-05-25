@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from polymarket_trader.domain.market import Market, TradingStatus
-from polymarket_trader.contracts import AccountSnapshotView
+from polymarket_trader.domain.decisions import AccountSnapshotView
 
 
 def should_keep_tracking(

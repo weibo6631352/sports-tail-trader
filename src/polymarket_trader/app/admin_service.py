@@ -21,7 +21,7 @@ from polymarket_trader.domain.events import DomainEvent, DomainEventType, Outbox
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.contracts.manual_confirmation import ManualConfirmation
+from polymarket_trader.domain.decisions import ManualConfirmation
 from polymarket_trader.app.decision_serialization import (
     TRADING_DECISION_WORKER_ORIGIN,
     serialize_allocation,

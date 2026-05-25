@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from polymarket_trader.domain.sports_season import SeasonSnapshot
 from polymarket_trader.observability.metrics import MetricsRegistry
 from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
-from polymarket_trader.contracts import RuntimePorts
+from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
 
 class MetricsRegistryMetricsPort:

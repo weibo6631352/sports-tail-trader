@@ -11,7 +11,7 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_FLOOR
 from typing import Mapping
 
-from polymarket_trader.contracts import DecisionContext
+from polymarket_trader.domain.decisions import DecisionContext
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 

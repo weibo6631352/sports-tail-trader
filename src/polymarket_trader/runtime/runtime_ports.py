@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
 from polymarket_trader.domain.sports_season import SeasonSnapshot
-from polymarket_trader.contracts.lifecycle import LifecycleBus
+from polymarket_trader.runtime.lifecycle_bus import LifecycleBus
 
 
 class MetricsPort(Protocol):

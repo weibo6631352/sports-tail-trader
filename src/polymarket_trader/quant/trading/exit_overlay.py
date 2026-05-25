@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 from polymarket_trader.domain.sports_live import BaseballGameState, TennisGameState, VolleyballGameState
-from polymarket_trader.contracts import DecisionContext
+from polymarket_trader.domain.decisions import DecisionContext
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 from polymarket_trader.quant.position_plan import cap_price_to_clob_limit

@@ -9,7 +9,7 @@ from polymarket_trader.domain.market import TradingStatus
 from polymarket_trader.domain.order import Order, OrderSide, OrderType
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.sports_live import LiveEvent
-from polymarket_trader.contracts import DecisionContext, TradingDecision, QuantDecision
+from polymarket_trader.domain.decisions import DecisionContext, QuantDecision, TradingDecision
 
 from polymarket_trader.quant.config import CurrentStrategyConfig
 from polymarket_trader.quant.position_plan import cap_price_to_clob_limit, build_position_plan_metadata

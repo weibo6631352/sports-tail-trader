@@ -21,7 +21,7 @@ from polymarket_trader.domain.sports_live import (
     LiveEventKind,
     SportsLiveGameStatus,
 )
-from polymarket_trader.contracts.live_state import LiveStateMatch
+from polymarket_trader.domain.sports_live import LiveStateMatch
 
 _GENERIC_ALIAS_TOKENS = {
     "a",

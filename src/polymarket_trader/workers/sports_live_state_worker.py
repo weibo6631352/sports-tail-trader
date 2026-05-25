@@ -26,8 +26,8 @@ from polymarket_trader.domain.sports_live import (
     SportsLiveSourceStatus,
     SportsLiveSyncStatus,
 )
-from polymarket_trader.contracts.lifecycle import LifecycleEvent
-from polymarket_trader.contracts.live_state import LiveStateMatch
+from polymarket_trader.runtime.lifecycle_bus import LifecycleEvent
+from polymarket_trader.domain.sports_live import LiveStateMatch
 from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.lifecycle_bus import LifecyclePublisher

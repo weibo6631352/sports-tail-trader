@@ -10,12 +10,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from polymarket_trader.domain.events import Fill
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.contracts import (
-    DecisionKind,
-    DecisionContext,
-    TradingDecision,
-    StrategySummary,
-)
+from polymarket_trader.domain.decisions import DecisionContext, DecisionKind, StrategySummary, TradingDecision
 
 if TYPE_CHECKING:
     from polymarket_trader.domain.market import Market

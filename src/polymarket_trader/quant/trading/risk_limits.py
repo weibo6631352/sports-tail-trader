@@ -11,7 +11,7 @@ from polymarket_trader.domain.allocation import (
     MarketBuyBudgetChanged,
 )
 from polymarket_trader.domain.order import OrderSide
-from polymarket_trader.contracts import DecisionContext
+from polymarket_trader.domain.decisions import DecisionContext
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot
 from polymarket_trader.quant.config import CurrentStrategyConfig

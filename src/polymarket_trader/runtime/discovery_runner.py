@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping
 from uuid import uuid4
 
 from polymarket_trader.domain.account import AccountSnapshot
-from polymarket_trader.contracts import DiscoveryQuery
 
 if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents
@@ -57,6 +56,20 @@ def _utc_now() -> datetime:
 def _sync(sync_runtime_metrics: RuntimeMetricsSync | None, runtime: RuntimeComponents) -> None:
     if sync_runtime_metrics is not None:
         sync_runtime_metrics(runtime)
+
+
+# ===== from former contracts/discovery.py =====
+@dataclass(frozen=True, slots=True)
+class DiscoveryQuery:
+    """Quant-side remote discovery filter fragment."""
+
+    name: str = "default"
+    params: Mapping[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def title_search(cls, title_search: str) -> "DiscoveryQuery":
+        text = title_search.strip()
+        return cls(name=f"title_search:{text}", params={"title_search": text})
 
 
 @dataclass(slots=True)

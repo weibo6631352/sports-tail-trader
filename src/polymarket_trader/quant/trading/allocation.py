@@ -11,7 +11,7 @@ from polymarket_trader.domain.allocation import (
 )
 from polymarket_trader.domain.market import TradingStatus
 from polymarket_trader.domain.order import OrderSide
-from polymarket_trader.contracts import EntryCandidate, DecisionContext
+from polymarket_trader.domain.decisions import DecisionContext, EntryCandidate
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot
 from polymarket_trader.quant.config import CurrentStrategyConfig

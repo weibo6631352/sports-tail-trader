@@ -12,7 +12,7 @@ from polymarket_trader.domain.order import (
     SellOrderIntent,
     TradableOrderIntent,
 )
-from polymarket_trader.contracts import TradeAction, TradingDecision
+from polymarket_trader.domain.decisions import TradeAction, TradingDecision
 
 
 def decision_to_trade_intent(

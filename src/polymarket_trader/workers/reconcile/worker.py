@@ -19,7 +19,7 @@ from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.domain.account import AccountSnapshot, MarketPauseSource
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
-from polymarket_trader.contracts.lifecycle import LifecycleEvent
+from polymarket_trader.runtime.lifecycle_bus import LifecycleEvent
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.gamma_snapshot_store import GammaMarketSnapshotStore
 from polymarket_trader.runtime.event_bus import EventBus
