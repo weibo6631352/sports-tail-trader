@@ -341,10 +341,6 @@ class AdminRuntimeView:
             payload = settings.sanitized_dump()
         else:
             payload = jsonable(settings)
-        # strategy_id 是策略侧常量（不在 Settings 内），在 settings payload 里
-        # 顺手 expose 给 frontend——/runtime 页面顶栏 + strategy bundle 路由用。
-        from polymarket_trader.quant.identity import STRATEGY_ID
-        payload["strategy_id"] = STRATEGY_ID
         return payload
 
     async def _identity_snapshot(self) -> dict[str, Any]:

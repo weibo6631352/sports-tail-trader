@@ -161,7 +161,6 @@ async def fetch_funnel_counts(
     window_end: datetime,
     league: str | None = None,
     market_type: str | None = None,
-    strategy_id: str | None = None,
 ) -> dict[str, int]:
     """单条查询一次性产出全部漏斗阶段计数。
 
@@ -175,7 +174,6 @@ async def fetch_funnel_counts(
         league=league,
         market_type=market_type,
     )
-    strategy_where = " AND a.strategy_id = :strategy_id" if strategy_id is not None else ""
 
     filter_clauses = ",\n        ".join(
         f"COUNT(*) FILTER (WHERE a.event_title = ANY(:stage_{i}_titles)) AS stage_{i}"
@@ -194,7 +192,7 @@ async def fetch_funnel_counts(
         FROM audit_events a{join_clause}
         WHERE a.created_at >= :window_start
           AND a.created_at < :window_end
-          AND a.event_title = ANY(:all_event_titles){where_extra}{strategy_where}
+          AND a.event_title = ANY(:all_event_titles){where_extra}
     """
     bind: dict[str, Any] = {
         "window_start": window_start,
@@ -202,8 +200,6 @@ async def fetch_funnel_counts(
         "all_event_titles": all_event_titles,
         **params,
     }
-    if strategy_id is not None:
-        bind["strategy_id"] = strategy_id
     for i, (_, titles) in enumerate(FUNNEL_STAGE_EVENT_TITLES):
         bind[f"stage_{i}_titles"] = list(titles)
     result = await session.execute(text(sql), bind)
@@ -222,7 +218,6 @@ async def fetch_rejection_reasons(
     league: str | None = None,
     market_type: str | None = None,
     limit: int = 20,
-    strategy_id: str | None = None,
 ) -> tuple[int, list[Mapping[str, Any]]]:
     """统计拒绝原因 top N。
 
@@ -235,7 +230,6 @@ async def fetch_rejection_reasons(
         league=league,
         market_type=market_type,
     )
-    strategy_where = " AND a.strategy_id = :strategy_id" if strategy_id is not None else ""
 
     sql_top = f"""
         SELECT COALESCE(NULLIF(BTRIM(a.reason), ''), '<empty>') AS reason_key,
@@ -243,7 +237,7 @@ async def fetch_rejection_reasons(
         FROM audit_events a{join_clause}
         WHERE a.created_at >= :window_start
           AND a.created_at < :window_end
-          AND a.event_title = ANY(:event_titles){where_extra}{strategy_where}
+          AND a.event_title = ANY(:event_titles){where_extra}
         GROUP BY reason_key
         ORDER BY reason_count DESC, reason_key ASC
         LIMIT :limit
@@ -253,7 +247,7 @@ async def fetch_rejection_reasons(
         FROM audit_events a{join_clause}
         WHERE a.created_at >= :window_start
           AND a.created_at < :window_end
-          AND a.event_title = ANY(:event_titles){where_extra}{strategy_where}
+          AND a.event_title = ANY(:event_titles){where_extra}
     """
     bind = {
         "window_start": window_start,
@@ -262,8 +256,6 @@ async def fetch_rejection_reasons(
         "limit": limit,
         **params,
     }
-    if strategy_id is not None:
-        bind["strategy_id"] = strategy_id
     total_row = (await session.execute(text(sql_total), bind)).one()
     total = int(total_row[0] or 0)
     rows = (await session.execute(text(sql_top), bind)).all()
@@ -278,7 +270,6 @@ async def fetch_execution_quality(
     window_end: datetime,
     league: str | None = None,
     market_type: str | None = None,
-    strategy_id: str | None = None,
 ) -> dict[str, Any]:
     """提交、成交延迟分位和滑点统计。
 
@@ -300,8 +291,6 @@ async def fetch_execution_quality(
         league=league,
         market_type=market_type,
     )
-    submit_strategy_where = " AND sub.strategy_id = :strategy_id" if strategy_id is not None else ""
-    fill_strategy_where = " AND f.strategy_id = :strategy_id" if strategy_id is not None else ""
 
     sql = f"""
         WITH submit_lat AS (
@@ -318,7 +307,7 @@ async def fetch_execution_quality(
             ) flt ON TRUE{submit_join}
             WHERE sub.event_title = 'order_submitted'
               AND sub.created_at >= :window_start
-              AND sub.created_at < :window_end{submit_where}{submit_strategy_where}
+              AND sub.created_at < :window_end{submit_where}
         ),
         fill_lat AS (
             SELECT EXTRACT(EPOCH FROM (f.confirmed_at - o.created_at)) * 1000.0 AS latency_ms,
@@ -332,7 +321,7 @@ async def fetch_execution_quality(
               AND f.confirmed_at < :window_end
               AND o.price IS NOT NULL
               AND o.price > 0
-              AND f.price IS NOT NULL{fill_where}{fill_strategy_where}
+              AND f.price IS NOT NULL{fill_where}
         )
         SELECT
             (SELECT percentile_cont(0.5)  WITHIN GROUP (ORDER BY latency_ms) FROM submit_lat) AS submit_p50,
@@ -358,8 +347,6 @@ async def fetch_execution_quality(
         **submit_params,
         **fill_params,
     }
-    if strategy_id is not None:
-        bind["strategy_id"] = strategy_id
     row = (await session.execute(text(sql), bind)).one()
     return {
         "submit_p50": _as_float(row[0]),
@@ -386,7 +373,6 @@ async def fetch_kelly_calibration(
     *,
     window_start: datetime,
     window_end: datetime,
-    strategy_id: str | None = None,
 ) -> dict[str, Any]:
     """Kelly implied_p 校准统计——用于检测策略 prob_p 估计的系统性偏倚。
 
@@ -403,8 +389,7 @@ async def fetch_kelly_calibration(
     ``positions.settled_zero_value`` 关联），先返回前置指标。
     """
 
-    strategy_clause = " AND a.strategy_id = :strategy_id" if strategy_id is not None else ""
-    sql = f"""
+    sql = """
         SELECT
             COUNT(*) AS sample_size,
             AVG((a.raw_payload->'kelly'->>'prob_p')::numeric) AS mean_implied_p,
@@ -415,14 +400,12 @@ async def fetch_kelly_calibration(
           AND a.created_at < :window_end
           AND a.buy_budget_usdc > 0
           AND a.raw_payload ? 'kelly'
-          {strategy_clause}
+          
     """
     params: dict[str, Any] = {
         "window_start": window_start,
         "window_end": window_end,
     }
-    if strategy_id is not None:
-        params["strategy_id"] = strategy_id
     row = (await session.execute(text(sql), params)).first()
     if row is None:
         return {

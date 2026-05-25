@@ -27,7 +27,6 @@ class TradeReplayFilters:
     condition_id: str | None = None
     token_id: str | None = None
     trace_id: str | None = None
-    strategy_id: str | None = None
 
 
 def build_trade_replay_records(
@@ -245,7 +244,6 @@ def _matches_order(order: Order, filters: TradeReplayFilters) -> bool:
         (filters.condition_id is None or order.condition_id == filters.condition_id)
         and (filters.token_id is None or order.token_id == filters.token_id)
         and (filters.trace_id is None or order.trace_id == filters.trace_id)
-        and (filters.strategy_id is None or order.strategy_id == filters.strategy_id)
     )
 
 
@@ -254,7 +252,6 @@ def _matches_fill(fill: Fill, filters: TradeReplayFilters) -> bool:
         (filters.condition_id is None or fill.condition_id == filters.condition_id)
         and (filters.token_id is None or fill.token_id == filters.token_id)
         and (filters.trace_id is None or fill.trace_id == filters.trace_id)
-        and (filters.strategy_id is None or fill.strategy_id == filters.strategy_id)
     )
 
 
@@ -263,7 +260,6 @@ def _matches_audit(event: AuditEvent, filters: TradeReplayFilters) -> bool:
         (filters.condition_id is None or event.condition_id == filters.condition_id)
         and (filters.token_id is None or event.token_id == filters.token_id)
         and (filters.trace_id is None or event.trace_id == filters.trace_id)
-        and (filters.strategy_id is None or event.strategy_id == filters.strategy_id)
     )
 
 

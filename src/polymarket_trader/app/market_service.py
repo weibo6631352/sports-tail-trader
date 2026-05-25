@@ -46,7 +46,7 @@ class MarketService:
     def __init__(
         self,
         *,
-        strategy: "TradingWorkflow",
+        workflow: "TradingWorkflow",
         parser: MarketPayloadParser | None = None,
         registry: MarketRegistry | None = None,
         market_tracker: MarketTracker | None = None,
@@ -54,7 +54,7 @@ class MarketService:
         filter_emit_min_interval_s: float = 0.0,
     ) -> None:
         self._parser = parser or MarketPayloadParser()
-        self._workflow = strategy
+        self._workflow = workflow
         self._registry = registry
         self._market_tracker = market_tracker
         self._account_snapshot_provider = account_snapshot_provider

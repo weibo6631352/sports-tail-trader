@@ -15,7 +15,6 @@ from polymarket_trader.domain.decisions import DecisionContext, EntryCandidate
 
 from polymarket_trader.quant.allocation import AllocationMarketSnapshot
 from polymarket_trader.quant.config import TradingWorkflowConfig
-from polymarket_trader.quant.identity import STRATEGY_ID
 from polymarket_trader.quant.outcomes import describe_sports_market, is_primary_token
 from polymarket_trader.sports import SportsMarketFamily
 from polymarket_trader.sports.parsing import live_game_state_from_metadata
@@ -213,7 +212,6 @@ def _skipped_allocation(
     reason: str,
 ) -> Allocation:
     return Allocation(
-        strategy_id=STRATEGY_ID,
         condition_id=snapshot.condition_id,
         target_budget_usdc=Decimal("0"),
         buy_budget_usdc=Decimal("0"),

@@ -45,7 +45,6 @@ class AllocationRepository(BaseRepository):
             rows,
             conflict_columns=("allocation_key",),
             update_columns=(
-                "strategy_id",
                 "trace_id",
                 "condition_id",
                 "market_slug",
@@ -71,7 +70,6 @@ class AllocationRepository(BaseRepository):
         condition_id: str | None = None,
         token_id: str | None = None,
         market_slug: str | None = None,
-        strategy_id: str | None = None,
     ) -> RepositoryPage[Allocation]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(AllocationModel).order_by(AllocationModel.updated_at.desc(), AllocationModel.id.desc())
@@ -83,8 +81,6 @@ class AllocationRepository(BaseRepository):
             stmt = stmt.where(AllocationModel.token_id == token_id)
         if market_slug is not None:
             stmt = stmt.where(AllocationModel.market_slug == market_slug)
-        if strategy_id is not None:
-            stmt = stmt.where(AllocationModel.strategy_id == strategy_id)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 

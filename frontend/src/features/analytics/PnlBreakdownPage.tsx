@@ -24,7 +24,6 @@ import { DataTable } from '@shared/tables/DataTable'
 import { formatUsdc, pnlTone, pnlToneColor, toDecimal } from '@shared/format'
 
 const GROUP_OPTIONS: { value: PnlBreakdownGroupBy; label: string }[] = [
-  { value: 'strategy_id', label: 'strategy_id' },
   { value: 'market_slug', label: 'market_slug' },
   { value: 'category', label: 'category' },
   { value: 'outcome', label: 'outcome' },
@@ -33,7 +32,7 @@ const GROUP_OPTIONS: { value: PnlBreakdownGroupBy; label: string }[] = [
 ]
 
 export function PnlBreakdownPage() {
-  const [groupBy, setGroupBy] = useState<PnlBreakdownGroupBy>('strategy_id')
+  const [groupBy, setGroupBy] = useState<PnlBreakdownGroupBy>('market_slug')
   const [submitted, setSubmitted] = useState<{ group_by: PnlBreakdownGroupBy } | null>(null)
 
   const query = useQuery({

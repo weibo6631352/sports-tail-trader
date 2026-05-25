@@ -58,8 +58,6 @@ export type RuntimeIdentity = {
 }
 
 export type RuntimeSettings = {
-  strategy_id?: string | null
-  strategy_id?: string | null
   paper_trading?: boolean
   [key: string]: unknown
 }
@@ -174,7 +172,6 @@ export type DecisionRecord = {
   hook_name?: string | null
   accepted: boolean
   reason?: string | null
-  strategy_id?: string | null
   created_at: Iso
   decision_input?: Record<string, unknown>
   decision_output?: Record<string, unknown>
@@ -283,7 +280,6 @@ export type OrderRow = {
   market_slug?: string | null
   condition_id?: string | null
   token_id?: string | null
-  strategy_id?: string | null
   side: 'BUY' | 'SELL' | string
   order_type?: string
   status: string
@@ -308,7 +304,6 @@ export type PositionRow = {
   condition_id: string
   token_id: string
   market_slug?: string | null
-  strategy_id?: string | null
   size_shares: DecimalStr
   cost_usdc?: DecimalStr | null
   entry_price?: DecimalStr | null
@@ -332,7 +327,6 @@ export type FillRow = {
   trade_id?: string | null
   condition_id?: string | null
   token_id?: string | null
-  strategy_id?: string | null
   side?: string | null
   price: DecimalStr
   size: DecimalStr
@@ -352,7 +346,6 @@ export type AllocationRow = {
   condition_id?: string | null
   token_id?: string | null
   market_slug?: string | null
-  strategy_id?: string | null
   target_budget_usdc?: DecimalStr | null
   buy_budget_usdc?: DecimalStr | null
   reason?: string | null
@@ -373,7 +366,6 @@ export type AuditEventRow = {
   operator?: string | null
   condition_id?: string | null
   token_id?: string | null
-  strategy_id?: string | null
   created_at: Iso
   payload?: Record<string, unknown>
   [key: string]: unknown
@@ -605,7 +597,6 @@ export type PnlBreakdownRow = {
 }
 
 export type PnlBreakdownGroupBy =
-  | 'strategy_id'
   | 'market_slug'
   | 'condition_id'
   | 'category'
@@ -641,7 +632,6 @@ export type Candidate = {
   fair_value?: DecimalStr | null
   entry_price?: DecimalStr | null
   size_shares?: DecimalStr | null
-  strategy_id?: string | null
   badges?: string[]
   metadata?: Record<string, unknown>
   [key: string]: unknown
@@ -703,7 +693,7 @@ export type RejectionsSnapshot = {
   generated_at: Iso
   total: number
   top: RejectionBucket[]
-  filters: { league: string | null; market_type: string | null; strategy_id: string | null }
+  filters: { league: string | null; market_type: string | null }
 }
 
 export type ExecutionQualitySnapshot = {
@@ -713,7 +703,7 @@ export type ExecutionQualitySnapshot = {
   fill_latency_ms: { p50: number | null; p95: number | null }
   slippage_bps: { mean: number | null; p95: number | null }
   sample_size: number
-  filters: { league: string | null; market_type: string | null; strategy_id: string | null }
+  filters: { league: string | null; market_type: string | null }
 }
 
 export type EdgeRealizationItem = {
@@ -744,7 +734,6 @@ export type EdgeRealizationBucket = {
 
 export type EdgeRealizationSnapshot = {
   limit: number
-  strategy_id?: string | null
   condition_id?: string | null
   items: EdgeRealizationItem[]
   buckets: EdgeRealizationBucket[]
@@ -802,7 +791,6 @@ export type TradeReplayRow = {
   condition_id?: string | null
   token_id?: string | null
   market_slug?: string | null
-  strategy_id?: string | null
   decision_at?: Iso | null
   order_at?: Iso | null
   fill_at?: Iso | null
@@ -1220,7 +1208,6 @@ export type ParameterSweepRequest = {
   /** 候选键值；笛卡尔积上限 1000。 */
   candidates: Partial<Record<SweepParameterKey, Array<number | string>>>
   per_decision_usdc?: number
-  strategy_id?: string
   since?: number
   until?: number
   decision_limit?: number
@@ -1251,7 +1238,6 @@ export type PortfolioExposureItem = {
   condition_id: string
   token_id: string
   market_slug: string | null
-  strategy_id: string
   shares: DecimalStr
   cost_usdc: DecimalStr
   notional_usdc: DecimalStr

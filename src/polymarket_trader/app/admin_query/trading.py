@@ -34,7 +34,6 @@ class AdminTradingQueryMixin:
         trade_id: str | None = None,
         status: str | None = None,
         time_range: TimeRange | None = None,
-        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         if open_only:
             snapshot = self._account_snapshot()
@@ -46,7 +45,6 @@ class AdminTradingQueryMixin:
                 and (trace_id is None or order.trace_id == trace_id)
                 and (order_id is None or order.order_id == order_id)
                 and (trade_id is None or order.trade_id == trade_id)
-                and (strategy_id is None or order.strategy_id == strategy_id)
                 and (status is None or (order.status is not None and order.status.value == status))
                 and (time_range is None or time_range.contains(order.created_at))
             ]
@@ -63,7 +61,6 @@ class AdminTradingQueryMixin:
                 and (trace_id is None or order.trace_id == trace_id)
                 and (order_id is None or order.order_id == order_id)
                 and (trade_id is None or order.trade_id == trade_id)
-                and (strategy_id is None or order.strategy_id == strategy_id)
                 and (status is None or (order.status is not None and order.status.value == status))
                 and (time_range is None or time_range.contains(order.created_at))
             ]
@@ -81,7 +78,6 @@ class AdminTradingQueryMixin:
                 token_id=token_id,
                 status=status,
                 time_range=time_range,
-                strategy_id=strategy_id,
             )
 
         page = await self._with_repositories(_query)
@@ -98,7 +94,6 @@ class AdminTradingQueryMixin:
         condition_id: str | None = None,
         token_id: str | None = None,
         time_range: TimeRange | None = None,
-        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         if not self._has_db_session_factory():
             snapshot = self._account_snapshot()
@@ -110,7 +105,6 @@ class AdminTradingQueryMixin:
                 and (trade_id is None or fill.trade_id == trade_id)
                 and (condition_id is None or fill.condition_id == condition_id)
                 and (token_id is None or fill.token_id == token_id)
-                and (strategy_id is None or fill.strategy_id == strategy_id)
                 and (time_range is None or time_range.contains(fill.created_at))
             ]
             page = self._slice_sequence(fills, limit=limit, offset=offset)
@@ -126,7 +120,6 @@ class AdminTradingQueryMixin:
                 condition_id=condition_id,
                 token_id=token_id,
                 time_range=time_range,
-                strategy_id=strategy_id,
             )
 
         page = await self._with_repositories(_query)
@@ -139,7 +132,6 @@ class AdminTradingQueryMixin:
         offset: int = 0,
         condition_id: str | None = None,
         token_id: str | None = None,
-        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         # 内存快照是唯一真相来源（§3）；DB 仅审计/复盘，不作当前持仓 fallback。
         # 启动竞态窗口（首次 reconcile 前）返回空而不是旧快照，避免 React Query 缓存旧数据后
@@ -150,7 +142,6 @@ class AdminTradingQueryMixin:
             for position in snapshot.positions
             if (condition_id is None or position.condition_id == condition_id)
             and (token_id is None or position.token_id == token_id)
-            and (strategy_id is None or position.strategy_id == strategy_id)
         ]
         page = self._slice_sequence(positions, limit=limit, offset=offset)
         return page_payload(page, serializer=self._serializer().position)
@@ -164,7 +155,6 @@ class AdminTradingQueryMixin:
         condition_id: str | None = None,
         token_id: str | None = None,
         market_slug: str | None = None,
-        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         if not self._has_db_session_factory():
             page: RepositoryPage[Any] = RepositoryPage(items=tuple(), total=0, limit=limit, offset=offset)
@@ -178,7 +168,6 @@ class AdminTradingQueryMixin:
                 condition_id=condition_id,
                 token_id=token_id,
                 market_slug=market_slug,
-                strategy_id=strategy_id,
             )
 
         page = await self._with_repositories(_query)
@@ -334,7 +323,6 @@ class AdminTradingQueryMixin:
                 "condition_id": pos.condition_id,
                 "token_id": pos.token_id,
                 "market_slug": pos.market_slug,
-                "strategy_id": pos.strategy_id,
                 "shares": decimal_text(pos.shares),
                 "cost_usdc": decimal_text(pos.cost_usdc),
                 "notional_usdc": decimal_text(notional),

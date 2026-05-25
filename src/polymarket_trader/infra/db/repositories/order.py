@@ -40,7 +40,6 @@ class OrderRepository(BaseRepository):
         local_rows = tuple(row for row in rows if not row.get("order_id"))
         update_columns = (
             "order_key",
-            "strategy_id",
             "trace_id",
             "condition_id",
             "token_id",
@@ -88,7 +87,6 @@ class OrderRepository(BaseRepository):
         offset: int = 0,
         condition_id: str | None = None,
         token_id: str | None = None,
-        strategy_id: str | None = None,
     ) -> RepositoryPage[Order]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(OrderModel).where(
@@ -108,8 +106,6 @@ class OrderRepository(BaseRepository):
             stmt = stmt.where(OrderModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(OrderModel.token_id == token_id)
-        if strategy_id is not None:
-            stmt = stmt.where(OrderModel.strategy_id == strategy_id)
         stmt = stmt.order_by(OrderModel.updated_at.desc(), OrderModel.id.desc())
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
@@ -126,7 +122,6 @@ class OrderRepository(BaseRepository):
         token_id: str | None = None,
         status: str | None = None,
         time_range: TimeRange | None = None,
-        strategy_id: str | None = None,
     ) -> RepositoryPage[Order]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(OrderModel).order_by(OrderModel.updated_at.desc(), OrderModel.id.desc())
@@ -140,8 +135,6 @@ class OrderRepository(BaseRepository):
             stmt = stmt.where(OrderModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(OrderModel.token_id == token_id)
-        if strategy_id is not None:
-            stmt = stmt.where(OrderModel.strategy_id == strategy_id)
         if status is not None:
             stmt = stmt.where(OrderModel.status == status)
         if time_range is not None and not time_range.is_empty:

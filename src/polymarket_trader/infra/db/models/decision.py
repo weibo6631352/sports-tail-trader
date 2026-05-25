@@ -27,7 +27,6 @@ class DecisionRecordModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     record_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     hook_name: Mapped[str | None] = mapped_column(String(64), index=True)
     condition_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
@@ -52,14 +51,12 @@ class DecisionRecordModel(Base, TimestampMixin):
         Index("ix_decision_records_trace_created", "trace_id", "created_at"),
         Index("ix_decision_records_condition_created", "condition_id", "created_at"),
         Index("ix_decision_records_accepted_created", "accepted", "created_at"),
-        Index("ix_decision_records_strategy_created", "strategy_id", "created_at"),
     )
 
     @classmethod
     def from_domain(cls, record: DecisionRecord) -> "DecisionRecordModel":
         return cls(
             record_id=record.record_id,
-            strategy_id=record.strategy_id,
             trace_id=record.trace_id,
             hook_name=record.hook_name or None,
             condition_id=record.condition_id,
@@ -75,7 +72,6 @@ class DecisionRecordModel(Base, TimestampMixin):
     def to_domain(self) -> DecisionRecord:
         return DecisionRecord(
             record_id=self.record_id,
-            strategy_id=self.strategy_id,
             trace_id=self.trace_id,
             hook_name=self.hook_name or "",
             condition_id=self.condition_id,

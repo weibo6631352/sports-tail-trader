@@ -94,7 +94,6 @@ async def run_shadow_session(
     stream: EventStreamSource,
     *,
     strategy: Any,
-    strategy_id: str,
     ledger: PaperVirtualLedger,
     starting_balance_usdc: Decimal,
     portfolio_budget_usdc: Decimal,
@@ -127,7 +126,6 @@ async def run_shadow_session(
 
     decision_service = TradingDecisionService(
         strategy=strategy,
-        strategy_id=strategy_id,
         registry=registry,
         orderbook_reader=market_ws.snapshot,
     )
@@ -192,7 +190,7 @@ async def run_shadow_session(
                 balance_usdc=ledger.available_usdc,
                 allowance_usdc=ledger.available_usdc,
             )
-            account_store.replace_positions(_ledger_positions_for_account(ledger, registry, strategy_id=strategy_id))
+            account_store.replace_positions(_ledger_positions_for_account(ledger, registry))
             domain_event = _build_domain_event(event)
             error: str | None = None
             try:
@@ -231,8 +229,6 @@ async def run_shadow_session(
 def _ledger_positions_for_account(
     ledger: PaperVirtualLedger,
     registry: MarketRegistry,
-    *,
-    strategy_id: str,
 ) -> tuple[Position, ...]:
     """把 ledger 持仓投射成 ``AccountStateStore`` 期望的 ``Position`` 元组。
 
@@ -252,7 +248,6 @@ def _ledger_positions_for_account(
         avg_price = (cost / shares) if shares > _ZERO else None
         positions.append(
             Position(
-                strategy_id=strategy_id,
                 condition_id=condition_id,
                 token_id=token_id,
                 shares=shares,

@@ -1926,12 +1926,8 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         return AdminRuntimeView(runtime=self.runtime)
 
     def _order_controller(self) -> AdminOrderController:
-        strategy_id = self._runtime_strategy_id()
-        if not strategy_id:
-            raise RuntimeError("runtime strategy missing strategy_id")
         return AdminOrderController(
             runtime=self.runtime,
-            strategy_id=strategy_id,
             serializer=self._serializer(),
             account_snapshot=self._account_snapshot,
             resolve_market=self._resolve_market,
@@ -2025,7 +2021,6 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             pass
         return {
             "candidate_id": f"{plan.trace_id}:{market.condition_id}:{token_id}",
-            "strategy_id": self._runtime_strategy_id(),
             "trace_id": plan.trace_id,
             "condition_id": market.condition_id,
             "market_slug": market.market_slug,
@@ -2067,14 +2062,6 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             "live_state_age_ms": live_state_age_ms,
             "live_state_source": live_state_source,
         }
-
-    def _runtime_strategy_id(self) -> str | None:
-        """读取当前策略 id，供候选过滤等内存视图使用。"""
-
-        if self.runtime is None:
-            return None
-        from polymarket_trader.quant.identity import STRATEGY_ID
-        return STRATEGY_ID
 
     def _entry_metadata_for_market(self, market: Market) -> dict[str, Any]:
         store = self._entry_metadata_store()
@@ -2151,10 +2138,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         account_state = self.runtime.account_state_store if self.runtime else None
         if account_state is None or review.order_result is None:
             return
-        strategy_id = self._runtime_strategy_id()
-        if not strategy_id:
-            raise RuntimeError("runtime strategy missing strategy_id")
-        projector = AccountStateProjector(account_state, strategy_id=strategy_id)
+        projector = AccountStateProjector(account_state)
         projector.apply_buy_result(review.order_result, snapshot=snapshot)
         projector.apply_result_flags(review.order_result, snapshot=snapshot)
 

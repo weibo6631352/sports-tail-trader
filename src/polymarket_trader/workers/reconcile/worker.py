@@ -126,7 +126,6 @@ class ReconcileWorker:
         self._registry = registry
         self._market_ws_worker = market_ws_worker
         self._authority_refresher = ReconcileAuthorityRefresher(
-            strategy_id=reconcile_service.strategy_id,
             registry_snapshot_provider=registry_snapshot_provider,
             account_state_store=account_state_store,
             registry=registry,
@@ -149,9 +148,7 @@ class ReconcileWorker:
         self._last_refresh_summary: AuthoritativeRefreshSummary | None = None
         self._last_result: ReconcileWorkerResultSummary | None = None
         self._recent_results: deque[ReconcileWorkerResultSummary] = deque(maxlen=8)
-        # reconcile_service 持有 strategy_id（来自 polymarket_trader.quant.identity），下游 applier 复用同一值。
         self._action_applier = ReconcileActionApplier(
-            strategy_id=reconcile_service.strategy_id,
             trading_service=trading_service,
             account_state_store=account_state_store,
         )

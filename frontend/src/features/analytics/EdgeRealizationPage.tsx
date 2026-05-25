@@ -31,9 +31,8 @@ import { useAnalyticsFiltersStore } from '@core/filters/store'
 export function EdgeRealizationPage() {
   const since = useTimeWindowStore((s) => s.since)
   const until = useTimeWindowStore((s) => s.until)
-  const strategyId = useAnalyticsFiltersStore((s) => s.strategyId)
   const [conditionId, setConditionId] = useState('')
-  const [submitted, setSubmitted] = useState<{ since?: number; until?: number; strategy_id?: string; condition_id?: string; limit?: number } | null>(null)
+  const [submitted, setSubmitted] = useState<{ since?: number; until?: number; condition_id?: string; limit?: number } | null>(null)
 
   const query = useQuery({
     queryKey: submitted ? qk.analytics.edgeRealization(submitted) : ['analytics', 'edge', 'idle'],
@@ -123,7 +122,6 @@ export function EdgeRealizationPage() {
             setSubmitted({
               since: since ?? undefined,
               until: until ?? undefined,
-              strategy_id: strategyId ?? undefined,
               condition_id: conditionId.trim() || undefined,
               limit: 500,
             })

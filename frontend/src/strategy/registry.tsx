@@ -1,23 +1,7 @@
 import type { StrategyBundle } from './api'
 import { currentStrategyBundle } from './current'
 
-// strategy_id → 前端 bundle 映射。Fallback bundle 在未知 strategy 时使用，
-// 仍能让 /strategy/* 路由不 404，便于运维诊断。
+// 当前系统只有一个量化交易工作流，前端不再需要按 ID 选择 bundle。
+// 直接导出唯一 bundle；如果未来出现第二个 workflow，再恢复 routing 机制。
 
-const REGISTRY: Record<string, StrategyBundle> = {
-  sports_tail: currentStrategyBundle,
-}
-
-const FALLBACK: StrategyBundle = {
-  id: 'fallback',
-  displayName: '未知策略',
-}
-
-export function resolveStrategyBundle(strategyId: string | null | undefined): StrategyBundle {
-  if (!strategyId) return FALLBACK
-  return REGISTRY[strategyId] ?? FALLBACK
-}
-
-export function listRegisteredStrategies(): StrategyBundle[] {
-  return Object.values(REGISTRY)
-}
+export const tradingWorkflowBundle: StrategyBundle = currentStrategyBundle

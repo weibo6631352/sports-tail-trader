@@ -25,7 +25,6 @@ class FillModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     event_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     event_type: Mapped[str] = mapped_column(String(128), index=True)
     condition_id: Mapped[str | None] = mapped_column(String(128), index=True)
@@ -48,7 +47,6 @@ class FillModel(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_fills_trace_trade_order", "trace_id", "trade_id", "order_id"),
-        Index("ix_fills_strategy_created", "strategy_id", "created_at"),
     )
 
     @classmethod
@@ -59,7 +57,6 @@ class FillModel(Base, TimestampMixin):
         raw_payload: JsonMapping | None = None,
     ) -> "FillModel":
         payload = _json_mapping(raw_payload) if raw_payload is not None else {
-            "strategy_id": fill.strategy_id,
             "trace_id": fill.trace_id,
             "event_type": str(fill.event_type),
             "event_id": fill.event_id,
@@ -77,7 +74,6 @@ class FillModel(Base, TimestampMixin):
         }
         return cls(
             event_id=fill.event_id,
-            strategy_id=fill.strategy_id,
             trace_id=fill.trace_id,
             event_type=str(fill.event_type),
             condition_id=fill.condition_id,
@@ -96,7 +92,6 @@ class FillModel(Base, TimestampMixin):
 
     def to_domain(self) -> Fill:
         return Fill(
-            strategy_id=self.strategy_id,
             trace_id=self.trace_id,
             event_type=self.event_type,
             event_id=self.event_id,

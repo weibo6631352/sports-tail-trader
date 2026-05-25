@@ -16,7 +16,6 @@ from polymarket_trader.domain.order import Order, OrderSide
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 
-from polymarket_trader.quant.identity import STRATEGY_ID
 
 _MIN_CLOB_NOTIONAL_USDC = Decimal("0.01")
 
@@ -137,7 +136,6 @@ def kelly_plan(
         if skip_reason:
             allocations.append(
                 Allocation(
-                    strategy_id=STRATEGY_ID,
                     condition_id=snapshot.condition_id,
                     target_budget_usdc=Decimal("0"),
                     buy_budget_usdc=Decimal("0"),
@@ -240,7 +238,6 @@ def kelly_plan(
             capped_by = "strategy_budget_cap"
         allocations.append(
             Allocation(
-                strategy_id=STRATEGY_ID,
                 condition_id=snapshot.condition_id,
                 target_budget_usdc=stake_usdc,
                 buy_budget_usdc=stake_usdc,
@@ -325,7 +322,6 @@ def _reject_allocation(
     kelly: KellyStake | None = None,
 ) -> Allocation:
     return Allocation(
-        strategy_id=STRATEGY_ID,
         condition_id=snapshot.condition_id,
         target_budget_usdc=Decimal("0"),
         buy_budget_usdc=Decimal("0"),

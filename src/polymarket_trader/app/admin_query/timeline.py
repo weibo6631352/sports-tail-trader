@@ -25,7 +25,6 @@ class AdminTimelineQueryMixin:
         condition_id: str | None = None,
         token_id: str | None = None,
         time_range: TimeRange | None = None,
-        strategy_id: str | None = None,
         with_total: bool = False,
     ) -> dict[str, Any]:
         import time as _time
@@ -42,7 +41,6 @@ class AdminTimelineQueryMixin:
                 condition_id=condition_id,
                 token_id=token_id,
                 time_range=time_range,
-                strategy_id=strategy_id,
                 with_total=with_total,
             )
 
@@ -70,7 +68,6 @@ class AdminTimelineQueryMixin:
         condition_id: str | None = None,
         token_id: str | None = None,
         trace_id: str | None = None,
-        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         """聚合成交、持仓、审计和策略 metadata，返回只读复盘视图。"""
 
@@ -78,7 +75,6 @@ class AdminTimelineQueryMixin:
             condition_id=condition_id,
             token_id=token_id,
             trace_id=trace_id,
-            strategy_id=strategy_id,
         )
         if not self._has_db_session_factory():
             account = self._account_snapshot()
@@ -108,7 +104,6 @@ class AdminTimelineQueryMixin:
                 trace_id=trace_id,
                 condition_id=condition_id,
                 token_id=token_id,
-                strategy_id=strategy_id,
             )
             fill_page = await repos.fill.list_fills_snapshot(
                 limit=query_limit,
@@ -116,14 +111,12 @@ class AdminTimelineQueryMixin:
                 trace_id=trace_id,
                 condition_id=condition_id,
                 token_id=token_id,
-                strategy_id=strategy_id,
             )
             position_page = await repos.position.list_positions_snapshot(
                 limit=query_limit,
                 offset=0,
                 condition_id=condition_id,
                 token_id=token_id,
-                strategy_id=strategy_id,
             )
             audit_page = await repos.audit.list_audit_events_snapshot(
                 limit=query_limit,
@@ -131,7 +124,6 @@ class AdminTimelineQueryMixin:
                 trace_id=trace_id,
                 condition_id=condition_id,
                 token_id=token_id,
-                strategy_id=strategy_id,
             )
             records = build_trade_replay_records(
                 markets=markets,

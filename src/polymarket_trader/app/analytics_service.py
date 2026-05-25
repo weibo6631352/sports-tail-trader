@@ -26,7 +26,6 @@ class AnalyticsDAO(Protocol):
         window_end: datetime,
         league: str | None,
         market_type: str | None,
-        strategy_id: str | None,
     ) -> dict[str, int]: ...
 
     async def fetch_rejection_reasons(
@@ -37,7 +36,6 @@ class AnalyticsDAO(Protocol):
         league: str | None,
         market_type: str | None,
         limit: int,
-        strategy_id: str | None,
     ) -> tuple[int, list[Mapping[str, Any]]]: ...
 
     async def fetch_execution_quality(
@@ -47,7 +45,6 @@ class AnalyticsDAO(Protocol):
         window_end: datetime,
         league: str | None,
         market_type: str | None,
-        strategy_id: str | None,
     ) -> dict[str, Any]: ...
 
 
@@ -82,7 +79,6 @@ class AnalyticsService:
         end_ms: int | None = None,
         league: str | None = None,
         market_type: str | None = None,
-        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         start_dt, end_dt = self._window(window_ms=window_ms, end_ms=end_ms)
         counts = await self.dao.fetch_funnel_counts(
@@ -90,14 +86,13 @@ class AnalyticsService:
             window_end=end_dt,
             league=league,
             market_type=market_type,
-            strategy_id=strategy_id,
         )
         stages = [{"name": name, "count": int(counts.get(name, 0))} for name in FUNNEL_STAGES]
         return {
             "window_ms": window_ms,
             "generated_at": end_dt.isoformat(),
             "stages": stages,
-            "filters": {"league": league, "market_type": market_type, "strategy_id": strategy_id},
+            "filters": {"league": league, "market_type": market_type},
         }
 
     async def rejections(
@@ -108,7 +103,6 @@ class AnalyticsService:
         league: str | None = None,
         market_type: str | None = None,
         limit: int = 20,
-        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         start_dt, end_dt = self._window(window_ms=window_ms, end_ms=end_ms)
         total, rows = await self.dao.fetch_rejection_reasons(
@@ -117,7 +111,6 @@ class AnalyticsService:
             league=league,
             market_type=market_type,
             limit=limit,
-            strategy_id=strategy_id,
         )
         top: list[dict[str, Any]] = []
         for row in rows:
@@ -129,7 +122,7 @@ class AnalyticsService:
             "generated_at": end_dt.isoformat(),
             "total": total,
             "top": top,
-            "filters": {"league": league, "market_type": market_type, "strategy_id": strategy_id},
+            "filters": {"league": league, "market_type": market_type},
         }
 
     async def execution_quality(
@@ -139,7 +132,6 @@ class AnalyticsService:
         end_ms: int | None = None,
         league: str | None = None,
         market_type: str | None = None,
-        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         start_dt, end_dt = self._window(window_ms=window_ms, end_ms=end_ms)
         data = await self.dao.fetch_execution_quality(
@@ -147,7 +139,6 @@ class AnalyticsService:
             window_end=end_dt,
             league=league,
             market_type=market_type,
-            strategy_id=strategy_id,
         )
         return {
             "window_ms": window_ms,
@@ -165,7 +156,7 @@ class AnalyticsService:
                 "p95": _round_or_none(data.get("slip_p95")),
             },
             "sample_size": int(data.get("sample_size") or 0),
-            "filters": {"league": league, "market_type": market_type, "strategy_id": strategy_id},
+            "filters": {"league": league, "market_type": market_type},
         }
 
 
@@ -199,7 +190,6 @@ class SessionFactoryAnalyticsDAO:
         window_end: datetime,
         league: str | None,
         market_type: str | None,
-        strategy_id: str | None,
     ) -> dict[str, int]:
         from polymarket_trader.infra.db.analytics_queries import fetch_funnel_counts
 
@@ -210,7 +200,6 @@ class SessionFactoryAnalyticsDAO:
                 window_end=window_end,
                 league=league,
                 market_type=market_type,
-                strategy_id=strategy_id,
             )
 
         return await self._run(_do)
@@ -223,7 +212,6 @@ class SessionFactoryAnalyticsDAO:
         league: str | None,
         market_type: str | None,
         limit: int,
-        strategy_id: str | None,
     ) -> tuple[int, list[Mapping[str, Any]]]:
         from polymarket_trader.infra.db.analytics_queries import fetch_rejection_reasons
 
@@ -235,7 +223,6 @@ class SessionFactoryAnalyticsDAO:
                 league=league,
                 market_type=market_type,
                 limit=limit,
-                strategy_id=strategy_id,
             )
 
         return await self._run(_do)
@@ -247,7 +234,6 @@ class SessionFactoryAnalyticsDAO:
         window_end: datetime,
         league: str | None,
         market_type: str | None,
-        strategy_id: str | None,
     ) -> dict[str, Any]:
         from polymarket_trader.infra.db.analytics_queries import fetch_execution_quality
 
@@ -258,7 +244,6 @@ class SessionFactoryAnalyticsDAO:
                 window_end=window_end,
                 league=league,
                 market_type=market_type,
-                strategy_id=strategy_id,
             )
 
         return await self._run(_do)

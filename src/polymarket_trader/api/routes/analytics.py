@@ -40,7 +40,6 @@ async def get_funnel(
     end_ms: int | None = Query(default=None, ge=0),
     league: str | None = Query(default=None, min_length=1, max_length=64),
     market_type: str | None = Query(default=None, min_length=1, max_length=64),
-    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     service: AnalyticsService = Depends(get_analytics_service),
 ) -> dict[str, Any]:
     return await service.funnel(
@@ -48,7 +47,6 @@ async def get_funnel(
         end_ms=end_ms,
         league=league,
         market_type=market_type,
-        strategy_id=strategy_id,
     )
 
 
@@ -58,7 +56,6 @@ async def get_rejections(
     end_ms: int | None = Query(default=None, ge=0),
     league: str | None = Query(default=None, min_length=1, max_length=64),
     market_type: str | None = Query(default=None, min_length=1, max_length=64),
-    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     service: AnalyticsService = Depends(get_analytics_service),
 ) -> dict[str, Any]:
     return await service.rejections(
@@ -67,7 +64,6 @@ async def get_rejections(
         league=league,
         market_type=market_type,
         limit=20,
-        strategy_id=strategy_id,
     )
 
 
@@ -77,7 +73,6 @@ async def get_execution_quality(
     end_ms: int | None = Query(default=None, ge=0),
     league: str | None = Query(default=None, min_length=1, max_length=64),
     market_type: str | None = Query(default=None, min_length=1, max_length=64),
-    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     service: AnalyticsService = Depends(get_analytics_service),
 ) -> dict[str, Any]:
     return await service.execution_quality(
@@ -85,14 +80,12 @@ async def get_execution_quality(
         end_ms=end_ms,
         league=league,
         market_type=market_type,
-        strategy_id=strategy_id,
     )
 
 
 @router.get("/edge-realization")
 async def get_edge_realization(
     limit: int = Query(default=200, ge=1, le=2000),
-    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     condition_id: str | None = Query(default=None, min_length=1),
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
@@ -109,7 +102,6 @@ async def get_edge_realization(
 
     return await service.edge_realization_snapshot(
         limit=limit,
-        strategy_id=strategy_id,
         condition_id=condition_id,
         time_range=build_time_range(since=since, until=until),
     )
@@ -157,7 +149,6 @@ async def aggregate_risk_rejections(
 @router.get("/calibration")
 async def get_calibration(
     bucket_size: float = Query(default=0.05, gt=0.0, le=0.5),
-    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
     sample_limit: int = Query(default=2000, ge=1, le=10000),
@@ -174,7 +165,6 @@ async def get_calibration(
 
     return await service.calibration_snapshot(
         bucket_size=Decimal(str(bucket_size)),
-        strategy_id=strategy_id,
         time_range=build_time_range(since=since, until=until),
         sample_limit=sample_limit,
     )
@@ -184,7 +174,6 @@ async def get_calibration(
 async def get_missed_opportunities(
     limit: int = Query(default=500, ge=1, le=5000),
     per_decision_usdc: float = Query(default=10.0, gt=0, le=10_000),
-    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
     service: AdminService = Depends(get_admin_service),
@@ -200,7 +189,6 @@ async def get_missed_opportunities(
     return await service.missed_opportunities_snapshot(
         limit=limit,
         per_decision_usdc=Decimal(str(per_decision_usdc)),
-        strategy_id=strategy_id,
         time_range=build_time_range(since=since, until=until),
     )
 

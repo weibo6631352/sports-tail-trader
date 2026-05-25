@@ -515,11 +515,7 @@ class AdminControlsMixin:
                 "order": self._serializer().order(source_order),
             }
 
-        strategy_id = self._runtime_strategy_id()
-        if not strategy_id:
-            return {"status": "failed", "trace_id": trace_id, "reason": "strategy_id_missing"}
         intent = CancelOrderIntent(
-            strategy_id=strategy_id,
             trace_id=trace_id,
             condition_id=source_order.condition_id,
             token_id=source_order.token_id,
@@ -704,11 +700,7 @@ class AdminControlsMixin:
         except RuntimeError as exc:
             return {"status": "failed", "trace_id": trace_id, "reason": str(exc)}
 
-        strategy_id = self._runtime_strategy_id()
-        if not strategy_id:
-            return {"status": "failed", "trace_id": trace_id, "reason": "strategy_id_missing"}
         intent = SellOrderIntent(
-            strategy_id=strategy_id,
             trace_id=trace_id,
             condition_id=condition_id,
             token_id=token_id,

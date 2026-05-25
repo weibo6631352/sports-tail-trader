@@ -349,7 +349,6 @@ class PolymarketOrderExecutionClient:
         if request.action == "replace":
             replacement_request = OrderExecutionRequest(
                 action="submit",
-                strategy_id=request.strategy_id,
                 trace_id=request.trace_id,
                 idempotency_key=request.idempotency_key,
                 condition_id=request.condition_id,
@@ -417,7 +416,6 @@ class PolymarketOrderExecutionClient:
         # retry，不阻塞 thread pool worker（见 PolymarketOrderExecutor.replace）。
         replacement_request = OrderExecutionRequest(
             action="submit",
-            strategy_id=request.strategy_id,
             trace_id=request.trace_id,
             idempotency_key=request.idempotency_key,
             condition_id=request.condition_id,

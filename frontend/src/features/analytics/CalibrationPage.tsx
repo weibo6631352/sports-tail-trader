@@ -40,12 +40,10 @@ import { toDecimal } from '@shared/format'
 export function CalibrationPage() {
   const since = useTimeWindowStore((s) => s.since)
   const until = useTimeWindowStore((s) => s.until)
-  const strategyId = useAnalyticsFiltersStore((s) => s.strategyId)
   const [bucketSize, setBucketSize] = useState(0.05)
   const [sampleLimit, setSampleLimit] = useState(2000)
   const [submitted, setSubmitted] = useState<{
     bucket_size: number
-    strategy_id?: string
     since?: number
     until?: number
     sample_limit: number
@@ -132,7 +130,6 @@ export function CalibrationPage() {
           onClick={() =>
             setSubmitted({
               bucket_size: bucketSize,
-              strategy_id: strategyId ?? undefined,
               since: since ?? undefined,
               until: until ?? undefined,
               sample_limit: sampleLimit,

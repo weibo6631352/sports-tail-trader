@@ -100,7 +100,6 @@ export const decisionsApi = {
       accepted?: boolean
       since?: number
       until?: number
-      strategy_id?: string
     },
     signal?: AbortSignal,
   ) =>
@@ -229,7 +228,6 @@ export const ordersApi = {
       status?: string
       since?: number
       until?: number
-      strategy_id?: string
     },
     signal?: AbortSignal,
   ) => apiClient.get<OrdersPage>('/orders', { params, signal }),
@@ -268,7 +266,6 @@ export const positionsApi = {
       offset?: number
       condition_id?: string
       token_id?: string
-      strategy_id?: string
     },
     signal?: AbortSignal,
   ) => apiClient.get<PositionsPage>('/positions', { params, signal }),
@@ -294,7 +291,6 @@ export const fillsApi = {
       token_id?: string
       since?: number
       until?: number
-      strategy_id?: string
     },
     signal?: AbortSignal,
   ) => apiClient.get<FillsPage>('/fills', { params, signal }),
@@ -309,7 +305,6 @@ export const allocationsApi = {
       condition_id?: string
       token_id?: string
       market_slug?: string
-      strategy_id?: string
     },
     signal?: AbortSignal,
   ) => apiClient.get<AllocationsPage>('/allocations', { params, signal }),
@@ -340,7 +335,6 @@ export const auditEventsApi = {
       token_id?: string
       since?: number
       until?: number
-      strategy_id?: string
     },
     signal?: AbortSignal,
   ) => apiClient.get<AuditEventsPage>('/audit-events', { params, signal }),
@@ -369,7 +363,6 @@ export const portfolioApi = {
   pnlBreakdown: (
     params: {
       group_by: PnlBreakdownGroupBy
-      strategy_id?: string
       condition_id?: string
       position_limit?: number
     },
@@ -414,7 +407,6 @@ export const candidatesApi = {
       accepted?: boolean
       confirmable?: boolean
       league?: string
-      strategy_id?: string
     },
     signal?: AbortSignal,
   ) => apiClient.get<CandidatesPage>('/candidates', { params, signal }),
@@ -467,7 +459,6 @@ export const analyticsApi = {
       end_ms?: number
       league?: string
       market_type?: string
-      strategy_id?: string
     },
     signal?: AbortSignal,
   ) => apiClient.get<FunnelSnapshot>('/analytics/funnel', { params, signal }),
@@ -477,7 +468,6 @@ export const analyticsApi = {
       end_ms?: number
       league?: string
       market_type?: string
-      strategy_id?: string
     },
     signal?: AbortSignal,
   ) =>
@@ -491,7 +481,6 @@ export const analyticsApi = {
       end_ms?: number
       league?: string
       market_type?: string
-      strategy_id?: string
     },
     signal?: AbortSignal,
   ) =>
@@ -502,7 +491,6 @@ export const analyticsApi = {
   edgeRealization: (
     params: {
       limit?: number
-      strategy_id?: string
       condition_id?: string
       since?: number
       until?: number
@@ -543,7 +531,6 @@ export const analyticsApi = {
   calibration: (
     params: {
       bucket_size?: number
-      strategy_id?: string
       since?: number
       until?: number
       sample_limit?: number
@@ -558,7 +545,6 @@ export const analyticsApi = {
     params: {
       limit?: number
       per_decision_usdc?: number
-      strategy_id?: string
       since?: number
       until?: number
     },
@@ -681,7 +667,6 @@ export const tradeReplaysApi = {
       condition_id?: string
       token_id?: string
       trace_id?: string
-      strategy_id?: string
     },
     signal?: AbortSignal,
   ) => apiClient.get<TradeReplaysPage>('/trade-replays', { params, signal }),

@@ -27,8 +27,6 @@ class AllocationModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     allocation_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    # strategy_id NOT NULL，无 server_default。策略归属由调用侧显式提供。
-    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     condition_id: Mapped[str] = mapped_column(String(128), index=True)
     market_slug: Mapped[str | None] = mapped_column(String(255), index=True)
@@ -57,7 +55,6 @@ class AllocationModel(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_allocations_trace_condition", "trace_id", "condition_id"),
-        Index("ix_allocations_strategy_created", "strategy_id", "created_at"),
     )
 
     @classmethod
@@ -88,7 +85,6 @@ class AllocationModel(Base, TimestampMixin):
             payload = dict(_json_mapping(raw_payload))
         else:
             payload = {
-                "strategy_id": allocation.strategy_id,
                 "trace_id": trace_id,
                 "condition_id": allocation.condition_id,
                 "market_slug": allocation.market_slug,
@@ -105,7 +101,6 @@ class AllocationModel(Base, TimestampMixin):
             payload["kelly"] = kelly_payload
         return cls(
             allocation_key=allocation_key,
-            strategy_id=allocation.strategy_id,
             trace_id=trace_id,
             condition_id=allocation.condition_id,
             market_slug=allocation.market_slug,
@@ -136,7 +131,6 @@ class AllocationModel(Base, TimestampMixin):
         else:
             kelly_fields["is_round_up_overbet"] = False
         return Allocation(
-            strategy_id=self.strategy_id,
             condition_id=self.condition_id,
             target_budget_usdc=_decimal(self.target_budget_usdc) or Decimal("0"),
             buy_budget_usdc=_decimal(self.buy_budget_usdc) or Decimal("0"),

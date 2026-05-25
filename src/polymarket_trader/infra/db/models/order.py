@@ -38,7 +38,6 @@ class OrderModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     order_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     condition_id: Mapped[str] = mapped_column(String(128), index=True)
     token_id: Mapped[str] = mapped_column(String(128), index=True)
@@ -67,7 +66,6 @@ class OrderModel(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_orders_trace_order_trade", "trace_id", "order_id", "trade_id"),
         Index("ix_orders_condition_token_status", "condition_id", "token_id", "status"),
-        Index("ix_orders_strategy_created", "strategy_id", "created_at"),
     )
 
     @classmethod
@@ -82,7 +80,6 @@ class OrderModel(Base, TimestampMixin):
             order_type = order.order_type
             order_key = _order_key(order)
             payload = _json_mapping(raw_payload) if raw_payload is not None else {
-                "strategy_id": order.strategy_id,
                 "trace_id": order.trace_id,
                 "condition_id": order.condition_id,
                 "token_id": order.token_id,
@@ -104,7 +101,6 @@ class OrderModel(Base, TimestampMixin):
             }
             return cls(
                 order_key=order_key,
-                strategy_id=order.strategy_id,
                 trace_id=order.trace_id,
                 condition_id=order.condition_id,
                 token_id=order.token_id,
@@ -131,7 +127,6 @@ class OrderModel(Base, TimestampMixin):
 
         order_key = _order_key(order)
         payload = _json_mapping(raw_payload) if raw_payload is not None else {
-            "strategy_id": order.strategy_id,
             "trace_id": order.trace_id,
             "condition_id": order.condition_id,
             "token_id": order.token_id,
@@ -159,7 +154,6 @@ class OrderModel(Base, TimestampMixin):
         }
         return cls(
             order_key=order_key,
-            strategy_id=order.strategy_id,
             trace_id=order.trace_id,
             condition_id=order.condition_id,
             token_id=order.token_id,
@@ -203,7 +197,6 @@ class OrderModel(Base, TimestampMixin):
         except ValueError as exc:
             raise ValueError(f"orders[order_key={self.order_key}] invalid status={self.status!r}") from exc
         return Order(
-            strategy_id=self.strategy_id,
             trace_id=self.trace_id,
             condition_id=self.condition_id,
             token_id=self.token_id,

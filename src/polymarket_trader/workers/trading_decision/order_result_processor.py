@@ -289,7 +289,6 @@ class TradingOrderResultProcessor:
             },
         )
         cancel_intent = CancelOrderIntent(
-            strategy_id=order_result.strategy_id or self._trading_decision_service.strategy_id,
             trace_id=order_result.trace_id,
             condition_id=order_result.condition_id,
             token_id=order_result.token_id,

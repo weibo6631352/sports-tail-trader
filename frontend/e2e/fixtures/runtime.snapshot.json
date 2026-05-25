@@ -1,6 +1,5 @@
 {
   "settings": {
-    "strategy_id": "sports_tail",
     "phase": "running",
     "automatic_trading_enabled": true,
     "paper_trading": false

@@ -122,7 +122,6 @@ def build_order_result(
         spent_usdc = Decimal("0")
 
     return OrderResult(
-        strategy_id=request.strategy_id,
         trace_id=request.trace_id,
         condition_id=request.condition_id,
         token_id=request.token_id,

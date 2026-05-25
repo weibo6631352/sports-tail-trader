@@ -464,7 +464,6 @@ def _synthetic_order_result(
         size_shares = None
         notional_usdc = Decimal("0")
     return OrderResult(
-        strategy_id=intent.strategy_id,
         trace_id=intent.trace_id,
         condition_id=intent.condition_id,
         token_id=intent.token_id,

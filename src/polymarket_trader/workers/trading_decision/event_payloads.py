@@ -56,12 +56,7 @@ def coerce_order_result_from_event(event: DomainEvent) -> OrderResult | None:
     }:
         return None
     status = coerce_status(status_value, event.event_type)
-    strategy_id_value = payload.get("strategy_id")
-    if strategy_id_value is None:
-        # 兼容旧 payload：framework 内部所有事件必须带 strategy_id；缺失时无法构造 OrderResult。
-        return None
     return OrderResult(
-        strategy_id=str(strategy_id_value),
         trace_id=str(payload.get("trace_id", event.trace_id)),
         condition_id=str(payload.get("condition_id", event.condition_id or "")),
         token_id=str(payload.get("token_id", event.token_id or "")),

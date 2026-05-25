@@ -251,7 +251,6 @@ class AdminReconcileDecisionsQueryMixin:
         condition_id: str | None = None,
         accepted: bool | None = None,
         time_range: TimeRange | None = None,
-        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         """暴露 ``decision_records`` 表（策略 hook 决策录制）。
 
@@ -271,7 +270,6 @@ class AdminReconcileDecisionsQueryMixin:
                 condition_id=condition_id,
                 accepted=accepted,
                 time_range=time_range,
-                strategy_id=strategy_id,
             )
 
         page = await self._with_repositories(_query)
@@ -293,20 +291,11 @@ class AdminReconcileDecisionsQueryMixin:
         accepted: bool | None = None,
         confirmable: bool | None = None,
         league: str | None = None,
-        strategy_id: str | None = None,
     ) -> dict[str, Any]:
         """从热态 market、orderbook 与直播 metadata 投影体育扫尾候选。"""
 
         candidates: list[dict[str, Any]] = []
         account = self._account_snapshot()
-        # candidates 在运行时纯内存投影，归属由 runtime.strategy_id 决定。
-        runtime_strategy_id = self._runtime_strategy_id()
-        if strategy_id is not None and runtime_strategy_id is not None and strategy_id != runtime_strategy_id:
-            empty_page = self._slice_sequence((), limit=limit, offset=offset)
-            payload = page_payload(empty_page, serializer=lambda item: item)
-            payload["has_more"] = False
-            payload["source_markets"] = 0
-            return payload
         # === module-level candidate cache (TTL 3s) ===
         # /candidates 每次重跑 1500 markets × 2 outcome = 3000 次 build_entry_plan,
         # p99 22 秒卡死 event loop → ws_queue DEGRADED.3s TTL 让多客户端共享一次评估,负载降 90%+.

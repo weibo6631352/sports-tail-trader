@@ -33,24 +33,16 @@ class DecisionEventRecorder:
     内部不维护任何缓冲：每次 record 直接构造 ``OutboxEvent`` 并 ``put_nowait``。
     """
 
-    __slots__ = ("_outbox", "_strategy_id")
+    __slots__ = ("_outbox",)
 
-    def __init__(self, outbox: _OutboxSink | None, *, strategy_id: str) -> None:
-        if not strategy_id:
-            raise ValueError("DecisionEventRecorder requires non-empty strategy_id")
+    def __init__(self, outbox: _OutboxSink | None) -> None:
         self._outbox = outbox
-        self._strategy_id = strategy_id
-
-    @property
-    def strategy_id(self) -> str:
-        return self._strategy_id
 
     def record(self, record: DecisionRecord) -> None:
         if self._outbox is None:
             return
         log_context = {
             "trace_id": record.trace_id,
-            "strategy_id": record.strategy_id,
             "hook_name": record.hook_name,
             "condition_id": record.condition_id,
         }
@@ -82,7 +74,6 @@ def build_decision_record_from_hook(
     *,
     hook_name: str,
     trace_id: str,
-    strategy_id: str,
     context: Any,
     decision: Any,
     condition_id: str | None,
@@ -97,13 +88,10 @@ def build_decision_record_from_hook(
 
     if not condition_id:
         return None
-    if not strategy_id:
-        return None
     context_payload = _safe_jsonable(context)
     decision_payload = _safe_jsonable(decision)
     accepted, reason = _decision_outcome(decision_payload)
     return DecisionRecord(
-        strategy_id=strategy_id,
         trace_id=trace_id,
         condition_id=str(condition_id),
         hook_name=hook_name,
@@ -168,7 +156,6 @@ def _decision_outcome(payload: Mapping[str, Any]) -> tuple[bool, str | None]:
 def _build_outbox_event(record: DecisionRecord) -> OutboxEvent:
     payload = {
         "record_id": record.record_id,
-        "strategy_id": record.strategy_id,
         "trace_id": record.trace_id,
         "hook_name": record.hook_name or "",
         "condition_id": record.condition_id,

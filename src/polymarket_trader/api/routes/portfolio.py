@@ -98,10 +98,9 @@ async def get_risk_metrics(
 @router.get("/pnl-breakdown")
 async def get_pnl_breakdown(
     group_by: str = Query(
-        default="strategy_id",
-        description="strategy_id | market_slug | condition_id | category | outcome | redeemable_status",
+        default="market_slug",
+        description="market_slug | condition_id | category | outcome | redeemable_status",
     ),
-    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     condition_id: str | None = Query(default=None, min_length=1),
     position_limit: int = Query(default=5000, ge=1, le=20000),
     service: AdminService = Depends(get_admin_service),
@@ -117,7 +116,6 @@ async def get_pnl_breakdown(
         return await asyncio.wait_for(
             service.pnl_breakdown_snapshot(
                 group_by=group_by,
-                strategy_id=strategy_id,
                 condition_id=condition_id,
                 position_limit=position_limit,
             ),

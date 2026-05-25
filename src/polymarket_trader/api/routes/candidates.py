@@ -54,7 +54,6 @@ async def list_candidates(
     accepted: bool | None = Query(default=None),
     confirmable: bool | None = Query(default=None),
     league: str | None = Query(default=None),
-    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
     return await service.list_strategy_candidates(
@@ -70,7 +69,6 @@ async def list_candidates(
         accepted=accepted,
         confirmable=confirmable,
         league=league,
-        strategy_id=strategy_id,
     )
 
 

@@ -39,7 +39,6 @@ class FillRepository(BaseRepository):
             rows,
             conflict_columns=("event_id",),
             update_columns=(
-                "strategy_id",
                 "trace_id",
                 "event_type",
                 "condition_id",
@@ -69,7 +68,6 @@ class FillRepository(BaseRepository):
         condition_id: str | None = None,
         token_id: str | None = None,
         time_range: TimeRange | None = None,
-        strategy_id: str | None = None,
     ) -> RepositoryPage[Fill]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(FillModel).order_by(FillModel.confirmed_at.desc(), FillModel.id.desc())
@@ -83,8 +81,6 @@ class FillRepository(BaseRepository):
             stmt = stmt.where(FillModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(FillModel.token_id == token_id)
-        if strategy_id is not None:
-            stmt = stmt.where(FillModel.strategy_id == strategy_id)
         if time_range is not None and not time_range.is_empty:
             since_dt, until_dt = time_range.to_datetime_range()
             if since_dt is not None:

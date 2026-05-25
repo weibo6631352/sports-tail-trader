@@ -39,13 +39,11 @@ const STATUS_LABEL: Record<string, string> = {
 export function MissedOpportunitiesPage() {
   const since = useTimeWindowStore((s) => s.since)
   const until = useTimeWindowStore((s) => s.until)
-  const strategyId = useAnalyticsFiltersStore((s) => s.strategyId)
   const [perDecisionUsdc, setPerDecisionUsdc] = useState(10)
   const [limit, setLimit] = useState(500)
   const [submitted, setSubmitted] = useState<{
     limit: number
     per_decision_usdc: number
-    strategy_id?: string
     since?: number
     until?: number
   } | null>(null)
@@ -60,7 +58,6 @@ export function MissedOpportunitiesPage() {
     setSubmitted({
       limit,
       per_decision_usdc: perDecisionUsdc,
-      strategy_id: strategyId ?? undefined,
       since: since ?? undefined,
       until: until ?? undefined,
     })

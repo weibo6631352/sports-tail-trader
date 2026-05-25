@@ -176,7 +176,6 @@ def serialize_plan_metadata(plan: EntryPlan) -> dict[str, object]:
 
 def serialize_intent(intent: ManagedOrderIntent) -> dict[str, object]:
     payload: dict[str, object] = {
-        "strategy_id": intent.strategy_id,
         "trace_id": intent.trace_id,
         "condition_id": intent.condition_id,
         "token_id": intent.token_id,
@@ -233,7 +232,6 @@ def serialize_review(review: TradingReviewResult) -> dict[str, object]:
 
 def serialize_control_intent(intent: CancelOrderIntent) -> dict[str, object]:
     return {
-        "strategy_id": intent.strategy_id,
         "trace_id": intent.trace_id,
         "condition_id": intent.condition_id,
         "token_id": intent.token_id,
@@ -247,7 +245,6 @@ def serialize_order_result(order_result: OrderResult | None) -> dict[str, object
     if order_result is None:
         return None
     return {
-        "strategy_id": order_result.strategy_id,
         "trace_id": order_result.trace_id,
         "condition_id": order_result.condition_id,
         "token_id": order_result.token_id,

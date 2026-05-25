@@ -31,7 +31,6 @@ def request_signature(request: OrderExecutionRequest) -> str:
 @dataclass(frozen=True, slots=True)
 class OrderExecutionRequest:
     action: str
-    strategy_id: str
     trace_id: str
     idempotency_key: str
     condition_id: str

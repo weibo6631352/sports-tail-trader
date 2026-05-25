@@ -43,7 +43,6 @@ class ParameterSweepRequest(BaseModel):
         ge=Decimal("0.01"),
         le=Decimal("100000.0"),
     )
-    strategy_id: str | None = Field(default=None, min_length=1, max_length=64)
     since: int | None = Field(default=None, ge=0)
     until: int | None = Field(default=None, ge=0)
     decision_limit: int = Field(default=2000, ge=1, le=20_000)
@@ -151,7 +150,6 @@ async def parameter_sweep(
         return await service.run_parameter_sweep(
             candidates=request.candidates,
             per_decision_usdc=request.per_decision_usdc,
-            strategy_id=request.strategy_id,
             time_range=build_time_range(since=request.since, until=request.until),
             decision_limit=request.decision_limit,
             settlement_limit=request.settlement_limit,

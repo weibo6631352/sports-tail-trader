@@ -314,9 +314,6 @@ class AuditEvent:
             trace_id = merged.pop("trace_id", None)
         if trace_id is None:
             raise ValueError("AuditEvent requires trace_id")
-        # 历史调用方可能仍把 strategy_id 塞进 payload/fields——直接吞掉，
-        # 避免 dataclass 未声明字段引发 KeyError；后续审计无此字段。
-        merged.pop("strategy_id", None)
 
         created_at = _normalize_datetime(created_at or merged.pop("created_at", None))
         updated_at = merged.pop("updated_at", None) or created_at

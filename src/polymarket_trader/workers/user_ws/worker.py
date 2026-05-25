@@ -93,17 +93,13 @@ class UserWsWorker:
     def __init__(
         self,
         *,
-        strategy_id: str,
         event_bus: EventBus | None = None,
         account_state_store: AccountStateStore | None = None,
         message_source: MessageSource | None = None,
     ) -> None:
-        if not strategy_id:
-            raise ValueError("UserWsWorker requires non-empty strategy_id")
-        self._strategy_id = strategy_id
         self._event_bus = event_bus
         self._account_state = account_state_store or AccountStateStore()
-        self._account_projector = UserWsAccountProjector(self._account_state, strategy_id=strategy_id)
+        self._account_projector = UserWsAccountProjector(self._account_state)
         self._message_source = message_source
         self._subscribed_condition_ids: dict[str, datetime] = {}
         self._last_message_at: datetime | None = None

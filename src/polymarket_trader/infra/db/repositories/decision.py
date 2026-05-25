@@ -53,7 +53,6 @@ class DecisionRecordRepository(BaseRepository):
         condition_id: str | None = None,
         accepted: bool | None = None,
         time_range: TimeRange | None = None,
-        strategy_id: str | None = None,
     ) -> RepositoryPage[DecisionRecord]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(DecisionRecordModel).order_by(
@@ -65,8 +64,6 @@ class DecisionRecordRepository(BaseRepository):
             stmt = stmt.where(DecisionRecordModel.condition_id == condition_id)
         if accepted is not None:
             stmt = stmt.where(DecisionRecordModel.accepted == accepted)
-        if strategy_id is not None:
-            stmt = stmt.where(DecisionRecordModel.strategy_id == strategy_id)
         if time_range is not None and not time_range.is_empty:
             since_dt, until_dt = time_range.to_datetime_range()
             if since_dt is not None:

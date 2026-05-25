@@ -38,7 +38,6 @@ def build_paper_runtime(
     account_state_store: AccountStateStore,
     registry: MarketRegistry,
     market_ws_worker: "MarketWsWorker",
-    strategy_id: str,
 ) -> tuple[
     PaperSubmitOnlyOrderClient,
     PaperVirtualLedger,
@@ -77,7 +76,6 @@ def build_paper_runtime(
         portfolio_budget_usdc=settings.portfolio_budget_usdc,
         registry=registry,
         market_ws_worker=market_ws_worker,
-        strategy_id=strategy_id,
     )
 
     # GoalserveLazy 提供 schedule / h2h 等按需拉取（不轮询，仅 lookup 时调用）。

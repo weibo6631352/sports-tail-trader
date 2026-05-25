@@ -189,14 +189,9 @@ def is_snapshot_message(payload: Mapping[str, Any]) -> bool:
     return kind in {"snapshot", "sync", "initial_snapshot", "full_snapshot", "state"}
 
 
-def iter_order_snapshots(payload: Mapping[str, Any], *, strategy_id: str) -> Iterable[Order]:
-    """从 Polymarket User WS 消息抽取 Order；strategy_id 由 framework 注入。
+def iter_order_snapshots(payload: Mapping[str, Any]) -> Iterable[Order]:
+    """从 Polymarket User WS 消息抽取 Order。"""
 
-    外部 WS payload 不携带策略身份，调用侧必须传入当前 runtime 的 strategy_id。
-    """
-
-    if not strategy_id:
-        raise ValueError("iter_order_snapshots requires non-empty strategy_id")
     candidates: Iterable[Any]
     if is_mapping_sequence(payload.get("orders")):
         candidates = payload["orders"]
@@ -238,7 +233,6 @@ def iter_order_snapshots(payload: Mapping[str, Any], *, strategy_id: str) -> Ite
         if remaining_shares is None and size_shares is not None:
             remaining_shares = max(Decimal("0"), size_shares - filled_shares)
         yield Order(
-            strategy_id=strategy_id,
             trace_id=extract_trace_id(item),
             condition_id=condition_id,
             token_id=token_id,
@@ -264,9 +258,7 @@ def iter_order_snapshots(payload: Mapping[str, Any], *, strategy_id: str) -> Ite
         )
 
 
-def iter_position_snapshots(payload: Mapping[str, Any], *, strategy_id: str) -> Iterable[Position]:
-    if not strategy_id:
-        raise ValueError("iter_position_snapshots requires non-empty strategy_id")
+def iter_position_snapshots(payload: Mapping[str, Any]) -> Iterable[Position]:
     candidates: Iterable[Any]
     if is_mapping_sequence(payload.get("positions")):
         candidates = payload["positions"]
@@ -287,7 +279,6 @@ def iter_position_snapshots(payload: Mapping[str, Any], *, strategy_id: str) -> 
         if condition_id is None or token_id is None:
             continue
         yield Position(
-            strategy_id=strategy_id,
             condition_id=condition_id,
             token_id=token_id,
             market_slug=extract_market_slug(item),
@@ -309,9 +300,7 @@ def iter_position_snapshots(payload: Mapping[str, Any], *, strategy_id: str) -> 
         )
 
 
-def iter_fill_snapshots(payload: Mapping[str, Any], *, strategy_id: str) -> Iterable[Fill]:
-    if not strategy_id:
-        raise ValueError("iter_fill_snapshots requires non-empty strategy_id")
+def iter_fill_snapshots(payload: Mapping[str, Any]) -> Iterable[Fill]:
     candidates: Iterable[Any]
     if is_mapping_sequence(payload.get("fills")):
         candidates = payload["fills"]
@@ -328,14 +317,14 @@ def iter_fill_snapshots(payload: Mapping[str, Any], *, strategy_id: str) -> Iter
         if not isinstance(item, Mapping):
             continue
         if _is_maker_trade_message(item):
-            yield from _maker_fill_snapshots(item, strategy_id=strategy_id)
+            yield from _maker_fill_snapshots(item)
             continue
-        fill = _top_level_fill_snapshot(item, strategy_id=strategy_id)
+        fill = _top_level_fill_snapshot(item)
         if fill is not None:
             yield fill
 
 
-def _top_level_fill_snapshot(item: Mapping[str, Any], *, strategy_id: str) -> Fill | None:
+def _top_level_fill_snapshot(item: Mapping[str, Any]) -> Fill | None:
     """按 taker 或普通 fill 语义读取顶层成交。"""
 
     condition_id = extract_condition_id(item)
@@ -355,7 +344,6 @@ def _top_level_fill_snapshot(item: Mapping[str, Any], *, strategy_id: str) -> Fi
     if notional_usdc == Decimal("0") and size is not None and price is not None:
         notional_usdc = price * size
     return Fill(
-        strategy_id=strategy_id,
         trace_id=extract_trace_id(item),
         event_id=extract_event_id(item),
         market_slug=extract_market_slug(item),
@@ -392,7 +380,7 @@ def _maker_orders(item: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...] | No
     return tuple(value)
 
 
-def _maker_fill_snapshots(item: Mapping[str, Any], *, strategy_id: str) -> Iterable[Fill]:
+def _maker_fill_snapshots(item: Mapping[str, Any]) -> Iterable[Fill]:
     """从 maker_orders 中抽取用户自己的成交腿。"""
 
     maker_orders = _maker_orders(item)
@@ -424,7 +412,6 @@ def _maker_fill_snapshots(item: Mapping[str, Any], *, strategy_id: str) -> Itera
         if notional_usdc == Decimal("0") and size is not None and price is not None:
             notional_usdc = price * size
         yield Fill(
-            strategy_id=strategy_id,
             trace_id=text_value(first_value(maker, "trace_id", "traceId")) or extract_trace_id(item),
             event_id=extract_event_id(item),
             market_slug=extract_market_slug(maker) or extract_market_slug(item),
@@ -482,7 +469,6 @@ def order_from_fill(fill: Fill) -> Order:
     elif fill.status in {"failed"}:
         order_status = OrderStatus.FAILED
     return Order(
-        strategy_id=fill.strategy_id,
         trace_id=fill.trace_id,
         condition_id=fill.condition_id or "",
         token_id=fill.token_id or "",
@@ -508,7 +494,6 @@ def apply_fill_to_position(position: Position | None, fill: Fill) -> Position | 
         if fill.condition_id is None or fill.token_id is None:
             return None
         position = Position(
-            strategy_id=fill.strategy_id,
             condition_id=fill.condition_id,
             token_id=fill.token_id,
             market_slug=fill.market_slug,

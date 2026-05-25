@@ -167,7 +167,7 @@ class DataPositionDTO:
             summary = _summary(self.raw) or ""
         object.__setattr__(self, "raw_summary", summary)
 
-    def to_position(self, *, strategy_id: str) -> Position:
+    def to_position(self) -> Position:
         """Data-api 持仓 → 内部 Position。
 
         **关键：mark-to-market 字段（current_value / cur_price / cash_pnl /
@@ -181,10 +181,7 @@ class DataPositionDTO:
         提供"账户事实"字段（shares / cost / 已结算 realized_pnl / avg_price），
         不参与"当前可实现价值"计算。
         """
-        if not strategy_id:
-            raise ValueError("to_position requires non-empty strategy_id")
         return Position(
-            strategy_id=strategy_id,
             condition_id=self.condition_id,
             token_id=self.token_id,
             shares=self.shares,
@@ -260,5 +257,5 @@ def normalize_balance_allowance_payload(payload: Mapping[str, Any]) -> BalanceAl
     )
 
 
-def data_position_to_domain_position(payload: Mapping[str, Any], *, strategy_id: str) -> Position:
-    return normalize_position_payload(payload).to_position(strategy_id=strategy_id)
+def data_position_to_domain_position(payload: Mapping[str, Any]) -> Position:
+    return normalize_position_payload(payload).to_position()

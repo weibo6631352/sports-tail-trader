@@ -45,7 +45,6 @@ class PositionRepository(BaseRepository):
             rows,
             conflict_columns=("position_key",),
             update_columns=(
-                "strategy_id",
                 "trace_id",
                 "condition_id",
                 "token_id",
@@ -80,7 +79,6 @@ class PositionRepository(BaseRepository):
         offset: int = 0,
         condition_id: str | None = None,
         token_id: str | None = None,
-        strategy_id: str | None = None,
     ) -> RepositoryPage[Position]:
         limit, offset = _limit_offset(limit, offset)
         stmt = select(PositionModel).order_by(PositionModel.updated_at.desc(), PositionModel.id.desc())
@@ -88,16 +86,12 @@ class PositionRepository(BaseRepository):
             stmt = stmt.where(PositionModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(PositionModel.token_id == token_id)
-        if strategy_id is not None:
-            stmt = stmt.where(PositionModel.strategy_id == strategy_id)
         rows, total = await self._paginate(stmt, limit=limit, offset=offset)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
     async def list_by_condition_ids(
         self,
         condition_ids: Sequence[str],
-        *,
-        strategy_id: str | None = None,
     ) -> tuple[Position, ...]:
         """按 ``condition_id`` 集合批量取仓位——给跨表聚合（edge-realization 等）用，
         避免 N+1。无 condition_ids 时返回空 tuple。"""
@@ -106,8 +100,6 @@ class PositionRepository(BaseRepository):
         if not ids:
             return ()
         stmt = select(PositionModel).where(PositionModel.condition_id.in_(ids))
-        if strategy_id is not None:
-            stmt = stmt.where(PositionModel.strategy_id == strategy_id)
         result = await self._session.scalars(stmt)
         return tuple(row.to_domain() for row in result.all())
 

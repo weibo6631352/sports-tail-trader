@@ -50,7 +50,6 @@ export function DecisionDetailDrawer({ recordId, onClose }: Props) {
               <KV k="condition_id" v={<CopyableId value={query.data.condition_id} />} />
               <KV k="token_id" v={<CopyableId value={query.data.token_id ?? ''} />} />
               <KV k="hook" v={query.data.hook_name ?? '—'} />
-              <KV k="strategy_id" v={query.data.strategy_id ?? '—'} />
               <KV k="created_at" v={formatIso(query.data.created_at)} />
               {query.data.reason ? <KV k="reason" v={<code>{query.data.reason}</code>} /> : null}
             </Stack>

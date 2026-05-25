@@ -41,7 +41,6 @@ async def _paper_balance_syncer(
     portfolio_budget_usdc: Decimal,
     registry: "MarketRegistry",
     market_ws_worker: "MarketWsWorker",
-    strategy_id: str,
 ) -> None:
     """每秒把 paper_ledger 投影回 account_state_store（balance + positions）。
 
@@ -75,7 +74,6 @@ async def _paper_balance_syncer(
                     ledger.observe_unrealized(token_id, ob.best_bid)
                 paper_positions.append(
                     Position(
-                        strategy_id=strategy_id,
                         condition_id=market.condition_id,
                         token_id=token_id,
                         market_slug=market.market_slug,
@@ -199,7 +197,6 @@ def start_paper_background_tasks(
     portfolio_budget_usdc: Decimal,
     registry: "MarketRegistry",
     market_ws_worker: "MarketWsWorker",
-    strategy_id: str,
 ) -> dict[str, asyncio.Task]:
     """启动 4 个 paper-mode 后台 task。
 
@@ -222,7 +219,6 @@ def start_paper_background_tasks(
                 portfolio_budget_usdc=portfolio_budget_usdc,
                 registry=registry,
                 market_ws_worker=market_ws_worker,
-                strategy_id=strategy_id,
             ),
             name="paper_balance_syncer",
         ),

@@ -151,7 +151,6 @@ class ReconcileAuthorityRefresher:
     def __init__(
         self,
         *,
-        strategy_id: str,
         registry_snapshot_provider: RegistrySnapshotProvider | None = None,
         account_state_store: AccountStateStore | None = None,
         registry: MarketRegistry | None = None,
@@ -166,9 +165,6 @@ class ReconcileAuthorityRefresher:
         gamma_snapshot_store: GammaMarketSnapshotStore | None = None,
         refresh_account_inline: bool = True,
     ) -> None:
-        if not strategy_id:
-            raise ValueError("ReconcileAuthorityRefresher requires non-empty strategy_id")
-        self._strategy_id = strategy_id
         self._registry_snapshot_provider = registry_snapshot_provider
         self._account_state_store = account_state_store
         self._registry = registry
@@ -404,7 +400,6 @@ class ReconcileAuthorityRefresher:
         snapshot = self._account_state_store.snapshot()
         projector = AccountStateProjector(
             self._account_state_store,
-            strategy_id=self._strategy_id,
         )
         coverage_targets: dict[tuple[str, str], str | None] = {}
         for position in snapshot.positions:
@@ -779,7 +774,7 @@ class ReconcileAuthorityRefresher:
         )
         if positions is None:
             return None
-        return tuple(position.to_position(strategy_id=self._strategy_id) for position in positions)
+        return tuple(position.to_position() for position in positions)
 
     async def _enrich_redeemable_positions(
         self,
@@ -861,7 +856,7 @@ class ReconcileAuthorityRefresher:
         )
         if orders is None:
             return None
-        return tuple(order.to_order_record(strategy_id=self._strategy_id) for order in orders)
+        return tuple(order.to_order_record() for order in orders)
 
     async def _fetch_fills(
         self,
@@ -878,7 +873,7 @@ class ReconcileAuthorityRefresher:
         )
         if fills is None:
             return None
-        return tuple(fill.to_fill(strategy_id=self._strategy_id) for fill in fills)
+        return tuple(fill.to_fill() for fill in fills)
 
     async def _fetch_balance(
         self,

@@ -78,7 +78,6 @@ async def list_positions(
     offset: int = Query(default=0, ge=0),
     condition_id: str | None = Query(default=None),
     token_id: str | None = Query(default=None),
-    strategy_id: str | None = Query(default=None, min_length=1, max_length=64),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
     return await service.list_positions(
@@ -86,7 +85,6 @@ async def list_positions(
         offset=offset,
         condition_id=condition_id,
         token_id=token_id,
-        strategy_id=strategy_id,
     )
 
 

@@ -26,7 +26,6 @@ class AuditEventModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     event_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     event_title: Mapped[str] = mapped_column(String(128), index=True)
     market_slug: Mapped[str | None] = mapped_column(String(255), index=True)
@@ -55,7 +54,6 @@ class AuditEventModel(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_audit_events_trace_event", "trace_id", "event_title"),
         Index("ix_audit_events_trace_order_trade", "trace_id", "order_id", "trade_id"),
-        Index("ix_audit_events_strategy_created", "strategy_id", "created_at"),
         # 注:created_at 单列索引由 TimestampMixin.index=True 自动创建为
         # ix_audit_events_created_at,不重复显式定义(SQLAlchemy 会冲突).
     )
@@ -70,7 +68,6 @@ class AuditEventModel(Base, TimestampMixin):
         payload = _json_mapping(raw_payload) if raw_payload is not None else audit_event.to_payload()
         return cls(
             event_id=audit_event.event_id,
-            strategy_id=audit_event.strategy_id,
             trace_id=audit_event.trace_id,
             event_title=audit_event.event_title,
             market_slug=audit_event.market_slug,
@@ -99,7 +96,6 @@ class AuditEventModel(Base, TimestampMixin):
             payload=dict(self.payload),
             trace_id=self.trace_id,
             created_at=self.created_at,
-            strategy_id=self.strategy_id,
         )
 
 

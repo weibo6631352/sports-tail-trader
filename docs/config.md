@@ -3,7 +3,7 @@
 先分清两类配置：
 
 - 框架配置：写 `.env`
-- 策略规则：写策略包；默认示例策略在 `src/strategies/current/`
+- 策略规则：写策略包；当前策略在 `src/polymarket_trader/quant/`
 
 ## 示例文件
 
@@ -24,12 +24,12 @@
 | 超时告警 | `ORDER_SUBMIT_TIMEOUT_MS`、`CRITICAL_LOCK_TIMEOUT_MS` | 防止交易链路无限等待 |
 | 数据库 | `DATABASE_URL`、`DATABASE_HOST` | PostgreSQL 连接地址；支持完整 URL 或拆分字段 |
 | 密钥 | `POLYMARKET_API_KEY`、`WALLET_PRIVATE_KEY` | 只能通过安全环境注入 |
-| 策略装配 | `STRATEGY_CONFIG_PATH` | 可选 TOML/JSON 文件，覆盖 `CurrentStrategyConfig` 默认值 |
+| 策略装配 | `WORKFLOW_CONFIG_PATH` | 可选 TOML/JSON 文件，覆盖 `TradingWorkflowConfig` 默认值 |
 | 策略规则 | `src/polymarket_trader/quant/` | 当前量化策略的交易阈值、筛选语义、订阅规则 |
 
 ## 规则
 
-- 当前只装配一个量化策略（`polymarket_trader.quant.CurrentStrategy`）；策略业务语义收口在 `src/polymarket_trader/quant/`。
+- 当前只装配一个量化策略（`polymarket_trader.quant.TradingWorkflow`）；策略业务语义收口在 `src/polymarket_trader/quant/`。
 - `Settings` 只接受已声明字段；未声明字段和已淘汰字段会直接报错，不会静默忽略。
 - `.env.example` 只保留常用启动项；不常改的默认值直接看 `Settings`，需要显式覆盖时再写 `.env.full.example`。
 - `POLYMARKET_API_KEY`、`POLYMARKET_API_SECRET`、`POLYMARKET_API_PASSPHRASE` 要么同时提供，要么全部留空并在运行时派生。
@@ -107,9 +107,9 @@
 
 策略代码统一收口在 `src/polymarket_trader/quant/`：
 
-- 入口主类：`src/polymarket_trader/quant/strategy.py`（`CurrentStrategy`）
+- 入口主类：`src/polymarket_trader/quant/workflow.py`（`TradingWorkflow`）
 - 量化决策中枢：`src/polymarket_trader/quant/quant_decider.py`（`QuantDecider`——所有 BUY/SELL/cancel/replace 决策的唯一入口）
-- 配置：`src/polymarket_trader/quant/config.py`（`CurrentStrategyConfig`，TOML/JSON 文件覆盖入口 = `STRATEGY_CONFIG_PATH`）
+- 配置：`src/polymarket_trader/quant/config.py`（`TradingWorkflowConfig`，TOML/JSON 文件覆盖入口 = `WORKFLOW_CONFIG_PATH`）
 - 远端 discovery 粗筛输入：`discovery_title_searches` / `discovery_tag_slugs`；当前默认用 `sports` tag 扩大市场扫描。Gamma Events keyset 文档：<https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination>
 - 直播比赛驱动 discovery：`tail_live_discovery_max_games` 控制每轮最多取多少个直播源比赛生成高意图查询，`tail_live_discovery_max_queries` 控制追加 query 上限；默认按 live 状态优先 + Polymarket 单场盘口覆盖度（NBA/NHL/MLB/ATP/WTA 优先）。
 - 受控加仓参数：`tail_scale_in_budget_fraction` 控制单次加仓预算相对首笔 BUY 成交额的比例，`tail_scale_in_max_buy_fills` 控制同 token BUY 成交次数上限。
@@ -171,7 +171,7 @@
 
 - Override **重启即丢**。Long-term 固化仍走 `.env` 改 `Settings` 或策略
   config 文件后重启。
-- 密钥 / SecretStr 字段、连接串、`STRATEGY_CONFIG_PATH` 等不在白名单——不能通过 API 改。
+- 密钥 / SecretStr 字段、连接串、`WORKFLOW_CONFIG_PATH` 等不在白名单——不能通过 API 改。
 - 策略侧消费 override 走 `ports.parameter`（`src/polymarket_trader/quant/parameter_overrides.py` 提供 effective_int / effective_decimal helper）。
 
 ## 新增配置时确认
@@ -182,5 +182,5 @@
 - 是否需要进白名单接入 `/parameters` 运行时热更新（只有探索性调参才需要；
   长期值仍走 `.env`）。
 - 是否需要写入 [`.env.full.example`](../.env.full.example)；如果属于最常用启动项，再同步写入 [`.env.example`](../.env.example)。
-- 如果只是策略规则，直接写 `src/polymarket_trader/quant/`（或通过 `STRATEGY_CONFIG_PATH` 指向的 TOML），不要新增框架环境变量。
+- 如果只是策略规则，直接写 `src/polymarket_trader/quant/`（或通过 `WORKFLOW_CONFIG_PATH` 指向的 TOML），不要新增框架环境变量。
 - 是否会改变资金暴露、订单行为或 reconcile 行为。

@@ -55,24 +55,15 @@ class TradingDecisionService:
     def __init__(
         self,
         *,
-        strategy: "TradingWorkflow",
-        strategy_id: str,
+        workflow: "TradingWorkflow",
         registry: MarketRegistry | None = None,
         orderbook_reader: OrderbookReader | None = None,
         decision_recorder: DecisionEventRecorder | None = None,
     ) -> None:
-        if not strategy_id:
-            raise ValueError("TradingDecisionService requires non-empty strategy_id")
-        self._workflow = strategy
-        self._strategy_id = strategy_id
+        self._workflow = workflow
         self._registry = registry
         self._orderbook_reader = orderbook_reader
         self._decision_recorder = decision_recorder
-
-    @property
-    def strategy_id(self) -> str:
-        return self._strategy_id
-
 
     def build_entry_plan(
         self,
@@ -227,7 +218,6 @@ class TradingDecisionService:
             decision_with_signal = replace(decision, metadata=merged_decision_metadata)
             intent = decision_to_trade_intent(
                 trace_id=trace_id,
-                strategy_id=self._strategy_id,
                 market=resolved_market,
                 default_token_id=focus_token_id,
                 decision=decision_with_signal,
@@ -293,7 +283,6 @@ class TradingDecisionService:
         )
         return DecisionContext(
             trace_id=trace_id,
-            strategy_id=self._strategy_id,
             market=market,
             token_id=token_id,
             orderbook=orderbook,
@@ -415,7 +404,6 @@ class TradingDecisionService:
         record = build_decision_record_from_hook(
             hook_name=hook_name,
             trace_id=context.trace_id,
-            strategy_id=context.strategy_id,
             context=context,
             decision=decision,
             condition_id=context.market.condition_id if context.market is not None else None,
@@ -470,7 +458,6 @@ class TradingDecisionService:
     ) -> ManagedOrderIntent | None:
         return decision_to_managed_intent(
             trace_id=trace_id,
-            strategy_id=self._strategy_id,
             condition_id=condition_id,
             market_slug=market_slug,
             default_token_id=default_token_id,

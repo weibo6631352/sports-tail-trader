@@ -282,9 +282,6 @@ class TradingDecisionWorker:
         # 5 类投票 + 流动性 tier + math_lock 是否支持 + fair_value 来源。
         # 仅持仓 token 写入，无持仓 token 不会有 entry，自动 LRU 由内存压力管理。
         self._token_position_signals: OrderedDict[str, dict[str, Any]] = OrderedDict()
-        # (strategy_id, reason) → count，供 admin/observability 查询哪个策略因何跳过了多少次。
-        # (strategy_id, reason) → count 计数器.reason 是 enum-like 字符串
-        # (< 100 种内建),strategy_id 由 framework 固定,组合上限 < 500;不需要 LRU.
         # 如果 reason 包含动态文本(本来不该如此),应在 source 端归一化,而非 LRU 兜底.
         self._skip_reason_histogram: dict[tuple[str, str], int] = {}
         # condition_id → [(lifecycle, timestamp), …]，记录每次状态转换的时间点。
@@ -788,7 +785,6 @@ class TradingDecisionWorker:
         quant_decision = self._trading_decision_service.quant_decide(
             DecisionContext(
                 trace_id=event.trace_id,
-                strategy_id=self._trading_decision_service.strategy_id,
                 market=market,
                 token_id=position.token_id,
                 orderbook=self._trading_decision_service.lookup_orderbook(position.token_id),
@@ -931,8 +927,7 @@ class TradingDecisionWorker:
         }
         if extra_payload:
             payload.update(extra_payload)
-        strategy_id = self._trading_decision_service.strategy_id or "unknown"
-        key = (strategy_id, reason or "unknown_reason")
+        key = (reason or "unknown_reason",)
         self._skip_reason_histogram[key] = self._skip_reason_histogram.get(key, 0) + 1
         skipped = await self._publish(
             DomainEventType.SKIPPED,
@@ -1386,7 +1381,7 @@ class TradingDecisionWorker:
 
     @property
     def skip_reason_histogram(self) -> dict[tuple[str, str], int]:
-        """P3.5: (strategy_id, reason) → count。只读快照，admin 查询用。"""
+        """P3.5: reason → count。只读快照，admin 查询用。"""
         return dict(self._skip_reason_histogram)
 
     @property
@@ -1469,7 +1464,6 @@ class TradingDecisionWorker:
             return None
         return AccountStateProjector(
             self._account_state_store,
-            strategy_id=self._trading_decision_service.strategy_id,
         )
 
 

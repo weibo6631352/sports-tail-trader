@@ -24,7 +24,6 @@ class PositionModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     position_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
     condition_id: Mapped[str] = mapped_column(String(128), index=True)
     token_id: Mapped[str] = mapped_column(String(128), index=True)
@@ -56,7 +55,6 @@ class PositionModel(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_positions_trace_condition_token", "trace_id", "condition_id", "token_id"),
-        Index("ix_positions_strategy_created", "strategy_id", "created_at"),
     )
 
     @classmethod
@@ -69,7 +67,6 @@ class PositionModel(Base, TimestampMixin):
     ) -> "PositionModel":
         position_key = "|".join([position.condition_id, position.token_id])
         payload = _json_mapping(raw_payload) if raw_payload is not None else {
-            "strategy_id": position.strategy_id,
             "trace_id": trace_id,
             "condition_id": position.condition_id,
             "token_id": position.token_id,
@@ -96,7 +93,6 @@ class PositionModel(Base, TimestampMixin):
         }
         return cls(
             position_key=position_key,
-            strategy_id=position.strategy_id,
             trace_id=trace_id,
             condition_id=position.condition_id,
             token_id=position.token_id,
@@ -124,7 +120,6 @@ class PositionModel(Base, TimestampMixin):
 
     def to_domain(self) -> Position:
         return Position(
-            strategy_id=self.strategy_id,
             condition_id=self.condition_id,
             token_id=self.token_id,
             shares=_decimal(self.shares) or Decimal("0"),

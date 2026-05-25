@@ -33,13 +33,9 @@ class ReconcileActionApplier:
     def __init__(
         self,
         *,
-        strategy_id: str,
         trading_service: TradingService | None,
         account_state_store: AccountStateStore | None,
     ) -> None:
-        if not strategy_id:
-            raise ValueError("ReconcileActionApplier requires non-empty strategy_id")
-        self._strategy_id = strategy_id
         self._trading_service = trading_service
         self._account_state_store = account_state_store
 
@@ -137,7 +133,6 @@ class ReconcileActionApplier:
         if self._account_state_store is not None and submitted:
             AccountStateProjector(
                 self._account_state_store,
-                strategy_id=self._strategy_id,
             ).apply_submitted_intent(
                 trade_intent,
                 market_slug=action.market_slug,
@@ -222,7 +217,6 @@ class ReconcileActionApplier:
         }:
             self._account_state_store.upsert_order(
                 OrderRecord(
-                    strategy_id=replace_intent.strategy_id or self._strategy_id,
                     trace_id=replace_intent.trace_id,
                     condition_id=replace_intent.condition_id,
                     token_id=replace_intent.token_id,

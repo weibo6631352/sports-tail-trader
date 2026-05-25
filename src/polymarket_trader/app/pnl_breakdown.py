@@ -21,7 +21,6 @@ PnlGroupBy = str  # Literal[...] 但保持枚举透明，由 caller 校验
 
 _VALID_GROUP_BY: frozenset[str] = frozenset(
     {
-        "strategy_id",
         "market_slug",
         "condition_id",
         "category",
@@ -118,8 +117,6 @@ def _group_key_resolver(
     group_by: str,
     markets_by_condition: Mapping[str, Market],
 ) -> Callable[[Position], str]:
-    if group_by == "strategy_id":
-        return lambda p: p.strategy_id or "(unknown)"
     if group_by == "market_slug":
         return lambda p: p.market_slug or "(unknown)"
     if group_by == "condition_id":

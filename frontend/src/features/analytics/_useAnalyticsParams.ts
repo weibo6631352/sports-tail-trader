@@ -10,13 +10,11 @@ export function useAnalyticsParams(): {
   until?: number
   league?: string
   market_type?: string
-  strategy_id?: string
 } {
   const since = useTimeWindowStore((s) => s.since)
   const until = useTimeWindowStore((s) => s.until)
   const league = useAnalyticsFiltersStore((s) => s.league)
   const marketType = useAnalyticsFiltersStore((s) => s.marketType)
-  const strategyId = useAnalyticsFiltersStore((s) => s.strategyId)
 
   return useMemo(() => {
     const ms = windowMs({ since, until })
@@ -27,7 +25,6 @@ export function useAnalyticsParams(): {
       until: until ?? undefined,
       league: league ?? undefined,
       market_type: marketType ?? undefined,
-      strategy_id: strategyId ?? undefined,
     }
-  }, [since, until, league, marketType, strategyId])
+  }, [since, until, league, marketType])
 }

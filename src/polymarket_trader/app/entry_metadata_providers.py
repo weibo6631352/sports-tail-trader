@@ -28,7 +28,7 @@ def build_entry_metadata_for_event_provider(
     *,
     registry: "MarketRegistry",
     entry_metadata_store: "EntryMetadataStore",
-    strategy: "TradingWorkflow",
+    workflow: "TradingWorkflow",
 ) -> Callable[[Any, AccountSnapshot | None], Mapping[str, Any]]:
     """构造 ``trading_decision_worker`` 所用的 entry_metadata_provider。
 
@@ -67,7 +67,7 @@ def build_entry_metadata_for_event_provider(
             pos_market = registry.get_by_condition_id(position.condition_id)
             if pos_market is None:
                 continue
-            family_label = strategy.market_family_label(pos_market)
+            family_label = workflow.market_family_label(pos_market)
             pos_orders = orders_by_condition.get(position.condition_id, ())
             exposure = current_exposure_usdc(position, pos_orders)
             if family_label == "outright":

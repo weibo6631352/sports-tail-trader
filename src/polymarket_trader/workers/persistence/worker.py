@@ -164,7 +164,6 @@ class PersistenceWorker:
     def __init__(
         self,
         *,
-        strategy_id: str,
         outbox: PersistenceOutbox | None = None,
         repository: PersistenceRepository | None = None,
         batch_size: int = 64,
@@ -173,11 +172,9 @@ class PersistenceWorker:
         max_retry_count: int = _PERSISTENCE_MAX_RETRIES,
         low_priority_merge_window_s: float = 0.05,
     ) -> None:
-        if not strategy_id:
-            raise ValueError("PersistenceWorker requires non-empty strategy_id")
         self._outbox = outbox
         self._repository = repository
-        self._record_builder = PersistenceRecordBuilder(strategy_id=strategy_id)
+        self._record_builder = PersistenceRecordBuilder()
         self._batch_size = max(1, batch_size)
         self._poll_timeout_s = max(0.01, poll_timeout_s)
         self._drain_timeout_s = max(0.0, drain_timeout_s)

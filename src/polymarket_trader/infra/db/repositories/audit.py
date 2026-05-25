@@ -39,7 +39,6 @@ class AuditEventRepository(BaseRepository):
             rows,
             conflict_columns=("event_id",),
             update_columns=(
-                "strategy_id",
                 "trace_id",
                 "event_title",
                 "market_slug",
@@ -73,7 +72,6 @@ class AuditEventRepository(BaseRepository):
         condition_id: str | None = None,
         token_id: str | None = None,
         time_range: TimeRange | None = None,
-        strategy_id: str | None = None,
         with_total: bool = True,
     ) -> RepositoryPage[AuditEvent]:
         limit, offset = _limit_offset(limit, offset)
@@ -86,8 +84,6 @@ class AuditEventRepository(BaseRepository):
             stmt = stmt.where(AuditEventModel.condition_id == condition_id)
         if token_id is not None:
             stmt = stmt.where(AuditEventModel.token_id == token_id)
-        if strategy_id is not None:
-            stmt = stmt.where(AuditEventModel.strategy_id == strategy_id)
         if time_range is not None and not time_range.is_empty:
             since_dt, until_dt = time_range.to_datetime_range()
             if since_dt is not None:

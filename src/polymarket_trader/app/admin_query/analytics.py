@@ -24,7 +24,6 @@ class AdminAnalyticsQueryMixin:
         self,
         *,
         limit: int = 200,
-        strategy_id: str | None = None,
         condition_id: str | None = None,
         time_range: TimeRange | None = None,
     ) -> dict[str, Any]:
@@ -53,7 +52,6 @@ class AdminAnalyticsQueryMixin:
                 offset=0,
                 accepted=True,
                 condition_id=condition_id,
-                strategy_id=strategy_id,
                 time_range=time_range,
             )
             decisions = tuple(decision_page.items or ())
@@ -65,7 +63,6 @@ class AdminAnalyticsQueryMixin:
             # 旧实现每个一次 await 会把响应放大百倍延迟。
             positions = await repos.position.list_by_condition_ids(
                 condition_ids,
-                strategy_id=strategy_id,
             )
             position_records: dict[tuple[str, str], Any] = {
                 (p.condition_id, p.token_id): p for p in positions
@@ -87,14 +84,13 @@ class AdminAnalyticsQueryMixin:
         self,
         *,
         group_by: str,
-        strategy_id: str | None = None,
         condition_id: str | None = None,
         position_limit: int = 5000,
     ) -> dict[str, Any]:
         """按维度分解的仓位 PnL 聚合。
 
         合法 ``group_by`` 由 ``pnl_breakdown.valid_group_by_values()`` 暴露：
-        ``strategy_id`` / ``market_slug`` / ``condition_id`` / ``category`` /
+        ``market_slug`` / ``condition_id`` / ``category`` /
         ``outcome`` / ``redeemable_status``。``category`` 和 ``outcome`` 维度
         额外做一次 markets 批量 join。
         """
@@ -125,7 +121,6 @@ class AdminAnalyticsQueryMixin:
                 limit=position_limit,
                 offset=0,
                 condition_id=condition_id,
-                strategy_id=strategy_id,
             )
             positions = tuple(position_page.items or ())
             if not needs_markets or not positions:
@@ -152,7 +147,6 @@ class AdminAnalyticsQueryMixin:
         *,
         candidates: dict[str, Any],
         per_decision_usdc: Decimal = Decimal("10"),
-        strategy_id: str | None = None,
         time_range: TimeRange | None = None,
         decision_limit: int = 2000,
         settlement_limit: int = 2000,
@@ -178,7 +172,6 @@ class AdminAnalyticsQueryMixin:
             decision_page = await repos.decision.list_decisions_snapshot(
                 limit=decision_limit,
                 offset=0,
-                strategy_id=strategy_id,
                 time_range=time_range,
             )
             settle_page = await repos.audit.list_audit_events_snapshot(
@@ -202,7 +195,6 @@ class AdminAnalyticsQueryMixin:
         *,
         limit: int = 500,
         per_decision_usdc: Decimal = Decimal("10"),
-        strategy_id: str | None = None,
         time_range: TimeRange | None = None,
     ) -> dict[str, Any]:
         """对 ``accepted=false`` 的决策做事后盈利模拟。
@@ -226,7 +218,6 @@ class AdminAnalyticsQueryMixin:
                 limit=limit,
                 offset=0,
                 accepted=False,
-                strategy_id=strategy_id,
                 time_range=time_range,
             )
             settle_page = await repos.audit.list_audit_events_snapshot(
@@ -248,7 +239,6 @@ class AdminAnalyticsQueryMixin:
         self,
         *,
         bucket_size: Decimal = Decimal("0.05"),
-        strategy_id: str | None = None,
         time_range: TimeRange | None = None,
         sample_limit: int = 2000,
     ) -> dict[str, Any]:
@@ -277,7 +267,6 @@ class AdminAnalyticsQueryMixin:
                 limit=sample_limit,
                 offset=0,
                 accepted=True,
-                strategy_id=strategy_id,
                 time_range=time_range,
             )
             settle_page = await repos.audit.list_audit_events_snapshot(

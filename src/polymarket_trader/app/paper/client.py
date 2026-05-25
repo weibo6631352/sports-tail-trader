@@ -109,7 +109,6 @@ class PaperSubmitOnlyOrderClient:
         effective_price = request.new_price if request.new_price is not None else request.price
         submit_request = OrderExecutionRequest(
             action="submit",
-            strategy_id=request.strategy_id,
             trace_id=request.trace_id,
             idempotency_key=request.idempotency_key,
             condition_id=request.condition_id,

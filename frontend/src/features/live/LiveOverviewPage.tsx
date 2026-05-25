@@ -22,8 +22,7 @@ import {
   candidatesApi,
   analyticsApi,
 } from '@core/api/resources'
-import { useRuntimeIdentity } from '@core/identity/useRuntimeIdentity'
-import { resolveStrategyBundle } from '@strategy/registry'
+import { tradingWorkflowBundle } from '@strategy/registry'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { StatusPill } from '@shared/ui/StatusPill'
@@ -90,9 +89,7 @@ export function LiveOverviewPage() {
     queryFn: ({ signal }) => analyticsApi.executionQuality({ window_ms: 3_600_000 }, signal),
   })
 
-  const { strategyId } = useRuntimeIdentity()
-  const strategyBundle = resolveStrategyBundle(strategyId)
-  const widgets = strategyBundle.dashboardWidgets ?? []
+  const widgets = tradingWorkflowBundle.dashboardWidgets ?? []
 
   const blockingReasons: string[] = ready.data?.blocking_reasons ?? []
   const warnings: unknown[] = ready.data?.warnings ?? []

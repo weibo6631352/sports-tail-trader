@@ -49,25 +49,7 @@ class PersistencePlannedRecord:
 
 
 class PersistenceRecordBuilder:
-    """事件落库记录构造器。
-
-    strategy_id 在 main.py 设置 worker 时按 ``polymarket_trader.quant.identity.STRATEGY_ID`` 注入，
-    单进程内值固定。Builder 在构造每条记录时把它统一盖上：
-    生产者已经在事件 payload 里塞了 strategy_id，则优先使用 payload 中的值
-    （便于未来同进程多策略），否则用 builder 持有的默认值。
-    """
-
-    def __init__(self, *, strategy_id: str) -> None:
-        if not strategy_id:
-            raise ValueError("PersistenceRecordBuilder requires non-empty strategy_id")
-        self._strategy_id = strategy_id
-
-    def _strategy_id_for(self, payload: Mapping[str, Any]) -> str:
-        value = _first(payload, "strategy_id")
-        if value is None:
-            return self._strategy_id
-        text = str(value).strip()
-        return text or self._strategy_id
+    """事件落库记录构造器。"""
 
     def build_planned_records(
         self,
@@ -138,7 +120,6 @@ class PersistenceRecordBuilder:
         return {
             "idempotency_key": _kind_idempotency_key("decision", event),
             "record_id": str(record_id),
-            "strategy_id": self._strategy_id_for(payload),
             "trace_id": event.trace_id,
             "hook_name": _first(payload, "hook_name"),
             "condition_id": event.condition_id or _first(payload, "condition_id"),
@@ -163,7 +144,6 @@ class PersistenceRecordBuilder:
         audit = AuditEvent(
             event_title=str(event.event_type),
             trace_id=event.trace_id,
-            strategy_id=self._strategy_id_for(payload),
             event_id=event.event_id,
             market_slug=event.market_slug,
             event_slug=event.event_slug,
@@ -258,24 +238,19 @@ class PersistenceRecordBuilder:
             }
         )
         record.update(jsonable(order))
-        # 强制覆盖：order payload 自带 strategy_id 时优先用它，否则用 builder 默认。
-        # 不允许 strategy_id 为空写入 DB。
-        record["strategy_id"] = _first(record, "strategy_id") or self._strategy_id_for(payload)
         return record
 
     def _build_fill_records(self, event: OutboxEvent, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
         fills = _mapping_list(payload, "fill", "fills")
         if not fills:
             return []
-        strategy_id = self._strategy_id_for(payload)
-        return [_indexed_record(event, "fill", index, fill, strategy_id) for index, fill in enumerate(fills)]
+        return [_indexed_record(event, "fill", index, fill) for index, fill in enumerate(fills)]
 
     def _build_position_records(self, event: OutboxEvent, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
         positions = _mapping_list(payload, "position", "positions")
         if not positions:
             return []
-        strategy_id = self._strategy_id_for(payload)
-        return [_indexed_record(event, "position", index, item, strategy_id) for index, item in enumerate(positions)]
+        return [_indexed_record(event, "position", index, item) for index, item in enumerate(positions)]
 
     def _build_allocation_records(self, event: OutboxEvent, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
         allocation = _mapping(payload, "allocation")
@@ -291,7 +266,6 @@ class PersistenceRecordBuilder:
         else:
             return []
 
-        strategy_id = self._strategy_id_for(payload)
         records: list[dict[str, Any]] = []
         for index, allocation_item in enumerate(records_source):
             record = _base_meta(event)
@@ -302,7 +276,6 @@ class PersistenceRecordBuilder:
                 }
             )
             record.update(jsonable(allocation_item))
-            record["strategy_id"] = _first(record, "strategy_id") or strategy_id
             records.append(record)
         return records
 
@@ -352,7 +325,6 @@ def _indexed_record(
     kind: str,
     index: int,
     item: Mapping[str, Any],
-    default_strategy_id: str,
 ) -> dict[str, Any]:
     record = _base_meta(event)
     record.update(
@@ -362,7 +334,6 @@ def _indexed_record(
         }
     )
     record.update(jsonable(item))
-    record["strategy_id"] = _first(record, "strategy_id") or default_strategy_id
     return record
 
 
