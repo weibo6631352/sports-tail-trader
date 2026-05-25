@@ -12,7 +12,7 @@ from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.extension_api import RecoveryDecision, ExtensionContext, ExtensionDecision
 
 from strategies.current.config import CurrentStrategyConfig
-from strategies.current.exit_plan import cap_price_to_clob_limit, build_exit_plan_metadata
+from strategies.current.position_plan import cap_price_to_clob_limit, build_position_plan_metadata
 from strategies.current.outcomes import describe_sports_market, SportsMarketFamily, tail_token_targets
 from strategies.current.tail import LiveGameStatus, live_game_state_from_metadata
 from strategies.current.trading.helpers import resolve_tick_size
@@ -227,7 +227,7 @@ def _recovery_profit_take_action(
         return None  # 预期毛利润低于最小阈值，不值得挂单。
     exit_metadata = dict(recovery_metadata)
     exit_metadata.update(
-        build_exit_plan_metadata(
+        build_position_plan_metadata(
             config,
             context,
             token_id=position.token_id,
@@ -245,7 +245,7 @@ def _recovery_profit_take_action(
             "recovery_position_avg_price": _decimal_metadata_text(average_price),
         }
     )
-    plan = exit_metadata.get("exit_plan")
+    plan = exit_metadata.get("position_plan")
     if isinstance(plan, dict):
         plan["target_exit_price"] = str(target_price)
         plan["primary_action"] = "place_recovery_profit_take_gtc_sell"
@@ -412,7 +412,7 @@ def _recovery_metadata(
     if abnormal_pause_reason is not None:
         metadata["recovery_pause_reason"] = abnormal_pause_reason
         metadata.update(
-            build_exit_plan_metadata(
+            build_position_plan_metadata(
                 config,
                 context,
                 token_id=context.token_id,

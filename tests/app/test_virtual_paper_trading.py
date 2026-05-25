@@ -67,18 +67,6 @@ def test_virtual_paper_trade_does_not_fabricate_trade_without_live_metadata() ->
     assert result["opportunity_funnel"]["auto_execute_count"] == 0
     assert result["rejection_summary"]["by_reason"]["missing_live_game_state"] == 1
     assert result["rejection_summary"]["by_stage"]["plan"] == 1
-def test_virtual_paper_trade_prioritizes_live_rejection_over_scheduled_single_game() -> None:
-    runtime = _runtime_with_scheduled_and_live_single_game_rejections()
-
-    result = asyncio.run(run_virtual_paper_trade(runtime))
-
-    assert result["status"] == "no_trade"
-    assert result["selection"]["market_slug"] == "nhl-live-tail-2026-04-28-total-10pt5"
-    # totals 盘口扫尾未锁定 → outcome_not_locked（唯一入场路径）。
-    # 本用例只验证"live 拒绝优先于 scheduled 拒绝"，具体拒绝原因不强依赖。
-    assert result["reason"] == "outcome_not_locked"
-# === F-3 显式 market 找不到时不静默 fallback ===
-
 def test_explicit_market_slug_not_found_returns_not_found_without_fallback() -> None:
     runtime = _runtime_with_real_like_candidate()
 

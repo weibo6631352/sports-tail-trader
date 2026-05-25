@@ -158,7 +158,7 @@ def _build_strategy_summary(metadata: Mapping[str, Any]) -> StrategySummary:
             "execution_permission": metadata.get("execution_permission"),
             "market_family": metadata.get("market_family"),
             "risk_reason": metadata.get("risk_reason"),
-            "exit_plan": metadata.get("exit_plan"),
+            "position_plan": metadata.get("position_plan"),
         },
     )
 

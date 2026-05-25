@@ -22,7 +22,7 @@ from strategies.current.allocation import (
     kelly_plan,
 )
 from strategies.current.config import CurrentStrategyConfig
-from strategies.current.exit_plan import build_exit_plan_metadata, exit_price_for_context
+from strategies.current.position_plan import build_position_plan_metadata, exit_price_for_context
 
 from .allocation import (
     _allocation_skip_reason,
@@ -36,19 +36,14 @@ from .allocation import (
     _market_skip_metadata,
 )
 from .exit_overlay import (
-    _apply_profit_take_exit_plan,
+    _apply_profit_take_position_plan,
     _capital_efficiency_gate,
     evaluate_dynamic_exit,
 )
 from .gates import (
     _ask_depth_notional,
-    _scale_in_allocation_gate,
-    _scale_in_entry_gate,
-    _tail_allocation_gate,
-    _tail_entry_gate,
 )
 from .helpers import _metadata_text
-from .pricing import _tail_locked_outcome_signal, _tail_price_cap
 from .risk_limits import _apply_tail_risk_limits
 
 logger = logging.getLogger(__name__)
@@ -296,48 +291,14 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
     eligible_snapshots: list[AllocationMarketSnapshot] = []
     skipped_allocations: dict[tuple[str, str], Allocation] = {}
     sizing_metadata: dict[str, object] = {}
-    snapshot_price_cap: dict[tuple[str, str], Decimal] = {}
     for snapshot in candidate_snapshots:
-        price_cap = _tail_price_cap(
-            config,
-            snapshot.market,
-            snapshot.token_id,
-            locked_outcome_signal=_tail_locked_outcome_signal(context),
-        )
-        snapshot_price_cap[(snapshot.condition_id, snapshot.token_id)] = price_cap
-        buyable_liquidity_usdc = _ask_depth_notional(
-            snapshot.orderbook,
-            price_cap=price_cap,
-        )
-        scale_in_allowed, scale_in_metadata, scale_in_budget_cap = _scale_in_allocation_gate(
-            config,
-            context,
-            snapshot,
-            buyable_liquidity_usdc=buyable_liquidity_usdc,
-        )
-        snapshot_for_allocation = replace(
-            snapshot,
-            scale_in_allowed=scale_in_allowed,
-            strategy_budget_cap_usdc=scale_in_budget_cap,
-        )
+        buyable_liquidity_usdc = _ask_depth_notional(snapshot.orderbook)
         skip_reason = _allocation_skip_reason(
             config,
             context,
-            snapshot_for_allocation,
+            snapshot,
             buyable_liquidity_usdc=buyable_liquidity_usdc,
         )
-        if not skip_reason:
-            if scale_in_allowed:
-                tail_metadata = scale_in_metadata
-            else:
-                skip_reason, tail_metadata = _tail_allocation_gate(
-                    config,
-                    context,
-                    snapshot,
-                    buyable_liquidity_usdc=buyable_liquidity_usdc,
-                )
-            if _is_focus_snapshot(context, snapshot):
-                sizing_metadata.update(tail_metadata)
         if skip_reason:
             if _is_focus_snapshot(context, snapshot) and "tail_reason" not in sizing_metadata:
                 sizing_metadata.update(_market_skip_metadata(snapshot, skip_reason))
@@ -346,7 +307,7 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
                 reason=skip_reason,
             )
             continue
-        eligible_snapshots.append(replace(snapshot_for_allocation, liquidity_usdc=buyable_liquidity_usdc))
+        eligible_snapshots.append(replace(snapshot, liquidity_usdc=buyable_liquidity_usdc))
 
     implied_min_edge_required = Decimal(config.tail_implied_min_edge_bps) / Decimal("10000")
     implied_prob_confidence_base = config.tail_implied_prob_confidence
@@ -360,14 +321,7 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
         if math_view is not None:
             return math_view
 
-        cap = snapshot_price_cap.get((snap.condition_id, snap.token_id))
-        if cap is None:
-            cap = _tail_price_cap(
-                config,
-                snap.market,
-                snap.token_id,
-                locked_outcome_signal=_tail_locked_outcome_signal(context),
-            )
+        cap = config.tail_locked_outcome_max_entry_price
         implied_p = implied_fair_value_from_price_cap(cap, min_edge_required=implied_min_edge_required)
         # 动态 conf：流动性薄 / 价差宽时 implied_p 更不可靠 → κ 进一步收缩。
         # 公式 = base × min(1, depth/baseline) × max(0.25, 1 - spread/widening)
@@ -431,24 +385,18 @@ def size_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Entr
 
 
 def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> ExtensionDecision:
-    """根据盘口和预算生成 BUY 决策。"""
+    """根据盘口和预算生成 BUY 决策。
+
+    门禁已在 size_entry / _allocation_skip_reason 通过——这里只负责落 BUY intent
+    并附带 position_plan（进场后止盈/止损/scale-in 等行为）。
+    """
 
     if context.market is None or context.orderbook is None:
         return ExtensionDecision.skip(reason="missing_market_state")
 
-    scale_in_gate = _scale_in_entry_gate(config, context)
-    tail_gate = scale_in_gate or _tail_entry_gate(config, context)
-    if tail_gate is not None:
-        decision, allowed_price, tail_metadata = tail_gate
-        if decision is not None:
-            return decision
-    else:
-        tail_metadata = {}
-
     best_ask = context.orderbook.best_ask
     if best_ask is None:
         return ExtensionDecision.skip(reason="missing_best_ask")
-    # price_above_entry_max gate 已删——宽进严管，持仓策略接管止盈止损。
     entry_price = best_ask
 
     amount_usdc = context.amount_usdc
@@ -456,7 +404,7 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         return ExtensionDecision.skip(reason="missing_entry_amount")
 
     token_id = context.token_id or context.orderbook.token_id
-    decision_metadata = dict(tail_metadata)
+    decision_metadata: dict[str, object] = {}
     efficiency_allowed, efficiency_reason, efficiency_metadata = _capital_efficiency_gate(
         config,
         context,
@@ -468,20 +416,30 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
     if not efficiency_allowed:
         return ExtensionDecision.skip(reason=efficiency_reason, metadata=decision_metadata)
     decision_metadata.update(
-        build_exit_plan_metadata(
+        build_position_plan_metadata(
             config,
             context,
             token_id=token_id,
-            source_reason=str(tail_metadata.get("tail_reason") or "strategy_entry"),
+            source_reason="strategy_entry",
             entry_price=entry_price,
         )
     )
-    _apply_profit_take_exit_plan(decision_metadata)
-    decision_reason = "strategy_scale_in" if tail_metadata.get("opportunity_type") == (
-        "scale_in_advantage"
-    ) else "strategy_entry"
+    _apply_profit_take_position_plan(decision_metadata)
+    from polymarket_trader.extension_api.summary import StrategySummary
+    from strategies.current.outcomes import describe_sports_market
+    descriptor = describe_sports_market(context.market)
+    summary = StrategySummary(
+        action="auto_execute",
+        reason="strategy_entry",
+        market_type=descriptor.market_type.value if descriptor.market_type is not None else "",
+        best_ask=entry_price,
+        extras={
+            "market_family": descriptor.market_family.value,
+            "execution_permission": "auto_execute",
+        },
+    )
     return ExtensionDecision.buy(
-        reason=decision_reason,
+        reason="strategy_entry",
         token_id=token_id,
         price=entry_price,
         amount_usdc=amount_usdc,
@@ -489,6 +447,7 @@ def decide_entry(config: CurrentStrategyConfig, context: ExtensionContext) -> Ex
         post_only=False,
         market_slug=context.market.market_slug,
         metadata=decision_metadata,
+        summary=summary,
     )
 
 
@@ -555,11 +514,11 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
         or (context.position.token_id if context.position is not None else None)
         or _metadata_text(context, "token_id")
     )
-    # entry_price 先算出来 → 同时喂给 exit_plan metadata 和静态 exit_price，
-    # 确保 build_exit_plan_metadata + exit_price_for_context 都走 entry+offset，
+    # entry_price 先算出来 → 同时喂给 position_plan metadata 和静态 exit_price，
+    # 确保 build_position_plan_metadata + exit_price_for_context 都走 entry+offset，
     # 而不是 fallback 到 config.exit_no_price ($0.99) 永远等结算。
     entry_price = _position_entry_price(context)
-    decision_metadata = build_exit_plan_metadata(
+    decision_metadata = build_position_plan_metadata(
         config,
         context,
         token_id=token_id,
@@ -591,7 +550,7 @@ def decide_exit(config: CurrentStrategyConfig, context: ExtensionContext) -> Ext
             exit_price = dynamic.exit_price
             exit_reason = dynamic.reason
             decision_metadata["exit_target_price"] = str(exit_price)
-            plan = decision_metadata.get("exit_plan")
+            plan = decision_metadata.get("position_plan")
             if isinstance(plan, dict):
                 plan["target_exit_price"] = str(exit_price)
 

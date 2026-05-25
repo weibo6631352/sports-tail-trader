@@ -81,7 +81,7 @@ def test_trade_replay_uses_data_position_pnl_and_audit_context() -> None:
             "strategy_payload": {
                 "live_game": {"league": "NBA", "status": "live"},
                 "live_match": {"source_event_id": "401705460"},
-                "exit_plan": {"target_exit_price": "0.995"},
+                "position_plan": {"target_exit_price": "0.995"},
             },
         },
     )
@@ -103,6 +103,6 @@ def test_trade_replay_uses_data_position_pnl_and_audit_context() -> None:
     assert record["pnl"]["realized_pnl_usdc"] == "0.75"
     assert record["pnl"]["cash_pnl_usdc"] == "1.65"
     assert record["strategy_payload"]["live_game"]["league"] == "NBA"
-    assert record["strategy_payload"]["exit_plan"]["target_exit_price"] == 0.995
+    assert record["strategy_payload"]["position_plan"]["target_exit_price"] == 0.995
     assert record["decision_kind"] == "entry_candidate"
     assert record["strategy_summary"]["reason"] == "moneyline_late_lead"

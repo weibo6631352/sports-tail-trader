@@ -1,11 +1,13 @@
-"""体育直播扫尾策略包。
+"""体育策略类型集合包。
 
-通用体育能力（LiveGameState / SportsMarket* / 联赛识别 / 通用 slug 解析）已上提到
-``strategies.sports_framework``；本包内只承载扫尾专属语义（TailPolicy /
-TailEvaluation / 评估器分派 / MLB / Tennis 私有规则）。
+历史上承载扫尾评估器（OUTCOME_NOT_LOCKED / sport-specific dispatch），
+现已删除——「门禁过了即进场」哲学下，进场判断只剩硬约束（live source / cash /
+best_ask / state），进场后行为全部走 position_plan。
 
-为保持外部调用方零改动，``__init__`` 同时 re-export 通用与专属符号；
-``from strategies.current.tail import X`` 仍按以前用法即可。
+本包只保留：
+- 通用体育类型（re-export from sports_framework）
+- 策略层基础类型（TailPolicy / TailAction / ExecutionPermission，仅供 Kelly /
+  exit overlay 等下游消费）
 """
 
 from __future__ import annotations
@@ -24,18 +26,12 @@ from strategies.sports_framework import (
     live_game_state_from_metadata,
 )
 
-from .evaluator import (
-    evaluate_scale_in_opportunity,
-    evaluate_tail_opportunity,
-)
 from .types import (
     ExecutionPermission,
     SportsTailCandidate,
-    SportsTailOpportunityType,
     TailAction,
     TailEvaluation,
     TailPolicy,
-    TailRejectReason,
 )
 
 __all__ = [
@@ -50,13 +46,9 @@ __all__ = [
     "SportsMarketSnapshot",
     "SportsMarketType",
     "SportsTailCandidate",
-    "SportsTailOpportunityType",
     "TailAction",
     "TailEvaluation",
     "TailPolicy",
-    "TailRejectReason",
     "TennisGameState",
-    "evaluate_scale_in_opportunity",
-    "evaluate_tail_opportunity",
     "live_game_state_from_metadata",
 ]

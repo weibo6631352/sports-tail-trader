@@ -12,7 +12,7 @@ from polymarket_trader.domain.sports_live import BaseballGameState, TennisGameSt
 from polymarket_trader.extension_api import ExtensionContext
 
 from strategies.current.config import CurrentStrategyConfig
-from strategies.current.exit_plan import cap_price_to_clob_limit
+from strategies.current.position_plan import cap_price_to_clob_limit
 from strategies.current.outcomes import target_for_token
 from strategies.current.tail import SportsMarketSide
 
@@ -1308,14 +1308,14 @@ def _decimal_metadata_text(value: Decimal) -> str:
     return str(value.quantize(Decimal("0.000000000000000001")))
 
 
-def _apply_profit_take_exit_plan(metadata: dict[str, object]) -> None:
+def _apply_profit_take_position_plan(metadata: dict[str, object]) -> None:
     """把需要主动止盈的订单退出计划改写为买入后挂 profit-take SELL。"""
 
     if not _has_profit_take_follow_up(metadata):
         return
     target_price = metadata.get("profit_take_target_price")
     metadata["exit_target_price"] = target_price
-    plan = metadata.get("exit_plan")
+    plan = metadata.get("position_plan")
     if not isinstance(plan, dict):
         return
     plan["target_exit_price"] = target_price

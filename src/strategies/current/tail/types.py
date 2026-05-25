@@ -1,8 +1,11 @@
-"""体育扫尾策略私有类型层：策略评估、政策与决策结果。
+"""策略层基础类型。
 
-通用体育类型（``LiveGameState`` / ``SportsMarketSnapshot`` / ``BaseballGameState`` /
-``TennisGameState`` 等）已上提到 ``strategies.sports_framework``；本模块只承载
-与扫尾语义强绑定的类型。
+历史上承载完整扫尾评估器（TailRejectReason / SportsTailOpportunityType /
+sport-specific dispatch），现已删除——「门禁过了即进场」哲学下，进场判断只剩硬约束，
+所有进场后行为走 position_plan。
+
+本模块只保留下游（Kelly sizing / Goalserve 调参 / exit overlay metadata）仍需
+消费的策略基础类型。
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ from strategies.sports_framework import (
 
 
 class ExecutionPermission(StrEnum):
-    """候选通过评估后的执行权限。"""
+    """执行权限——历史评估器输出，目前仅由 outright / series 子策略使用。"""
 
     RECORD_ONLY = "record_only"
     ALERT_ONLY = "alert_only"
@@ -29,7 +32,7 @@ class ExecutionPermission(StrEnum):
 
 
 class TailAction(StrEnum):
-    """候选评估后的建议动作。"""
+    """历史评估器建议动作——目前仅 outright / audit metadata 使用。"""
 
     REJECT = "reject"
     RECORD = "record"
@@ -38,133 +41,9 @@ class TailAction(StrEnum):
     AUTO_EXECUTE = "auto_execute"
 
 
-class SportsTailOpportunityType(StrEnum):
-    """体育扫尾策略识别出的机会类型。"""
-
-    LIVE_TAIL = "live_tail"
-    ENDED_NOT_CLOSED = "ended_not_closed"
-    SCALE_IN_ADVANTAGE = "scale_in_advantage"
-
-
-class TailRejectReason(StrEnum):
-    """体育扫尾评估拒绝原因。"""
-
-    MISSING_LIVE_GAME_STATE = "missing_live_game_state"
-    GAME_NOT_LIVE = "game_not_live"
-    STALE_GAME_STATE = "stale_game_state"
-    MISSING_MARKET_LINE = "missing_market_line"
-    MISSING_BEST_ASK = "missing_best_ask"
-    PRICE_ABOVE_MAX = "price_above_max"
-    PRICE_BELOW_MIN = "price_below_min"
-    LIQUIDITY_BELOW_MIN = "liquidity_below_min"
-    OUTCOME_NOT_LOCKED = "outcome_not_locked"
-    MISSING_SECONDS_REMAINING = "missing_seconds_remaining"
-    GAME_NOT_LATE_ENOUGH = "game_not_late_enough"
-    INSUFFICIENT_LEAD = "insufficient_lead"
-    INSUFFICIENT_SAFETY_MARGIN = "insufficient_safety_margin"
-    UNSUPPORTED_MARKET_TYPE = "unsupported_market_type"
-    UNSUPPORTED_MARKET_SIDE = "unsupported_market_side"
-    UNSUPPORTED_MARKET_SCOPE = "unsupported_market_scope"
-    OUTRIGHT_MARKET_NOT_AUTO_TRADABLE = "outright_market_not_auto_tradable"
-    ESPORTS_MARKET_NOT_AUTO_TRADABLE = "esports_market_not_auto_tradable"
-    UNSUPPORTED_MARKET_FAMILY = "unsupported_market_family"
-    LIVE_SOURCE_CONFLICT = "live_source_conflict"
-    MISSING_BASEBALL_STATE = "missing_baseball_state"
-    BASEBALL_NOT_LATE_ENOUGH = "baseball_not_late_enough"
-    BASEBALL_THREAT_ON_BASE = "baseball_threat_on_base"
-    BASEBALL_OFFENSE_NOT_TRAILING = "baseball_offense_not_trailing"
-    BASEBALL_FIRST_INNING_NOT_COMPLETE = "baseball_first_inning_not_complete"
-    MISSING_BASKETBALL_STATE = "missing_basketball_state"
-    BASKETBALL_FIRST_HALF_NOT_COMPLETE = "basketball_first_half_not_complete"
-    BASKETBALL_QUARTER_NOT_COMPLETE = "basketball_quarter_not_complete"
-    BASKETBALL_SECOND_HALF_NOT_COMPLETE = "basketball_second_half_not_complete"
-    # 已识别为分段 ML/spread 盘口，但该运动当前没有干净的分段比分模型
-    # （冰球分节、棒球 F5 等）。区别于真正的数据缺失（missing_*_state）：
-    # 数据可能完好，只是该分段类型未建模。
-    UNSUPPORTED_PERIOD_MONEYLINE = "unsupported_period_moneyline"
-    UNSUPPORTED_PERIOD_SPREAD = "unsupported_period_spread"
-    SOCCER_HALFTIME_NOT_COMPLETE = "soccer_halftime_not_complete"
-    MISSING_TENNIS_STATE = "missing_tennis_state"
-    TENNIS_NOT_LATE_ENOUGH = "tennis_not_late_enough"
-    TENNIS_TOTALS_UNDER_NOT_SUPPORTED = "tennis_totals_under_not_supported"
-    TENNIS_SET_WINNER_NOT_SUPPORTED = "tennis_set_winner_not_supported"
-    TENNIS_TOTAL_SCOPE_UNSUPPORTED = "tennis_total_scope_unsupported"
-    TENNIS_SPREADS_NOT_SUPPORTED = "tennis_spreads_not_supported"
-    # 网球盘分让分（set handicap）专属拒绝原因。
-    TENNIS_SET_HANDICAP_LINE_UNSUPPORTED = "tennis_set_handicap_line_unsupported"
-    TENNIS_BEST_OF_UNKNOWN = "tennis_best_of_unknown"
-    RUGBY_NOT_LATE_ENOUGH = "rugby_not_late_enough"
-    RUGBY_LEAD_NOT_SAFE = "rugby_lead_not_safe"
-    RUGBY_DRAW_NOT_SUPPORTED = "rugby_draw_not_supported"
-    RUGBY_MARKET_NOT_SUPPORTED = "rugby_market_not_supported"
-    MISSING_ESPORTS_STATE = "missing_esports_state"
-    ESPORTS_BEST_OF_UNKNOWN = "esports_best_of_unknown"
-    # 板球扫尾锁定拒绝原因。板球追分（chase）锁定依赖 target / 追分局
-    # required_runs / required_balls；缺这些数据不臆测，给精确可审计原因。
-    MISSING_CRICKET_STATE = "missing_cricket_state"
-    # 第一局（设定 target 的一方还在打）—— 尚无 target，不可锁定追分结果。
-    CRICKET_NOT_LATE_ENOUGH = "cricket_not_late_enough"
-    # 追分局已开始但 feed 未给出 target / required 数据，无法判断锁定。
-    CRICKET_CHASE_DATA_MISSING = "cricket_chase_data_missing"
-    # 追分局进行中，结果尚未数学锁定（既未追平 target，也未失败出局）。
-    CRICKET_OUTCOME_NOT_LOCKED = "cricket_outcome_not_locked"
-    # 手球扫尾锁定拒绝原因。手球 livescore 无盘中时钟（time 是开球时间），
-    # 只能靠"超大领先"或"比赛已判定/结束"锁定；其余给精确可审计原因。
-    MISSING_HANDBALL_STATE = "missing_handball_state"
-    HANDBALL_LEAD_NOT_SAFE = "handball_lead_not_safe"
-    # 格斗（拳击/MMA）盘中无比分模型——只在打完后由 winner 锁定胜方。
-    # 盘中市场只能给此精确可审计原因，绝不建立回合评分模型（CLAUDE.md §17）。
-    MMA_IN_PROGRESS_NO_MODEL = "mma_in_progress_no_model"
-    # 利基事件型 prop 的精确拒绝原因（CLAUDE.md §17：每个被拒市场都要能
-    # 回答"为什么不做"，泛化的 OUTCOME_NOT_LOCKED 对未建模 prop 不可审计）。
-    # 总分奇偶：每进一分奇偶翻转，永不可扫尾锁定。
-    UNSUPPORTED_ODD_EVEN = "unsupported_odd_even"
-    # 精确净胜分桶：终场前净胜分仍可变，不可干净锁定。
-    UNSUPPORTED_WINNING_MARGIN = "unsupported_winning_margin"
-    # 首个得分方：归一化直播模型不携带首得分方/进球时间线，缺数据不臆测。
-    UNSUPPORTED_TO_SCORE_FIRST = "unsupported_to_score_first"
-    # 拳击/MMA 胜利方式（KO/TKO、降服、判定、"打满全程"、回合组）：只有当
-    # 比赛以特定方式结束时才结算，盘中永不可扫尾锁定；归一化直播模型也不携带
-    # 拳击/MMA 的回合/胜利方式遥测数据。给精确可审计原因，不强行建模。
-    UNSUPPORTED_METHOD_OF_VICTORY = "unsupported_method_of_victory"
-    # F1 子盘口（杆位、登台、最快圈速、安全车等）：需要 F1 专属遥测（排位赛
-    # 结果、圈速、赛道事件），本系统未建模该数据源。整场冠军（race winner）
-    # 不在此列——由 RACE-kind 直播匹配链路另行处理。
-    UNSUPPORTED_F1_PROP = "unsupported_f1_prop"
-    # 板球 prop（掷币胜方、最佳击球手、最多六分球等）：需要逐球员板球数据，
-    # 本系统未接入；给精确可审计原因，不强行建模。
-    UNSUPPORTED_CRICKET_PROP = "unsupported_cricket_prop"
-    # 足球 anytime-goalscorer（球员是否在比赛中进球）扫尾锁定原因。
-    # 球员名称匹配是该家族唯一的关键正确性环节——CLAUDE.md §18 要求名称
-    # 解析失败必须给可审计原因，不静默归到泛化 OUTCOME_NOT_LOCKED。
-    ANYTIME_GOALSCORER_PLAYER_AMBIGUOUS = "anytime_goalscorer_player_ambiguous"
-    # 锁定方向与下注方向不一致：玩家已进球但 market.side=NO（注定输），
-    # 或玩家未进球且比赛已结束但 market.side=YES（注定输）——精确拒绝。
-    ANYTIME_GOALSCORER_WRONG_SIDE = "anytime_goalscorer_wrong_side"
-    # live feed stale：LiveGameState.server_clock_at 距当下超阈值（15s 默认），
-    # feed 数据陈旧（server/网络/解析问题），不基于陈旧状态决策。
-    LIVE_FEED_STALE = "live_feed_stale"
-    # 末段低赔率 underdog 买入守卫：BUY price < 0.30 且比赛进入末段时，
-    # 胜负基本已收敛，underdog 翻盘概率极低 → 买入大概率砸手里。
-    # baseball 8th+ inning / basket 4th quarter 末段 / tennis 决胜盘 /
-    # soccer 80+ min 触发；规则源自实战经验。
-    LATE_GAME_LOW_PRICE_UNDERDOG = "late_game_low_price_underdog"
-    # 盘口单边下杀守卫：orderbook_direction 10s 窗口显示 direction_label="no"
-    # 且 confidence >= 0.5 → 买盘正在被吃 / microprice 持续下滑，此时入场会
-    # 落地即亏。实战案例：mlb-col-ari-spread-away-1pt5 BUY @ 0.31 → 20s 后
-    # SELL @ 0.26 (-16%)。entry 路径必须看盘口风向，不能只看 best_ask 价格。
-    ORDERBOOK_DIRECTION_BEARISH = "orderbook_direction_bearish"
-    # 无退出通道守卫：best_bid=None = 盘口没人接 SELL，入场后无法主动平仓，
-    # 只能 hold 到结算或亏到 0。冷盘口（如 exact-score 精确比分）常见此态。
-    NO_EXIT_CHANNEL = "no_exit_channel"
-    # 负 EV 价位守卫：实证数据（/runtime/win-rate）显示 0.4-0.8 价位
-    # 长期 -$77 损失（PF 0.27/0.38）。中间价位入场 EV 显著为负 → 直接拦截。
-    PRICE_NEGATIVE_EV_ZONE = "price_negative_ev_zone"
-
-
 @dataclass(frozen=True, slots=True)
 class TailPolicy:
-    """体育扫尾评估策略参数。"""
+    """Goalserve 等下游调参仍读这些字段；进场决策不再用。"""
 
     enabled_market_types: tuple[SportsMarketType, ...] = (
         SportsMarketType.TOTALS,
@@ -184,19 +63,12 @@ class TailPolicy:
     baseball_max_game_state_age_seconds: int = 45
     tennis_max_game_state_age_seconds: int = 35
     soccer_max_game_state_age_seconds: int = 120
-    # esports 只能靠 livescore getfeed（服务端每 60s 才刷新），且锁定信号"已赢
-    # 地图数"单调不衰减——60s 前赢的局现在仍赢着。放宽到 90s 是匹配该信号的
-    # 真实衰减率，不是过度放宽。
     esports_max_game_state_age_seconds: int = 90
     max_under_seconds_remaining: int = 30
     max_moneyline_seconds_remaining: int = 180
     max_spreads_seconds_remaining: int = 120
     min_under_safety_margin: Decimal = Decimal("2")
-    # MLB Under 总分入场最早可考虑的局数；早于此局一律拒绝。
     mlb_under_min_inning: int = 6
-    # MLB Under 每提前一局（早于 9 局）额外要求的 safety margin。
-    # 默认 9 局基准 margin=2，每往前一局 +2：8 局需 4、7 局需 6、6 局需 8。
-    # margin 足够大时 Under 在该局已基本锁定，配合提前止盈做准量化盈利。
     mlb_under_inning_margin_step: Decimal = Decimal("2")
     min_moneyline_lead: int = 6
     soccer_min_moneyline_lead: int = 1
@@ -208,7 +80,7 @@ class TailPolicy:
 
 @dataclass(frozen=True, slots=True)
 class SportsTailCandidate:
-    """统一体育扫尾候选。"""
+    """候选数据载体；目前仅 audit metadata / outright path 使用。"""
 
     game: LiveGameState
     market: SportsMarketSnapshot
@@ -219,12 +91,11 @@ class SportsTailCandidate:
 
 @dataclass(frozen=True, slots=True)
 class TailEvaluation:
-    """统一体育扫尾评估结果。"""
+    """评估结果载体；进场路径已不再产出，仅 outright path 仍构造。"""
 
     accepted: bool
     action: TailAction
     reason: str
     candidate: SportsTailCandidate | None = None
     execution_permission: ExecutionPermission | None = None
-    opportunity_type: SportsTailOpportunityType = SportsTailOpportunityType.LIVE_TAIL
     metadata: Mapping[str, Any] = field(default_factory=dict)

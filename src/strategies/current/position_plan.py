@@ -1,7 +1,9 @@
-"""体育扫尾策略的退出计划元数据。
+"""体育策略的持仓计划（position plan）元数据。
 
-退出计划不直接创建订单，只把策略对“买入后如何卖出、异常时如何处理”的意图
-写成稳定 metadata，供跟单卖出、reconcile、审计和管理台复盘使用。
+门禁过了即进场——本模块产出的 position_plan metadata 包含进场后所有行为：
+止盈挂单价（exit price）、settlement 规则、异常状态处理、scale-in 通道等。
+plan 本身不创建订单，只把策略对"持仓期如何决策"的意图写成稳定 metadata，
+供 follow-up 卖出、reconcile、审计和管理台复盘使用。
 """
 
 from __future__ import annotations
@@ -14,8 +16,10 @@ from polymarket_trader.extension_api import ExtensionContext
 from strategies.current.config import CurrentStrategyConfig
 
 
-EXIT_PLAN_VERSION = "1"
-def build_exit_plan_metadata(
+POSITION_PLAN_VERSION = "1"
+
+
+def build_position_plan_metadata(
     config: CurrentStrategyConfig,
     context: ExtensionContext,
     *,
@@ -24,7 +28,7 @@ def build_exit_plan_metadata(
     target_size_shares: Decimal | None = None,
     entry_price: Decimal | None = None,
 ) -> dict[str, object]:
-    """构造当前策略统一的退出计划 metadata。
+    """构造当前策略统一的持仓计划 metadata。
 
     参数：
         config:
@@ -50,7 +54,7 @@ def build_exit_plan_metadata(
         recovery_rule = "cancel_open_entry_orders_and_keep_position_for_settlement_or_manual_review"
 
     plan: dict[str, object] = {
-        "version": EXIT_PLAN_VERSION,
+        "version": POSITION_PLAN_VERSION,
         "source_reason": source_reason,
         "condition_id": None if context.market is None else context.market.condition_id,
         "market_slug": None if context.market is None else context.market.market_slug,
@@ -72,10 +76,10 @@ def build_exit_plan_metadata(
     if game_snapshot:
         plan["live_state"] = game_snapshot
     return {
-        "exit_plan_version": EXIT_PLAN_VERSION,
+        "position_plan_version": POSITION_PLAN_VERSION,
+        "position_plan_source_reason": source_reason,
         "exit_target_price": str(exit_price),
-        "exit_source_reason": source_reason,
-        "exit_plan": plan,
+        "position_plan": plan,
     }
 
 
@@ -116,7 +120,6 @@ def exit_price_for_context(
         return fallback
     aligned = align_price_to_tick(target, tick_size=tick_size)
     if aligned <= base_price:
-        # tick 对齐后价格回退到不再领先 base_price → 退化到结算价（避免锁定亏损）
         return fallback
     return aligned
 
@@ -124,7 +127,7 @@ def exit_price_for_context(
 def align_price_to_tick(price: Decimal, *, tick_size: Decimal | None) -> Decimal:
     """把策略目标价格向下对齐到交易所允许的 tick。
 
-    卖出退出价是“目标上限”，当市场只支持 0.01 tick 时，0.995 应落到 0.99；
+    卖出退出价是"目标上限"，当市场只支持 0.01 tick 时，0.995 应落到 0.99；
     如果 tick 缺失或异常，保持原价并交给框架风控继续审计。
     """
 
