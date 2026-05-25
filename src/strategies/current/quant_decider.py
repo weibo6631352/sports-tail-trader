@@ -58,15 +58,44 @@ class QuantDecider:
     # ---- market_tick：盘口事件路径 ----------------------------------
 
     def _decide_market_tick(self, context: ExtensionContext) -> QuantDecision:
-        """市场盘口事件触发：算 SELL 价跟随。
+        """市场盘口事件触发：单一入口决策当前动作。
 
-        当前仅处理已持仓 token 的 SELL/replace 决策；BUY 入场仍由
-        entry_planner 走 size_entry / decide_entry。等下一步迁移完，BUY 也归这里。
+        分派规则：
+        - 有持仓 → ``_decide_position_action``（SELL / replace）
+        - 无持仓 → ``_decide_entry_attempt``（BUY）
         """
-        decision = self._decide_position_action(context)
+        has_position = (
+            context.position is not None and context.position.shares > Decimal("0")
+        )
+        if has_position:
+            decision = self._decide_position_action(context)
+        else:
+            decision = self._decide_entry_attempt(context)
         if decision.action.value == "skip":
             return QuantDecision(actions=(), reason=decision.reason)
         return QuantDecision(actions=(decision,), reason=decision.reason)
+
+    def _decide_entry_attempt(self, context: ExtensionContext) -> ExtensionDecision:
+        """无持仓时的入场决策：跑 Kelly + 构造 BUY intent。
+
+        现阶段委托给原 ``size_entry`` + ``decide_entry`` 函数（位于
+        trading/hooks.py），后续直接把核心逻辑搬进类内。
+        """
+        from dataclasses import replace
+        from strategies.current.trading import decide_entry, size_entry
+
+        if context.market is None or context.orderbook is None:
+            return ExtensionDecision.skip(reason="missing_market_state")
+        sizing = size_entry(self._config, context)
+        if sizing.allocation is None or sizing.allocation.buy_budget_usdc <= Decimal("0"):
+            return ExtensionDecision.skip(reason=sizing.reason or "no_allocation")
+        focus_context = replace(
+            context,
+            amount_usdc=sizing.allocation.buy_budget_usdc,
+            allocation=sizing.allocation,
+            allocation_plan=sizing.allocation_plan,
+        )
+        return decide_entry(self._config, focus_context)
 
     def _decide_position_action(self, context: ExtensionContext) -> ExtensionDecision:
         from strategies.current.trading.hooks import _maybe_reprice_stale_sell, _position_entry_price
