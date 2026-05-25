@@ -71,7 +71,7 @@ class EntryMetadataRecord:
         }
 
 
-class EntryMetadataStore:
+class MarketMetadataStore:
     """按 market/event 维度保存入场前可读的轻量 metadata。
 
     该 store 不理解具体策略字段，只负责无阻塞读写运行时事实。

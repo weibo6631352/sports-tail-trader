@@ -49,7 +49,7 @@ class _KellySizingState:
 
 
 
-class TradingDecisionService:
+class DecisionContextBuilder:
     """Bridge strategy decisions into framework plans and managed order intents."""
 
     def __init__(
@@ -375,7 +375,7 @@ class TradingDecisionService:
 
         ``context.quant_trigger_kind`` 由调用方填写（"market_tick" / "reconcile_cycle"）。
         返回 QuantDecision；调用侧把 ``actions`` 转 intent 走统一
-        TradingService/RiskManager。
+        OrderGateway/RiskManager。
         """
         import time as _time
         t0 = _time.perf_counter()

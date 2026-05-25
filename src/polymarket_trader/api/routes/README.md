@@ -32,7 +32,7 @@
 - 签名、下单、撤单。
 - 持有交易状态锁。
 - 直接查询 Polymarket API。
-- 绕过 TradingService、RiskManager 或 OrderExecutor 执行候选确认。
+- 绕过 OrderGateway、RiskManager 或 OrderExecutor 执行候选确认。
 
 ## 输入与输出
 

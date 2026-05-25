@@ -122,7 +122,7 @@ class AdminRuntimeQueryMixin:
     def data_freshness(self) -> dict[str, Any]:
         """每市场数据源新鲜度快照（纯内存，零 DB，零 P0 影响）。
 
-        从 entry_metadata_store 读取每条 metadata record 的最后更新时间，
+        从 market_metadata_store 读取每条 metadata record 的最后更新时间，
         计算 staleness_ms。staleness 过高说明 live_state 数据源断流。
         """
 

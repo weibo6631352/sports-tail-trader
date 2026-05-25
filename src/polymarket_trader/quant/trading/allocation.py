@@ -131,7 +131,7 @@ def _allocation_skip_reason(
         and not snapshot.scale_in_allowed
     ):
         return "position_already_open"
-    # ws_eligible 已删——市场的 universe / 时间窗口判断由 discovery + market_service
+    # ws_eligible 已删——市场的 universe / 时间窗口判断由 discovery + market_ingest_service
     # 一次写入 registry，trading_status != ELIGIBLE 才是真正的"不可交易"信号。
     # 走到 allocation 这一步说明 worker 已收到 entry_signal_published（live_state
     # 工作者明确 signal_allowed=True），无需在策略层二次门控。

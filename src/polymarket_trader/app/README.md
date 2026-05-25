@@ -13,10 +13,10 @@
 ## 文件职责
 
 - `admin_service.py`：只读查询和受控人工操作编排。
-- `market_service.py`：market discovery 结果解析、扩展 universe 精筛、registry 和订阅编排。
+- `market_ingest_service.py`：market discovery 结果解析、扩展 universe 精筛、registry 和订阅编排。
 - `reconcile_service.py`：权威快照校准和修复动作编排。
-- `trading_decision_service.py`：交易事件到扩展决策和订单意图的编排。
-- `trading_service.py`：风控通过后的订单意图执行编排。
+- `decision_context_builder.py`：交易事件到扩展决策和订单意图的编排。
+- `order_gateway.py`：风控通过后的订单意图执行编排。
 
 ## 允许依赖
 
@@ -40,5 +40,5 @@ App service 方法应优先接受内部 DTO 或基础类型，返回内部 DTO�
 交易订单链路必须保持：
 
 ```text
-event -> TradingDecisionWorker -> TradingDecisionService -> EntryPlanner -> RiskManager -> TradingService -> OrderExecutor -> outbox/audit
+event -> TradingDecisionWorker -> DecisionContextBuilder -> EntryPlanner -> RiskManager -> OrderGateway -> OrderExecutor -> outbox/audit
 ```

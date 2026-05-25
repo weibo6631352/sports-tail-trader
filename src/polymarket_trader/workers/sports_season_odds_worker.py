@@ -1,7 +1,7 @@
 """赛季隐含概率同步 worker（P2，低频）。
 
 针对追踪的 outright market 周期性拉取赛季 fair probabilities，写入
-``EntryMetadataStore`` 的 ``season_odds_snapshot`` 键。outright 评估器在决策
+``MarketMetadataStore`` 的 ``season_odds_snapshot`` 键。outright 评估器在决策
 路径读这份内存快照、不发起 IO。
 
 cadence 默认 1800s。每个 market 内部按 ``ttl_seconds`` 节流，避免免费 API
@@ -20,7 +20,7 @@ from polymarket_trader.domain.events import DomainEvent, DomainEventType, Outbox
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_season import SeasonOddsSnapshot
 from polymarket_trader.infra.sports.season_odds_client import SeasonOddsClient
-from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
+from polymarket_trader.runtime.market_metadata import MarketMetadataStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.serialization import jsonable
@@ -45,7 +45,7 @@ class SportsSeasonOddsWorker:
         *,
         odds_client: SeasonOddsClient,
         registry: MarketRegistry,
-        entry_metadata_store: EntryMetadataStore,
+        market_metadata_store: MarketMetadataStore,
         sport_key_for: SportKeyResolver,
         is_outright_market: Callable[[Market], bool],
         market_key_for: Callable[[Market], str],
@@ -55,7 +55,7 @@ class SportsSeasonOddsWorker:
     ) -> None:
         self._odds_client = odds_client
         self._registry = registry
-        self._entry_metadata_store = entry_metadata_store
+        self._entry_metadata_store = market_metadata_store
         self._sport_key_for = sport_key_for
         self._is_outright_market = is_outright_market
         self._market_key_for = market_key_for
@@ -134,7 +134,7 @@ class SportsSeasonOddsWorker:
         return (_utc_now() - last).total_seconds() >= self._ttl_seconds
 
     def _upsert(self, market: Market, snapshot: SeasonOddsSnapshot) -> None:
-        # EntryMetadataStore.upsert 是整记录替换，必须保留既有 live_state_* 字段，
+        # MarketMetadataStore.upsert 是整记录替换，必须保留既有 live_state_* 字段，
         # 否则 outright 的 odds 写入会清掉 live_state worker 的 single_game 数据。
         payload = dict(jsonable(snapshot))
         existing_record = self._entry_metadata_store.find(

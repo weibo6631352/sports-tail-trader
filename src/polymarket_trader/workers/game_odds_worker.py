@@ -1,7 +1,7 @@
 """单场胜率同步 worker（P2，低频）。
 
 针对追踪的 series WINNER market 周期性拉取下一场比赛 moneyline，写入
-``EntryMetadataStore`` 的 ``game_odds`` 键。series evaluator 在决策路径读
+``MarketMetadataStore`` 的 ``game_odds`` 键。series evaluator 在决策路径读
 这份内存快照，不发起 IO。
 
 cadence 与 series_state 一致（默认 600s），但底层 TheOddsAPI 配额较紧，
@@ -24,7 +24,7 @@ from polymarket_trader.infra.sports.game_odds_client import (
     GameOddsSnapshot,
     GameSpreadSnapshot,
 )
-from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
+from polymarket_trader.runtime.market_metadata import MarketMetadataStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.registry import MarketRegistry
 
@@ -49,7 +49,7 @@ class GameOddsWorker:
         *,
         client: GameOddsClient,
         registry: MarketRegistry,
-        entry_metadata_store: EntryMetadataStore,
+        market_metadata_store: MarketMetadataStore,
         sport_key_for: SportKeyResolver,
         is_series_winner_market: Callable[[Market], bool],
         game_key_for: GameKeyResolver,
@@ -59,7 +59,7 @@ class GameOddsWorker:
     ) -> None:
         self._client = client
         self._registry = registry
-        self._entry_metadata_store = entry_metadata_store
+        self._entry_metadata_store = market_metadata_store
         self._sport_key_for = sport_key_for
         self._is_series_winner_market = is_series_winner_market
         self._game_key_for = game_key_for

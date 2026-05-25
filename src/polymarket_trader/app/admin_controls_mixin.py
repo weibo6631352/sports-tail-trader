@@ -1,7 +1,7 @@
 """AdminService 受控操作 mixin。
 
 包含人工触发的可写动作：reconcile、replace_order、upsert_live_state、
-confirm_candidate。这些动作仍走 TradingService -> RiskManager ->
+confirm_candidate。这些动作仍走 OrderGateway -> RiskManager ->
 OrderExecutor 的主链路，不绕过统一服务。
 
 宿主 AdminService 提供 ``runtime``、``_order_controller``、``_entry_metadata_store``、
@@ -476,7 +476,7 @@ class AdminControlsMixin:
         reason: str = "admin_cancel_order",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """人工撤单。走 TradingService → OrderExecutor，与策略撤单同一条主链路。"""
+        """人工撤单。走 OrderGateway → OrderExecutor，与策略撤单同一条主链路。"""
 
         trace_id = trace_id or uuid4().hex
         logger.warning(
@@ -506,7 +506,7 @@ class AdminControlsMixin:
             }
 
         try:
-            trading_service = self._trading_service()
+            order_gateway = self._trading_service()
         except RuntimeError as exc:
             return {
                 "status": "failed",
@@ -523,7 +523,7 @@ class AdminControlsMixin:
             market_slug=source_order.market_slug,
             reason=reason,
         )
-        review = await trading_service.cancel(intent)
+        review = await order_gateway.cancel(intent)
         result = review.order_result
         failed = result is None or result.status in {
             OrderResultStatus.FAILED,
@@ -696,7 +696,7 @@ class AdminControlsMixin:
             }
 
         try:
-            trading_service = self._trading_service()
+            order_gateway = self._trading_service()
         except RuntimeError as exc:
             return {"status": "failed", "trace_id": trace_id, "reason": str(exc)}
 
@@ -709,7 +709,7 @@ class AdminControlsMixin:
             market_slug=market.market_slug,
             order_type=OrderType.GTC,
         )
-        review = await trading_service.sell(
+        review = await order_gateway.sell(
             intent,
             market=market,
             position=position,
@@ -800,7 +800,7 @@ class AdminControlsMixin:
     ) -> dict[str, Any]:
         """批量撤单：对列表里每个 order_id 依次调用 cancel_order。
 
-        每笔撤单独立走 TradingService → OrderExecutor，有独立 trace_id。
+        每笔撤单独立走 OrderGateway → OrderExecutor，有独立 trace_id。
         失败不影响后续条目——全量跑完后返回汇总结果。
         上限 20 单，防止一次 admin 操作占用交易服务过久。
         """

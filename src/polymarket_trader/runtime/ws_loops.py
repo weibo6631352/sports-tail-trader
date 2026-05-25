@@ -143,7 +143,7 @@ def market_ws_subscription_token_ids(runtime: Any) -> tuple[str, ...]:
 
     account_snapshot = _account_snapshot(runtime)
     exposed_condition_ids, exposed_token_ids = _account_exposure_keys(account_snapshot)
-    entry_metadata_store = getattr(runtime, "entry_metadata_store", None)
+    market_metadata_store = getattr(runtime, "market_metadata_store", None)
     candidates: list[tuple[float, tuple[str, ...]]] = []
     for market in runtime.registry.snapshot().markets:
         has_exposure = (
@@ -151,8 +151,8 @@ def market_ws_subscription_token_ids(runtime: Any) -> tuple[str, ...]:
             or any(tid in exposed_token_ids for tid in market.token_ids)
         )
         entry = (
-            entry_metadata_store.find(condition_id=market.condition_id)
-            if entry_metadata_store is not None
+            market_metadata_store.find(condition_id=market.condition_id)
+            if market_metadata_store is not None
             else None
         )
         if not should_subscribe_ws(market, entry, has_exposure):

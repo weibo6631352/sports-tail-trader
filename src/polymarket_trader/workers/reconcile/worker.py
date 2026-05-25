@@ -15,7 +15,7 @@ from polymarket_trader.app.reconcile_service import (
     ReconcileService,
 )
 from polymarket_trader.app.market_tracking_policy import market_unsubscribe_prune_reason
-from polymarket_trader.app.trading_service import TradingService
+from polymarket_trader.app.order_gateway import OrderGateway
 from polymarket_trader.domain.account import AccountSnapshot, MarketPauseSource
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
@@ -102,7 +102,7 @@ class ReconcileWorker:
         registry_snapshot_provider: RegistrySnapshotProvider | None = None,
         account_snapshot_provider: AccountSnapshotProvider | None = None,
         account_state_store: AccountStateStore | None = None,
-        trading_service: TradingService | None = None,
+        order_gateway: OrderGateway | None = None,
         registry: MarketRegistry | None = None,
         market_ws_worker: MarketWsWorker | None = None,
         gamma_client: MarketAuthorityClient | None = None,
@@ -122,7 +122,7 @@ class ReconcileWorker:
         self._registry_snapshot_provider = registry_snapshot_provider
         self._account_snapshot_provider = account_snapshot_provider
         self._account_state_store = account_state_store
-        self._trading_service = trading_service
+        self._trading_service = order_gateway
         self._registry = registry
         self._market_ws_worker = market_ws_worker
         self._authority_refresher = ReconcileAuthorityRefresher(
@@ -149,7 +149,7 @@ class ReconcileWorker:
         self._last_result: ReconcileWorkerResultSummary | None = None
         self._recent_results: deque[ReconcileWorkerResultSummary] = deque(maxlen=8)
         self._action_applier = ReconcileActionApplier(
-            trading_service=trading_service,
+            order_gateway=order_gateway,
             account_state_store=account_state_store,
         )
         # audit 节流:reconcile 每 20s 跑 200+ markets,逐条 publish

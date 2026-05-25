@@ -41,7 +41,7 @@ async def list_sports_live_states(
     offset: int = Query(default=0, ge=0),
     service: AdminService = Depends(get_admin_service),
 ) -> dict[str, object]:
-    """当前 EntryMetadataStore 中所有有直播状态的市场快照。
+    """当前 MarketMetadataStore 中所有有直播状态的市场快照。
 
     每条记录含 ``live_state_payload``（含 ``goalserve_moneyline`` 赔率、比分、
     时钟等）+ ``condition_id / market_slug``，供前端渲染买入机会详情。

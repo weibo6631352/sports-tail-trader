@@ -22,7 +22,7 @@ class MarketCompanionState:
     使用方:
     - reconcile worker: already_paused_audit / last_reconcile_applied_at / last_reconcile_diff_at
     - sports_live_state worker: last_audit_state_hash / last_audit_emit_at
-    - market_service(discovery): last_filter_reason / last_filter_emit_at
+    - market_ingest_service(discovery): last_filter_reason / last_filter_emit_at
 
     一律按 monotonic 时间戳(time.monotonic()),不混 wall clock.
     """
@@ -36,7 +36,7 @@ class MarketCompanionState:
     last_audit_state_hash: str | None = None
     last_audit_emit_at_mono: float = 0.0
 
-    # market_service(discovery filter):reason dedupe + 60s 兜底节流
+    # market_ingest_service(discovery filter):reason dedupe + 60s 兜底节流
     last_filter_reason: str | None = None
     last_filter_emit_at_mono: float = 0.0
 

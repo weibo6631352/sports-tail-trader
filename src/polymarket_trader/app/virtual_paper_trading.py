@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 from uuid import uuid4
 
 from polymarket_trader.app.paper import PaperSubmitOnlyOrderClient, PaperVirtualLedger
-from polymarket_trader.app.trading_decision_service import EntryPlan, TradingDecisionService
-from polymarket_trader.app.trading_service import TradingService
+from polymarket_trader.app.decision_context_builder import EntryPlan, DecisionContextBuilder
+from polymarket_trader.app.order_gateway import OrderGateway
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.market import Market
@@ -113,8 +113,8 @@ async def run_virtual_paper_trade(
     account_store = _clone_account_store(selection.account)
     try:
         worker = TradingDecisionWorker(
-            trading_decision_service=_trading_decision_service(runtime),
-            trading_service=TradingService(executor=executor),
+            decision_context_builder=_trading_decision_service(runtime),
+            order_gateway=OrderGateway(executor=executor),
             account_state_store=account_store,
             portfolio_budget_usdc=_settings_decimal(runtime, "portfolio_budget_usdc"),
             kelly_fraction=_settings_decimal(runtime, "kelly_fraction") or Decimal("0.25"),
@@ -961,7 +961,7 @@ def _resolve_market_by_token(runtime: RuntimeComponents, token_id: str) -> Marke
 
 
 def _entry_metadata_for_market(runtime: RuntimeComponents, market: Market) -> dict[str, Any]:
-    store = runtime.entry_metadata_store
+    store = runtime.market_metadata_store
     if store is None:
         return {}
     return dict(
@@ -974,7 +974,7 @@ def _entry_metadata_for_market(runtime: RuntimeComponents, market: Market) -> di
 
 
 def _entry_metadata_record_for_market(runtime: RuntimeComponents, market: Market):
-    store = runtime.entry_metadata_store
+    store = runtime.market_metadata_store
     if store is None:
         return None
     return store.find(
@@ -984,10 +984,10 @@ def _entry_metadata_record_for_market(runtime: RuntimeComponents, market: Market
     )
 
 
-def _trading_decision_service(runtime: RuntimeComponents) -> TradingDecisionService:
-    service = runtime.trading_decision_service
+def _trading_decision_service(runtime: RuntimeComponents) -> DecisionContextBuilder:
+    service = runtime.decision_context_builder
     if service is None:
-        raise RuntimeError("trading_decision_service unavailable")
+        raise RuntimeError("decision_context_builder unavailable")
     return service
 
 

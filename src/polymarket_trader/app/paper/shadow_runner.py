@@ -21,15 +21,15 @@ from decimal import Decimal
 from typing import Any, Mapping
 from uuid import uuid4
 
-from polymarket_trader.app.trading_decision_service import TradingDecisionService
-from polymarket_trader.app.trading_service import TradingService
+from polymarket_trader.app.decision_context_builder import DecisionContextBuilder
+from polymarket_trader.app.order_gateway import OrderGateway
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.infra.outbox.local_queue import LocalOutbox
 from polymarket_trader.infra.polymarket.order_executor import PolymarketOrderExecutor
 from polymarket_trader.runtime.account_state import AccountStateStore
-from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
+from polymarket_trader.runtime.market_metadata import MarketMetadataStore
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
 
@@ -116,7 +116,7 @@ async def run_shadow_session(
 
     registry = MarketRegistry()
     market_ws = _ShadowMarketWs()
-    metadata_store = EntryMetadataStore()
+    metadata_store = MarketMetadataStore()
     account_store = AccountStateStore()
     account_store.update_balances(balance_usdc=starting_balance_usdc, allowance_usdc=starting_balance_usdc)
     account_store.mark_user_ws_connected(True)
@@ -124,7 +124,7 @@ async def run_shadow_session(
         ledger.fund(starting_balance_usdc)
     clock = virtual_clock or EventTimestampClock()
 
-    decision_service = TradingDecisionService(
+    decision_service = DecisionContextBuilder(
         strategy=strategy,
         registry=registry,
         orderbook_reader=market_ws.snapshot,
@@ -155,8 +155,8 @@ async def run_shadow_session(
 
     try:
         worker = TradingDecisionWorker(
-            trading_decision_service=decision_service,
-            trading_service=TradingService(executor=executor),
+            decision_context_builder=decision_service,
+            order_gateway=OrderGateway(executor=executor),
             account_state_store=account_store,
             portfolio_budget_usdc=portfolio_budget_usdc,
             kelly_fraction=kelly_fraction,
@@ -266,13 +266,13 @@ def _apply_event_to_runtime(
     *,
     registry: MarketRegistry,
     market_ws: _ShadowMarketWs,
-    metadata_store: EntryMetadataStore,
+    metadata_store: MarketMetadataStore,
 ) -> None:
     """把事件 snapshot 落到影子 runtime stores 中。
 
     ``ShadowEvent.live_metadata`` 契约：永远是**内层 game state**（含 league /
     home_score / away_score / period / status / observed_at 等字段），由
-    shadow_runner 统一包装为 ``{"live_game": ...}`` 喂给 entry_metadata_store。
+    shadow_runner 统一包装为 ``{"live_game": ...}`` 喂给 market_metadata_store。
     调用方不要预先包装，避免双重嵌套。
     """
 

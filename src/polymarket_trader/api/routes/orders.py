@@ -129,7 +129,7 @@ async def bulk_cancel_orders(
     service: AdminService = Depends(get_admin_service),
     _rate: None = Depends(rate_limit(endpoint="bulk_cancel_orders", qps=0.2, burst=1)),
 ) -> dict[str, object]:
-    """批量撤单（最多 20 单）。每笔独立走 TradingService → OrderExecutor，
+    """批量撤单（最多 20 单）。每笔独立走 OrderGateway → OrderExecutor，
     单笔失败不阻塞后续；返回每笔结果汇总。"""
 
     return await service.bulk_cancel_orders(

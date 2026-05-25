@@ -23,8 +23,8 @@ from polymarket_trader.domain.position import Position
 from polymarket_trader.serialization import jsonable
 
 if TYPE_CHECKING:
-    from polymarket_trader.app.trading_decision_service import EntryPlan
-    from polymarket_trader.app.trading_service import TradingReviewResult
+    from polymarket_trader.app.decision_context_builder import EntryPlan
+    from polymarket_trader.app.order_gateway import TradingReviewResult
 
 TRADING_DECISION_WORKER_ORIGIN = "trading_decision_worker"
 

@@ -15,7 +15,7 @@ from polymarket_trader.domain.events import DomainEventType
 
 
 # 漏斗阶段 → 对应的 ``audit_events.event_title`` 集合。
-# market_service 在接受新市场时 emit ``market_discovered``，对已跟踪市场的更新 emit
+# market_ingest_service 在接受新市场时 emit ``market_discovered``，对已跟踪市场的更新 emit
 # ``market_updated``，拒绝时 emit ``market_filtered_out``。漏斗顶端「processed」
 # 需要把这三类都纳入；中段「filtered_in」只算接受（discovered+updated）。
 # 历史上 stage 名字面匹配 event_title 导致 ``market_filtered_in`` 永远 0，详见

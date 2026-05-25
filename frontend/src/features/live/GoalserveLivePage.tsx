@@ -27,7 +27,7 @@ import { MonoText } from '@shared/ui/MonoCell'
 import { formatIso } from '@shared/format'
 
 // Goalserve 实时直播状态 + 买入机会看板
-// 数据来源：GET /sports/live-states（EntryMetadataStore 当前快照）
+// 数据来源：GET /sports/live-states（MarketMetadataStore 当前快照）
 // payload.goalserve_moneyline 含 home/away 欧赔和隐含概率
 
 type GoalserveOddsMarket = {

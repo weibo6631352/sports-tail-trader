@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any, Callable
 
 from polymarket_trader.app.reconcile_service import ReconcileAction, ReconcilePlan
-from polymarket_trader.app.trading_service import TradingReviewResult
+from polymarket_trader.app.order_gateway import TradingReviewResult
 from polymarket_trader.domain.allocation import Allocation
 from polymarket_trader.domain.events import AuditEvent, Fill, OutboxEvent
 from polymarket_trader.domain.fees import FeeQuote, TakerFeePreview, build_taker_fee_preview

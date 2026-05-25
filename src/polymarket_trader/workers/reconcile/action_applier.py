@@ -10,7 +10,7 @@ from polymarket_trader.app.order_projection import (
     order_result_to_order_status,
 )
 from polymarket_trader.app.reconcile_service import ReconcileAction, ReconcileActionType
-from polymarket_trader.app.trading_service import TradingService
+from polymarket_trader.app.order_gateway import OrderGateway
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.market import Market, TradingStatus
 from polymarket_trader.domain.order import (
@@ -33,10 +33,10 @@ class ReconcileActionApplier:
     def __init__(
         self,
         *,
-        trading_service: TradingService | None,
+        order_gateway: OrderGateway | None,
         account_state_store: AccountStateStore | None,
     ) -> None:
-        self._trading_service = trading_service
+        self._trading_service = order_gateway
         self._account_state_store = account_state_store
 
     async def apply(

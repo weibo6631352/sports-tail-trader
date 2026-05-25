@@ -8,7 +8,7 @@ from itertools import count
 from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
-from polymarket_trader.app.market_service import MarketDiscoveryOutcome, MarketService
+from polymarket_trader.app.market_ingest_service import MarketDiscoveryOutcome, MarketIngestService
 from polymarket_trader.domain.discovery import RawMarketEvent
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.infra.polymarket import market_discovery_adapter
@@ -26,7 +26,7 @@ _payload_signature = market_discovery_adapter.payload_signature
 # Gamma 长期翻页 + WS new_market 会持续推新 condition_id；缓存必须有上界，否则
 # 进程驻留期内单调增长（§6 队列/缓存容量上限）。100000 远超目前体育市场池规模，
 # 触顶意味着发现源出现异常或体育市场极度泛滥，应触发告警；丢弃最老一项即可，
-# 因为权威源仍是 MarketService.registry，缓存只用来去重 audit 噪声。
+# 因为权威源仍是 MarketIngestService.registry，缓存只用来去重 audit 噪声。
 # 容量从 10000 提到 100000，避免在多查询轮转 + 长期发现窗口里被驱逐后，把
 # 同一市场误识别为"首次发现"再次发 MARKET_DISCOVERED（N8）。
 _MAX_CACHED_MARKETS = 100_000
@@ -58,14 +58,14 @@ class MarketDiscoveryWorker:
     def __init__(
         self,
         *,
-        market_service: MarketService | None = None,
+        market_ingest_service: MarketIngestService | None = None,
         event_bus: EventBus | None = None,
         source_name: str = "gamma",
         retry_delay_seconds: int = 30,
     ) -> None:
-        if market_service is None:
-            raise ValueError("market_service is required")
-        self._market_service = market_service
+        if market_ingest_service is None:
+            raise ValueError("market_ingest_service is required")
+        self._market_service = market_ingest_service
         self._event_bus = event_bus
         self._source_name = source_name
         self._retry_delay_seconds = retry_delay_seconds
@@ -215,7 +215,7 @@ class MarketDiscoveryWorker:
         else:
             self._last_failure = None
         if outcome.suppress_event:
-            # MarketService 已对同 (cid, reason) 的 MARKET_FILTERED_OUT 高频事件去重；
+            # MarketIngestService 已对同 (cid, reason) 的 MARKET_FILTERED_OUT 高频事件去重；
             # 进入这里说明本次是冗余拒绝，直接静默，不再走首次审计路径。
             return None
         if not outcome.should_publish_event:

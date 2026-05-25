@@ -38,7 +38,7 @@ class OrderExecutorProtocol(Protocol):
     async def replace(self, intent: ReplaceOrderIntent) -> OrderResult: ...
 
 
-class TradingService:
+class OrderGateway:
     """Coordinates risk-checked order intents and execution."""
 
     def __init__(
@@ -79,7 +79,7 @@ class TradingService:
         if isinstance(exc, asyncio.CancelledError):
             return
         logger.warning(
-            "trading_service.background_task_failed name=%s",
+            "order_gateway.background_task_failed name=%s",
             task.get_name(),
             exc_info=exc,
         )
@@ -277,12 +277,12 @@ class TradingService:
             # 执行中被 GC，从而静默吞掉风控拒绝审计事件（§7）。
             self._spawn_background(
                 bus.publish(OutboxPriority.P3, event),
-                name="trading_service.publish_risk_event",
+                name="order_gateway.publish_risk_event",
             )
         except Exception:
             # 审计事件投递失败必须可见，但不能阻塞 P0 主链路（§7）。
             logger.warning(
-                "trading_service.publish_risk_event_failed",
+                "order_gateway.publish_risk_event_failed",
                 exc_info=True,
                 extra={"trace_id": intent.trace_id, "condition_id": intent.condition_id},
             )

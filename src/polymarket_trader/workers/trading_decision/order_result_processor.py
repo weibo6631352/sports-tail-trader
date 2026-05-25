@@ -7,8 +7,8 @@ from polymarket_trader.app.order_projection import (
     has_unexpected_resting_order,
     released_budget,
 )
-from polymarket_trader.app.trading_decision_service import EntryPlan, TradingDecisionService
-from polymarket_trader.app.trading_service import TradingReviewResult, TradingService
+from polymarket_trader.app.decision_context_builder import EntryPlan, DecisionContextBuilder
+from polymarket_trader.app.order_gateway import TradingReviewResult, OrderGateway
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.market import Market
@@ -75,13 +75,13 @@ class TradingOrderResultProcessor:
         self,
         *,
         host: TradingOrderResultHost,
-        trading_decision_service: TradingDecisionService,
-        trading_service: TradingService,
+        decision_context_builder: DecisionContextBuilder,
+        order_gateway: OrderGateway,
         account_state_store: AccountStateStore | None,
     ) -> None:
         self._host = host
-        self._trading_decision_service = trading_decision_service
-        self._trading_service = trading_service
+        self._trading_decision_service = decision_context_builder
+        self._trading_service = order_gateway
         self._account_state_store = account_state_store
 
     async def handle(

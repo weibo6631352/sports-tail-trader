@@ -194,7 +194,7 @@ async def markets_tracking_breakdown(
         return {"available": False, "reason": "registry_unavailable"}
 
     ws_worker = getattr(runtime, "market_ws_worker", None)
-    metadata_store = getattr(runtime, "entry_metadata_store", None)
+    metadata_store = getattr(runtime, "market_metadata_store", None)
 
     snapshot = registry.snapshot()
     markets = snapshot.markets

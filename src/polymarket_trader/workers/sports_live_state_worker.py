@@ -1,7 +1,7 @@
 """体育直播状态同步 worker。
 
 该 worker 是 P2 维护任务：从外部比分源读取状态，匹配当前跟踪 market，并写入
-EntryMetadataStore 供策略入场评估读取。它不直接判断交易机会，也不绕过风控下单。
+MarketMetadataStore 供策略入场评估读取。它不直接判断交易机会，也不绕过风控下单。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from polymarket_trader.domain.sports_live import (
 )
 from polymarket_trader.runtime.lifecycle_bus import LifecycleEvent
 from polymarket_trader.domain.sports_live import LiveStateMatch
-from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
+from polymarket_trader.runtime.market_metadata import MarketMetadataStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.lifecycle_bus import LifecyclePublisher
 from polymarket_trader.runtime.registry import MarketRegistry
@@ -109,7 +109,7 @@ class SportsLiveStateWorker:
         snapshot_provider: SportsLiveSnapshotProvider,
         match_live_state: SportsLiveStateMatcher,
         registry: MarketRegistry,
-        entry_metadata_store: EntryMetadataStore,
+        market_metadata_store: MarketMetadataStore,
         event_bus: EventBus | None = None,
         market_tracker: SportsLiveMarketTracker | Callable[[Market], None] | None = None,
         lifecycle_bus: LifecyclePublisher | None = None,
@@ -123,7 +123,7 @@ class SportsLiveStateWorker:
         self._snapshot_provider = snapshot_provider
         self._match_live_state = match_live_state
         self._registry = registry
-        self._entry_metadata_store = entry_metadata_store
+        self._entry_metadata_store = market_metadata_store
         self._event_bus = event_bus
         self._market_tracker = market_tracker
         self._lifecycle_bus = lifecycle_bus

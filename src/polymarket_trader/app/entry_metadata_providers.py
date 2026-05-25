@@ -6,7 +6,7 @@
 查询），不属于 composition root 职责。
 
 两个函数都返回 callable（closure），让 main.py 拿到后直接传给 worker。
-closure 捕获 registry / strategy / entry_metadata_store 三个长生命周期对象，
+closure 捕获 registry / strategy / market_metadata_store 三个长生命周期对象，
 其它输入由 worker 调用时每次传入。
 """
 
@@ -20,14 +20,14 @@ from polymarket_trader.domain.allocation import current_exposure_usdc
 
 if TYPE_CHECKING:
     from polymarket_trader.quant.workflow import TradingWorkflow
-    from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
+    from polymarket_trader.runtime.market_metadata import MarketMetadataStore
     from polymarket_trader.runtime.registry import MarketRegistry
 
 
 def build_entry_metadata_for_event_provider(
     *,
     registry: "MarketRegistry",
-    entry_metadata_store: "EntryMetadataStore",
+    market_metadata_store: "MarketMetadataStore",
     workflow: "TradingWorkflow",
 ) -> Callable[[Any, AccountSnapshot | None], Mapping[str, Any]]:
     """构造 ``trading_decision_worker`` 所用的 entry_metadata_provider。
@@ -96,7 +96,7 @@ def build_entry_metadata_for_event_provider(
             market = registry.get_by_token_id(event.token_id)
         if market is None and event.market_slug is not None:
             market = registry.get_by_slug(event.market_slug)
-        base = entry_metadata_store.metadata_for_event(event, market=market)
+        base = market_metadata_store.metadata_for_event(event, market=market)
         exposure = _portfolio_exposure_metadata(
             snapshot,
             current_condition_id=market.condition_id if market else event.condition_id,
@@ -111,16 +111,16 @@ def build_entry_metadata_for_event_provider(
 
 def build_entry_metadata_for_market_provider(
     *,
-    entry_metadata_store: "EntryMetadataStore",
+    market_metadata_store: "MarketMetadataStore",
 ) -> Callable[[Any], Mapping[str, Any]]:
     """构造 ``reconcile_worker`` 所用的 entry_metadata_provider。
 
-    输入：market 对象。输出：``entry_metadata_store.metadata_for`` 直接查询结果，
+    输入：market 对象。输出：``market_metadata_store.metadata_for`` 直接查询结果，
     不做敞口聚合（reconcile 路径不需要）。
     """
 
     def entry_metadata_for_market(market):
-        return entry_metadata_store.metadata_for(
+        return market_metadata_store.metadata_for(
             condition_id=market.condition_id,
             market_slug=market.market_slug,
             event_slug=market.event_slug,

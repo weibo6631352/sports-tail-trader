@@ -1,4 +1,4 @@
-"""把 EntryMetadataStore 中 season_odds_snapshot payload 还原成 SeasonOddsSnapshot。
+"""把 MarketMetadataStore 中 season_odds_snapshot payload 还原成 SeasonOddsSnapshot。
 
 ``sports_season_odds_worker`` 写入的是 dict 形态（jsonable 序列化）。outright
 评估器需要直接拿到强类型 SeasonOddsSnapshot 做反向定价。

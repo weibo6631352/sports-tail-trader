@@ -24,12 +24,12 @@ from polymarket_trader.app.entry_metadata_providers import (
     build_entry_metadata_for_event_provider,
     build_entry_metadata_for_market_provider,
 )
-from polymarket_trader.app.market_service import MarketService
+from polymarket_trader.app.market_ingest_service import MarketIngestService
 from polymarket_trader.app.ports import bind_runtime_season_state, build_runtime_ports
 from polymarket_trader.app.reconcile_service import ReconcileService
 from polymarket_trader.app.settlement_scanner import SettlementScannerService
-from polymarket_trader.app.trading_decision_service import TradingDecisionService
-from polymarket_trader.app.trading_service import TradingService
+from polymarket_trader.app.decision_context_builder import DecisionContextBuilder
+from polymarket_trader.app.order_gateway import OrderGateway
 from polymarket_trader.config import ConfigLoadError, Settings, StartupReadiness, load_settings
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
@@ -75,7 +75,7 @@ from polymarket_trader.runtime import (
     trading_gate_reason,
 )
 from polymarket_trader.runtime.account_state import AccountStateStore
-from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
+from polymarket_trader.runtime.market_metadata import MarketMetadataStore
 from polymarket_trader.runtime.discovery_runner import (
     FullMarketDiscoveryState,
     MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS,
@@ -154,7 +154,7 @@ class RuntimeComponents:
     persistence_repository: DatabasePersistenceRepository
     persistence_worker: PersistenceWorker
     account_state_store: AccountStateStore
-    entry_metadata_store: EntryMetadataStore
+    market_metadata_store: MarketMetadataStore
     order_executor: PolymarketOrderExecutor
     market_ws_worker: MarketWsWorker
     orderbook_delta_store: OrderbookDeltaStore
@@ -162,13 +162,13 @@ class RuntimeComponents:
     orderbook_derived_store: OrderbookDerivedStore
     orderbook_derived_publisher: OrderbookDerivedPublisher
     user_ws_worker: UserWsWorker
-    market_service: MarketService
+    market_ingest_service: MarketIngestService
     market_discovery_worker: MarketDiscoveryWorker
     market_discovery_scan: FullMarketDiscoveryState
     sports_live_state_client: SportsLiveAggregateClient | None
     sports_live_state_worker: SportsLiveStateWorker | None
-    trading_decision_service: TradingDecisionService
-    trading_service: TradingService
+    decision_context_builder: DecisionContextBuilder
+    order_gateway: OrderGateway
     trading_decision_worker: TradingDecisionWorker
     reconcile_service: ReconcileService
     reconcile_worker: ReconcileWorker
@@ -262,7 +262,7 @@ def _build_season_odds_worker(
     settings: Settings,
     *,
     registry: MarketRegistry,
-    entry_metadata_store: EntryMetadataStore,
+    market_metadata_store: MarketMetadataStore,
     workflow: TradingWorkflow,
     event_bus: EventBus | None = None,
 ) -> tuple[SportsSeasonOddsWorker, SeasonOddsClient] | tuple[None, None]:
@@ -298,7 +298,7 @@ def _build_season_odds_worker(
     worker = SportsSeasonOddsWorker(
         odds_client=client,
         registry=registry,
-        entry_metadata_store=entry_metadata_store,
+        market_metadata_store=market_metadata_store,
         sport_key_for=_sport_key,
         is_outright_market=_is_outright,
         market_key_for=_market_key,
@@ -313,7 +313,7 @@ def _build_game_odds_worker(
     settings: Settings,
     *,
     registry: MarketRegistry,
-    entry_metadata_store: EntryMetadataStore,
+    market_metadata_store: MarketMetadataStore,
     workflow: TradingWorkflow,
     event_bus: EventBus | None = None,
 ) -> tuple[GameOddsWorker, GameOddsClient] | tuple[None, None]:
@@ -348,7 +348,7 @@ def _build_game_odds_worker(
     worker = GameOddsWorker(
         client=client,
         registry=registry,
-        entry_metadata_store=entry_metadata_store,
+        market_metadata_store=market_metadata_store,
         sport_key_for=_sport_key,
         is_series_winner_market=_is_series_winner,
         game_key_for=_game_key,
@@ -363,7 +363,7 @@ def _build_pregame_worker(
     settings: Settings,
     *,
     registry: MarketRegistry,
-    entry_metadata_store: EntryMetadataStore,
+    market_metadata_store: MarketMetadataStore,
 ) -> tuple[GoalservePregameWorker, GoalservePregameOddsClient] | tuple[None, None]:
     """按 settings 装配 goalserve_pregame_worker；未启用或无 API key 时返回 (None, None)。"""
 
@@ -385,7 +385,7 @@ def _build_pregame_worker(
         client=client,
         enabled=True,
         registry=registry,
-        entry_metadata_store=entry_metadata_store,
+        market_metadata_store=market_metadata_store,
     )
     return worker, client
 
@@ -429,7 +429,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     )
     registry = MarketRegistry()
     gamma_snapshot_store = GammaMarketSnapshotStore()
-    entry_metadata_store = EntryMetadataStore()
+    market_metadata_store = MarketMetadataStore()
     outbox = LocalOutbox(max_size=settings.persistence_event_queue_max_size)
     event_bus.bind_persistence_sink(build_domain_event_outbox_sink(outbox))
     sse_subscription_registry = SseSubscriptionRegistry(soft_cap=settings.sse_subscriber_cap)
@@ -525,7 +525,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         critical_lock_timeout_ms=settings.critical_lock_timeout_ms,
         metrics=metrics,
     )
-    market_service = MarketService(
+    market_ingest_service = MarketIngestService(
         workflow=workflow,
         registry=registry,
         market_tracker=market_ws_worker,
@@ -535,13 +535,13 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         filter_emit_min_interval_s=300.0,
     )
     decision_recorder = DecisionEventRecorder(outbox=outbox)
-    trading_decision_service = TradingDecisionService(
+    decision_context_builder = DecisionContextBuilder(
         workflow=workflow,
         registry=registry,
         orderbook_reader=market_ws_worker.snapshot,
         decision_recorder=decision_recorder,
     )
-    trading_service = TradingService(
+    order_gateway = OrderGateway(
         executor=order_executor,
         lifecycle_bus=lifecycle_bus,
         event_bus=event_bus,
@@ -553,17 +553,17 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
 
     entry_metadata_for_event = build_entry_metadata_for_event_provider(
         registry=registry,
-        entry_metadata_store=entry_metadata_store,
+        market_metadata_store=market_metadata_store,
         workflow=workflow,
     )
     entry_metadata_for_market = build_entry_metadata_for_market_provider(
-        entry_metadata_store=entry_metadata_store,
+        market_metadata_store=market_metadata_store,
     )
 
     trading_decision_worker = TradingDecisionWorker(
         event_bus=event_bus,
-        trading_decision_service=trading_decision_service,
-        trading_service=trading_service,
+        decision_context_builder=decision_context_builder,
+        order_gateway=order_gateway,
         account_state_store=account_state_store,
         portfolio_budget_usdc=settings.portfolio_budget_usdc,
         kelly_fraction=workflow_config.kelly_fraction,
@@ -579,14 +579,14 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     reconcile_service = ReconcileService(
         workflow=workflow,
         entry_metadata_provider=entry_metadata_for_market,
-        orderbook_reader=trading_decision_service.lookup_orderbook,
+        orderbook_reader=decision_context_builder.lookup_orderbook,
     )
     # 注册 trading_decision_worker prune callback:market prune 时同步清 worker
     # 内部 4 个 cid/token 索引 dict(_market_lifecycle / _token_*) 防内存泄漏.
     registry.register_prune_callback(trading_decision_worker.evict_market)
-    # entry_metadata_store 已有 remove API,适配成 callback signature 注册:
+    # market_metadata_store 已有 remove API,适配成 callback signature 注册:
     registry.register_prune_callback(
-        lambda cid, _tokens: entry_metadata_store.remove(condition_id=cid)
+        lambda cid, _tokens: market_metadata_store.remove(condition_id=cid)
     )
     reconcile_worker = ReconcileWorker(
         event_bus=event_bus,
@@ -594,7 +594,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         registry_snapshot_provider=registry.snapshot,
         account_snapshot_provider=account_state_store.snapshot,
         account_state_store=account_state_store,
-        trading_service=trading_service,
+        order_gateway=order_gateway,
         registry=registry,
         market_ws_worker=market_ws_worker,
         gamma_client=gamma_client,
@@ -611,7 +611,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # 注册 authority_refresher prune callback:market prune 时清 _condition_failure_counts.
     registry.register_prune_callback(reconcile_worker._authority_refresher.evict_market)
     market_discovery_worker = MarketDiscoveryWorker(
-        market_service=market_service,
+        market_ingest_service=market_ingest_service,
         event_bus=event_bus,
         retry_delay_seconds=MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS,
     )
@@ -630,7 +630,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
             snapshot_provider=sports_live_state_client.list_events,
             match_live_state=workflow.match_live_state,
             registry=registry,
-            entry_metadata_store=entry_metadata_store,
+            market_metadata_store=market_metadata_store,
             event_bus=event_bus,
             market_tracker=market_ws_worker.track_market,
             lifecycle_bus=lifecycle_bus,
@@ -652,14 +652,14 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     season_odds_worker, season_odds_client = _build_season_odds_worker(
         settings,
         registry=registry,
-        entry_metadata_store=entry_metadata_store,
+        market_metadata_store=market_metadata_store,
         workflow=workflow,
         event_bus=event_bus,
     )
     game_odds_worker, game_odds_client = _build_game_odds_worker(
         settings,
         registry=registry,
-        entry_metadata_store=entry_metadata_store,
+        market_metadata_store=market_metadata_store,
         workflow=workflow,
         event_bus=event_bus,
     )
@@ -674,7 +674,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     pregame_worker, pregame_client = _build_pregame_worker(
         settings,
         registry=registry,
-        entry_metadata_store=entry_metadata_store,
+        market_metadata_store=market_metadata_store,
     )
     scheduler = Scheduler()
     supervisor = Supervisor(
@@ -718,7 +718,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         persistence_repository=persistence_repository,
         persistence_worker=persistence_worker,
         account_state_store=account_state_store,
-        entry_metadata_store=entry_metadata_store,
+        market_metadata_store=market_metadata_store,
         order_executor=order_executor,
         market_ws_worker=market_ws_worker,
         orderbook_delta_store=orderbook_delta_store,
@@ -726,7 +726,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         orderbook_derived_store=orderbook_derived_store,
         orderbook_derived_publisher=orderbook_derived_publisher,
         user_ws_worker=user_ws_worker,
-        market_service=market_service,
+        market_ingest_service=market_ingest_service,
         market_discovery_worker=market_discovery_worker,
         market_discovery_scan=market_discovery_scan,
         sports_live_state_client=sports_live_state_client,
@@ -738,8 +738,8 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         game_odds_client=game_odds_client,
         pregame_worker=pregame_worker,
         pregame_client=pregame_client,
-        trading_decision_service=trading_decision_service,
-        trading_service=trading_service,
+        decision_context_builder=decision_context_builder,
+        order_gateway=order_gateway,
         trading_decision_worker=trading_decision_worker,
         reconcile_service=reconcile_service,
         reconcile_worker=reconcile_worker,
@@ -888,7 +888,7 @@ async def shutdown_runtime(runtime: RuntimeComponents) -> None:
     runtime.background_tasks.clear()
 
     with suppress(Exception):
-        await runtime.trading_service.aclose()
+        await runtime.order_gateway.aclose()
     with suppress(Exception):
         await runtime.order_executor.aclose()
     for client in (runtime.gamma_client, runtime.clob_client, runtime.data_client):

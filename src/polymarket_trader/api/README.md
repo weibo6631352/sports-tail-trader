@@ -24,7 +24,7 @@
 - 不直接写 Market Registry、Orderbook Cache、Position State。
 - 不在 HTTP handler 中执行慢数据库全表扫描或报表生成。
 - 不绕过 Risk Manager 暴露 FAK BUY 入口。
-- 候选人工确认必须重新构建入场计划并经过 `TradingService -> RiskManager -> OrderExecutor`。
+- 候选人工确认必须重新构建入场计划并经过 `OrderGateway -> RiskManager -> OrderExecutor`。
 - 不与 Order Executor 共用交易主链路线程池。
 
 ## 接口调用链
@@ -38,7 +38,7 @@ route -> app service -> domain / runtime snapshot / repository
 订单相关人工操作：
 
 ```text
-route -> AdminService -> TradingService -> OrderExecutor
+route -> AdminService -> OrderGateway -> OrderExecutor
 ```
 
 ## 输入与输出

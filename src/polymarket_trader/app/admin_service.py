@@ -15,8 +15,8 @@ from polymarket_trader.app.admin_service_helpers import (
     _RepositoryGroup,
 )
 from polymarket_trader.app.order_projection import AccountStateProjector, normalize_order_id
-from polymarket_trader.app.trading_decision_service import TradingDecisionService
-from polymarket_trader.app.trading_service import TradingService
+from polymarket_trader.app.decision_context_builder import DecisionContextBuilder
+from polymarket_trader.app.order_gateway import OrderGateway
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
@@ -1007,16 +1007,16 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
                 }
             except Exception as exc:
                 components["market_ws_worker_states"] = {"error": str(exc)[:120]}
-        # entry_metadata_store
-        if self.runtime.entry_metadata_store is not None:
+        # market_metadata_store
+        if self.runtime.market_metadata_store is not None:
             try:
-                records = list(self.runtime.entry_metadata_store.records())
-                components["entry_metadata_store"] = {
+                records = list(self.runtime.market_metadata_store.records())
+                components["market_metadata_store"] = {
                     "records": len(records),
                     "estimated_kb": round(len(records) * 2.0, 1),
                 }
             except Exception as exc:
-                components["entry_metadata_store"] = {"error": str(exc)[:120]}
+                components["market_metadata_store"] = {"error": str(exc)[:120]}
         # account_state_store
         if self.runtime.account_state_store is not None:
             try:
@@ -1174,11 +1174,11 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             health["per_sport_sources_error"] = str(exc)[:120]
 
         # === 直播对局/比分/赔率 整体新鲜度桶分布 ===
-        # 从 entry_metadata_store 拉所有 record 的 updated_at,分桶统计
+        # 从 market_metadata_store 拉所有 record 的 updated_at,分桶统计
         try:
             store = self._entry_metadata_store() if hasattr(self, "_entry_metadata_store") else None
             if store is None:
-                store = self.runtime.entry_metadata_store
+                store = self.runtime.market_metadata_store
             if store is not None:
                 buckets = {"<5s": 0, "5-30s": 0, "30-60s": 0, "60-300s": 0, ">300s": 0, "no_state": 0}
                 total = 0; signal_allowed_count = 0
@@ -1931,7 +1931,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             serializer=self._serializer(),
             account_snapshot=self._account_snapshot,
             resolve_market=self._resolve_market,
-            trading_service=self._trading_service,
+            order_gateway=self._trading_service,
             find_open_order=self._find_open_order,
         )
 
@@ -1997,7 +1997,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             and action_label == "manual_confirm"
             and not (summary.manual_confirmed if summary is not None else False)
         )
-        # 从 entry_metadata_store 反查该市场的直播源信号状态,让 candidate
+        # 从 market_metadata_store 反查该市场的直播源信号状态,让 candidate
         # 一次性带出"为什么被拒"的上游信息(数据源是否给出 signal_allowed).
         signal_allowed: bool | None = None
         live_state_age_ms: int | None = None
@@ -2084,7 +2084,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
 
         list-all 模式 (无单查参数) 额外过滤 ``market_outside_trade_window``,
         跟 polymarket 自己的 /sports/live 同口径只取"即将开赛 30min ~ 已开赛 6h"
-        窗口内的 single-game 市场——避免 entry_metadata_store 累积的已结束 stale
+        窗口内的 single-game 市场——避免 market_metadata_store 累积的已结束 stale
         records 拖累每次 /candidates 评估 (实测 956 records 中绝大多数已过窗口).
         单查模式不过滤, 人查可能需要看已结束市场.
         """
@@ -2195,18 +2195,18 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             raise RuntimeError("clob_client unavailable")
         return self.runtime.clob_client
 
-    def _trading_service(self) -> TradingService:
+    def _trading_service(self) -> OrderGateway:
         if self.runtime is None:
-            raise RuntimeError("trading_service unavailable")
-        return self.runtime.trading_service
+            raise RuntimeError("order_gateway unavailable")
+        return self.runtime.order_gateway
 
-    def _trading_decision_service(self) -> TradingDecisionService:
+    def _trading_decision_service(self) -> DecisionContextBuilder:
         if self.runtime is None:
-            raise RuntimeError("trading_decision_service unavailable")
-        return self.runtime.trading_decision_service
+            raise RuntimeError("decision_context_builder unavailable")
+        return self.runtime.decision_context_builder
 
     def _entry_metadata_store(self) -> Any | None:
-        return self.runtime.entry_metadata_store if self.runtime else None
+        return self.runtime.market_metadata_store if self.runtime else None
 
     def _settings_value(self, name: str) -> Any:
         settings = self.runtime.settings if self.runtime else None

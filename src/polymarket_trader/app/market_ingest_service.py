@@ -40,7 +40,7 @@ class MarketTracker(Protocol):
     def build_subscription_request(self, token_ids: tuple[str, ...]) -> dict[str, Any]: ...
 
 
-class MarketService:
+class MarketIngestService:
     """Coordinates market discovery, strategy universe filtering, and registry updates."""
 
     def __init__(

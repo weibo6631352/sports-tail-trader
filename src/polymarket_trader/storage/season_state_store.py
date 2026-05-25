@@ -1,7 +1,7 @@
 """赛季状态内存 store，键 ``(league, season_id)``。
 
-与 ``EntryMetadataStore`` 解耦：season state cadence 与决策热路径完全不同，
-混入 EntryMetadataStore 会让秒级读和小时级写互相干扰。本 store 只面向赛季
+与 ``MarketMetadataStore`` 解耦：season state cadence 与决策热路径完全不同，
+混入 MarketMetadataStore 会让秒级读和小时级写互相干扰。本 store 只面向赛季
 worker 写、outright 评估读。
 """
 

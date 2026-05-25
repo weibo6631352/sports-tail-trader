@@ -15,8 +15,8 @@ from uuid import uuid4
 
 from polymarket_trader.observability.cpu_track import cpu_track
 
-from polymarket_trader.app.trading_decision_service import EntryPlan, TradingDecisionService
-from polymarket_trader.app.trading_service import TradingReviewResult, TradingService
+from polymarket_trader.app.decision_context_builder import EntryPlan, DecisionContextBuilder
+from polymarket_trader.app.order_gateway import TradingReviewResult, OrderGateway
 from polymarket_trader.app.order_projection import AccountStateProjector
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
@@ -226,8 +226,8 @@ class TradingDecisionWorker:
         self,
         *,
         event_bus: EventBus | None = None,
-        trading_decision_service: TradingDecisionService | None = None,
-        trading_service: TradingService | None = None,
+        decision_context_builder: DecisionContextBuilder | None = None,
+        order_gateway: OrderGateway | None = None,
         positions_provider: PositionsProvider | None = None,
         open_orders_provider: OpenOrdersProvider | None = None,
         account_state_store: AccountStateStore | None = None,
@@ -245,10 +245,10 @@ class TradingDecisionWorker:
         idle_heartbeat_seconds: float = _TRADING_DECISION_IDLE_HEARTBEAT_SECONDS,
     ) -> None:
         self._event_bus = event_bus
-        if trading_decision_service is None:
-            raise ValueError("trading_decision_service is required")
-        self._trading_decision_service = trading_decision_service
-        self._trading_service = trading_service or TradingService()
+        if decision_context_builder is None:
+            raise ValueError("decision_context_builder is required")
+        self._trading_decision_service = decision_context_builder
+        self._trading_service = order_gateway or OrderGateway()
         self._account_state_store = account_state_store
         self._positions_provider = positions_provider or self._build_positions_provider()
         self._open_orders_provider = open_orders_provider or self._build_open_orders_provider()
@@ -293,8 +293,8 @@ class TradingDecisionWorker:
         self._suppressed_allocation_emits: int = 0
         self._order_result_processor = TradingOrderResultProcessor(
             host=self,
-            trading_decision_service=self._trading_decision_service,
-            trading_service=self._trading_service,
+            decision_context_builder=self._trading_decision_service,
+            order_gateway=self._trading_service,
             account_state_store=self._account_state_store,
         )
 

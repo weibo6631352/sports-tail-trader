@@ -1,4 +1,4 @@
-"""从 EntryMetadataStore 装载 SeriesState 与单场胜率 (p_per_game)。
+"""从 MarketMetadataStore 装载 SeriesState 与单场胜率 (p_per_game)。
 
 ``series_state_worker`` 写入 ``metadata["series_state"]``（jsonable 序列化的
 SeriesState）；``game_odds_worker`` 写入 ``metadata["game_odds"]``。本模块负责

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from polymarket_trader.app.trading_decision_service import EntryPlan
-from polymarket_trader.app.trading_service import TradingReviewResult
+from polymarket_trader.app.decision_context_builder import EntryPlan
+from polymarket_trader.app.order_gateway import TradingReviewResult
 from polymarket_trader.domain.events import DomainEvent
 from polymarket_trader.domain.order import ManagedOrderIntent
 from polymarket_trader.domain.state_machine import MarketLifecycle

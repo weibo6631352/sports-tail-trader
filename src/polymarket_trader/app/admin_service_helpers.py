@@ -187,7 +187,7 @@ def _live_source_gap_scope_markets(runtime: Any, markets: Sequence[Market]) -> t
 def _runtime_strategy(runtime: RuntimeComponents) -> Any | None:
     """提取运行时已装配的策略实例。
 
-    Admin 查询不直接依赖具体策略包；strategy 不可用时从 MarketService 读取
+    Admin 查询不直接依赖具体策略包；strategy 不可用时从 MarketIngestService 读取
     同一份 universe hooks。RuntimeError/AttributeError 时返回 None，让调用方
     退回全量 markets 诊断。
     """
@@ -197,7 +197,7 @@ def _runtime_strategy(runtime: RuntimeComponents) -> Any | None:
     except (RuntimeError, AttributeError):
         pass
     try:
-        return runtime.market_service.strategy
+        return runtime.market_ingest_service.strategy
     except AttributeError:
         return None
 

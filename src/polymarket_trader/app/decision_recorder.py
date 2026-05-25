@@ -29,7 +29,7 @@ class _OutboxSink(Protocol):
 class DecisionEventRecorder:
     """同步把策略决策投递到 outbox。
 
-    暴露 ``record(...)`` 接口供 TradingDecisionService / ReconcileService 旁路调用，
+    暴露 ``record(...)`` 接口供 DecisionContextBuilder / ReconcileService 旁路调用，
     内部不维护任何缓冲：每次 record 直接构造 ``OutboxEvent`` 并 ``put_nowait``。
     """
 

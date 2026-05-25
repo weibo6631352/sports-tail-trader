@@ -1077,7 +1077,7 @@ class AdminMarketQueryMixin:
 
         # live_state from entry_metadata
         live_info: dict[str, Any] = {}
-        meta_store = self.runtime.entry_metadata_store
+        meta_store = self.runtime.market_metadata_store
         if meta_store is not None:
             rec = next((r for r in meta_store.records() if r.condition_id == market.condition_id), None)
             if rec is None:

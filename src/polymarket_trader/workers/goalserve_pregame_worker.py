@@ -1,7 +1,7 @@
 """Goalserve 赛前赔率同步 worker（P2，增量拉取）。
 
 周期性调用 GoalservePregameOddsClient.fetch_all()，用 ts 增量减少流量；
-快照存内存，同时把能匹配到市场的 pregame_moneyline 写入 EntryMetadataStore，
+快照存内存，同时把能匹配到市场的 pregame_moneyline 写入 MarketMetadataStore，
 供策略 gates.py 在 goalserve_moneyline（inplay）缺失时作为 fallback 验证信号。
 """
 
@@ -18,7 +18,7 @@ from polymarket_trader.infra.sports.goalserve_pregame_client import (
     GoalservePregameSnapshot,
     PregameMatch,
 )
-from polymarket_trader.runtime.entry_metadata import EntryMetadataStore
+from polymarket_trader.runtime.market_metadata import MarketMetadataStore
 from polymarket_trader.runtime.registry import MarketRegistry
 
 logger = logging.getLogger(__name__)
@@ -38,9 +38,9 @@ class GoalservePregameWorker:
     ts 增量：每次成功拉取后保存各运动的 ts，下次携带以减少数据量。
     单运动失败不影响其他运动（客户端内部已处理）。
 
-    若注入 registry + entry_metadata_store，sync_once 会在拉取完成后，按
+    若注入 registry + market_metadata_store，sync_once 会在拉取完成后，按
     市场的 live_game 团队名匹配 pregame match，将 pregame_moneyline 写入
-    EntryMetadataStore。gates.py 可以在 goalserve_moneyline（inplay）缺失
+    MarketMetadataStore。gates.py 可以在 goalserve_moneyline（inplay）缺失
     时 fallback 到 pregame_moneyline 完成交叉验证。
     """
 
@@ -52,12 +52,12 @@ class GoalservePregameWorker:
         client: GoalservePregameOddsClient,
         enabled: bool = False,
         registry: MarketRegistry | None = None,
-        entry_metadata_store: EntryMetadataStore | None = None,
+        market_metadata_store: MarketMetadataStore | None = None,
     ) -> None:
         self._client = client
         self._enabled = enabled
         self._registry = registry
-        self._entry_metadata_store = entry_metadata_store
+        self._entry_metadata_store = market_metadata_store
         self._snapshots: dict[str, GoalservePregameSnapshot] = {}
         self._ts_by_sport: dict[str, str] = {}
         self._last_started_at: datetime | None = None
@@ -104,7 +104,7 @@ class GoalservePregameWorker:
         return total_matches
 
     def _write_pregame_metadata(self) -> int:
-        """把 pregame_moneyline 写入有 live_game 的市场的 EntryMetadataStore 记录。
+        """把 pregame_moneyline 写入有 live_game 的市场的 MarketMetadataStore 记录。
 
         匹配逻辑：从 live_game.home_name / away_name 规范化后在 pregame 索引中查找。
         只更新已有记录的 pregame_moneyline 字段，不创建新记录，不改变 live_state 字段。

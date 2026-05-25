@@ -429,7 +429,7 @@ def _account_snapshot_for_discovery(runtime: RuntimeComponents) -> AccountSnapsh
 
 
 def _live_event_slugs_for_expansion(runtime: RuntimeComponents, *, now: datetime) -> tuple[str, ...]:
-    store = runtime.entry_metadata_store
+    store = runtime.market_metadata_store
     state = runtime.market_discovery_scan
     slugs: list[str] = []
     for record in store.records():

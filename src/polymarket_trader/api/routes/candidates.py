@@ -78,7 +78,7 @@ async def get_data_freshness(
 ) -> dict[str, object]:
     """每市场 live_state 数据源新鲜度（纯内存，零 DB，零 P0 影响）。
 
-    从 entry_metadata_store 读取每条记录的最后更新时间，计算 staleness_ms。
+    从 market_metadata_store 读取每条记录的最后更新时间，计算 staleness_ms。
     staleness 过高表明该市场的 live_state 数据源已断流。
     """
 
