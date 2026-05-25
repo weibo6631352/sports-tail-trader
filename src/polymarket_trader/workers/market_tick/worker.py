@@ -16,7 +16,7 @@ from uuid import uuid4
 from polymarket_trader.observability.cpu_track import cpu_track
 
 from polymarket_trader.app.decision_context_builder import EntryPlan, DecisionContextBuilder
-from polymarket_trader.app.order_gateway import TradingReviewResult, OrderGateway
+from polymarket_trader.app.order_gateway import OrderGatewayReview, OrderGateway
 from polymarket_trader.app.order_projection import AccountStateProjector
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
@@ -51,7 +51,7 @@ from .event_payloads import (
     snapshot_position,
 )
 from .order_result_processor import TradingOrderResultProcessor
-from .result import TradingDecisionWorkerResult
+from .result import MarketTickWorkerResult
 
 PositionsProvider = Callable[[], Iterable[Position]]
 OpenOrdersProvider = Callable[[], Iterable[Order]]
@@ -219,7 +219,7 @@ def _entry_gate_closed_for_event(
     return False
 
 
-class TradingDecisionWorker:
+class MarketTickWorker:
     priority = "P0"
 
     def __init__(
@@ -382,14 +382,14 @@ class TradingDecisionWorker:
 
     async def run(self) -> None:
         if self._event_bus is None:
-            raise RuntimeError("TradingDecisionWorker requires an EventBus to run")
+            raise RuntimeError("MarketTickWorker requires an EventBus to run")
         self._emit_heartbeat(detail=self._idle_detail("running"))
         while True:
             await self.run_once()
 
-    async def run_once(self) -> "TradingDecisionWorkerResult | None":
+    async def run_once(self) -> "MarketTickWorkerResult | None":
         if self._event_bus is None:
-            raise RuntimeError("TradingDecisionWorker requires an EventBus to run")
+            raise RuntimeError("MarketTickWorker requires an EventBus to run")
         # 空闲等事件时仍要让 supervisor 区分「卡死」和「无事可做」——超时后只 heartbeat，
         # 不向上抛错，下一轮继续等。idle 时不消耗 CPU；只有真到 timeout 才唤醒一次。
         while True:
@@ -407,7 +407,7 @@ class TradingDecisionWorker:
         return result
 
     @cpu_track("trading_decision")
-    async def process_event(self, event: DomainEvent) -> "TradingDecisionWorkerResult | None":
+    async def process_event(self, event: DomainEvent) -> "MarketTickWorkerResult | None":
         if is_self_emitted(event):
             return None
         import time as _time
@@ -451,7 +451,7 @@ class TradingDecisionWorker:
         self,
         event: DomainEvent,
         snapshot: AccountSnapshot | None,
-    ) -> "TradingDecisionWorkerResult | None":
+    ) -> "MarketTickWorkerResult | None":
         # 合成事件 dedupe：position_exit_evaluator 每 5s 发合成 event 兜底薄盘
         # 没人推 orderbook 的场景。但同 token 5s 内已有真实 orderbook event 处理过
         # → 该 token 不缺数据，跳过合成 event 避免重复评估。
@@ -606,7 +606,7 @@ class TradingDecisionWorker:
         event: DomainEvent,
         snapshot: AccountSnapshot | None,
         plan: EntryPlan,
-    ) -> "TradingDecisionWorkerResult":
+    ) -> "MarketTickWorkerResult":
         positions = snapshot.positions if snapshot is not None else tuple(self._positions_provider())
         if snapshot is not None and not snapshot.allow_new_entries:
             return await self._emit_entry_skip(
@@ -671,7 +671,7 @@ class TradingDecisionWorker:
             execution=review,
             plan=plan,
         )
-        return TradingDecisionWorkerResult(
+        return MarketTickWorkerResult(
             entry_event=event,
             plan=plan,
             review=review,
@@ -689,9 +689,9 @@ class TradingDecisionWorker:
         source_event: DomainEvent,
         order_result: OrderResult | None,
         snapshot: AccountSnapshot | None,
-        execution: TradingReviewResult | None = None,
+        execution: OrderGatewayReview | None = None,
         plan: EntryPlan | None = None,
-    ) -> "TradingDecisionWorkerResult":
+    ) -> "MarketTickWorkerResult":
         return await self._order_result_processor.handle(
             source_event=source_event,
             order_result=order_result,
@@ -704,9 +704,9 @@ class TradingDecisionWorker:
         self,
         event: DomainEvent,
         snapshot: AccountSnapshot | None,
-    ) -> "TradingDecisionWorkerResult":
+    ) -> "MarketTickWorkerResult":
         if snapshot is None:
-            return TradingDecisionWorkerResult(
+            return MarketTickWorkerResult(
                 entry_event=event,
                 plan=None,
                 review=None,
@@ -718,7 +718,7 @@ class TradingDecisionWorker:
         if market is not None:
             self._transition_market(market, MarketLifecycle.POSITION_OPEN)
         if position is None:
-            return TradingDecisionWorkerResult(
+            return MarketTickWorkerResult(
                 entry_event=event,
                 plan=None,
                 review=None,
@@ -733,7 +733,7 @@ class TradingDecisionWorker:
         )
         if exit_result is not None:
             return exit_result
-        return TradingDecisionWorkerResult(
+        return MarketTickWorkerResult(
             entry_event=event,
             plan=None,
             review=None,
@@ -747,7 +747,7 @@ class TradingDecisionWorker:
         event: DomainEvent,
         snapshot: AccountSnapshot,
         position: Position,
-    ) -> "TradingDecisionWorkerResult | None":
+    ) -> "MarketTickWorkerResult | None":
         """在真实持仓更新后让策略决定是否需要退出保护单。
 
         用户 WS 的成交可能晚于初次下单响应到达。此时热态里已经有持仓，但
@@ -850,7 +850,7 @@ class TradingDecisionWorker:
             intent=intent,
             snapshot=snapshot,
         )
-        return TradingDecisionWorkerResult(
+        return MarketTickWorkerResult(
             entry_event=event,
             plan=None,
             review=review,
@@ -863,7 +863,7 @@ class TradingDecisionWorker:
 
     def _apply_position_exit_result(
         self,
-        review: TradingReviewResult,
+        review: OrderGatewayReview,
         *,
         intent: ManagedOrderIntent,
         snapshot: AccountSnapshot,
@@ -896,7 +896,7 @@ class TradingDecisionWorker:
         lifecycle: MarketLifecycle,
         extra_payload: Mapping[str, object] | None,
         emit_in_tuple: bool,
-    ) -> "TradingDecisionWorkerResult":
+    ) -> "MarketTickWorkerResult":
         """统一发布入场 SKIP 事件 + 状态转换 + 构造 result。
 
         ``emit_in_tuple`` 控制是否把 SKIP 事件同时写入 ``emitted_events`` 元组。
@@ -928,7 +928,7 @@ class TradingDecisionWorker:
         )
         self._transition_market(plan.market, lifecycle if plan.market else None)
         emitted_events_tuple: tuple[DomainEvent, ...] = (skipped,) if emit_in_tuple else ()
-        return TradingDecisionWorkerResult(
+        return MarketTickWorkerResult(
             entry_event=event,
             plan=plan,
             review=None,
@@ -1395,7 +1395,7 @@ class TradingDecisionWorker:
         intent: ManagedOrderIntent,
         *,
         snapshot: AccountSnapshot | None,
-    ) -> TradingReviewResult:
+    ) -> OrderGatewayReview:
         market = self._trading_decision_service.resolve_market(
             condition_id=intent.condition_id,
             token_id=intent.token_id,

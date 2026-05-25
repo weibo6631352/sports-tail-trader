@@ -40,5 +40,5 @@ App service 方法应优先接受内部 DTO 或基础类型，返回内部 DTO�
 交易订单链路必须保持：
 
 ```text
-event -> TradingDecisionWorker -> DecisionContextBuilder -> EntryPlanner -> RiskManager -> OrderGateway -> OrderExecutor -> outbox/audit
+event -> MarketTickWorker -> DecisionContextBuilder -> EntryPlanner -> RiskManager -> OrderGateway -> OrderExecutor -> outbox/audit
 ```

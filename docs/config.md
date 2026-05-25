@@ -68,7 +68,7 @@
 
 - 外部 API 请求只发生在 `sports_live_state_sync` P2 scheduler job 中；ESPN、NBA、NHL、MLB、SofaScore 和 TheSportsDB 会先聚合成单个 `sports_live_aggregate` 快照再进入匹配。
 - 聚合去重优先保留官方源状态；通用免费源与官方源状态冲突时，通用源只记录为 `source_conflicts`，交易侧会降级拒绝自动执行。
-- `TradingDecisionWorker.entry_metadata_provider` 只读取内存 `EntryMetadataStore`，不会在 P0 路径请求外部 API。
+- `MarketTickWorker.entry_metadata_provider` 只读取内存 `MarketMetadataStore`，不会在 P0 路径请求外部 API。
 - 同步状态通过 `/runtime`、`/workers`、`/metrics` 的 `sports_live_sync` 字段和前端候选页展示；`source_statuses.health` 区分 `success_with_live_data`、`success_empty`、`cached`、`rate_limited` 和 `failed`。
 
 默认覆盖边界：

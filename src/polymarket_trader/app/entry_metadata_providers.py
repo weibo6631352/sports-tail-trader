@@ -1,6 +1,6 @@
 """Entry / event 的 metadata provider 工厂。
 
-把 ``trading_decision_worker.entry_metadata_provider`` 和
+把 ``market_tick_worker.entry_metadata_provider`` 和
 ``reconcile_worker.entry_metadata_provider`` 所需的两个 callable 从 main.py
 拆出来——它们承载实际业务（exposure 按 market family 聚合 + entry_metadata
 查询），不属于 composition root 职责。
@@ -30,7 +30,7 @@ def build_entry_metadata_for_event_provider(
     market_metadata_store: "MarketMetadataStore",
     workflow: "TradingWorkflow",
 ) -> Callable[[Any, AccountSnapshot | None], Mapping[str, Any]]:
-    """构造 ``trading_decision_worker`` 所用的 entry_metadata_provider。
+    """构造 ``market_tick_worker`` 所用的 entry_metadata_provider。
 
     输入：事件 (DomainEvent) + account_snapshot。
     输出：base entry metadata 叠加按 market family 聚合的 outright/series 敞口。

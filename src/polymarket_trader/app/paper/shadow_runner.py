@@ -31,7 +31,7 @@ from polymarket_trader.infra.polymarket.order_executor import PolymarketOrderExe
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.runtime.market_metadata import MarketMetadataStore
 from polymarket_trader.runtime.registry import MarketRegistry
-from polymarket_trader.workers.trading_decision import TradingDecisionWorker
+from polymarket_trader.workers.market_tick import MarketTickWorker
 
 from .client import PaperSubmitOnlyOrderClient
 from .event_stream import EventStreamSource, ShadowEvent
@@ -154,7 +154,7 @@ async def run_shadow_session(
         return metadata_store.metadata_for_event(event, market=market)
 
     try:
-        worker = TradingDecisionWorker(
+        worker = MarketTickWorker(
             decision_context_builder=decision_service,
             order_gateway=OrderGateway(executor=executor),
             account_state_store=account_store,

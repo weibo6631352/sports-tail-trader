@@ -1,8 +1,8 @@
 """交易决策 worker 子包。
 
-包含 trading_decision_worker 主体、事件 payload 序列化、订单结果处理与
+包含 market_tick_worker 主体、事件 payload 序列化、订单结果处理与
 work-result DTO。模块间通过相对 import 互相依赖；调用方按
-``from polymarket_trader.workers.trading_decision import X`` 使用。
+``from polymarket_trader.workers.market_tick import X`` 使用。
 """
 
 from __future__ import annotations
@@ -31,13 +31,13 @@ from .event_payloads import (
     snapshot_position,
 )
 from .order_result_processor import TradingOrderResultProcessor
-from .result import TradingDecisionWorkerResult
-from .worker import TradingDecisionWorker
+from .result import MarketTickWorkerResult
+from .worker import MarketTickWorker
 
 __all__ = [
     "TRADING_DECISION_WORKER_ORIGIN",
-    "TradingDecisionWorker",
-    "TradingDecisionWorkerResult",
+    "MarketTickWorker",
+    "MarketTickWorkerResult",
     "TradingOrderResultProcessor",
     "coerce_order_result_from_event",
     "coerce_order_type",

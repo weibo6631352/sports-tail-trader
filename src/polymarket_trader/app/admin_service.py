@@ -590,7 +590,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         - position_quality_score: per 持仓 holding + drawdown + price_trend 综合
         - signal_consensus: orderbook_direction + odds_drift + game_progress 一致性
         """
-        from polymarket_trader.workers.trading_decision.worker import get_odds_drift_store
+        from polymarket_trader.workers.market_tick.worker import get_odds_drift_store
         from decimal import Decimal
         from statistics import mean, stdev
         store = get_odds_drift_store()
@@ -1283,7 +1283,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         - vig_pct_current: 当前 ML overround
         - vig_change_5min: vig 变化（庄家收紧 / 放松信号）
         """
-        from polymarket_trader.workers.trading_decision.worker import get_odds_drift_store
+        from polymarket_trader.workers.market_tick.worker import get_odds_drift_store
         store = get_odds_drift_store()
         if market_slug:
             samples = list(store.get(market_slug, []))[-limit:]
@@ -1903,9 +1903,9 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         condition_id / token_id 都缺 → 返回全部持仓 signals 列表。
         """
 
-        if self.runtime is None or self.runtime.trading_decision_worker is None:
+        if self.runtime is None or self.runtime.market_tick_worker is None:
             return {"items": []}
-        cache = self.runtime.trading_decision_worker._token_position_signals
+        cache = self.runtime.market_tick_worker._token_position_signals
         items: list[dict[str, object]] = []
         for tid, signals in cache.items():
             if token_id is not None and tid != token_id:

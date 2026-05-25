@@ -32,8 +32,8 @@ from polymarket_trader.infra.polymarket.order_executor import (
 )
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.serialization import jsonable
-from polymarket_trader.workers.trading_decision import TradingDecisionWorker
-from polymarket_trader.workers.trading_decision import TradingDecisionWorkerResult
+from polymarket_trader.workers.market_tick import MarketTickWorker
+from polymarket_trader.workers.market_tick import MarketTickWorkerResult
 
 @runtime_checkable
 class _OrderbookFallbackClient(Protocol):
@@ -112,7 +112,7 @@ async def run_virtual_paper_trade(
     )
     account_store = _clone_account_store(selection.account)
     try:
-        worker = TradingDecisionWorker(
+        worker = MarketTickWorker(
             decision_context_builder=_trading_decision_service(runtime),
             order_gateway=OrderGateway(executor=executor),
             account_state_store=account_store,
@@ -359,7 +359,7 @@ def _build_plan(
 
 def _result_payload(
     *,
-    result: TradingDecisionWorkerResult | None,
+    result: MarketTickWorkerResult | None,
     event: DomainEvent,
     selection: _CandidateSelection,
     paper_client: PaperSubmitOnlyOrderClient,
@@ -493,7 +493,7 @@ def _result_payload(
     )
 
 
-def _steps(result: TradingDecisionWorkerResult | None) -> tuple[dict[str, Any], ...]:
+def _steps(result: MarketTickWorkerResult | None) -> tuple[dict[str, Any], ...]:
     if result is None:
         return ({"key": "worker", "label": "交易 worker", "status": "failed", "detail": "worker 未返回结果"},)
     plan = result.plan

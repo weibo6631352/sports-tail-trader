@@ -111,7 +111,7 @@ class OrderGateway:
         portfolio_total_invested_usdc: Decimal | None = None,
         bankroll_usdc: Decimal | None = None,
         operation: str = "review",
-    ) -> "TradingReviewResult":
+    ) -> "OrderGatewayReview":
         risk_decision = self._risk_manager.check_order_intent(
             intent,
             market=market,
@@ -152,7 +152,7 @@ class OrderGateway:
             risk_decision=risk_decision,
             order_result=order_result,
         )
-        return TradingReviewResult(
+        return OrderGatewayReview(
             intent=intent,
             operation=operation,
             risk_decision=risk_decision,
@@ -161,10 +161,10 @@ class OrderGateway:
             submission_error=submission_error,
         )
 
-    async def buy(self, intent: BuyOrderIntent, **kwargs: Any) -> "TradingReviewResult":
+    async def buy(self, intent: BuyOrderIntent, **kwargs: Any) -> "OrderGatewayReview":
         return await self.review_intent(intent, operation="buy", **kwargs)
 
-    async def sell(self, intent: SellOrderIntent, **kwargs: Any) -> "TradingReviewResult":
+    async def sell(self, intent: SellOrderIntent, **kwargs: Any) -> "OrderGatewayReview":
         return await self.review_intent(intent, operation="sell", **kwargs)
 
     async def cancel(
@@ -172,7 +172,7 @@ class OrderGateway:
         intent: CancelOrderIntent,
         *,
         operation: str = "cancel",
-    ) -> "TradingReviewResult":
+    ) -> "OrderGatewayReview":
         order_result, submitted, submission_error = await self._execute_control_intent(
             intent,
             operation=operation,
@@ -183,7 +183,7 @@ class OrderGateway:
             risk_decision=None,
             order_result=order_result,
         )
-        return TradingReviewResult(
+        return OrderGatewayReview(
             intent=intent,
             operation=operation,
             risk_decision=None,
@@ -197,7 +197,7 @@ class OrderGateway:
         intent: ReplaceOrderIntent,
         *,
         operation: str = "replace",
-    ) -> "TradingReviewResult":
+    ) -> "OrderGatewayReview":
         order_result, submitted, submission_error = await self._execute_control_intent(
             intent,
             operation=operation,
@@ -208,7 +208,7 @@ class OrderGateway:
             risk_decision=None,
             order_result=order_result,
         )
-        return TradingReviewResult(
+        return OrderGatewayReview(
             intent=intent,
             operation=operation,
             risk_decision=None,
@@ -402,7 +402,7 @@ class OrderGateway:
 
 
 @dataclass(frozen=True, slots=True)
-class TradingReviewResult:
+class OrderGatewayReview:
     intent: ManagedOrderIntent
     operation: str
     risk_decision: RiskDecision | None

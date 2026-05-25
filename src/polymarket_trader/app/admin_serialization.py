@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any, Callable
 
 from polymarket_trader.app.reconcile_service import ReconcileAction, ReconcilePlan
-from polymarket_trader.app.order_gateway import TradingReviewResult
+from polymarket_trader.app.order_gateway import OrderGatewayReview
 from polymarket_trader.domain.allocation import Allocation
 from polymarket_trader.domain.events import AuditEvent, Fill, OutboxEvent
 from polymarket_trader.domain.fees import FeeQuote, TakerFeePreview, build_taker_fee_preview
@@ -553,7 +553,7 @@ class AdminSerializer:
             market = registry.get_by_slug(market_slug)
         return None if market is None else market.event_slug
 
-    def review(self, review: TradingReviewResult) -> dict[str, Any]:
+    def review(self, review: OrderGatewayReview) -> dict[str, Any]:
         return {
             "operation": review.operation,
             "submitted": review.submitted,

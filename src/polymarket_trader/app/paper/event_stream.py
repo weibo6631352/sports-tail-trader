@@ -2,7 +2,7 @@
 
 ShadowEvent 携带触发一次评估所需的全量 snapshot（market / orderbook / live
 metadata）。shadow_runner 顺序消费这些事件，按 observed_at 推进虚拟时钟，
-每事件触发 ``TradingDecisionWorker.process_event``。
+每事件触发 ``MarketTickWorker.process_event``。
 
 JSONL 格式说明：每行一个事件，字段 ``event_type / observed_at / condition_id /
 token_id / market_slug / trace_id / market / orderbook / live_metadata``；

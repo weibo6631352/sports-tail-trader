@@ -344,7 +344,7 @@ async def refresh_priority_condition_ids(runtime: RuntimeComponents) -> None:
     """P3.1：对持仓/挂单市场按独立快速间隔（15s）单独拉取 Gamma 市场快照。
 
     常规全量 Gamma 轮转可能数分钟才回到某个 condition_id；有持仓的市场需要
-    更频繁的盘口状态更新，确保 TradingDecisionWorker 读到的 registry 不滞后。
+    更频繁的盘口状态更新，确保 MarketTickWorker 读到的 registry 不滞后。
     每 tick 最多发 1 次额外 gamma 请求，不挤占常规发现预算。
     """
 

@@ -108,7 +108,7 @@ class Settings(BaseSettings):
     # 每天累积百万级 row，长期运行会让查询变慢且占用大量磁盘。retention job 每天跑
     # 一次 ``DELETE WHERE created_at < now() - interval N days``，让 audit 表稳态
     # 在 ~14 天数据量内。改 0 关闭 retention（不推荐——仅用于离线分析临时保留）。
-    # 注:trading_decision_worker 每秒 ~100 条 allocation_decision_recorded,
+    # 注:market_tick_worker 每秒 ~100 条 allocation_decision_recorded,
     # 每天 ~370 万行 audit_events。3 天 retention ≈ 1100 万行,DB 体积可控;
     # 想长保留要先做写源抽样(只在 accepted/拒绝原因变化时记)。
     audit_retention_days: int = Field(default=3, ge=0, le=365)

@@ -1,8 +1,8 @@
 """交易决策相关的 audit payload 序列化 / 账户快照辅助函数。
 
-这些函数既被 trading_decision_worker 的事件发布路径使用，也被 admin_service
+这些函数既被 market_tick_worker 的事件发布路径使用，也被 admin_service
 的候选展示和人工确认路径使用；统一放在 app 层避免 app → workers 反向依赖。
-Workers 通过 ``workers.trading_decision.event_payloads`` 的 re-export 保持原有调用界面。
+Workers 通过 ``workers.market_tick.event_payloads`` 的 re-export 保持原有调用界面。
 """
 
 from __future__ import annotations
@@ -24,9 +24,9 @@ from polymarket_trader.serialization import jsonable
 
 if TYPE_CHECKING:
     from polymarket_trader.app.decision_context_builder import EntryPlan
-    from polymarket_trader.app.order_gateway import TradingReviewResult
+    from polymarket_trader.app.order_gateway import OrderGatewayReview
 
-TRADING_DECISION_WORKER_ORIGIN = "trading_decision_worker"
+TRADING_DECISION_WORKER_ORIGIN = "market_tick_worker"
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +210,7 @@ def serialize_intent(intent: ManagedOrderIntent) -> dict[str, object]:
     return payload
 
 
-def serialize_review(review: TradingReviewResult) -> dict[str, object]:
+def serialize_review(review: OrderGatewayReview) -> dict[str, object]:
     return {
         "operation": review.operation,
         "submitted": review.submitted,

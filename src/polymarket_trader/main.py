@@ -106,7 +106,7 @@ from polymarket_trader.workers.sports_live_state_worker import SportsLiveStateWo
 from polymarket_trader.workers.sports_season_odds_worker import SportsSeasonOddsWorker
 from polymarket_trader.workers.game_odds_worker import GameOddsWorker
 from polymarket_trader.workers.goalserve_pregame_worker import GoalservePregameWorker
-from polymarket_trader.workers.trading_decision import TradingDecisionWorker
+from polymarket_trader.workers.market_tick import MarketTickWorker
 from polymarket_trader.quant.config import load_workflow_config
 from polymarket_trader.quant.workflow import TradingWorkflow
 from polymarket_trader.workers.user_ws import UserWsWorker
@@ -169,7 +169,7 @@ class RuntimeComponents:
     sports_live_state_worker: SportsLiveStateWorker | None
     decision_context_builder: DecisionContextBuilder
     order_gateway: OrderGateway
-    trading_decision_worker: TradingDecisionWorker
+    market_tick_worker: MarketTickWorker
     reconcile_service: ReconcileService
     reconcile_worker: ReconcileWorker
     scheduler: Scheduler
@@ -560,7 +560,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         market_metadata_store=market_metadata_store,
     )
 
-    trading_decision_worker = TradingDecisionWorker(
+    market_tick_worker = MarketTickWorker(
         event_bus=event_bus,
         decision_context_builder=decision_context_builder,
         order_gateway=order_gateway,
@@ -581,9 +581,9 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         entry_metadata_provider=entry_metadata_for_market,
         orderbook_reader=decision_context_builder.lookup_orderbook,
     )
-    # 注册 trading_decision_worker prune callback:market prune 时同步清 worker
+    # 注册 market_tick_worker prune callback:market prune 时同步清 worker
     # 内部 4 个 cid/token 索引 dict(_market_lifecycle / _token_*) 防内存泄漏.
-    registry.register_prune_callback(trading_decision_worker.evict_market)
+    registry.register_prune_callback(market_tick_worker.evict_market)
     # market_metadata_store 已有 remove API,适配成 callback signature 注册:
     registry.register_prune_callback(
         lambda cid, _tokens: market_metadata_store.remove(condition_id=cid)
@@ -695,7 +695,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     )
     # N13：把 supervisor heartbeat 接到 trading_decision worker；worker 内部不直接持有
     # supervisor 实例，避免 P0 worker 反向耦合 runtime/状态层。
-    trading_decision_worker.bind_heartbeat(
+    market_tick_worker.bind_heartbeat(
         lambda **kwargs: supervisor.heartbeat_worker("trading_decision", **kwargs)
     )
     return RuntimeComponents(
@@ -740,7 +740,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         pregame_client=pregame_client,
         decision_context_builder=decision_context_builder,
         order_gateway=order_gateway,
-        trading_decision_worker=trading_decision_worker,
+        market_tick_worker=market_tick_worker,
         reconcile_service=reconcile_service,
         reconcile_worker=reconcile_worker,
         scheduler=scheduler,
@@ -1029,7 +1029,7 @@ def _start_background_tasks(runtime: RuntimeComponents) -> None:
         _run_supervised_loop(
             runtime,
             name="trading_decision",
-            runner=runtime.trading_decision_worker.run,
+            runner=runtime.market_tick_worker.run,
         ),
         name="trader:trading-decision",
     )

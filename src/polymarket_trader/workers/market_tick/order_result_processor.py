@@ -8,7 +8,7 @@ from polymarket_trader.app.order_projection import (
     released_budget,
 )
 from polymarket_trader.app.decision_context_builder import EntryPlan, DecisionContextBuilder
-from polymarket_trader.app.order_gateway import TradingReviewResult, OrderGateway
+from polymarket_trader.app.order_gateway import OrderGatewayReview, OrderGateway
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.market import Market
@@ -30,7 +30,7 @@ from .event_payloads import (
     serialize_order_result,
     serialize_review,
 )
-from .result import TradingDecisionWorkerResult
+from .result import MarketTickWorkerResult
 
 
 class TradingOrderResultHost(Protocol):
@@ -65,7 +65,7 @@ class TradingOrderResultHost(Protocol):
         intent: ManagedOrderIntent,
         *,
         snapshot: AccountSnapshot | None,
-    ) -> TradingReviewResult: ...
+    ) -> OrderGatewayReview: ...
 
     def _account_projector(self) -> AccountStateProjector | None: ...
 
@@ -90,13 +90,13 @@ class TradingOrderResultProcessor:
         source_event: DomainEvent,
         order_result: OrderResult | None,
         snapshot: AccountSnapshot | None,
-        execution: TradingReviewResult | None = None,
+        execution: OrderGatewayReview | None = None,
         plan: EntryPlan | None = None,
-    ) -> TradingDecisionWorkerResult:
+    ) -> MarketTickWorkerResult:
         if order_result is None:
             order_result = coerce_order_result_from_event(source_event)
         if order_result is None:
-            return TradingDecisionWorkerResult(
+            return MarketTickWorkerResult(
                 entry_event=source_event,
                 plan=plan,
                 review=execution,
@@ -125,7 +125,7 @@ class TradingOrderResultProcessor:
         )
         self._host._transition_from_order_result(order_result)
         follow_up_intents: list[ManagedOrderIntent] = []
-        follow_up_results: list[TradingReviewResult] = []
+        follow_up_results: list[OrderGatewayReview] = []
         active_snapshot = snapshot
         position_already_projected = bool(
             source_event.payload.get("position_projected")
@@ -235,7 +235,7 @@ class TradingOrderResultProcessor:
         projector = self._host._account_projector()
         if projector is not None:
             projector.apply_result_flags(order_result, snapshot=snapshot)
-        return TradingDecisionWorkerResult(
+        return MarketTickWorkerResult(
             entry_event=source_event,
             plan=plan,
             review=execution,
@@ -273,8 +273,8 @@ class TradingOrderResultProcessor:
         self,
         order_result: OrderResult,
         follow_up_intents: list[ManagedOrderIntent],
-        follow_up_results: list[TradingReviewResult],
-    ) -> TradingReviewResult:
+        follow_up_results: list[OrderGatewayReview],
+    ) -> OrderGatewayReview:
         await self._host._publish(
             DomainEventType.ORDER_STATE_UPDATED,
             trace_id=order_result.trace_id,
@@ -343,7 +343,7 @@ class TradingOrderResultProcessor:
         active_snapshot: AccountSnapshot | None,
         result_event: DomainEvent,
         follow_up_intents: list[ManagedOrderIntent],
-        follow_up_results: list[TradingReviewResult],
+        follow_up_results: list[OrderGatewayReview],
     ) -> tuple[AccountSnapshot | None, DomainEvent]:
         # 真正量化形态：user_ws fill 是过去决策的结果，不携带新市场信息——
         # 不再调用 quant_decide。下次 market_ws book/price_change tick 时
@@ -352,7 +352,7 @@ class TradingOrderResultProcessor:
 
     def _apply_follow_up_result(
         self,
-        follow_up_review: TradingReviewResult,
+        follow_up_review: OrderGatewayReview,
         *,
         intent: ManagedOrderIntent,
         active_snapshot: AccountSnapshot | None,
@@ -383,7 +383,7 @@ class TradingOrderResultProcessor:
 
 def _entry_failure_lifecycle(
     order_result: OrderResult,
-    execution: TradingReviewResult | None,
+    execution: OrderGatewayReview | None,
 ) -> MarketLifecycle:
     """把入场失败映射到后续生命周期。
 
