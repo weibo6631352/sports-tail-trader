@@ -23,7 +23,6 @@ from polymarket_trader.api.routes.stream import SseSubscriptionRegistry
 from polymarket_trader.app.market_service import MarketService
 from polymarket_trader.app.ports import bind_extension_orderbook_reader, bind_extension_season_state, build_extension_ports
 from polymarket_trader.app.reconcile_service import ReconcileService
-from polymarket_trader.app.extension_host import load_extension
 from polymarket_trader.app.trading_decision_service import TradingDecisionService
 from polymarket_trader.app.trading_service import TradingService
 from polymarket_trader.config import ConfigIssue, ConfigLoadError, Settings, StartupReadiness, load_settings
@@ -97,7 +96,6 @@ from polymarket_trader.runtime.ws_loops import (
     run_market_ws as _run_market_ws,
     run_user_ws as _run_user_ws,
 )
-from polymarket_trader.extension_api import BusinessExtension, resolve_kelly_params
 from polymarket_trader.extension_api.manifest import ConfigValidator
 from polymarket_trader.workers.market_discovery_worker import MarketDiscoveryWorker
 from polymarket_trader.workers.market_ws import MarketWsWorker
@@ -108,7 +106,7 @@ from polymarket_trader.workers.sports_season_odds_worker import SportsSeasonOdds
 from polymarket_trader.workers.game_odds_worker import GameOddsWorker
 from polymarket_trader.workers.goalserve_pregame_worker import GoalservePregameWorker
 from polymarket_trader.workers.trading_decision import TradingDecisionWorker
-from polymarket_trader.extension_api.hooks import MarketClassificationHooks
+from polymarket_trader.quant.strategy import CurrentStrategy as _CurrentStrategy
 from polymarket_trader.workers.user_ws import UserWsWorker
 from polymarket_trader.infra.sports.game_odds_client import (
     GameOddsClient,
@@ -139,11 +137,11 @@ _RECONCILE_BATCH_SIZE_LIMIT = 256
 class RuntimeComponents:
     settings: Settings
     readiness: StartupReadiness
-    extensions: tuple[BusinessExtension, ...]
+    extensions: tuple[_CurrentStrategy, ...]
     logging_runtime: LoggingRuntime
 
     @property
-    def extension(self) -> BusinessExtension:
+    def extension(self) -> _CurrentStrategy:
         """单策略快捷访问；多策略并存接入时由调用侧改为按 routing_key 选择。"""
 
         if not self.extensions:
@@ -377,7 +375,7 @@ def _build_season_odds_worker(
     *,
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
-    extension: BusinessExtension,
+    extension: _CurrentStrategy,
     event_bus: EventBus | None = None,
 ) -> tuple[SportsSeasonOddsWorker, SeasonOddsClient] | tuple[None, None]:
     """按 settings 装配 sports_season_odds_worker；缺 api_key 或未启用 outright 时返回 (None, None)。
@@ -398,7 +396,7 @@ def _build_season_odds_worker(
             if r.strip()
         ),
     )
-    _classifier = extension if isinstance(extension, MarketClassificationHooks) else None
+    _classifier = extension
 
     def _is_outright(market: Market) -> bool:
         return _classifier.is_outright_market(market) if _classifier is not None else False
@@ -428,7 +426,7 @@ def _build_game_odds_worker(
     *,
     registry: MarketRegistry,
     entry_metadata_store: EntryMetadataStore,
-    extension: BusinessExtension,
+    extension: _CurrentStrategy,
     event_bus: EventBus | None = None,
 ) -> tuple[GameOddsWorker, GameOddsClient] | tuple[None, None]:
     """按 settings 装配 game_odds_worker；缺 api_key 时返回 (None, None)。"""
@@ -447,7 +445,7 @@ def _build_game_odds_worker(
         ),
     )
 
-    _classifier = extension if isinstance(extension, MarketClassificationHooks) else None
+    _classifier = extension
 
     def _sport_key(market: Market) -> str | None:
         return _classifier.sport_key_for_game_odds(market) if _classifier is not None else None
@@ -504,7 +502,7 @@ def _build_pregame_worker(
     return worker, client
 
 
-def _validate_extension_config(extension: BusinessExtension, settings: Settings) -> tuple[ConfigIssue, ...]:
+def _validate_extension_config(extension: _CurrentStrategy, settings: Settings) -> tuple[ConfigIssue, ...]:
     """如扩展实现了 ConfigValidator 协议，则在启动期收集其拒绝原因。
 
     与 ``Settings.validate_startup_readiness`` 互补：把策略侧的最小可执行集
@@ -591,25 +589,18 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
                 )
             ]
         )
-    extension = load_extension(
-        module_path=settings.extension_module,
-        ports=extension_ports,
-        config_path=settings.extension_config_path,
-    )
+    # 直接装配 quant 策略——不再通过 EXTENSION_MODULE 动态加载（早期"框架+插件"二次开发
+    # 抽象已废除，量化决策器就是这个交易系统本身）。
+    from polymarket_trader.quant.strategy import CurrentStrategy
+    from polymarket_trader.quant.config import load_current_strategy_config
+    from polymarket_trader.quant.identity import STRATEGY_ID
+    strategy_config = load_current_strategy_config(settings.extension_config_path)
+    extension = CurrentStrategy(config=strategy_config, ports=extension_ports)
     extension_issues = _validate_extension_config(extension, settings)
     if extension_issues:
         raise ConfigLoadError(list(extension_issues))
-    # 从扩展侧读取策略配置实例（kelly_* 等策略参数）；未实现 ConfiguredExtension 协议的
-    # 扩展使用框架侧默认值兜底（不会出现在当前策略，仅防御性保留）。
-    strategy_config = resolve_kelly_params(extension)
-    # settings 是框架侧不变量，由 composition root 直接绑定。strategy.* 默认值由
-    # 策略自己在 __init__ 时通过 ports.parameter.register_strategy_defaults 注册——
-    # 框架不读策略私有属性，避免跨层 duck-typing。
     parameter_store.bind_settings(settings)
-    # strategy_id 来自策略 spec，单进程内只装配一次；所有 framework worker / service
-    # （persistence、decision recorder、trading_decision_service、user_ws_worker ...）
-    # 都绑定同一个值，作为 SCOPE 表的归属键。
-    strategy_id = extension.spec.strategy_id
+    strategy_id = STRATEGY_ID
     persistence_worker = PersistenceWorker(
         strategy_id=strategy_id,
         outbox=outbox,
@@ -866,7 +857,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         account_state_store=account_state_store,
     )
 
-    _exposure_classifier = extension if isinstance(extension, MarketClassificationHooks) else None
+    _exposure_classifier = extension
 
     def _portfolio_exposure_metadata(
         snapshot: AccountSnapshot | None,
