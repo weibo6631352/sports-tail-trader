@@ -50,7 +50,10 @@ class _KellySizingState:
     kelly_round_up_max_overbet_ratio: Decimal
 
 
-class EntryPlanner:
+
+class TradingDecisionService:
+    """Bridge extension hooks into framework plans and managed order intents."""
+
     def __init__(
         self,
         *,
@@ -61,7 +64,7 @@ class EntryPlanner:
         decision_recorder: DecisionEventRecorder | None = None,
     ) -> None:
         if not strategy_id:
-            raise ValueError("EntryPlanner requires non-empty strategy_id")
+            raise ValueError("TradingDecisionService requires non-empty strategy_id")
         self._extension_hooks = extension_hooks
         self._strategy_id = strategy_id
         self._registry = registry
@@ -71,6 +74,7 @@ class EntryPlanner:
     @property
     def strategy_id(self) -> str:
         return self._strategy_id
+
 
     def build_entry_plan(
         self,
@@ -102,7 +106,7 @@ class EntryPlanner:
             positions=positions,
             open_orders=open_orders,
         )
-        resolved_market = market or self._resolve_market(condition_id=condition_id, token_id=token_id)
+        resolved_market = market or self.resolve_market(condition_id=condition_id, token_id=token_id)
         resolved_token_id = token_id or (orderbook.token_id if orderbook is not None else None)
         resolved_orderbook = orderbook or self._resolve_orderbook(
             market=resolved_market,
@@ -208,7 +212,7 @@ class EntryPlanner:
             decision = ExtensionDecision.skip(
                 reason=quant_decision.reason or "quant_no_buy_action",
             )
-        self._record_decision(
+        self._record(
             hook_name="quant_decide",
             context=quant_context,
             decision=decision,
@@ -339,7 +343,7 @@ class EntryPlanner:
                     focus_orderbook
                     if candidate.condition_id == focus_market.condition_id
                     and candidate_token_id == focus_token_id
-                    else self._lookup_orderbook(candidate_token_id)
+                    else self.lookup_orderbook(candidate_token_id)
                 )
                 if candidate_orderbook is None:
                     continue
@@ -378,136 +382,6 @@ class EntryPlanner:
             idempotency_key=f"{trace_id}:{market.condition_id}:{token_id}",
         )
 
-    def _resolve_market(
-        self,
-        *,
-        condition_id: str | None,
-        token_id: str | None,
-    ) -> Market | None:
-        if self._registry is None:
-            return None
-        if condition_id is not None:
-            market = self._registry.get_by_condition_id(condition_id)
-            if market is not None:
-                return market
-        if token_id is not None:
-            return self._registry.get_by_token_id(token_id)
-        return None
-
-    def _resolve_orderbook(
-        self,
-        *,
-        market: Market | None,
-        token_id: str | None,
-    ) -> OrderbookSnapshot | None:
-        if token_id is None:
-            return None
-        return self._lookup_orderbook(token_id)
-
-    def _lookup_orderbook(self, token_id: str) -> OrderbookSnapshot | None:
-        if self._orderbook_reader is None:
-            return None
-        return self._orderbook_reader(token_id)
-
-    def _record_decision(
-        self,
-        *,
-        hook_name: str,
-        context: ExtensionContext,
-        decision: object,
-    ) -> None:
-        if self._decision_recorder is None:
-            return
-        record = build_decision_record_from_hook(
-            hook_name=hook_name,
-            trace_id=context.trace_id,
-            strategy_id=context.strategy_id,
-            context=context,
-            decision=decision,
-            condition_id=context.market.condition_id if context.market is not None else None,
-            token_id=context.token_id,
-            market_slug=context.market.market_slug if context.market is not None else None,
-        )
-        if record is None:
-            return
-        # DecisionEventRecorder.record 内部已经吞掉所有异常并仅做 outbox.put_nowait，
-        # 不会反向阻塞决策返回；这里不再额外 try/except。
-        self._decision_recorder.record(record)
-
-
-class TradingDecisionService:
-    """Bridge extension hooks into framework plans and managed order intents."""
-
-    def __init__(
-        self,
-        *,
-        extension_hooks: ExtensionHooks,
-        strategy_id: str,
-        registry: MarketRegistry | None = None,
-        orderbook_reader: OrderbookReader | None = None,
-        decision_recorder: DecisionEventRecorder | None = None,
-    ) -> None:
-        if not strategy_id:
-            raise ValueError("TradingDecisionService requires non-empty strategy_id")
-        self._extension_hooks = extension_hooks
-        self._strategy_id = strategy_id
-        self._registry = registry
-        self._orderbook_reader = orderbook_reader
-        self._decision_recorder = decision_recorder
-        self._entry_planner = EntryPlanner(
-            extension_hooks=extension_hooks,
-            strategy_id=strategy_id,
-            registry=registry,
-            orderbook_reader=orderbook_reader,
-            decision_recorder=decision_recorder,
-        )
-
-    @property
-    def strategy_id(self) -> str:
-        return self._strategy_id
-
-    def build_entry_plan(
-        self,
-        *,
-        market: Market | None = None,
-        orderbook: OrderbookSnapshot | None = None,
-        account_snapshot: AccountSnapshot | None = None,
-        condition_id: str | None = None,
-        token_id: str | None = None,
-        trace_id: str | None = None,
-        portfolio_budget_usdc: Decimal,
-        available_usdc: Decimal | None = None,
-        kelly_fraction: Decimal,
-        kelly_max_position_fraction: Decimal,
-        kelly_min_edge: Decimal,
-        kelly_min_stake_usdc: Decimal,
-        kelly_allow_round_up_to_market_min: bool = True,
-        kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
-        positions: Iterable[Position] = (),
-        open_orders: Iterable[Order] = (),
-        metadata: Mapping[str, Any] | None = None,
-        manual_confirmation: ManualConfirmation | None = None,
-    ) -> EntryPlan:
-        return self._entry_planner.build_entry_plan(
-            market=market,
-            orderbook=orderbook,
-            account_snapshot=account_snapshot,
-            condition_id=condition_id,
-            token_id=token_id,
-            trace_id=trace_id,
-            portfolio_budget_usdc=portfolio_budget_usdc,
-            available_usdc=available_usdc,
-            kelly_fraction=kelly_fraction,
-            kelly_max_position_fraction=kelly_max_position_fraction,
-            kelly_min_edge=kelly_min_edge,
-            kelly_min_stake_usdc=kelly_min_stake_usdc,
-            kelly_allow_round_up_to_market_min=kelly_allow_round_up_to_market_min,
-            kelly_round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
-            positions=positions,
-            open_orders=open_orders,
-            metadata=metadata,
-            manual_confirmation=manual_confirmation,
-        )
 
     def quant_decide(self, context: ExtensionContext):
         """量化决策器——所有 WS / 周期触发统一走这里。
@@ -576,6 +450,16 @@ class TradingDecisionService:
         if self._orderbook_reader is None:
             return None
         return self._orderbook_reader(token_id)
+
+    def _resolve_orderbook(
+        self,
+        *,
+        market: Market | None,
+        token_id: str | None,
+    ) -> OrderbookSnapshot | None:
+        if token_id is None:
+            return None
+        return self.lookup_orderbook(token_id)
 
     def build_intent_from_decision(
         self,
