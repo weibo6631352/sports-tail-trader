@@ -57,6 +57,7 @@ from .runtime_aggregator import RuntimeAggregator
 from .settlement_aggregator import SettlementAggregator
 from .sports_live_aggregator import SportsLiveAggregator
 from .sports_query_aggregator import SportsQueryAggregator
+from .system_observability_aggregator import SystemObservabilityAggregator
 from .timeline_aggregator import TimelineAggregator
 from .trading_query_aggregator import TradingQueryAggregator
 
@@ -75,6 +76,7 @@ __all__ = [
     "SettlementAggregator",
     "SportsLiveAggregator",
     "SportsQueryAggregator",
+    "SystemObservabilityAggregator",
     "TimelineAggregator",
     "TradingQueryAggregator",
 ]

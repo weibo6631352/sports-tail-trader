@@ -9,6 +9,7 @@ from polymarket_trader.api.aggregators import (
     PaperTradingAggregator,
     ReconcileDecisionsAggregator,
     RuntimeAggregator,
+    SystemObservabilityAggregator,
 )
 from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
@@ -114,27 +115,15 @@ async def error_rate(
 
 
 @router.get("/runtime/data-staleness")
-async def data_staleness(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
+async def data_staleness(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
     """每个数据源的 lag/staleness — healthy 占比 + stale 列表 + per source 详情。"""
-    return service.data_staleness_snapshot()
+    return SystemObservabilityAggregator(runtime=runtime).data_staleness_snapshot()
 
 
 @router.get("/runtime/system-perf")
-async def system_perf(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """系统性能 + 健康 + 启动耗时统一可观测视图。
-
-    一次拿全：
-    - boot_phase_timings: bootstrap 各阶段耗时（找启动慢点）
-    - process_metrics: CPU/RSS/threads/connections/ctx_switches/io
-    - system_metrics: CPU per core / load avg / memory / disk / net io
-    - asyncio_metrics: 当前 task 数 + running task names
-    - http_endpoints: top 30 by call_count + latency p50/p90/p99 + error rate
-    - ws_traffic: per channel msg rate + bandwidth
-    - db_queries: count + 延迟分位
-    - db_pool: size/checked_in/checked_out/overflow
-    - db_ping_ms: SELECT 1 实时延迟
-    """
-    return await service.system_perf_snapshot()
+async def system_perf(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    """系统性能 + 健康 + 启动耗时统一可观测视图（CPU/RSS/asyncio/HTTP/DB pool/...）。"""
+    return await SystemObservabilityAggregator(runtime=runtime).system_perf_snapshot()
 
 
 @router.get("/markets/tracking-breakdown")
@@ -345,35 +334,30 @@ async def pipeline_cpu(window_seconds: float = 60.0) -> dict[str, object]:
 
 
 @router.get("/runtime/memory-timeseries")
-async def memory_timeseries(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """进程 RSS 时间序列(每 30s 一点,保留 1h = 120 点)+ 增长率 + 泄漏判断."""
-    return service.memory_timeseries_snapshot()
+async def memory_timeseries(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    """进程 RSS 时间序列（每 30s 一点，保留 1h = 120 点）+ 增长率 + 泄漏判断。"""
+    return SystemObservabilityAggregator(runtime=runtime).memory_timeseries_snapshot()
 
 
 @router.get("/runtime/memory-components")
-async def memory_components(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """各 runtime store/buffer 内存占用估算 — 定位"哪个 store 最大"."""
-    return service.memory_components_snapshot()
+async def memory_components(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    """各 runtime store/buffer 内存占用估算 — 定位"哪个 store 最大"。"""
+    return SystemObservabilityAggregator(runtime=runtime).memory_components_snapshot()
 
 
 @router.get("/runtime/memory-objects")
 async def memory_objects(
     top_n: int = Query(default=30, ge=1, le=200),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """gc.get_objects() 按 type 分组 top N — 识别"哪类对象最多"."""
-    return service.memory_objects_snapshot(top_n=top_n)
+    """gc.get_objects() 按 type 分组 top N — 识别"哪类对象最多"。"""
+    return SystemObservabilityAggregator(runtime=runtime).memory_objects_snapshot(top_n=top_n)
 
 
 @router.get("/runtime/data-sources-health")
-async def data_sources_health(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """所有数据源延迟 / 健康 / 错误的统一可观测视图。
-
-    包括 goalserve（inplay/livescore/pregame/lazy/pbp）+ polymarket（market_ws/user_ws/
-    trade_tape_cache）+ outbox 积压 + reconcile age + workers。
-    一次拿全运维数据，定位"哪条数据链路慢/挂了"。
-    """
-    return service.data_sources_health()
+async def data_sources_health(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    """所有数据源延迟 / 健康 / 错误的统一可观测视图。"""
+    return SystemObservabilityAggregator(runtime=runtime).data_sources_health()
 
 
 @router.get("/runtime/odds-drift")
@@ -413,9 +397,9 @@ async def soccer_injuries(service: AdminService = Depends(get_admin_service)) ->
 
 
 @router.get("/runtime/live-attention")
-async def live_attention(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
+async def live_attention(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
     """同时 LIVE 比赛分布（注意力分散度）。多 LIVE = 信号噪音大。"""
-    return service.live_attention_snapshot()
+    return SystemObservabilityAggregator(runtime=runtime).live_attention_snapshot()
 
 
 @router.get("/runtime/h2h")
