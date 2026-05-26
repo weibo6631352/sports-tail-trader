@@ -8,9 +8,12 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from polymarket_trader.api.aggregators import AnalyticsAggregator, PortfolioAggregator
-from polymarket_trader.api.deps import get_admin_service, get_runtime
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.api.aggregators import (
+    AnalyticsAggregator,
+    PortfolioAggregator,
+    RuntimeAggregator,
+)
+from polymarket_trader.api.deps import get_runtime
 from polymarket_trader.app.portfolio_history_service import (
     DEFAULT_INTERVAL_MS,
     DEFAULT_WINDOW_MS,
@@ -42,8 +45,9 @@ def _runtime_error_detail(exc: RuntimeError) -> str:
 
 
 @router.get("")
-async def get_portfolio(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    return await service.portfolio_snapshot()
+async def get_portfolio(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    aggregator = RuntimeAggregator(runtime=runtime, session_factory=runtime.db_session_factory)
+    return await aggregator.portfolio_snapshot()
 
 
 @router.get("/exposure")

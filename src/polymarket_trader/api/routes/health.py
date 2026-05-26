@@ -5,8 +5,8 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
 
-from polymarket_trader.api.deps import get_admin_service, get_runtime
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.api.aggregators import RuntimeAggregator
+from polymarket_trader.api.deps import get_runtime
 from polymarket_trader.observability import HealthReporter, render_prometheus
 
 router = APIRouter(tags=["health"])
@@ -56,8 +56,8 @@ async def health_account(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
 
 
 @router.get("/ready")
-async def ready(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    return service.readiness_snapshot()
+async def ready(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    return RuntimeAggregator(runtime=runtime).readiness_snapshot()
 
 
 @router.get("/metrics", response_class=PlainTextResponse)

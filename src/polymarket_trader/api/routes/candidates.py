@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.aggregators import CandidateAggregator
+from polymarket_trader.api.aggregators import CandidateAggregator, RuntimeAggregator
 from polymarket_trader.api.deps import get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
@@ -75,16 +75,10 @@ async def list_candidates(
 
 
 @router.get("/data-freshness")
-async def get_data_freshness(
-    service: AdminService = Depends(get_admin_service),
-) -> dict[str, object]:
-    """每市场 live_state 数据源新鲜度（纯内存，零 DB，零 P0 影响）。
+async def get_data_freshness(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    """每市场 live_state 数据源新鲜度（纯内存，零 DB，零 P0 影响）。"""
 
-    从 market_metadata_store 读取每条记录的最后更新时间，计算 staleness_ms。
-    staleness 过高表明该市场的 live_state 数据源已断流。
-    """
-
-    return service.data_freshness()
+    return RuntimeAggregator(runtime=runtime).data_freshness()
 
 
 @router.get("/live-states")

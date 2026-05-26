@@ -4,7 +4,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from polymarket_trader.api.aggregators import AnalyticsAggregator, ReconcileDecisionsAggregator
+from polymarket_trader.api.aggregators import (
+    AnalyticsAggregator,
+    ReconcileDecisionsAggregator,
+    RuntimeAggregator,
+)
 from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
@@ -15,39 +19,26 @@ _DECISIONS_DUMP_MAX_LIMIT = 10000
 
 
 @router.get("/runtime")
-async def runtime(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    return await service.runtime_snapshot()
+async def runtime(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    aggregator = RuntimeAggregator(runtime=runtime, session_factory=runtime.db_session_factory)
+    return await aggregator.runtime_snapshot()
 
 
 @router.get("/runtime/paper-ledger")
-async def paper_ledger_snapshot(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """Paper trading 虚拟账本快照——只在 PAPER_TRADING_MODE=true 时有数据。
-
-    暴露:
-    - available_usdc: 当前可用虚拟余额（初始 portfolio_budget_usdc - 已花费 + SELL 回款）
-    - positions: {token_id: net_shares}（已扣 fee_shares）
-    - cost_basis_usdc: {token_id: 累计 gross cost}（算 avg_price 用）
-    - fees_accrued_usdc: 累计 fee 总额
-    - 派生: avg_prices, unrealized_pnl_usdc（按当前 best_bid mark-to-market）
-    """
-    snapshot = service.paper_ledger_snapshot()
+async def paper_ledger_snapshot(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    """Paper trading 虚拟账本快照——只在 PAPER_TRADING_MODE=true 时有数据。"""
+    snapshot = RuntimeAggregator(runtime=runtime).paper_ledger_snapshot()
     if snapshot is None:
         raise HTTPException(status_code=404, detail="paper_trading_mode not enabled")
     return snapshot
 
 
 @router.get("/runtime/risk-metrics")
-async def risk_metrics(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """量化风险度量（Sharpe / Sortino / Calmar / VaR 95-99）。
-
-    基于 equity_curve 时序（每分钟 1 点）计算：
-    - Sharpe ratio: risk-adjusted return
-    - Sortino: downside-adjusted return
-    - Calmar: 年化收益 / max drawdown
-    - VaR 95/99: 历史 5%/1% 分位单分钟损失
-    """
-    d = service.risk_metrics_snapshot()
-    if d is None: raise HTTPException(status_code=404, detail="paper_trading_mode not enabled")
+async def risk_metrics(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    """量化风险度量（Sharpe / Sortino / Calmar / VaR 95-99）。"""
+    d = RuntimeAggregator(runtime=runtime).risk_metrics_snapshot()
+    if d is None:
+        raise HTTPException(status_code=404, detail="paper_trading_mode not enabled")
     return d
 
 
@@ -529,13 +520,13 @@ async def paper_orders_snapshot(
 
 
 @router.get("/workers")
-async def workers(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    return service.workers_snapshot()
+async def workers(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    return RuntimeAggregator(runtime=runtime).workers_snapshot()
 
 
 @router.get("/metrics")
-async def metrics(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    return service.metrics_snapshot()
+async def metrics(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    return RuntimeAggregator(runtime=runtime).metrics_snapshot()
 
 
 @router.get("/metrics/latency-percentiles")

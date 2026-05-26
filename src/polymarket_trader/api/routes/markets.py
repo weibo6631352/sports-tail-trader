@@ -6,7 +6,11 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.aggregators import MarketDetailAggregator, SettlementAggregator
+from polymarket_trader.api.aggregators import (
+    MarketDetailAggregator,
+    MarketMiscAggregator,  # noqa: F401 — wired in following commit (markets route switch)
+    SettlementAggregator,
+)
 from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.api.rate_limit import rate_limit
 from polymarket_trader.app.admin_service import AdminService
@@ -72,12 +76,13 @@ async def get_market_orderbook(
     market_slug: str | None = Query(default=None),
     condition_id: str | None = Query(default=None),
     token_id: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
     if token_id is None:
         raise HTTPException(status_code=422, detail="token_id is required")
+    aggregator = MarketMiscAggregator(runtime=runtime)
     try:
-        payload = await service.get_market_orderbook(
+        payload = await aggregator.get_market_orderbook(
             market_slug=market_slug,
             condition_id=condition_id,
             token_id=token_id,
@@ -98,12 +103,13 @@ async def get_market_midpoint(
     market_slug: str | None = Query(default=None),
     condition_id: str | None = Query(default=None),
     token_id: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
     if token_id is None:
         raise HTTPException(status_code=422, detail="token_id is required")
+    aggregator = MarketMiscAggregator(runtime=runtime)
     try:
-        payload = await service.get_market_midpoint(
+        payload = await aggregator.get_market_midpoint(
             market_slug=market_slug,
             condition_id=condition_id,
             token_id=token_id,
@@ -124,7 +130,7 @@ async def get_orderbook_direction(
     token_id: str = Query(min_length=1),
     window_seconds: float | None = Query(default=None, ge=0.5, le=120.0),
     windows: str | None = Query(default=None, description="逗号分隔的多窗口秒数,如 2,5,10,30"),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
     """读盘口多时点 delta 信号(best bid/ask price + size 变化)。
 
@@ -147,8 +153,10 @@ async def get_orderbook_direction(
         for w in window_list:
             if w < 0.5 or w > 120.0:
                 raise HTTPException(status_code=422, detail=f"each window must be in [0.5, 120.0], got {w}")
-        return await service.get_orderbook_direction_multi(token_id=token_id, windows=tuple(window_list))
-    return await service.get_orderbook_direction(
+        aggregator = MarketMiscAggregator(runtime=runtime, session_factory=runtime.db_session_factory)
+        return await aggregator.get_orderbook_direction_multi(token_id=token_id, windows=tuple(window_list))
+    aggregator = MarketMiscAggregator(runtime=runtime, session_factory=runtime.db_session_factory)
+    return await aggregator.get_orderbook_direction(
         token_id=token_id, window_seconds=window_seconds if window_seconds is not None else 10.0,
     )
 
