@@ -141,10 +141,6 @@ class Settings(BaseSettings):
     sports_live_state_enabled: bool = True
     sports_live_state_leagues: str = "nba,nhl,nfl,mlb,tennis,sports,atp,wta,itf,bkbbl,bkseriea"
     sports_live_state_interval_seconds: int = Field(default=3, ge=1)
-    sports_live_state_timeout_s: float = Field(default=8.0, ge=0.1)
-    sports_live_state_publish_entry_signals: bool = True
-    sports_live_state_health_cooldown_base_s: float = Field(default=60.0, ge=1.0)
-    sports_live_state_health_eviction_s: float = Field(default=1800.0, ge=60.0)
 
     # Goalserve inplay GZIP feed（http://inplay.goalserve.com/inplay-{sport}.gz）配置。
     # keyless（IP 白名单），demand-driven 轮询 8 个运动；proxy 仅用于开发环境
@@ -184,7 +180,6 @@ class Settings(BaseSettings):
     sports_game_odds_ttl_seconds: int = Field(default=1800, ge=60)
 
     # 性能与优先级字段必须始终有限制，避免无界队列、无界等待和热路径阻塞。
-    enable_uvloop: bool = True
     trading_event_queue_max_size: int = Field(default=1000, ge=1)
     maintenance_event_queue_max_size: int = Field(default=1000, ge=1)
     persistence_event_queue_max_size: int = Field(default=5000, ge=1)
