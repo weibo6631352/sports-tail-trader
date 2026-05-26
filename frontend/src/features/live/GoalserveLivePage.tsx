@@ -161,10 +161,28 @@ function ScoreCell({ game }: { game: LiveGame | null | undefined }) {
     game.home_score != null && game.away_score != null
       ? `${game.home_score} : ${game.away_score}`
       : '—'
+  // 显示归一 status (live/paused/ended/scheduled),不再显示 raw period 文本.
+  // 之前 period="Started" + status="paused" 同时出现让操盘困惑——period 是博彩
+  // 平台用的整场系列标签,不反映当前是否真在打.
+  const status = (game.status ?? '').toLowerCase()
+  const statusLabel: Record<string, { tone: 'success' | 'warning' | 'neutral' | 'danger'; text: string }> = {
+    live: { tone: 'success', text: '进行中' },
+    paused: { tone: 'warning', text: '暂停中' },
+    ended: { tone: 'neutral', text: '已结束' },
+    scheduled: { tone: 'neutral', text: '未开始' },
+    postponed: { tone: 'danger', text: '延期' },
+    cancelled: { tone: 'danger', text: '取消' },
+    retired: { tone: 'danger', text: '弃赛' },
+    disputed: { tone: 'danger', text: '争议' },
+    unknown: { tone: 'neutral', text: '未知' },
+  }
+  const meta = statusLabel[status]
   return (
-    <Stack gap={0}>
+    <Stack gap={2}>
       <MonoText>{score}</MonoText>
-      {game.period ? <Text size="xs" c="dimmed">{game.period}</Text> : null}
+      {meta ? (
+        <StatusPill tone={meta.tone} size="xs">{meta.text}</StatusPill>
+      ) : null}
     </Stack>
   )
 }
