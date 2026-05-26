@@ -1,8 +1,5 @@
 """OutboxAggregator —— outbox pending / failures 查询。
 
-替代 `app/admin_query/reconcile_decisions.py:list_outbox_pending +
-list_outbox_failures`。
-
 # 双数据源
 
 - `list_pending` 走**进程内 runtime.outbox**（运行时 LocalOutbox），无 DB 调用

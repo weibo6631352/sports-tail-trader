@@ -1,7 +1,4 @@
-"""SettlementAggregator —— 市场结算历史 + 单市场结算详情。
-
-替代 `app/admin_query/reconcile_decisions.py:list_market_settlements +
-get_market_settlement`。属于审计查询类（走 DB）。
+"""SettlementAggregator —— 市场结算历史 + 单市场结算详情（§12.2 审计查询类）。
 
 # Endpoint 对应
 

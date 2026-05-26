@@ -1,9 +1,8 @@
 """PositionAggregator —— 基于 DataGraph 的持仓聚合。
 
-替代 `app/admin_query/trading.py` 里 `list_positions` —— 直接通过
-DataGraph.all_market_views 走 OutcomeView。比直接读 AccountStateStore 优势：
-持仓自动带上 market metadata（market_slug / event_title / outcome name）+
-当前盘口 best_bid/ask，省一次 join。
+直接通过 DataGraph.all_market_views 走 OutcomeView——持仓自动带上 market
+metadata（market_slug / event_title / outcome name）+ 当前盘口 best_bid/ask，
+省一次 join。比直接读 AccountStateStore 多两个维度。
 
 # Endpoint 对应
 

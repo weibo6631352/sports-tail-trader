@@ -1,8 +1,11 @@
-"""Aggregator-shared pure-function helpers.
+"""Aggregator 共享纯函数 helpers。
 
-迁自 `app/admin_query/_helpers.py`（admin_query 目录已删除）。
-- decision record 投影
-- latency 分位数计算（用于 AnalyticsAggregator.latency_percentiles_snapshot）
+- `decision_record_payload` —— DecisionRecord → JSON 友好 dict
+- `compute_latency_payload` / `empty_latency_payload` —— 订单 latency 分位数计算
+  （AnalyticsAggregator.latency_percentiles_snapshot 用）
+- `_parse_iso` / `_percentile` —— 时间戳解析 + 百分位插值
+
+无状态、可独立测试，与具体 aggregator 解耦。
 """
 
 from __future__ import annotations

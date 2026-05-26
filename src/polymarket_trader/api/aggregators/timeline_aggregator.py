@@ -1,7 +1,4 @@
-"""TimelineAggregator —— audit 事件 / 复盘 / 时间线查询。
-
-替代 `app/admin_query/timeline.py:AdminTimelineQueryMixin` 全部方法。
-按 docs/新架构方案.md §12.2 审计查询类（走 DB）— 不缓存。
+"""TimelineAggregator —— audit 事件 / 复盘 / 时间线查询（§12.2 审计查询类，不缓存）。
 
 # Endpoint 对应
 

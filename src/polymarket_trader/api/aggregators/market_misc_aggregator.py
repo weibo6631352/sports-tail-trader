@@ -1,9 +1,8 @@
-"""MarketMiscAggregator —— 市场盘口 / 流动性 / 数据健康 / 历史快照查询。
+"""MarketMiscAggregator —— 市场盘口 / 流动性 / 数据健康 / 历史快照 / 派生指标。
 
-替代 `app/admin_query/market.py:AdminMarketQueryMixin` 余下方法（market_detail /
-settlement / portfolio exposure 已在各自专门 aggregator 中）。
-
-按 docs/新架构方案.md §12.2 三类划分：
+market_detail / settlement / portfolio exposure 在各自专门 aggregator；
+本 aggregator 收 market 维度其余查询（约 16 个方法）。按 docs/新架构方案.md
+§12.2 三类划分：
 - list_markets / list_orderbook_history → DB 审计查询
 - get_market_orderbook / midpoint / prices_history → REST + WS 混合
 - orderbook_direction / depth / liquidity_summary / event_bundle /
@@ -544,7 +543,9 @@ class MarketMiscAggregator:
             }
         else:
             payload = {"token_id": token_id, **_serialize_direction_signal(signal)}
-        self._publish_audit(DomainEventType.ORDERBOOK_DIRECTION_QUERIED, payload, "admin_query")
+        self._publish_audit(
+            DomainEventType.ORDERBOOK_DIRECTION_QUERIED, payload, "admin_direction_query",
+        )
         return payload
 
     async def get_orderbook_direction_multi(
@@ -578,7 +579,11 @@ class MarketMiscAggregator:
             "tracked_tokens": len(store.tracked_tokens()),
             "signals": signals_payload,
         }
-        self._publish_audit(DomainEventType.ORDERBOOK_DIRECTION_QUERIED, payload, "admin_query_multi")
+        self._publish_audit(
+            DomainEventType.ORDERBOOK_DIRECTION_QUERIED,
+            payload,
+            "admin_direction_query_multi",
+        )
         return payload
 
     # ---------- orderbook history (DB) ----------

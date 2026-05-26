@@ -1,9 +1,5 @@
 """TradingQueryAggregator —— orders / fills / positions / allocations 列表查询。
 
-替代 `app/admin_query/trading.py:AdminTradingQueryMixin` 的 list_orders /
-list_fills / list_positions / list_allocations / list_allocation_decisions
-方法。
-
 按 docs/新架构方案.md §12.2：
 - list_positions / open_only=true 的 list_orders / list_fills 无 DB 时 →
   内存运营查询（来自 account_state_store snapshot）

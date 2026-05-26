@@ -1,8 +1,8 @@
 """SportsLiveAggregator —— 直播源状态聚合（基于 LiveStateStore + LiveSourceRegistry）。
 
-替代 `app/admin_query/sports.py` 里 `list_sports_live_states` /
-`list_sports_live_source_gaps` —— 直接读 Step 2 新建的 LiveStateStore.all_buckets +
-LiveSourceRegistry.summary，无需再跨 metadata_store + worker 拼接。
+直接读 LiveStateStore.all_buckets + LiveSourceRegistry.summary，无需跨
+metadata_store + worker 拼接。聚焦 V2 直播源架构（per-source bucket + 订阅注册）；
+旧版基于 market_metadata_store 的 sports 查询在 `SportsQueryAggregator`。
 
 # Endpoint 对应
 

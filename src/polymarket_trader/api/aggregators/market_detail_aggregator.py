@@ -1,7 +1,7 @@
 """MarketDetailAggregator —— 基于 DataGraph 的单 market 详情聚合。
 
-替代 `app/admin_query/market.py` 里 `get_market` / `get_market_orderbook` /
-`get_market_liquidity` 等散落跨 store 查询——统一走 MarketView。
+按 docs/新架构方案.md §12.3 ⑤。把跨 store（registry / orderbook / metadata /
+account）的拼装统一到 MarketView，路由层只调本 aggregator 不再手拼。
 
 # 三层 endpoint 对应
 
