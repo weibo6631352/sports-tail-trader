@@ -162,16 +162,26 @@ class HealthReporter:
                 connected = bool(getattr(snap, "connected", False))
                 last_msg = getattr(snap, "last_message_at", None)
                 stale_s = _stale_seconds(last_msg, now=now)
+                # market_ws 是 demand-driven: 0 订阅时 WS 不需要连接(no token to subscribe).
+                # 这是 §17.8 设计上的"idle" 正常态,不应标 degraded.
+                # user_ws 与订阅无关(用户账户层),不走这个豁免.
+                subscription_count = int(getattr(snap, "subscription_count", 0) or 0)
+                idle_due_to_no_demand = name == "market_ws" and subscription_count == 0
                 status: HealthStatus = "healthy"
-                if not connected:
+                if idle_due_to_no_demand:
+                    # 没 token 可订阅,无论 connected 与否都视为 idle healthy
+                    pass
+                elif not connected:
                     status = "degraded"
                 elif check_idle[name] and stale_s is not None and stale_s > _WS_IDLE_S:
                     status = "degraded"
                 results[name] = {
                     "connected": connected,
+                    "subscription_count": subscription_count,
                     "last_message_at": last_msg.isoformat() if last_msg else None,
                     "idle_seconds": stale_s,
                     "idle_checked": check_idle[name],
+                    "idle_due_to_no_demand": idle_due_to_no_demand,
                     "status": status,
                 }
                 worst = _worst([worst, status])
