@@ -287,23 +287,15 @@ class QuantDecider:
     def _decide_entry_attempt(self, context: DecisionContext) -> TradingDecision:
         """无持仓时的入场决策——所有 family 走同一份主路径。
 
-        - 所有 SportsMarketFamily（SINGLE_GAME / OUTRIGHT / SERIES / 未识别）
-          统一调 ``size_entry`` + ``decide_entry``；
+        - 所有 SportsMarketFamily 统一调 ``size_entry`` + ``decide_entry``；
         - 单一信号入口是 ``estimate_signal``（math_prob / goalserve / microprice 三层），
-          没真信号的市场 → ProbView(prob_p=None) → Kelly 拒绝；
-        - ``ESPORTS`` 仍单独 skip——这类盘口没量化锁定信号。
-        """
-        from polymarket_trader.workflow.outcomes import SportsMarketFamily, describe_sports_market
+          没真信号的市场 → ProbView(prob_p=None) → Kelly 拒绝。
 
+        ESPORTS 之类没量化锁定信号的 family 由 universe 层(workflow/universe.py)
+        在 discovery 阶段拒绝;这里不再二次拦截——belt-and-suspenders 已移除。
+        """
         if context.market is None or context.orderbook is None:
             return TradingDecision.skip(reason="missing_market_state")
-
-        descriptor = describe_sports_market(context.market)
-        if descriptor.market_family == SportsMarketFamily.ESPORTS:
-            return TradingDecision.skip(
-                reason="esports_not_auto_tradable",
-                metadata={"market_family": SportsMarketFamily.ESPORTS.value},
-            )
 
         sizing = size_entry(self._config, context)
         if sizing.allocation is None or sizing.allocation.buy_budget_usdc <= Decimal("0"):
