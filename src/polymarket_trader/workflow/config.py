@@ -61,10 +61,6 @@ class TradingWorkflowConfig:
     # 凑齐金额上限 = position_cap × ratio。
     kelly_round_up_max_overbet_ratio: Decimal = Decimal("10")
 
-    # 入场 / 退出兜底价格。
-    entry_no_price_max: Decimal = Decimal("0.99")
-    exit_no_price: Decimal = Decimal("0.995")
-
     # Discovery + universe 过滤。
     discovery_tag_slugs: tuple[str, ...] = ("sports",)
     # 已接入直播源的体育联赛 token 白名单；universe 精筛用。
@@ -106,10 +102,6 @@ class TradingWorkflowConfig:
         SportsMarketType.SPREADS,
         SportsMarketType.BINARY_PROP,
     )
-    min_entry_price: Decimal = Decimal("0.10")
-    totals_max_entry_price: Decimal = Decimal("0.99")
-    moneyline_max_entry_price: Decimal = Decimal("0.98")
-    spreads_max_entry_price: Decimal = Decimal("0.96")
 
     # 直播状态新鲜度阈值（reconcile 判 stale → pause market 用）。
     # default 兜底：inplay GZIP 运动 1-3s 推送，但暂停（timeout / break）30-60s
