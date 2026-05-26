@@ -76,7 +76,9 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    # Polymarket 端点配置只描述外部服务地址，不携带任何密钥。
+    # ================================================================
+    # Polymarket 接入（端点 / 链 / 签名身份）
+    # ================================================================
     polymarket_clob_host: str = "https://clob.polymarket.com"
     polymarket_gamma_host: str = "https://gamma-api.polymarket.com"
     polymarket_data_host: str = "https://data-api.polymarket.com"
@@ -86,9 +88,10 @@ class Settings(BaseSettings):
     # 默认按 EOA 签名处理；如果使用代理钱包或 Safe，需要显式覆盖 signature type / funder。
     polymarket_signature_type: int = Field(default=0, ge=0, le=2)
     polymarket_funder_address: str | None = None
-    # 策略配置文件路径（TOML / JSON），保留作为策略 config 的可选加载入口。
-    workflow_config_path: str | None = None
 
+    # ================================================================
+    # Bankroll & 同步周期
+    # ================================================================
     # portfolio_budget_usdc 语义：bankroll 软上限。实际 bankroll = min(链上可用 USDC,
     # portfolio_budget_usdc)。设 0 时 Kelly 拒新仓（启动安全态）。Kelly 引擎在
     # ``domain/kelly.py``——见该模块 docstring 公式。
@@ -104,6 +107,107 @@ class Settings(BaseSettings):
     # 20s 平衡：太短 → CLOB API 限流压力；太长 → balance 显示滞后。
     market_sync_interval_seconds: int = Field(default=20, ge=1)
 
+    # ================================================================
+    # 体育直播状态源（Goalserve：inplay / livescore / pregame）
+    # ================================================================
+    # 外部体育直播状态源只提供入场前事实，不承载策略阈值或交易参数。
+    # 默认 ``True``：strategies/current 的入场链路依赖直播状态，关闭后整个 funnel
+    # 在 candidates 阶段卡死（实测 25k discovered / 0 filtered_in）。所以默认开 +
+    # supervisor 启动期对"trading 已就绪但 sports_live_state 关闭"发告警。
+    sports_live_state_enabled: bool = True
+    sports_live_state_leagues: str = "nba,nhl,nfl,mlb,tennis,sports,atp,wta,itf,bkbbl,bkseriea"
+    sports_live_state_interval_seconds: int = Field(default=3, ge=1)
+
+    # Goalserve inplay GZIP feed（http://inplay.goalserve.com/inplay-{sport}.gz）配置。
+    # keyless（IP 白名单），demand-driven 轮询 8 个运动；proxy 仅用于开发环境
+    # （本机 Clash 代理）出口白名单 IP，生产留空直连。
+    goalserve_proxy: str | None = None
+
+    # Goalserve getfeed livescore 配置。认证方式：API key 嵌入 URL。
+    # 覆盖 inplay feed 没有的运动：cricket/handball/rugby/boxing/mma/golf/horse_racing/f1/motogp。
+    goalserve_api_key: SecretStr | None = None
+    goalserve_livescore_enabled: bool = True
+    goalserve_livescore_base_url: str = "http://www.goalserve.com/getfeed"
+    goalserve_livescore_timeout_s: float = Field(default=10.0, ge=1.0)
+
+    # Goalserve 赛前赔率（Pregame Odds）配置。认证方式：API key 嵌入 URL，GZIP 压缩。
+    # 数据量极大（>100MB），默认关闭；按需启用并配置 GOALSERVE_API_KEY。
+    goalserve_pregame_enabled: bool = False
+    goalserve_pregame_sports: str = "soccer,basketball,tennis,hockey,baseball,amfootball,esports,mma,cricket,rugby,volleyball,handball,boxing,darts,table_tennis,futsal,rugbyleague"
+    goalserve_pregame_base_url: str = "http://www.goalserve.com"
+    goalserve_pregame_timeout_s: float = Field(default=30.0, ge=1.0)
+    # ts 增量拉取；每次只拿变化部分，300s 足以在 ts 未超期前更新一次。
+    goalserve_pregame_interval_seconds: int = Field(default=300, ge=60)
+
+    # ================================================================
+    # 赛季 / 单场 H2H 赔率（the-odds-api：驱动 series winner p_per_game）
+    # ================================================================
+    sports_season_odds_provider: str = "theoddsapi"
+    sports_season_odds_api_key: SecretStr | None = None
+    sports_season_odds_base_url: str = "https://api.the-odds-api.com"
+    sports_season_odds_regions: str = "us,eu"
+    sports_season_odds_interval_seconds: int = Field(default=1800, ge=300)
+    sports_season_odds_ttl_seconds: int = Field(default=1800, ge=60)
+
+    sports_game_odds_provider: str = "theoddsapi"
+    sports_game_odds_api_key: SecretStr | None = None
+    sports_game_odds_base_url: str = "https://api.the-odds-api.com"
+    sports_game_odds_regions: str = "us,eu"
+    sports_game_odds_interval_seconds: int = Field(default=1800, ge=300)
+    sports_game_odds_ttl_seconds: int = Field(default=1800, ge=60)
+
+    # ================================================================
+    # 性能 / 队列 / 超时
+    # ================================================================
+    # 性能与优先级字段必须始终有限制，避免无界队列、无界等待和热路径阻塞。
+    trading_event_queue_max_size: int = Field(default=1000, ge=1)
+    maintenance_event_queue_max_size: int = Field(default=1000, ge=1)
+    persistence_event_queue_max_size: int = Field(default=5000, ge=1)
+    trading_worker_threads: int = Field(default=4, ge=1)
+    maintenance_worker_threads: int = Field(default=4, ge=1)
+    maintenance_process_workers: int = Field(default=2, ge=1)
+    order_submit_timeout_ms: int = Field(default=3000, ge=1)
+    order_sign_timeout_ms: int = Field(default=1000, ge=1)
+    critical_lock_timeout_ms: int = Field(default=20, ge=1)
+    trading_queue_warn_depth: int = Field(default=100, ge=0)
+    entry_signal_to_submit_warn_ms: int = Field(default=500, ge=1)
+    # SSE fan-out 订阅者并发上限；超过返回 429 Retry-After=5。
+    sse_subscriber_cap: int = Field(default=32, ge=1)
+
+    # ================================================================
+    # API 服务暴露面（Operator 路由是高危写入入口）
+    # ================================================================
+    # 默认 True 便于本机开发；prod 必须显式 EXPOSE_OPENAPI_DOCS=false。
+    expose_openapi_docs: bool = True
+    # 非 None 时所有 admin 写接口要求 X-Admin-Token 头匹配；None 表示禁用 token 校验
+    # （仅适合本机/受信网络）。生产环境 None 等同于 operator API 裸跑，应在启动阶段告警。
+    admin_api_token: SecretStr | None = None
+    # CORS 白名单——逗号分隔。生产配置应只列前端实际域名，不留 localhost。
+    cors_allowed_origins: str = "http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:5173,http://localhost:5174"
+
+    # ================================================================
+    # 密钥（绝不入仓，运行时从安全环境变量或 secret manager 注入）
+    # ================================================================
+    polymarket_api_key: SecretStr | None = None
+    polymarket_api_secret: SecretStr | None = None
+    polymarket_api_passphrase: SecretStr | None = None
+    wallet_private_key: SecretStr | None = None
+    signer_private_key: SecretStr | None = None
+
+    # ================================================================
+    # 数据库（DATABASE_URL 优先；留空时由下面拆分字段拼接）
+    # ================================================================
+    database_url_override: str | None = Field(default=None, validation_alias="DATABASE_URL")
+    database_driver: str = "postgresql+asyncpg"
+    database_host: str = "localhost"
+    database_port: int = Field(default=5432, ge=1, le=65535)
+    database_name: str = "trader"
+    database_user: str = "trader"
+    database_password: SecretStr | None = None
+
+    # ================================================================
+    # 审计 retention（各表保留期；0=关闭）
+    # ================================================================
     # audit_events 表保留期（天）。实测 sports_live_state_recorded + market_discovered
     # 每天累积百万级 row，长期运行会让查询变慢且占用大量磁盘。retention job 每天跑
     # 一次 ``DELETE WHERE created_at < now() - interval N days``，让 audit 表稳态
@@ -134,93 +238,6 @@ class Settings(BaseSettings):
     decision_records_retention_days: int = Field(default=7, ge=0, le=365)
     account_snapshots_retention_days: int = Field(default=14, ge=0, le=365)
 
-    # 外部体育直播状态源只提供入场前事实，不承载策略阈值或交易参数。
-    # 默认 ``True``：strategies/current 的入场链路依赖直播状态，关闭后整个 funnel
-    # 在 candidates 阶段卡死（实测 25k discovered / 0 filtered_in）。所以默认开 +
-    # supervisor 启动期对"trading 已就绪但 sports_live_state 关闭"发告警。
-    sports_live_state_enabled: bool = True
-    sports_live_state_leagues: str = "nba,nhl,nfl,mlb,tennis,sports,atp,wta,itf,bkbbl,bkseriea"
-    sports_live_state_interval_seconds: int = Field(default=3, ge=1)
-
-    # Goalserve inplay GZIP feed（http://inplay.goalserve.com/inplay-{sport}.gz）配置。
-    # keyless（IP 白名单），demand-driven 轮询 8 个运动；proxy 仅用于开发环境
-    # （本机 Clash 代理）出口白名单 IP，生产留空直连。
-    goalserve_proxy: str | None = None
-
-    # Goalserve getfeed livescore 配置。认证方式：API key 嵌入 URL。
-    # 覆盖 inplay feed 没有的运动：cricket/handball/rugby/boxing/mma/golf/horse_racing/f1/motogp。
-    goalserve_api_key: SecretStr | None = None
-    goalserve_livescore_enabled: bool = True
-    goalserve_livescore_base_url: str = "http://www.goalserve.com/getfeed"
-    goalserve_livescore_timeout_s: float = Field(default=10.0, ge=1.0)
-
-    # Goalserve 赛前赔率（Pregame Odds）配置。认证方式：API key 嵌入 URL，GZIP 压缩。
-    # 数据量极大（>100MB），默认关闭；按需启用并配置 GOALSERVE_API_KEY。
-    goalserve_pregame_enabled: bool = False
-    goalserve_pregame_sports: str = "soccer,basketball,tennis,hockey,baseball,amfootball,esports,mma,cricket,rugby,volleyball,handball,boxing,darts,table_tennis,futsal,rugbyleague"
-    goalserve_pregame_base_url: str = "http://www.goalserve.com"
-    goalserve_pregame_timeout_s: float = Field(default=30.0, ge=1.0)
-    # ts 增量拉取；每次只拿变化部分，300s 足以在 ts 未超期前更新一次。
-    goalserve_pregame_interval_seconds: int = Field(default=300, ge=60)
-
-    # 赛季级赔率（the-odds-api 提供，独立于 ESPN）：服务于 outright 反向定价。
-    sports_season_odds_provider: str = "theoddsapi"
-    sports_season_odds_api_key: SecretStr | None = None
-    sports_season_odds_base_url: str = "https://api.the-odds-api.com"
-    sports_season_odds_regions: str = "us,eu"
-    sports_season_odds_interval_seconds: int = Field(default=1800, ge=300)
-    sports_season_odds_ttl_seconds: int = Field(default=1800, ge=60)
-
-    # 单场 h2h 赔率源：TheOddsAPI v4 markets=h2h，driving series winner p_per_game。
-    sports_game_odds_provider: str = "theoddsapi"
-    sports_game_odds_api_key: SecretStr | None = None
-    sports_game_odds_base_url: str = "https://api.the-odds-api.com"
-    sports_game_odds_regions: str = "us,eu"
-    sports_game_odds_interval_seconds: int = Field(default=1800, ge=300)
-    sports_game_odds_ttl_seconds: int = Field(default=1800, ge=60)
-
-    # 性能与优先级字段必须始终有限制，避免无界队列、无界等待和热路径阻塞。
-    trading_event_queue_max_size: int = Field(default=1000, ge=1)
-    maintenance_event_queue_max_size: int = Field(default=1000, ge=1)
-    persistence_event_queue_max_size: int = Field(default=5000, ge=1)
-    trading_worker_threads: int = Field(default=4, ge=1)
-    maintenance_worker_threads: int = Field(default=4, ge=1)
-    maintenance_process_workers: int = Field(default=2, ge=1)
-    order_submit_timeout_ms: int = Field(default=3000, ge=1)
-    order_sign_timeout_ms: int = Field(default=1000, ge=1)
-    critical_lock_timeout_ms: int = Field(default=20, ge=1)
-    trading_queue_warn_depth: int = Field(default=100, ge=0)
-    entry_signal_to_submit_warn_ms: int = Field(default=500, ge=1)
-
-    # SSE fan-out 订阅者并发上限；超过返回 429 Retry-After=5。
-    sse_subscriber_cap: int = Field(default=32, ge=1)
-
-    # === API 服务暴露面（Admin 路由是高危写入入口，必须能在 prod 关掉 Swagger 文档
-    # 和强制 token 鉴权）===
-    # 默认 True 便于本机开发；prod 必须显式 EXPOSE_OPENAPI_DOCS=false。
-    expose_openapi_docs: bool = True
-    # 非 None 时所有 admin 写接口要求 X-Admin-Token 头匹配；None 表示禁用 token 校验
-    # （仅适合本机/受信网络）。生产环境 None 等同于 operator API裸跑，应在启动阶段告警。
-    admin_api_token: SecretStr | None = None
-    # CORS 白名单——逗号分隔。生产配置应只列前端实际域名，不留 localhost。
-    cors_allowed_origins: str = "http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:5173,http://localhost:5174"
-
-    # 密钥类配置绝不入仓；空值只作为示例，真值必须来自安全环境变量或 secret manager。
-    polymarket_api_key: SecretStr | None = None
-    polymarket_api_secret: SecretStr | None = None
-    polymarket_api_passphrase: SecretStr | None = None
-    wallet_private_key: SecretStr | None = None
-    signer_private_key: SecretStr | None = None
-
-    # 数据库连接支持完整 URL 覆盖，也支持拆分字段；数据库密码同样不得写入仓库。
-    database_url_override: str | None = Field(default=None, validation_alias="DATABASE_URL")
-    database_driver: str = "postgresql+asyncpg"
-    database_host: str = "localhost"
-    database_port: int = Field(default=5432, ge=1, le=65535)
-    database_name: str = "trader"
-    database_user: str = "trader"
-    database_password: SecretStr | None = None
-
     _SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
         "polymarket_api_key",
         "polymarket_api_secret",
@@ -244,7 +261,6 @@ class Settings(BaseSettings):
         "polymarket_funder_address",
         "database_password",
         "database_url_override",
-        "workflow_config_path",
         "goalserve_api_key",
         mode="before",
     )

@@ -505,16 +505,18 @@ def default_workflow_config() -> TradingWorkflowConfig:
     return TradingWorkflowConfig()
 
 
-def load_workflow_config(config_path: str | None) -> TradingWorkflowConfig:
-    """从外部配置文件加载当前策略配置。
+_STRATEGY_CONFIG_FILENAME = "strategy_config.toml"
 
-    参数：
-        config_path:
-            外部配置文件路径。支持 ``json`` / ``toml``。如果为 ``None``，
-            或者调用方没有提供配置文件，则退回默认配置。
 
-    返回：
-        解析后的 ``TradingWorkflowConfig``。
+def load_workflow_config() -> TradingWorkflowConfig:
+    """加载当前策略配置。
+
+    从仓库根的 ``strategy_config.toml`` 读取（若存在），否则用 dataclass 默认值。
+    没有 env 间接层——TOML 文件就是策略 frozen 值的唯一权威来源。
     """
 
+    from pathlib import Path
+
+    candidate = Path.cwd() / _STRATEGY_CONFIG_FILENAME
+    config_path = str(candidate) if candidate.exists() else None
     return load_strategy_config(TradingWorkflowConfig, config_path) or default_workflow_config()

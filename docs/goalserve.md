@@ -1,6 +1,6 @@
 # Goalserve 数据接口
 
-Goalserve 是本项目的体育数据源，提供实时比分（Livescore）、盘中赔率（Inplay Odds）、赛前赔率（Pregame Odds）和赛果数据。后续扩展 Totals、Moneyline、Spread 等扫尾策略的实时判定，依赖本接口的 inplay 数据。
+Goalserve 是本项目的体育数据源，提供实时比分（Livescore）、盘中赔率（Inplay Odds）、赛前赔率（Pregame Odds）和赛果数据。整个体育市场的实时定价、Totals/Moneyline/Spreads/分节 prop 等盘口家族的判定都依赖本接口的 inplay 数据。
 
 ## 资料位置
 
@@ -122,21 +122,15 @@ https://www.goalserve.com/getfeed/{API_KEY}/{sport}/inplay-mapping
 
 ## 对接计划
 
-本项目后续 Goalserve 接入分两阶段：
+Goalserve 是当前系统的唯一体育数据源，早期 ESPN / NBA / NHL / MLB / SofaScore / TheSportsDB 全部已下线。
 
-**阶段一：Inplay 比分源替换 / 增强**  
-当前系统已有 ESPN、NBA、NHL、MLB、SofaScore 等比分源。对于已有明确 time_status 和比分结构的运动（篮球、冰球、棒球、足球），优先验证 Goalserve inplay feed 能否作为备选或主力比分源，重点关注：
-- 延迟（目标 ≤ 2s）
-- time_status 与现有状态机的对齐
-- 分节/局数/比分字段完整性
+**Inplay 比分 + 赔率**：覆盖 8 个运动（soccer、basket、tennis、volleyball、amfootball、esports、hockey、baseball）。inplay odds（Moneyline / Totals / Handicap）的隐含概率是核心 edge 信号——与 Polymarket 当前价格存在显著差价时直接触发候选（参见 [CLAUDE.md §17 直播源赔率 vs Polymarket 价格差价](../CLAUDE.md)）。
 
-**阶段二：Inplay Odds 接入扫尾定价**  
-Inplay odds 覆盖 Moneyline、Totals、Handicap 等盘口的实时赔率，可用于：
-- 交叉验证 Polymarket 当前价格与市场均衡价的偏差
-- 为 Totals / Spread 扫尾策略提供"市场共识价格"参考
-- 扩展盘口识别和定价逻辑
+**Livescore getfeed**：覆盖 inplay 之外的运动（cricket、handball、rugby、boxing、mma、golf、horse_racing、f1、motogp）。
 
-接入实现落在 `src/polymarket_trader/infra/`（外部数据源适配）和 `src/strategies/current/`（策略定价逻辑）。
+**Pregame odds**：赛季 / 单场赛前赔率，数据量 >100MB 默认关闭，按需启用。
+
+接入实现落在 [`src/polymarket_trader/infra/sports/`](../src/polymarket_trader/infra/sports/)；策略侧消费在 [`src/polymarket_trader/workflow/`](../src/polymarket_trader/workflow/)。
 
 ## 注意事项
 

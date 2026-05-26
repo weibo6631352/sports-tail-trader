@@ -13,41 +13,12 @@ export type ParamMetadata = {
 }
 
 const META: Record<string, ParamMetadata> = {
-  // settings 段 —— 全部高风险，直接影响资金敞口与挂单上限。
+  // settings 段 —— 全部高风险，直接影响资金敞口。
   'settings.portfolio_budget_usdc': {
     risk: 'high',
     group: '组合预算',
     inputHint: 'usdc',
     hint: '组合总预算上限；缩小会立即影响后续 allocation。',
-  },
-  'settings.max_order_usdc': {
-    risk: 'high',
-    group: '订单上限',
-    inputHint: 'usdc',
-    hint: '单笔订单最大投入。',
-  },
-  'settings.max_market_usdc': {
-    risk: 'high',
-    group: '组合预算',
-    inputHint: 'usdc',
-    hint: '同一市场累计最大暴露。',
-  },
-  'settings.max_total_usdc': {
-    risk: 'high',
-    group: '组合预算',
-    inputHint: 'usdc',
-    hint: '组合累计暴露上限。',
-  },
-  'settings.max_open_orders': {
-    risk: 'medium',
-    group: '订单上限',
-    inputHint: 'integer',
-    hint: '账户级 open order 数量上限。',
-  },
-  'settings.order_retry_limit': {
-    risk: 'low',
-    group: '订单上限',
-    inputHint: 'integer',
   },
   // strategy 段 —— 风控/入场价直接影响成单。
   'strategy.tail_outright_min_edge_bps': {

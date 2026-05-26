@@ -42,7 +42,7 @@ show_help() {
      - `stop_all.sh`
      - `frontend/dist`
      - `support/serve_frontend.py`
-     - `config/.env` / `.env.example` / `.env.full.example`
+     - `config/.env` / `.env.example`
      - `wheels/`
   4. 传入 `--archive` 后，额外生成 `.dist-packages/fdv-runtime.tar.gz`。
 EOF
@@ -106,8 +106,7 @@ Trader Runtime Bundle
 
 目录说明:
 - config/.env: 默认安全配置，可直接改
-- config/.env.example: 最小配置模板
-- config/.env.full.example: 完整配置模板
+- config/.env.example: 配置模板（含完整字段说明）
 - frontend/dist: 已构建前端静态资源
 - support/serve_frontend.py: 前端静态服务 + /api 反向代理脚本，被 start_all.sh 调用
 - wheels: 后端本地安装包
@@ -140,7 +139,6 @@ assemble_bundle() {
   install -m 755 "$ROOT_DIR/stop_all.sh" "$BUNDLE_DIR/stop_all.sh"
   install -m 644 "$ROOT_DIR/.env.example" "$CONFIG_DIR/.env"
   install -m 644 "$ROOT_DIR/.env.example" "$CONFIG_DIR/.env.example"
-  install -m 644 "$ROOT_DIR/.env.full.example" "$CONFIG_DIR/.env.full.example"
   install -m 644 "$ROOT_DIR/support/serve_frontend.py" "$SUPPORT_DIR/serve_frontend.py"
   write_bundle_readme
   write_build_info

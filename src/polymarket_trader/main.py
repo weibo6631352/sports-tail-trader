@@ -535,7 +535,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         metrics_registry=metrics,
     )
     # 直接装配 quant 策略——量化决策器就是这个交易系统本身。
-    workflow_config = load_workflow_config(settings.workflow_config_path)
+    workflow_config = load_workflow_config()
     workflow = TradingWorkflow(config=workflow_config, ports=runtime_ports)
     workflow_issues = workflow.validate_config(settings)
     if workflow_issues:
