@@ -1,28 +1,17 @@
-# 当前策略运行时参数覆盖。
-# 所有字段对应 CurrentStrategyConfig 的字段名；未填写的字段使用代码内默认值。
-# 由 EXTENSION_CONFIG_PATH 指定路径加载；留空时全部使用默认值。
+# TradingWorkflowConfig 运行时覆盖（启动期由 load_workflow_config 自动加载）。
+# 字段名对齐 src/polymarket_trader/workflow/config.py:TradingWorkflowConfig。
+# 未列出的字段使用代码内默认值。
 #
-# Kelly sizing 参数（策略层参数，不进框架 Settings）：
-# - half Kelly（quarter Kelly × confidence shrinkage 之后约 1/4 effective）
-# - 单仓 30% bankroll；round-up over-bet 上限 ratio=5（最坏单笔 1.5 USDC）
-# - min_edge 100bps（与 strategy implied edge 对齐）；min_stake 0.30 让低价 tail 能下
-# - drawdown lockout 0.4 → 跌穿 60% peak 才停（小账户波动允许）
+# Kelly sizing（实盘调过的非默认值——必须显式写在这里）：
+# - kelly_fraction=0.5（half Kelly；默认 0.25 quarter Kelly 过保守）
+# - kelly_max_position_fraction=0.30（单仓 30% bankroll；默认 1.0 不限）
+# - kelly_min_edge=0.01（100bps；默认 0.02 过严）
+# - kelly_min_stake_usdc=0.30（让低价市场能下；默认 1 USDC 偏高）
+# - kelly_round_up_max_overbet_ratio=10（round-up 上限；默认值即此，保留作显式记录）
+# - kelly_allow_round_up_to_market_min=true（默认即此）
 kelly_fraction = "0.5"
 kelly_max_position_fraction = "0.30"
 kelly_min_edge = "0.01"
 kelly_min_stake_usdc = "0.30"
 kelly_allow_round_up_to_market_min = true
 kelly_round_up_max_overbet_ratio = "10.0"
-
-# 扫尾入场时间窗口：最后5分钟（300s）涵盖篮球4Q更多机会；
-# 价格更低（0.78-0.88 vs 0.88-0.93）→ 每次进场盈利空间更大。
-# 领先 6 分以上 + 最后 5 分钟 → win rate ≈ 88-92%，期望值正。
-tail_max_moneyline_seconds_remaining = 300
-tail_max_spreads_seconds_remaining = 180
-
-# 止盈与自动退出
-# auto_exit_enabled = true：每次 BUY 成交后立即挂 GTC SELL
-# tail_profit_take_offset = 0.07：止盈目标 = 买入价 + 0.07，盘中提前止盈可达
-#   （买 0.88 → 卖 0.95），高价入场自动收敛到近结算价。做准量化盈利、不死等结算。
-auto_exit_enabled = true
-tail_profit_take_offset = "0.07"

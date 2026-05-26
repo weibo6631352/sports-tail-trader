@@ -65,12 +65,7 @@ class TradingWorkflowConfig:
             框架入场 BUY 的兜底最高价格。体育扫尾会优先使用各盘口自己的
             价格上限；这里保留给现有分配和下单接线使用。
         exit_no_price:
-            启用自动退出时使用的目标挂卖价格。当前默认扫尾策略买入后等待
-            权威结算，不主动挂 follow-up SELL。
-        auto_exit_enabled:
-            是否在 BUY 成交或持仓恢复时自动生成 SELL。默认开启：退出 overlay
-            必须每个决策周期运行，才能基于实时盘口动态重估退出价/退出时机；
-            settlement-only 模式（仅等权威结算、不主动挂 SELL）需显式设为 False。
+            退出 GTC SELL 的目标挂卖价格（接近 1.0，等结算）。
         tail_dynamic_exit_stop_loss_fraction:
             动态止损阈值（CLAUDE.md §17）。当我方方向的 fair value 跌到
             买入价 × 此比例以下时，说明比赛/赔率已明确逆转，主动按当前
@@ -183,7 +178,6 @@ class TradingWorkflowConfig:
 
     entry_no_price_max: Decimal = Decimal("0.99")
     exit_no_price: Decimal = Decimal("0.995")
-    auto_exit_enabled: bool = True
     min_liquidity_usdc: Decimal = Decimal("1")
     max_spread: Decimal | None = Decimal("0.10")
     discovery_tag_slugs: tuple[str, ...] = ("sports",)
@@ -269,8 +263,6 @@ class TradingWorkflowConfig:
     # 继续扫描只是 noise。reconcile 看到 pause 后会把 market 从订阅集合排除。
     tail_stale_no_live_state_seconds: int = 86_400
     tail_max_under_seconds_remaining: int = 30
-    tail_max_moneyline_seconds_remaining: int = 180
-    tail_max_spreads_seconds_remaining: int = 120
     tail_min_under_safety_margin: Decimal = Decimal("2")
     # MLB Under 总分入场最早可考虑的局数；早于此局一律拒绝。
     tail_mlb_under_min_inning: int = 6
@@ -343,12 +335,7 @@ class TradingWorkflowConfig:
     tail_profit_take_hold_minutes: int = 2  # 流动性好时预计止盈成交时间（分钟）
     # bid 侧深度低于此值视为薄市场，止盈单大概率等结算，效率按结算持仓时间算
     tail_profit_take_liquid_bid_depth_usdc: Decimal = Decimal("10")
-    # 止盈目标价：三选一，优先级 offset > multiplier > 默认上一档 tick。
-    # tail_profit_take_offset：目标卖价 = entry_price + offset，超过 1.0 自动收敛到 0.99。
-    #   固定 offset 让盘中提前止盈可达（如 +0.07：买 0.88 → 卖 0.95），不必死等结算。
-    # tail_profit_take_multiplier：目标卖价 = entry_price × multiplier（旧模式）。
-    # 两者都为 None：只上一档 tick（原有资金效率模式）。
-    tail_profit_take_offset: Decimal | None = None
+    # 止盈目标价倍数：目标卖价 = entry_price × multiplier；None = 退到上一档 tick。
     tail_profit_take_multiplier: Decimal | None = None
     # 动态止损阈值：fair value 跌破 entry_price × 此比例时主动按 best bid 卖出止损。
     # 0.5 = 价值跌到买入价一半即止损（CLAUDE.md §17），不等结算输掉全部本金。
@@ -481,8 +468,6 @@ def tail_policy_from_config(config: TradingWorkflowConfig) -> TailPolicy:
         tennis_max_game_state_age_seconds=config.tail_tennis_max_game_state_age_seconds,
         esports_max_game_state_age_seconds=config.tail_esports_max_game_state_age_seconds,
         max_under_seconds_remaining=config.tail_max_under_seconds_remaining,
-        max_moneyline_seconds_remaining=config.tail_max_moneyline_seconds_remaining,
-        max_spreads_seconds_remaining=config.tail_max_spreads_seconds_remaining,
         min_under_safety_margin=config.tail_min_under_safety_margin,
         mlb_under_min_inning=config.tail_mlb_under_min_inning,
         mlb_under_inning_margin_step=config.tail_mlb_under_inning_margin_step,

@@ -580,8 +580,6 @@ class QuantDecider:
         from polymarket_trader.workflow.position_plan import exit_price_for_context
 
         config = self._config
-        if not config.auto_exit_enabled:
-            return TradingDecision.skip(reason="settlement_only_exit_disabled")
 
         now = context.now or _utc_now()
         if context.account_snapshot is not None:

@@ -94,16 +94,6 @@ def build_recovery_quant_decision(
             continue
         if missing_target:
             continue
-        if not config.auto_exit_enabled and _is_open_exit_order(order) and not _is_profit_take_exit_order(order):
-            actions.append(
-                TradingDecision.cancel(
-                    reason="settlement_only_open_exit_order_detected",
-                    token_id=order.token_id,
-                    order_id=order_id,
-                    market_slug=order.market_slug or context.market.market_slug,
-                    metadata=recovery_metadata,
-                )
-            )
 
     open_exit_by_token: dict[str, Decimal] = {}
     for order in open_orders:
@@ -117,12 +107,10 @@ def build_recovery_quant_decision(
         uncovered_shares = position.shares - open_exit_shares
         if uncovered_shares <= Decimal("0"):
             continue
-        # 未覆盖持仓不再由恢复侧挂静态价 SELL：动态退出引擎 ``decide_exit``
-        # 每个 reconcile 周期都会从实时盘口重估 HOLD/EXIT 并下单。恢复侧若
-        # 再挂静态退出单会覆盖持仓份额，使 ``decide_exit`` 因
-        # ``no_uncovered_shares`` 跳过、动态引擎被旁路。此处仅保留对历史遗留
-        # 高均价仓位的 settlement-only profit-take 补单（_recovery_profit_take_action）。
-        if config.auto_exit_enabled and not missing_target:
+        # 未覆盖持仓不由恢复侧挂静态价 SELL：动态退出引擎 ``decide_exit`` 每个
+        # reconcile 周期都会从实时盘口重估 HOLD/EXIT 并下单。恢复侧仅在 missing_target
+        # （动态引擎判定无法兜底）时考虑补 profit-take 补单。
+        if not missing_target:
             continue
         if missing_target and context.market.trading_status != TradingStatus.ELIGIBLE:
             continue

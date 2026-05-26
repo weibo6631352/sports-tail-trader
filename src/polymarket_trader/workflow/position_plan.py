@@ -44,14 +44,9 @@ def build_position_plan_metadata(
     """
 
     exit_price = exit_price_for_context(config, context, entry_price=entry_price)
-    if config.auto_exit_enabled:
-        primary_action = "place_follow_up_gtc_sell_after_buy_fill"
-        settlement_rule = "keep_exit_order_until_fill_or_authoritative_resolution"
-        recovery_rule = "cancel_open_entry_orders_and_cover_unprotected_positions"
-    else:
-        primary_action = "hold_until_authoritative_resolution"
-        settlement_rule = "wait_for_authoritative_resolution_without_follow_up_sell"
-        recovery_rule = "cancel_open_entry_orders_and_keep_position_for_settlement_or_manual_review"
+    primary_action = "place_follow_up_gtc_sell_after_buy_fill"
+    settlement_rule = "keep_exit_order_until_fill_or_authoritative_resolution"
+    recovery_rule = "cancel_open_entry_orders_and_cover_unprotected_positions"
 
     plan: dict[str, object] = {
         "version": POSITION_PLAN_VERSION,
@@ -89,39 +84,16 @@ def exit_price_for_context(
     *,
     entry_price: Decimal | None = None,
 ) -> Decimal:
-    """返回符合当前 market tick size 的退出挂单价格。
+    """返回符合当前 market tick size 的退出挂单价格——锁定结算价。
 
-    优先级（§17 准量化提前止盈）：
-    1. 显式传 ``entry_price``（BUY 决策时已知本笔成交目标价）→ ``entry + offset``
-    2. 持仓有 cost/shares 且 ``tail_profit_take_offset`` 配置了 → 返回 ``avg + offset``
-       （盘中提前止盈可达：买 0.20 → 卖 0.27），不再死等结算
-    3. 兜底返回 ``exit_no_price`` 锁定结算价（0.995→tick 后 0.99，无持仓信息时退化）
-
-    超过 ``exit_no_price`` 的目标自动收敛到 ``exit_no_price``，避免越过 CLOB 上限或
-    错过实际市场可成交价。
+    返回 ``exit_no_price`` 对齐到 tick（0.995→tick 后 0.99）。盘中止盈/止损由独立的
+    动态退出引擎（decide_exit / profit-take overlay / dynamic-exit）按实时盘口决策，
+    不在本函数内构造价格。entry_price 参数保留以维持调用方签名稳定。
     """
 
+    _ = entry_price  # 接口稳定占位
     tick_size = _effective_tick_size(context)
-    fallback = align_price_to_tick(config.exit_no_price, tick_size=tick_size)
-    offset = config.tail_profit_take_offset
-    if offset is None or offset <= Decimal("0"):
-        return fallback
-    base_price: Decimal | None = None
-    if entry_price is not None and entry_price > Decimal("0"):
-        base_price = entry_price
-    else:
-        position = context.position
-        if position is not None and position.shares > Decimal("0") and position.cost_usdc > Decimal("0"):
-            base_price = position.cost_usdc / position.shares
-    if base_price is None:
-        return fallback
-    target = base_price + offset
-    if target >= config.exit_no_price:
-        return fallback
-    aligned = align_price_to_tick(target, tick_size=tick_size)
-    if aligned <= base_price:
-        return fallback
-    return aligned
+    return align_price_to_tick(config.exit_no_price, tick_size=tick_size)
 
 
 def align_price_to_tick(price: Decimal, *, tick_size: Decimal | None) -> Decimal:

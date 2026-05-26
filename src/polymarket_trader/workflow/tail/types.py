@@ -65,8 +65,6 @@ class TailPolicy:
     soccer_max_game_state_age_seconds: int = 120
     esports_max_game_state_age_seconds: int = 90
     max_under_seconds_remaining: int = 30
-    max_moneyline_seconds_remaining: int = 180
-    max_spreads_seconds_remaining: int = 120
     min_under_safety_margin: Decimal = Decimal("2")
     mlb_under_min_inning: int = 6
     mlb_under_inning_margin_step: Decimal = Decimal("2")
