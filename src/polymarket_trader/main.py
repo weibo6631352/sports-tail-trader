@@ -102,6 +102,7 @@ from polymarket_trader.runtime.orderbook_derived_publisher import OrderbookDeriv
 from polymarket_trader.runtime.orderbook_derived_store import OrderbookDerivedStore
 from polymarket_trader.runtime.orderbook_history_buffer import OrderbookHistoryBuffer
 from polymarket_trader.runtime.gamma_snapshot_store import GammaMarketSnapshotStore
+from polymarket_trader.runtime.sports_live_history import SportsLiveHistoryBuffer
 from polymarket_trader.runtime.registry import MarketRegistry
 from polymarket_trader.runtime.ws_loops import (
     handle_market_ws_message,
@@ -150,6 +151,7 @@ class RuntimeComponents:
     registry: MarketRegistry
     lifecycle_registry: LifecycleRegistry
     gamma_snapshot_store: GammaMarketSnapshotStore
+    sports_live_history_buffer: SportsLiveHistoryBuffer
     outbox: LocalOutbox
     db_engine: AsyncEngine
     db_session_factory: async_sessionmaker[AsyncSession]
@@ -399,10 +401,14 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     registry.register_added_callback(lifecycle_registry.emit_added)
     gamma_snapshot_store = GammaMarketSnapshotStore()
     market_metadata_store = MarketMetadataStore()
+    sports_live_history_buffer = SportsLiveHistoryBuffer()
     outbox = LocalOutbox(max_size=settings.persistence_event_queue_max_size)
     event_bus.bind_persistence_sink(build_domain_event_outbox_sink(outbox))
     sse_subscription_registry = SseSubscriptionRegistry(soft_cap=settings.sse_subscriber_cap)
     event_bus.add_broadcast_listener(sse_subscription_registry.broadcast)
+    # SPORTS_LIVE_STATE_RECORDED 事件同时走 audit_events DB 写入 + 内存 ring buffer——
+    # /sports/live-events 端点从 buffer 读,首次 N 窗口零 DB 命中。
+    event_bus.add_broadcast_listener(sports_live_history_buffer.ingest_event)
     db_engine = build_engine(settings.database_url)
     db_session_factory = build_session_factory(settings.database_url)
     persistence_repository = DatabasePersistenceRepository(db_session_factory)
@@ -610,6 +616,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         ("gamma_snapshot_store", gamma_snapshot_store),
         ("market_tick_worker", market_tick_worker),
         ("market_metadata_store", market_metadata_store),
+        ("sports_live_history_buffer", sports_live_history_buffer),
         ("reconcile_authority_refresher", reconcile_worker.authority_refresher),
         ("user_ws_worker", user_ws_worker),
         ("account_state_store", account_state_store),
@@ -670,6 +677,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         registry=registry,
         lifecycle_registry=lifecycle_registry,
         gamma_snapshot_store=gamma_snapshot_store,
+        sports_live_history_buffer=sports_live_history_buffer,
         outbox=outbox,
         db_engine=db_engine,
         db_session_factory=db_session_factory,

@@ -1,11 +1,12 @@
-"""SportsQueryAggregator —— 体育直播状态相关只读查询。
+"""SportsQueryAggregator —— 体育直播状态相关只读查询，全部走内存。
 
-按 原架构方案 §12.2：
-- list_sports_live_events_history → DB audit 查询
-- list_sports_live_states / list_sports_live_source_gaps → 内存运营查询
-  （基于 market_metadata_store + registry）
+按 原架构方案 §12.2 + 用户原则"能内存就内存,尽量不 DB"：
+- list_sports_live_events_history → ``SportsLiveHistoryBuffer`` 内存 ring buffer
+  （远期历史走 /audit-events/by-condition/{cid}?channels=sports_live_state_recorded）
+- list_sports_live_states / list_sports_live_source_gaps → market_metadata_store + registry
 
-以 market_metadata_store 为真相源，覆盖前端 operator sports 路由的完整契约。
+以 market_metadata_store + sports_live_history_buffer 为真相源,覆盖前端 operator
+sports 路由的完整契约。零 DB。
 """
 
 from __future__ import annotations
@@ -16,13 +17,11 @@ from typing import TYPE_CHECKING, Any
 
 from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.config import Settings
-from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.serialization import page_payload
 
 from ._helpers import slice_sequence
-from .timeline_aggregator import TimelineAggregator
 
 # 直播源缺口诊断窗口：开赛已超过此时长的市场视为陈旧，不再算缺口。
 # 设 6h 覆盖单场赛事全长（足球/篮球/棒球/网球/橄榄球均 < 5h）。
@@ -164,18 +163,12 @@ class SportsQueryAggregator:
         serializer: ApiSerializer | None = None,
     ) -> None:
         self._runtime = runtime
-        self._session_factory = getattr(runtime, "db_session_factory", None) if runtime else None
         self._serializer = serializer or ApiSerializer.from_runtime(None)
-        self._timeline = TimelineAggregator(
-            session_factory=self._session_factory,
-            runtime=runtime,
-            serializer=self._serializer,
-        )
 
     def _entry_metadata_store(self) -> Any | None:
         return getattr(self._runtime, "market_metadata_store", None) if self._runtime else None
 
-    async def list_sports_live_events_history(
+    def list_sports_live_events_history(
         self,
         *,
         limit: int = 200,
@@ -183,13 +176,30 @@ class SportsQueryAggregator:
         condition_id: str | None = None,
         time_range: TimeRange | None = None,
     ) -> dict[str, Any]:
-        return await self._timeline.list_audit_events(
+        """SPORTS_LIVE_STATE_RECORDED 事件历史——从 ``sports_live_history_buffer``
+        内存 ring buffer 读,零 DB。
+
+        每 condition 默认保留 200 条（按 deduper 30s 窗口约 ~100 分钟）;
+        远期历史走 ``GET /audit-events/by-condition/{cid}?channels=sports_live_state_recorded``。
+        """
+        buffer = getattr(self._runtime, "sports_live_history_buffer", None) if self._runtime else None
+        if buffer is None:
+            return {"items": (), "total": 0, "limit": limit, "offset": offset}
+        since_iso = until_iso = None
+        if time_range is not None and not time_range.is_empty:
+            since_dt, until_dt = time_range.to_datetime_range()
+            if since_dt is not None:
+                since_iso = since_dt.isoformat()
+            if until_dt is not None:
+                until_iso = until_dt.isoformat()
+        items, total = buffer.list_events(
+            condition_id=condition_id,
             limit=limit,
             offset=offset,
-            event_title=DomainEventType.SPORTS_LIVE_STATE_RECORDED.value,
-            condition_id=condition_id,
-            time_range=time_range,
+            since_iso=since_iso,
+            until_iso=until_iso,
         )
+        return {"items": list(items), "total": total, "limit": limit, "offset": offset}
 
     async def list_sports_live_states(
         self, *, limit: int = 100, offset: int = 0

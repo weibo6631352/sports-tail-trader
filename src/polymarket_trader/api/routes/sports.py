@@ -22,7 +22,7 @@ async def list_sports_live_events_history(
     """历史体育实时事件——决策瞬间的比分/时钟/赛况快照。"""
 
     aggregator = SportsQueryAggregator(runtime=runtime)
-    return await aggregator.list_sports_live_events_history(
+    return aggregator.list_sports_live_events_history(
         limit=limit,
         offset=offset,
         condition_id=condition_id,
