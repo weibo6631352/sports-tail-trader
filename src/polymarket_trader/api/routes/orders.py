@@ -8,9 +8,9 @@ from pydantic import BaseModel, Field
 from typing import Any
 
 from polymarket_trader.api.aggregators import TradingQueryAggregator
-from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
+from polymarket_trader.api.deps import build_time_range, get_operator_service, get_runtime
 from polymarket_trader.api.middleware.rate_limit import rate_limit
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.app.operator_service import OperatorService
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -94,7 +94,7 @@ async def list_orders(
 @router.post("/replace")
 async def replace_order(
     request: ReplaceOrderRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
     _rate: None = Depends(rate_limit(endpoint="replace_order", qps=0.5, burst=2)),
 ) -> dict[str, object]:
     return await service.replace_order(
@@ -113,7 +113,7 @@ async def replace_order(
 @router.post("/cancel")
 async def cancel_order(
     request: CancelOrderRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
     _rate: None = Depends(rate_limit(endpoint="cancel_order", qps=0.5, burst=2)),
 ) -> dict[str, object]:
     return await service.cancel_order(
@@ -130,7 +130,7 @@ async def cancel_order(
 @router.post("/bulk-cancel")
 async def bulk_cancel_orders(
     request: BulkCancelRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
     _rate: None = Depends(rate_limit(endpoint="bulk_cancel_orders", qps=0.2, burst=1)),
 ) -> dict[str, object]:
     """批量撤单（最多 20 单）。每笔独立走 OrderGateway → OrderExecutor，

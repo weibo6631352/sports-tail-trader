@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.app.operator_service import OperatorService
 from polymarket_trader.config import Settings
 from polymarket_trader.api.routes import (
     allocations,
@@ -87,7 +87,7 @@ def _acquire_singleton_lock() -> Any | None:
 def create_app(
     *,
     runtime: Any | None = None,
-    admin_service: AdminService | None = None,
+    operator_service: OperatorService | None = None,
     settings: Settings | None = None,
 ) -> FastAPI:
     owns_runtime = runtime is None
@@ -102,15 +102,15 @@ def create_app(
         bound_runtime = runtime
         if bound_runtime is None:
             bound_runtime = await create_runtime()
-        bound_service = admin_service or getattr(bound_runtime, "admin_service", None) or AdminService()
+        bound_service = operator_service or getattr(bound_runtime, "operator_service", None) or OperatorService()
         if getattr(bound_service, "runtime", None) is None:
             bound_service = bound_service.bind_runtime(bound_runtime)
         app.state.runtime = bound_runtime
-        app.state.admin_service = bound_service
+        app.state.operator_service = bound_service
         app.state.get_runtime = lambda: app.state.runtime
-        app.state.get_admin_service = lambda: app.state.admin_service
-        if getattr(bound_runtime, "admin_service", None) is None:
-            bound_runtime.admin_service = bound_service
+        app.state.get_operator_service = lambda: app.state.operator_service
+        if getattr(bound_runtime, "operator_service", None) is None:
+            bound_runtime.operator_service = bound_service
         try:
             yield
         finally:

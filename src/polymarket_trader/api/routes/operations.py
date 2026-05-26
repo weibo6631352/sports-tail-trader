@@ -9,9 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from polymarket_trader.api.aggregators import AnalyticsAggregator, ReconcileDecisionsAggregator
-from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
+from polymarket_trader.api.deps import build_time_range, get_operator_service, get_runtime
 from polymarket_trader.api.middleware.rate_limit import rate_limit
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.app.operator_service import OperatorService
 from polymarket_trader.app.virtual_paper_trading import run_virtual_paper_trade
 
 router = APIRouter(prefix="/operations", tags=["operations"])
@@ -83,7 +83,7 @@ class ResumeTradingRequest(BaseModel):
 @router.post("/reconcile")
 async def reconcile(
     request: ReconcileRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
     return await service.reconcile(
         trace_id=request.trace_id,
@@ -166,7 +166,7 @@ async def parameter_sweep(
 @router.post("/virtual-paper-trade")
 async def virtual_paper_trade(
     request: VirtualPaperTradeRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
     runtime = service.runtime
     if runtime is None:
@@ -187,7 +187,7 @@ async def virtual_paper_trade(
 @router.post("/pause-trading")
 async def pause_trading(
     request: PauseTradingRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
     return await service.pause_trading(
         reason=request.reason,
@@ -200,7 +200,7 @@ async def pause_trading(
 @router.post("/resume-trading")
 async def resume_trading(
     request: ResumeTradingRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
     return await service.resume_trading(
         operator=request.operator,

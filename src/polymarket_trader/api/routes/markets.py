@@ -11,9 +11,9 @@ from polymarket_trader.api.aggregators import (
     MarketMiscAggregator,
     SettlementAggregator,
 )
-from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
+from polymarket_trader.api.deps import build_time_range, get_operator_service, get_runtime
 from polymarket_trader.api.middleware.rate_limit import rate_limit
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.app.operator_service import OperatorService
 from polymarket_trader.infra.polymarket import PolymarketClientError
 
 router = APIRouter(prefix="/markets", tags=["markets"])
@@ -308,7 +308,7 @@ async def list_markets(
 @router.post("/pause")
 async def pause_market(
     request: PauseMarketRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
     return await service.pause_market_manual(
         condition_id=request.condition_id,
@@ -321,7 +321,7 @@ async def pause_market(
 @router.post("/resume")
 async def resume_market(
     request: ResumeMarketRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
     return await service.resume_market_manual(
         condition_id=request.condition_id,
@@ -417,7 +417,7 @@ async def get_market_impact(
 @router.post("/settle")
 async def settle_market(
     request: SettleMarketRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
     """手工记录市场结算结果。
 

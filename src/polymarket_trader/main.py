@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 if TYPE_CHECKING:
-    from polymarket_trader.app.admin_service import AdminService
+    from polymarket_trader.app.operator_service import OperatorService
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -201,7 +201,7 @@ class RuntimeComponents:
     maintenance_thread_pool: ThreadPoolExecutor
     maintenance_process_pool: ProcessPoolExecutor
     background_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
-    admin_service: AdminService | None = None
+    operator_service: OperatorService | None = None
     sse_subscription_registry: SseSubscriptionRegistry | None = None
     bootstrap_summary: dict[str, Any] = field(default_factory=dict)
     season_state_store: SeasonStateStore | None = None

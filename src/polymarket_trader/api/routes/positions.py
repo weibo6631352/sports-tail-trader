@@ -11,8 +11,8 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 from polymarket_trader.api.aggregators import PositionAggregator, TradingQueryAggregator
-from polymarket_trader.api.deps import get_admin_service, get_runtime
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.api.deps import get_operator_service, get_runtime
+from polymarket_trader.app.operator_service import OperatorService
 
 router = APIRouter(prefix="/positions", tags=["positions"])
 
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/positions", tags=["positions"])
 async def get_position_signals(
     condition_id: str | None = Query(default=None, min_length=1, max_length=128),
     token_id: str | None = Query(default=None, min_length=1, max_length=80),
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
     """持仓信号 admin 端点：返回最近 decide_exit 决策的完整 5 类投票 +
     流动性 tier + math_lock 支持情况 + fair_value 来源等。
@@ -111,7 +111,7 @@ async def get_position_detail(
 @router.post("/force-exit")
 async def force_exit(
     request: ForceExitRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
     return await service.force_exit_position(
         condition_id=request.condition_id,

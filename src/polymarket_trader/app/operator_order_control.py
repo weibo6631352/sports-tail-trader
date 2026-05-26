@@ -41,7 +41,7 @@ class OpenOrderFinder(Protocol):
     ) -> Order | None: ...
 
 
-class AdminOrderController:
+class OperatorOrderController:
     def __init__(
         self,
         *,

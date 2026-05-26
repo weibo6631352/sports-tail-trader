@@ -6,8 +6,8 @@ docs/新架构方案.md §12.2 三类划分 + §12.3 ① 统一聚合：
   短 TTL 缓存
 - **审计查询类**（audit_events / decisions / settlements / analytics 报表 /
   trade timeline / outbox failures）走 DB session_factory，不缓存
-- **操盘动作类**走 `app/admin_service.py:AdminService`（仅保留
-  `AdminControlsMixin`），不在本层
+- **操盘动作类**走 `app/operator_service.py:OperatorService`（人工触发的
+  受控写动作 + 必经 OrderGateway/RiskManager），不在本层
 
 # 设计约束
 
@@ -15,8 +15,8 @@ docs/新架构方案.md §12.2 三类划分 + §12.3 ① 统一聚合：
 - **无状态**：每次调用即时聚合（缓存由 api/middleware/cache 加，仅限
   非审计类 endpoint）
 - **field selection**：运营查询默认 summary 字段，`level=detail` 返回完整数据
-- **不依赖 AdminService**：所有 aggregator 直接持 `runtime` 和/或
-  `session_factory`，与 admin_service.py 完全解耦
+- **不依赖 OperatorService**：所有 aggregator 直接持 `runtime` 和/或
+  `session_factory`，与 operator_service.py 完全解耦
 
 # 模块（按职责分）
 

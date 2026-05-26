@@ -38,7 +38,7 @@ route -> app service -> domain / runtime snapshot / repository
 订单相关人工操作：
 
 ```text
-route -> AdminService -> OrderGateway -> OrderExecutor
+route -> OperatorService -> OrderGateway -> OrderExecutor
 ```
 
 ## 输入与输出

@@ -1,8 +1,7 @@
 """交易决策相关的 audit payload 序列化 / 账户快照辅助函数。
 
-这些函数既被 market_tick_worker 的事件发布路径使用，也被 admin_service
-的候选展示和人工确认路径使用；统一放在 app 层避免 app → workers 反向依赖。
-Workers 通过 ``workers.market_tick.event_payloads`` 的 re-export 保持原有调用界面。
+被 market_tick_worker 的事件发布路径 + operator_service 的候选展示和人工
+确认路径共用；归位在 pipeline/decision/ 内与决策生命周期对齐。
 """
 
 from __future__ import annotations

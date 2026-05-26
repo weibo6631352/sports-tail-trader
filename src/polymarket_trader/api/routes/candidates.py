@@ -10,8 +10,8 @@ from polymarket_trader.api.aggregators import (
     RuntimeAggregator,
     SportsQueryAggregator,
 )
-from polymarket_trader.api.deps import get_admin_service, get_runtime
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.api.deps import get_operator_service, get_runtime
+from polymarket_trader.app.operator_service import OperatorService
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -116,7 +116,7 @@ async def list_live_source_gaps(
 async def upsert_live_state(
     body: LiveStateRequest,
     http_request: Request,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
     # Content-Length 提前拦截大 payload，避免 service / DB / outbox 被拖慢。
     # FastAPI / uvicorn 没有内建 body size limit，必须在路由层做。
@@ -145,7 +145,7 @@ async def upsert_live_state(
 @router.post("/confirm")
 async def confirm_candidate(
     request: ConfirmCandidateRequest,
-    service: AdminService = Depends(get_admin_service),
+    service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
     return await service.confirm_candidate(
         condition_id=request.condition_id,

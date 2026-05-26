@@ -12,7 +12,9 @@
 
 ## 文件职责
 
-- `admin_service.py`：只读查询和受控人工操作编排。
+- `operator_service.py`：人工触发的受控写动作编排（reconcile / pause /
+  replace / cancel / confirm / settle）。所有方法仍经 OrderGateway/RiskManager
+  主链路。只读查询走 `api/aggregators/*`，不在本类。
 - `market_ingest_service.py`：market discovery 结果解析、扩展 universe 精筛、registry 和订阅编排。
 - `reconcile_service.py`：权威快照校准和修复动作编排。
 - `decision_context_builder.py`：交易事件到扩展决策和订单意图的编排。
