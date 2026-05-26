@@ -20,7 +20,6 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order, OrderResult, OrderType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
-from polymarket_trader.domain.sports_live import GoalserveOddsSample, SoccerMatchEvent
 
 
 class TradeAction(StrEnum):
@@ -369,22 +368,6 @@ class AccountSnapshotView(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class SignalHistory:
-    """决策时点的时序信号源快照——按 condition_id 聚合的时间序列。
-
-    DecisionContext 持有的是 buffer 在决策时点的**只读快照**，不是 buffer 实例
-    本身——domain 层不依赖 runtime/。每个字段是 frozen tuple，调用方拿到后可
-    跨线程/异步任务消费，buffer 自身在主 loop 继续追加不影响此处。
-
-    扩展时按"一个信号源一个字段"加：``orderbook_history`` /
-    ``live_state_history`` 等后续接入。
-    """
-
-    match_events: tuple[SoccerMatchEvent, ...] = ()
-    goalserve_odds: tuple[GoalserveOddsSample, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class DecisionContext:
     """框架向workflow hook 输入的上下文。所有字段直接读取，不通过 sub-view 属性中转。"""
 
@@ -417,7 +400,6 @@ class DecisionContext:
     # quant_decide 触发源——仅 Workflow 2 (WS / 周期 触发) 使用；entry path 不填。
     quant_trigger_kind: str = ""
     metadata: Mapping[str, Any] = field(default_factory=dict)
-    signal_history: SignalHistory = field(default_factory=SignalHistory)
 
 
 

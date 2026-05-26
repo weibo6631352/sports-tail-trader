@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Literal, Mapping
 
@@ -212,9 +211,10 @@ class SoccerMatchEvent:
     对账。subst 事件的 ``player_id`` / ``player_name`` 是换出球员，换入球员
     通过 ``assist_*``（Goalserve schema）字段携带——本类暂不持，需要时再加。
 
-    两个时间维度并存：``minute`` 是比赛内分钟字符串（保留 ``"90+3"`` 这种
-    补时表达，禁止 int 化导致补时与 90 分钟事件碰撞），``observed_at`` 是
-    feed 解析时的 wall-clock UTC（时序分析、新鲜度判断、"刚发生"信号检测）。
+    ``minute`` 是比赛内分钟字符串——保留 ``"90+3"`` 补时表达，禁止 int 化
+    避免补时与 90 分钟事件碰撞。不持 wall-clock 时间戳：Goalserve 单次 fetch
+    带回的整批 events 共享同一接收时刻，子时序不可靠，量化用途只看 ``minute``
+    序列与 ``decision_records.created_at``（决策点 wall clock）。
     """
 
     event_type: SoccerMatchEventType
@@ -223,32 +223,6 @@ class SoccerMatchEvent:
     team: Literal["home", "away"]
     minute: str
     score_after: str
-    observed_at: datetime
-
-
-GoalserveOddsMarketType = Literal["moneyline", "spread", "totals", "halftime"]
-GoalserveOddsSide = Literal["home", "away", "draw", "over", "under"]
-
-
-@dataclass(frozen=True, slots=True)
-class GoalserveOddsSample:
-    """Goalserve 隐含概率时序信号——单一 (market_type, side) 的一次观测样本。
-
-    Goalserve inplay GZIP feed 推送的赔率反推隐含概率 ``1 / decimal_odds`` 已
-    在 metadata 提取层算好；本类把它转成时序样本，供下游分析最近 N 秒赔率
-    变化方向、速度、暂停切换等。
-
-    ``line``：totals 的 ``total_line`` / spread 的 ``home_handicap`` 等线值；
-    moneyline / halftime 为 None。``suspended`` 是 market 整盘暂停或本方向
-    单独暂停的合并值（任一为 true 即 True）——分析侧据此识别"曾经暂停"窗口。
-    """
-
-    market_type: GoalserveOddsMarketType
-    side: GoalserveOddsSide
-    implied_prob: Decimal
-    line: Decimal | None
-    suspended: bool
-    observed_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

@@ -24,7 +24,6 @@ ORDERBOOK_SNAPSHOT_UPDATED 并列）。MarketTickWorker 订阅它后跑 quant_de
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -40,12 +39,6 @@ from .store import LiveStateStore
 
 if TYPE_CHECKING:
     from polymarket_trader.runtime.event_bus import EventBus
-    from polymarket_trader.runtime.goalserve_odds_history_buffer import (
-        GoalserveOddsHistoryBuffer,
-    )
-    from polymarket_trader.runtime.match_event_history_buffer import (
-        MatchEventHistoryBuffer,
-    )
     from polymarket_trader.runtime.market_metadata import MarketMetadataStore
     from polymarket_trader.runtime.registry import MarketRegistry
 
@@ -63,8 +56,6 @@ class LiveStateMatchService:
         matcher: LiveSourceMatcher,
         calibrator: LiveSourceCalibrator,
         event_bus: "EventBus",
-        match_event_buffer: "MatchEventHistoryBuffer | None" = None,
-        goalserve_odds_buffer: "GoalserveOddsHistoryBuffer | None" = None,
     ) -> None:
         self._store = store
         self._registry = registry
@@ -73,8 +64,6 @@ class LiveStateMatchService:
         self._matcher = matcher
         self._calibrator = calibrator
         self._event_bus = event_bus
-        self._match_event_buffer = match_event_buffer
-        self._goalserve_odds_buffer = goalserve_odds_buffer
 
     def attach(self) -> None:
         """注册到 `LiveStateStore` 的 refresh listener，启动后即开始监听。"""
@@ -121,22 +110,6 @@ class LiveStateMatchService:
         match: LiveStateMatch,
         calibration: CalibrationResult,
     ) -> None:
-        # 时序信号源（一致写入点）：本轮 metadata 同步喂两个 buffer——
-        # 比赛事件流（goal / 红黄牌 / 换人 / VAR 取消）按 condition_id 整场保留；
-        # Goalserve 隐含概率按 (market_type, side) dedup-on-equal-last 120s 窗口。
-        # observed_at fallback：LiveEvent.observed_at 为 None 时用 utc_now（极少
-        # 见，aggregator 通常都会填）——buffer dedup 仍能正常工作。
-        observed_at = match.event.observed_at or datetime.now(timezone.utc)
-        if self._match_event_buffer is not None:
-            soccer_state = getattr(match.event, "soccer_state", None)
-            if soccer_state is not None and soccer_state.match_events:
-                self._match_event_buffer.record_many(
-                    market.condition_id, soccer_state.match_events
-                )
-        if self._goalserve_odds_buffer is not None:
-            self._goalserve_odds_buffer.record_metadata(
-                market.condition_id, match.payload, observed_at
-            )
         self._metadata.upsert(
             metadata=match.payload,
             condition_id=market.condition_id,

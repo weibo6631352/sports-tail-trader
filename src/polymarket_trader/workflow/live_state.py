@@ -213,7 +213,6 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
                     "team": e.team,
                     "minute": e.minute,
                     "score_after": e.score_after,
-                    "observed_at": e.observed_at.isoformat(),
                 }
                 for e in event.soccer_state.match_events
             ],

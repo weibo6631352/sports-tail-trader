@@ -1147,7 +1147,7 @@ _SOCCER_EVENT_TYPES = {"goal", "yellowcard", "yellowred", "redcard", "subst"}
 
 
 def _extract_soccer_match_events(
-    match: dict[str, Any], observed_at: datetime
+    match: dict[str, Any],
 ) -> tuple[SoccerMatchEvent, ...]:
     """从 soccernew/home match dict 提取所有比赛事件。
 
@@ -1207,7 +1207,6 @@ def _extract_soccer_match_events(
                 team=team,
                 minute=minute,
                 score_after=score_after,
-                observed_at=observed_at,
             )
         )
     # VAR 取消独立节点：goal 已被 VAR 撤销时由 livescore 单独标出，给量化
@@ -1246,7 +1245,6 @@ def _extract_soccer_match_events(
                     team=team,
                     minute=minute,
                     score_after=_str_val(vn.get("result") or vn.get("@result")),
-                    observed_at=observed_at,
                 )
             )
     return tuple(out)
@@ -1292,7 +1290,7 @@ def _parse_soccer_with_cats(scores: dict[str, Any], observed_at: datetime) -> li
             timer_raw = match.get("timer")
             seconds_remaining = _soccer_seconds_remaining(status_raw, timer_raw) if status == SportsLiveGameStatus.LIVE else None
             ht_home, ht_away = _soccer_halftime_scores(match)
-            match_events = _extract_soccer_match_events(match, observed_at)
+            match_events = _extract_soccer_match_events(match)
             # 任一信号（半场比分或事件流）存在时即构造 SoccerGameState，
             # 避免漏数据。
             if ht_home is not None and ht_away is not None:

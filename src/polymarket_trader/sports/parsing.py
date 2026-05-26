@@ -211,9 +211,8 @@ def _soccer_match_events(value: object) -> tuple[SoccerMatchEvent, ...]:
     """从 metadata 重建足球比赛事件元组；非列表或字段缺失返回空元组。
 
     下游策略/评估器的输入——异常输入安静返回空，由评估器据缺数据给精确
-    拒绝原因，而不是在解析层抛异常阻断其它盘口评估。``observed_at`` 缺失
-    /非 ISO8601、``minute`` 空串、``event_type`` 非白名单 → 丢弃该事件
-    （时序信号源不接受无时间戳/无类型的样本）。
+    拒绝原因，而不是在解析层抛异常阻断其它盘口评估。``minute`` 空串 /
+    ``event_type`` 非白名单 → 丢弃该事件（缺关键字段无法用于评估）。
     """
     if not isinstance(value, (tuple, list)):
         return ()
@@ -230,13 +229,6 @@ def _soccer_match_events(value: object) -> tuple[SoccerMatchEvent, ...]:
         minute = str(item.get("minute") or "").strip()
         if not minute:
             continue
-        observed_raw = item.get("observed_at")
-        if not isinstance(observed_raw, str):
-            continue
-        try:
-            observed_at = datetime.fromisoformat(observed_raw)
-        except ValueError:
-            continue
         out.append(
             SoccerMatchEvent(
                 event_type=event_type,  # type: ignore[arg-type]
@@ -245,7 +237,6 @@ def _soccer_match_events(value: object) -> tuple[SoccerMatchEvent, ...]:
                 team=team_raw,  # type: ignore[arg-type]
                 minute=minute,
                 score_after=str(item.get("score_after") or ""),
-                observed_at=observed_at,
             )
         )
     return tuple(out)
