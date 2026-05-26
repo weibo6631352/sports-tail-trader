@@ -18,7 +18,7 @@ from decimal import Decimal, InvalidOperation
 from collections.abc import Mapping
 from typing import Any, Sequence
 
-from polymarket_trader.app.admin_serialization import decimal_text
+from polymarket_trader.serialization import decimal_text
 from polymarket_trader.domain.decisions import DecisionRecord
 from polymarket_trader.domain.events import AuditEvent
 

@@ -16,7 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
+from polymarket_trader.serialization import decimal_text, jsonable
+from polymarket_trader.app.admin_serialization import AdminSerializer
 from polymarket_trader.domain.decisions import DecisionRecord
 from polymarket_trader.domain.events import AuditEvent, Fill, OutboxEvent
 from polymarket_trader.domain.order import Order

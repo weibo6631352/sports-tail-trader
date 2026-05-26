@@ -9,7 +9,8 @@ if TYPE_CHECKING:
 
 
 from polymarket_trader.app.admin_order_control import AdminOrderController
-from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
+from polymarket_trader.serialization import decimal_text, jsonable
+from polymarket_trader.app.admin_serialization import AdminSerializer
 from polymarket_trader.app.admin_service_helpers import (
     _RepositoryGroup,
 )

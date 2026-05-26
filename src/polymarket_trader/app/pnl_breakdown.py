@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Callable, Iterable, Mapping, Sequence
 
-from polymarket_trader.app.admin_serialization import decimal_text
+from polymarket_trader.serialization import decimal_text
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.position import Position
 

@@ -37,11 +37,8 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from polymarket_trader.app.admin_serialization import (
-    AdminSerializer,
-    decimal_text,
-    page_payload,
-)
+from polymarket_trader.app.admin_serialization import AdminSerializer
+from polymarket_trader.serialization import decimal_text, page_payload
 from polymarket_trader.app.admin_service_helpers import (
     MarketFeeSortField,
     SortDirection,
@@ -261,7 +258,7 @@ class MarketMiscAggregator:
             if session_factory is not None
             else (getattr(runtime, "db_session_factory", None) if runtime else None)
         )
-        self._serializer = serializer or self._build_serializer()
+        self._serializer = serializer or AdminSerializer.from_runtime(runtime)
 
     # ---------- shared helpers ----------
     def _account_snapshot(self) -> AccountSnapshot:
@@ -280,15 +277,6 @@ class MarketMiscAggregator:
         if self._runtime is None:
             raise RuntimeError("clob_client unavailable")
         return self._runtime.clob_client
-
-    def _build_serializer(self) -> AdminSerializer:
-        if self._runtime is None:
-            return AdminSerializer()
-        return AdminSerializer(
-            account_snapshot_provider=self._account_snapshot,
-            registry_snapshot_provider=self._registry_snapshot,
-            market_ws_snapshot=self._market_ws_snapshot,
-        )
 
     def _resolve_market(
         self,

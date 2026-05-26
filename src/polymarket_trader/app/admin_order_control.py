@@ -9,7 +9,8 @@ if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents
 
 from polymarket_trader.app.admin_operations import market_status_allowed_for_manual_order
-from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text
+from polymarket_trader.serialization import decimal_text
+from polymarket_trader.app.admin_serialization import AdminSerializer
 from polymarket_trader.app.order_projection import AccountStateProjector, normalize_order_id, order_open_shares
 from polymarket_trader.pipeline.execution.order_gateway import OrderGateway
 from polymarket_trader.domain.account import AccountSnapshot

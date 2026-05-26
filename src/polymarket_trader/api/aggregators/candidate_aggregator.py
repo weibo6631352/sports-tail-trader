@@ -23,7 +23,7 @@ import time as _time
 from datetime import datetime, timezone
 from typing import Any
 
-from polymarket_trader.app.admin_serialization import decimal_text, jsonable, page_payload
+from polymarket_trader.serialization import decimal_text, jsonable, page_payload
 from polymarket_trader.app.admin_service_helpers import _candidate_matches_filters
 from polymarket_trader.app.decision_serialization import serialize_intent
 from polymarket_trader.app.market_tracking_policy import market_outside_trade_window

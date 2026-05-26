@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, Sequence
 
-from polymarket_trader.app.admin_serialization import decimal_text, jsonable
+from polymarket_trader.serialization import decimal_text, jsonable
 from polymarket_trader.domain.decisions import DecisionRecord
 from polymarket_trader.domain.events import AuditEvent
 

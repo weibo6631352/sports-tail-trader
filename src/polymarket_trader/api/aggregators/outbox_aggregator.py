@@ -17,7 +17,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from polymarket_trader.app.admin_serialization import AdminSerializer, page_payload
+from polymarket_trader.serialization import page_payload
+from polymarket_trader.app.admin_serialization import AdminSerializer
 from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
 
@@ -39,7 +40,7 @@ class OutboxAggregator:
     ) -> None:
         self._session_factory = session_factory
         self._runtime_outbox = runtime_outbox
-        self._serializer = serializer or AdminSerializer()
+        self._serializer = serializer or AdminSerializer.from_runtime(None)
 
     async def list_pending(
         self,

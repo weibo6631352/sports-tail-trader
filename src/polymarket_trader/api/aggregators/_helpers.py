@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from polymarket_trader.app.admin_serialization import jsonable
+from polymarket_trader.serialization import jsonable
 from polymarket_trader.domain.decisions import DecisionRecord
 
 

@@ -17,7 +17,8 @@ from decimal import Decimal, InvalidOperation
 from statistics import mean, stdev
 from typing import TYPE_CHECKING, Any, Mapping
 
-from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
+from polymarket_trader.serialization import decimal_text, jsonable
+from polymarket_trader.app.admin_serialization import AdminSerializer
 from polymarket_trader.config import Settings
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.orderbook import OrderbookSnapshot

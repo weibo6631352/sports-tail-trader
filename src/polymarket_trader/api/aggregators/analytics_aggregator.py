@@ -48,7 +48,7 @@ class AnalyticsAggregator:
         serializer: AdminSerializer | None = None,
     ) -> None:
         self._session_factory = session_factory
-        self._serializer = serializer or AdminSerializer()
+        self._serializer = serializer or AdminSerializer.from_runtime(None)
         self._timeline = TimelineAggregator(
             session_factory=session_factory, serializer=self._serializer
         )

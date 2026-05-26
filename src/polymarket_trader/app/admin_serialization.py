@@ -14,7 +14,6 @@ from polymarket_trader.domain.order import Order, OrderResult
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.position_lifecycle import classify as classify_position_lifecycle
-from polymarket_trader.infra.db import RepositoryPage
 from polymarket_trader.infra.polymarket import ClobPriceHistoryDTO
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
@@ -40,21 +39,37 @@ def _normalize_token_id_strings(value: Any) -> Any:
     return value
 
 
-def page_payload(page: RepositoryPage[Any], *, serializer: Callable[[Any], Any]) -> dict[str, Any]:
-    return {
-        "items": [serializer(item) for item in page.items],
-        # total=-1 是 sentinel:调用方传 with_total=False 跳过了 count subquery
-        "total": page.total if page.total >= 0 else None,
-        "limit": page.limit,
-        "offset": page.offset,
-    }
-
-
 @dataclass(frozen=True, slots=True)
 class AdminSerializer:
     account_snapshot_provider: Callable[[], AccountSnapshot]
     registry_snapshot_provider: Callable[[], MarketRegistrySnapshot]
     market_ws_snapshot: Callable[[str], OrderbookSnapshot | None]
+
+    @classmethod
+    def from_runtime(cls, runtime: Any) -> "AdminSerializer":
+        """从 runtime 一站式构造 AdminSerializer。
+
+        把 account / registry / WS snapshot provider 都从 runtime 接出来，
+        避免每个 aggregator 重复 `_build_serializer` 模板。
+        """
+
+        def _account_snapshot() -> AccountSnapshot:
+            store = getattr(runtime, "account_state_store", None) if runtime else None
+            return store.snapshot() if store is not None else AccountSnapshot()
+
+        def _registry_snapshot() -> MarketRegistrySnapshot:
+            registry = getattr(runtime, "registry", None) if runtime else None
+            return registry.snapshot() if registry is not None else MarketRegistrySnapshot(tuple())
+
+        def _market_ws_snapshot(token_id: str) -> OrderbookSnapshot | None:
+            worker = getattr(runtime, "market_ws_worker", None) if runtime else None
+            return worker.snapshot(token_id) if worker is not None else None
+
+        return cls(
+            account_snapshot_provider=_account_snapshot,
+            registry_snapshot_provider=_registry_snapshot,
+            market_ws_snapshot=_market_ws_snapshot,
+        )
 
     def portfolio_snapshot(self, account: AccountSnapshot) -> dict[str, Any]:
         return {

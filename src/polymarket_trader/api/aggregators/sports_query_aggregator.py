@@ -19,7 +19,8 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from polymarket_trader.app.admin_serialization import AdminSerializer, page_payload
+from polymarket_trader.serialization import page_payload
+from polymarket_trader.app.admin_serialization import AdminSerializer
 from polymarket_trader.app.admin_service_helpers import (
     _live_source_gap_market_payload,
     _live_source_gap_outside_diagnostic_window,
@@ -49,7 +50,7 @@ class SportsQueryAggregator:
     ) -> None:
         self._runtime = runtime
         self._session_factory = getattr(runtime, "db_session_factory", None) if runtime else None
-        self._serializer = serializer or AdminSerializer()
+        self._serializer = serializer or AdminSerializer.from_runtime(None)
         self._timeline = TimelineAggregator(
             session_factory=self._session_factory,
             runtime=runtime,

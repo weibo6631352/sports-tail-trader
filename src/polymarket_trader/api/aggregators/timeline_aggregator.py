@@ -24,7 +24,8 @@ from collections import Counter
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from polymarket_trader.app.admin_serialization import AdminSerializer, jsonable, page_payload
+from polymarket_trader.serialization import jsonable, page_payload
+from polymarket_trader.app.admin_serialization import AdminSerializer
 from polymarket_trader.app.trade_replay import TradeReplayFilters, build_trade_replay_records
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
@@ -47,30 +48,7 @@ class TimelineAggregator:
     ) -> None:
         self._session_factory = session_factory
         self._runtime = runtime
-        self._serializer = serializer or self._build_serializer(runtime)
-
-    @staticmethod
-    def _build_serializer(runtime: Any) -> AdminSerializer:
-        if runtime is None:
-            return AdminSerializer()
-
-        def _account_snapshot() -> AccountSnapshot:
-            store = getattr(runtime, "account_state_store", None)
-            return store.snapshot() if store is not None else AccountSnapshot()
-
-        def _registry_snapshot() -> MarketRegistrySnapshot:
-            registry = getattr(runtime, "registry", None)
-            return registry.snapshot() if registry is not None else MarketRegistrySnapshot(tuple())
-
-        def _market_ws_snapshot(token_id: str):
-            worker = getattr(runtime, "market_ws_worker", None)
-            return worker.snapshot(token_id) if worker is not None else None
-
-        return AdminSerializer(
-            account_snapshot_provider=_account_snapshot,
-            registry_snapshot_provider=_registry_snapshot,
-            market_ws_snapshot=_market_ws_snapshot,
-        )
+        self._serializer = serializer or AdminSerializer.from_runtime(runtime)
 
     @staticmethod
     def _slice_sequence(

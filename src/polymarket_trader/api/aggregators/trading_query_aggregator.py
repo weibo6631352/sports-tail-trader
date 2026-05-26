@@ -25,12 +25,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from polymarket_trader.app.admin_serialization import AdminSerializer, page_payload
+from polymarket_trader.serialization import page_payload
+from polymarket_trader.app.admin_serialization import AdminSerializer
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
-from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 
 from ._db import RepositoryGroup, with_repositories
 from .timeline_aggregator import TimelineAggregator
@@ -53,32 +53,11 @@ class TradingQueryAggregator:
             if session_factory is not None
             else (getattr(runtime, "db_session_factory", None) if runtime else None)
         )
-        self._serializer = serializer or self._build_serializer()
+        self._serializer = serializer or AdminSerializer.from_runtime(runtime)
         self._timeline = TimelineAggregator(
             session_factory=self._session_factory,
             runtime=runtime,
             serializer=self._serializer,
-        )
-
-    def _build_serializer(self) -> AdminSerializer:
-        runtime = self._runtime
-
-        def _account_snapshot() -> AccountSnapshot:
-            store = getattr(runtime, "account_state_store", None) if runtime else None
-            return store.snapshot() if store is not None else AccountSnapshot()
-
-        def _registry_snapshot() -> MarketRegistrySnapshot:
-            registry = getattr(runtime, "registry", None) if runtime else None
-            return registry.snapshot() if registry is not None else MarketRegistrySnapshot(tuple())
-
-        def _market_ws_snapshot(token_id: str):
-            worker = getattr(runtime, "market_ws_worker", None) if runtime else None
-            return worker.snapshot(token_id) if worker is not None else None
-
-        return AdminSerializer(
-            account_snapshot_provider=_account_snapshot,
-            registry_snapshot_provider=_registry_snapshot,
-            market_ws_snapshot=_market_ws_snapshot,
         )
 
     def _account_snapshot(self) -> AccountSnapshot:
