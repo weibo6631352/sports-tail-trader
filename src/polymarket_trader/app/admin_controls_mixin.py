@@ -23,7 +23,7 @@ from uuid import uuid4
 if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents
 
-from polymarket_trader.app.admin_operations import (
+from polymarket_trader.domain.market import (
     market_status_allowed_for_manual_order,
     normalize_condition_ids,
 )

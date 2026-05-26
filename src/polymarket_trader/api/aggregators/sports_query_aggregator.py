@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -33,8 +32,8 @@ from polymarket_trader.config import Settings
 from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.time_filters import TimeRange
-from polymarket_trader.infra.db import RepositoryPage
 
+from ._helpers import slice_sequence
 from .timeline_aggregator import TimelineAggregator
 
 if TYPE_CHECKING:
@@ -59,17 +58,6 @@ class SportsQueryAggregator:
 
     def _entry_metadata_store(self) -> Any | None:
         return getattr(self._runtime, "market_metadata_store", None) if self._runtime else None
-
-    @staticmethod
-    def _slice_sequence(
-        items: Sequence[Any], *, limit: int, offset: int
-    ) -> RepositoryPage[Any]:
-        if limit <= 0:
-            limit = 100
-        if offset < 0:
-            offset = 0
-        sliced = tuple(items[offset : offset + limit])
-        return RepositoryPage(items=sliced, total=len(items), limit=limit, offset=offset)
 
     async def list_sports_live_events_history(
         self,
@@ -102,7 +90,7 @@ class SportsQueryAggregator:
                 key=lambda r: 0 if str(r.live_state_phase or "").lower() == "live" else 1,
             )
         )
-        page = self._slice_sequence(records, limit=limit, offset=offset)
+        page = slice_sequence(records, limit=limit, offset=offset)
         return page_payload(page, serializer=lambda record: record.as_payload())
 
     async def list_sports_live_source_gaps(
@@ -118,7 +106,7 @@ class SportsQueryAggregator:
         store = self._entry_metadata_store()
         if registry is None:
             empty = page_payload(
-                self._slice_sequence((), limit=limit, offset=offset),
+                slice_sequence((), limit=limit, offset=offset),
                 serializer=lambda item: item,
             )
             empty.update(
@@ -213,7 +201,7 @@ class SportsQueryAggregator:
             )
         ]
 
-        page = self._slice_sequence(tuple(missing_markets), limit=limit, offset=offset)
+        page = slice_sequence(tuple(missing_markets), limit=limit, offset=offset)
         payload = page_payload(
             page,
             serializer=lambda market: _live_source_gap_market_payload(

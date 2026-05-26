@@ -1,7 +1,8 @@
-"""Aggregator DB session helper —— `with_repositories` 复制自
-`app/admin_service._with_repositories`，让 aggregator 不依赖 AdminService。
+"""Aggregator DB session helper —— `with_repositories` + `RepositoryGroup`。
 
-docs/新架构方案.md §12.2 审计查询类（走 DB）。
+docs/新架构方案.md §12.2 审计查询类（走 DB）。每个 aggregator 不持久 session，
+统一通过 `with_repositories(session_factory, callback)` 打开 + 释放，避免长
+连接 + 跨方法状态。
 
 # 用法
 

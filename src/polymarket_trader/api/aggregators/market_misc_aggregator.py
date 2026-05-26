@@ -55,6 +55,7 @@ from polymarket_trader.infra.polymarket import PolymarketClientError
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 
 from ._db import RepositoryGroup, with_repositories
+from ._helpers import slice_sequence
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -302,16 +303,6 @@ class MarketMiscAggregator:
                 return m
         return None
 
-    @staticmethod
-    def _slice_sequence(items: Any, *, limit: int, offset: int) -> RepositoryPage[Any]:
-        if limit <= 0:
-            limit = 100
-        if offset < 0:
-            offset = 0
-        items_seq = tuple(items)
-        sliced = items_seq[offset : offset + limit]
-        return RepositoryPage(items=sliced, total=len(items_seq), limit=limit, offset=offset)
-
     def _publish_audit(self, event_type: DomainEventType, payload: dict[str, Any], reason: str) -> None:
         bus = getattr(self._runtime, "event_bus", None) if self._runtime else None
         if bus is None:
@@ -367,7 +358,7 @@ class MarketMiscAggregator:
                 sort_by=sort_by,
                 sort_direction=sort_direction,
             )
-            page = self._slice_sequence(markets, limit=limit, offset=offset)
+            page = slice_sequence(markets, limit=limit, offset=offset)
             items = [
                 self._serializer.market_view(
                     market,

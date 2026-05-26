@@ -21,7 +21,6 @@ aggregator 持 `session_factory` + `runtime`（用于无 DB 时降级到内存�
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from polymarket_trader.serialization import jsonable, page_payload
@@ -33,6 +32,7 @@ from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
 
 from ._db import RepositoryGroup, with_repositories
+from ._helpers import slice_sequence
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -49,17 +49,6 @@ class TimelineAggregator:
         self._session_factory = session_factory
         self._runtime = runtime
         self._serializer = serializer or AdminSerializer.from_runtime(runtime)
-
-    @staticmethod
-    def _slice_sequence(
-        items: Sequence[Any], *, limit: int, offset: int
-    ) -> RepositoryPage[Any]:
-        if limit <= 0:
-            limit = 100
-        if offset < 0:
-            offset = 0
-        sliced = tuple(items[offset : offset + limit])
-        return RepositoryPage(items=sliced, total=len(items), limit=limit, offset=offset)
 
     async def list_audit_events(
         self,
@@ -131,7 +120,7 @@ class TimelineAggregator:
                 serializer=self._serializer,
                 filters=filters,
             )
-            page = self._slice_sequence(records, limit=limit, offset=offset)
+            page = slice_sequence(records, limit=limit, offset=offset)
             return page_payload(page, serializer=lambda item: item)
 
         async def _query(repos: RepositoryGroup) -> dict[str, Any]:
@@ -178,7 +167,7 @@ class TimelineAggregator:
                 serializer=self._serializer,
                 filters=filters,
             )
-            page = self._slice_sequence(records, limit=limit, offset=offset)
+            page = slice_sequence(records, limit=limit, offset=offset)
             return page_payload(page, serializer=lambda item: item)
 
         return await with_repositories(self._session_factory, _query)

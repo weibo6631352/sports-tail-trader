@@ -402,9 +402,6 @@ async def h2h(
     return d
 
 
-# /runtime/nba-playbyplay 端点已删除：admin_service.nba_playbyplay_snapshot
-# 在重构前已被删，对应 NBA PBP 客户端基础设施不存在；保留路由是 §15 反例
-# （死代码 + 长期同义命名）。重新做 NBA PBP 需要先实装数据源，再加 route。
 
 
 @router.get("/runtime/win-rate")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
@@ -181,3 +182,23 @@ class Market:
             outcomes=self.outcomes if outcomes is None else outcomes,
             neg_risk=self.neg_risk if neg_risk is None else neg_risk,
         )
+
+
+def market_status_allowed_for_manual_order(market: Market) -> bool:
+    """市场状态是否允许人工下单（CLOSED/RESOLVED/REJECTED 都禁止）。
+
+    用于 admin 受控操作（manual cancel/replace/force-exit）路径——CLOSED
+    意味着 trading 已停，RESOLVED 是已结算，REJECTED 是被风控/discovery 拒。
+    """
+    return market.trading_status not in {
+        TradingStatus.CLOSED,
+        TradingStatus.RESOLVED,
+        TradingStatus.REJECTED,
+    }
+
+
+def normalize_condition_ids(condition_ids: "Sequence[str] | None") -> tuple[str, ...]:
+    """去除 None/空字符串后返回 tuple。"""
+    if not condition_ids:
+        return ()
+    return tuple(condition_id for condition_id in condition_ids if condition_id)

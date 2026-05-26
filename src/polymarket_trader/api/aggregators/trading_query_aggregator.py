@@ -22,7 +22,6 @@ aggregator 的 list_positions 仅用于 positions.py:positions_liquidity 内部
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from polymarket_trader.serialization import page_payload
@@ -33,6 +32,7 @@ from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
 
 from ._db import RepositoryGroup, with_repositories
+from ._helpers import slice_sequence
 from .timeline_aggregator import TimelineAggregator
 
 if TYPE_CHECKING:
@@ -64,17 +64,6 @@ class TradingQueryAggregator:
         store = getattr(self._runtime, "account_state_store", None) if self._runtime else None
         return store.snapshot() if store is not None else AccountSnapshot()
 
-    @staticmethod
-    def _slice_sequence(
-        items: Sequence[Any], *, limit: int, offset: int
-    ) -> RepositoryPage[Any]:
-        if limit <= 0:
-            limit = 100
-        if offset < 0:
-            offset = 0
-        sliced = tuple(items[offset : offset + limit])
-        return RepositoryPage(items=sliced, total=len(items), limit=limit, offset=offset)
-
     async def list_orders(
         self,
         *,
@@ -102,7 +91,7 @@ class TradingQueryAggregator:
                 and (status is None or (order.status is not None and order.status.value == status))
                 and (time_range is None or time_range.contains(order.created_at))
             ]
-            page = self._slice_sequence(orders, limit=limit, offset=offset)
+            page = slice_sequence(orders, limit=limit, offset=offset)
             return page_payload(page, serializer=self._serializer.order)
 
         if self._session_factory is None:
@@ -118,7 +107,7 @@ class TradingQueryAggregator:
                 and (status is None or (order.status is not None and order.status.value == status))
                 and (time_range is None or time_range.contains(order.created_at))
             ]
-            page = self._slice_sequence(orders, limit=limit, offset=offset)
+            page = slice_sequence(orders, limit=limit, offset=offset)
             return page_payload(page, serializer=self._serializer.order)
 
         async def _query(repos: RepositoryGroup) -> RepositoryPage[Any]:
@@ -161,7 +150,7 @@ class TradingQueryAggregator:
                 and (token_id is None or fill.token_id == token_id)
                 and (time_range is None or time_range.contains(fill.created_at))
             ]
-            page = self._slice_sequence(fills, limit=limit, offset=offset)
+            page = slice_sequence(fills, limit=limit, offset=offset)
             return page_payload(page, serializer=self._serializer.fill)
 
         async def _query(repos: RepositoryGroup) -> RepositoryPage[Any]:
@@ -196,7 +185,7 @@ class TradingQueryAggregator:
             if (condition_id is None or position.condition_id == condition_id)
             and (token_id is None or position.token_id == token_id)
         ]
-        page = self._slice_sequence(positions, limit=limit, offset=offset)
+        page = slice_sequence(positions, limit=limit, offset=offset)
         return page_payload(page, serializer=self._serializer.position)
 
     async def list_allocations(

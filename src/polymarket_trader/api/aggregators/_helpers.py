@@ -3,6 +3,7 @@
 - `decision_record_payload` —— DecisionRecord → JSON 友好 dict
 - `compute_latency_payload` / `empty_latency_payload` —— 订单 latency 分位数计算
   （AnalyticsAggregator.latency_percentiles_snapshot 用）
+- `slice_sequence` —— 通用分页切片（替代各 aggregator 内重复定义）
 - `_parse_iso` / `_percentile` —— 时间戳解析 + 百分位插值
 
 无状态、可独立测试，与具体 aggregator 解耦。
@@ -10,11 +11,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any
 
-from polymarket_trader.serialization import jsonable
 from polymarket_trader.domain.decisions import DecisionRecord
+from polymarket_trader.infra.db import RepositoryPage
+from polymarket_trader.serialization import jsonable
+
+
+def slice_sequence(
+    items: Sequence[Any], *, limit: int, offset: int
+) -> RepositoryPage[Any]:
+    """通用分页切片——把 in-memory list 按 limit/offset 切成 RepositoryPage。
+
+    limit <= 0 时 fallback 到 100；offset < 0 时 fallback 到 0。
+    total = len(items)，items = items[offset : offset + limit]。
+    """
+    if limit <= 0:
+        limit = 100
+    if offset < 0:
+        offset = 0
+    items_seq = tuple(items)
+    sliced = items_seq[offset : offset + limit]
+    return RepositoryPage(items=sliced, total=len(items_seq), limit=limit, offset=offset)
 
 
 _LATENCY_STAGES: tuple[tuple[str, str, str], ...] = (
