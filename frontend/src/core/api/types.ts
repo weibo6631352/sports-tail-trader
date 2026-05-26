@@ -109,6 +109,8 @@ export type WorkersSnapshot = {
     created_at?: Iso
   }
   queue_depths?: Record<string, number>
+  sse_active_subscribers?: number
+  sse_dropped_events_total?: number
   [key: string]: unknown
 }
 

@@ -52,10 +52,6 @@ export function LiveOverviewPage() {
     queryKey: qk.workers(),
     queryFn: ({ signal }) => healthApi.workers(signal),
   })
-  const metrics = useQuery({
-    queryKey: qk.metrics(),
-    queryFn: ({ signal }) => healthApi.metrics(signal),
-  })
   const portfolio = useQuery({
     queryKey: qk.portfolio.snapshot(),
     queryFn: ({ signal }) => portfolioApi.snapshot(signal),
@@ -535,8 +531,8 @@ export function LiveOverviewPage() {
           title="订阅状态"
           description="浏览器→后端 SSE 流 与 后端→Polymarket WS 推送 是两条不同的链路"
         >
-          {metrics.error ? (
-            <QueryErrorNotice error={metrics.error} compact />
+          {workers.error ? (
+            <QueryErrorNotice error={workers.error} compact />
           ) : (
             <Stack gap={6}>
               <Text size="xs" c="dimmed" fw={500}>
@@ -561,13 +557,13 @@ export function LiveOverviewPage() {
               </Text>
               <KV
                 k="活跃浏览器连接"
-                v={String(metrics.data?.sse_active_subscribers ?? '—')}
+                v={String(workers.data?.sse_active_subscribers ?? '—')}
               />
               <KV
                 k="丢弃事件"
-                v={String(metrics.data?.sse_dropped_events_total ?? '—')}
+                v={String(workers.data?.sse_dropped_events_total ?? '—')}
                 tone={
-                  (metrics.data?.sse_dropped_events_total ?? 0) > 0 ? 'neg' : 'neutral'
+                  (workers.data?.sse_dropped_events_total ?? 0) > 0 ? 'neg' : 'neutral'
                 }
               />
             </Stack>

@@ -23,6 +23,8 @@ export type RequestOptions = {
   signal?: AbortSignal
   /** 自定义超时（毫秒）；不传走默认 30s。0 / 负数 = 不超时。 */
   timeoutMs?: number
+  /** 响应解析类型；默认 'json'。`/metrics` 返 Prometheus 纯文本时传 'text'。 */
+  responseType?: 'json' | 'text'
 }
 
 function buildUrl(path: string, params?: QueryParams): string {
@@ -99,6 +101,9 @@ async function request<T>(method: string, path: string, options: RequestOptions 
   const response = await fetch(url, { method, headers, body, signal })
   if (!response.ok) throw await parseError(response, url)
   if (response.status === 204) return undefined as T
+  if (options.responseType === 'text') {
+    return (await response.text()) as T
+  }
   const contentType = response.headers.get('content-type') ?? ''
   if (contentType.includes('application/json')) {
     return (await response.json()) as T

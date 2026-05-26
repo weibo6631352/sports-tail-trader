@@ -174,6 +174,10 @@ class RuntimeAggregator:
             "scheduler": supervisor.get("scheduler"),
             "sports_live_sync": self._sports_live_sync_snapshot(),
             "workers": list(supervisor.get("worker_health", ())),
+            # SSE 订阅器统计——原由 /metrics dict endpoint 暴露,9fa353f 删 dict
+            # 版本后 promote 到 /workers,前端 dashboard 直接读。
+            "sse_active_subscribers": int(supervisor.get("sse_active_subscribers") or 0),
+            "sse_dropped_events_total": int(supervisor.get("sse_dropped_events_total") or 0),
         }
 
     # ---------- portfolio snapshot ----------

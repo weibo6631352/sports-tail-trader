@@ -65,7 +65,6 @@ import type {
   WorkersSnapshot,
   WriteOperationResult,
 } from './types'
-import type { MetricsSnapshot } from './types'
 
 // 所有 resource 函数走 apiClient 的对象参数签名 { params?, body?, signal? }。
 // GET 函数额外接收末位 signal?:AbortSignal——由 React Query 的 queryFn
@@ -80,7 +79,11 @@ export const healthApi = {
   ready: (signal?: AbortSignal) => apiClient.get<ReadinessSnapshot>('/ready', { signal }),
   runtime: (signal?: AbortSignal) => apiClient.get<RuntimeSnapshot>('/runtime', { signal }),
   workers: (signal?: AbortSignal) => apiClient.get<WorkersSnapshot>('/workers', { signal }),
-  metrics: (signal?: AbortSignal) => apiClient.get<MetricsSnapshot>('/metrics', { signal }),
+  // `/metrics` 是 Prometheus exposition text/plain。dashboard 想看的
+  // sse_active_subscribers / sse_dropped_events_total 已经在 RuntimeSnapshot 上,
+  // 直接走 healthApi.runtime;此 endpoint 保留供 Prometheus dump / 调试展示。
+  metrics: (signal?: AbortSignal) =>
+    apiClient.get<string>('/metrics', { signal, responseType: 'text' }),
   latencyPercentiles: (params: { window_ms?: number; sample_limit?: number }, signal?: AbortSignal) =>
     apiClient.get<LatencyPercentilesSnapshot>('/metrics/latency-percentiles', {
       params,

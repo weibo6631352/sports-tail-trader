@@ -21,10 +21,6 @@ export function HealthPage() {
     queryKey: qk.workers(),
     queryFn: ({ signal }) => healthApi.workers(signal),
   })
-  const metrics = useQuery({
-    queryKey: qk.metrics(),
-    queryFn: ({ signal }) => healthApi.metrics(signal),
-  })
   const runtime = useQuery({
     queryKey: qk.runtime(),
     queryFn: ({ signal }) => healthApi.runtime(signal),
@@ -142,8 +138,8 @@ export function HealthPage() {
             <Row k="dropped events" v={String(sseStatus.droppedEventsTotal)} />
             <Row k="reconnect attempts" v={String(sseStatus.reconnectAttempts)} />
             {sseStatus.lastError ? <Row k="last error" v={sseStatus.lastError} /> : null}
-            {typeof metrics.data?.sse_active_subscribers === 'number' ? (
-              <Row k="server subscribers" v={String(metrics.data.sse_active_subscribers)} />
+            {typeof workers.data?.sse_active_subscribers === 'number' ? (
+              <Row k="server subscribers" v={String(workers.data.sse_active_subscribers)} />
             ) : null}
           </Stack>
         </SectionCard>

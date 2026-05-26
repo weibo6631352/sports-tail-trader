@@ -27,7 +27,6 @@ evict
 from __future__ import annotations
 
 from collections import deque
-from threading import Lock
 from typing import Any
 
 from polymarket_trader.domain.events import DomainEventType
@@ -38,10 +37,13 @@ _DEFAULT_MAXLEN_PER_CONDITION = 200
 
 
 class SportsLiveHistoryBuffer:
+    """asyncio 单线程模型——所有读写都在 event loop 同一线程,靠 GIL 原子性,无锁。
+    对齐 ``OrderbookHistoryBuffer`` 的 "纯 dict + deque,无锁" 写法。
+    """
+
     def __init__(self, *, maxlen_per_condition: int = _DEFAULT_MAXLEN_PER_CONDITION) -> None:
         self._maxlen = max(1, maxlen_per_condition)
         self._buckets: dict[str, deque[dict[str, Any]]] = {}
-        self._lock = Lock()
 
     # ---------- write side: event_bus broadcast listener ----------
 
@@ -67,12 +69,11 @@ class SportsLiveHistoryBuffer:
             "created_at": jsonable(getattr(event, "created_at", None)),
             "payload": dict(getattr(event, "payload", {})),
         }
-        with self._lock:
-            bucket = self._buckets.get(condition_id)
-            if bucket is None:
-                bucket = deque(maxlen=self._maxlen)
-                self._buckets[condition_id] = bucket
-            bucket.appendleft(entry)
+        bucket = self._buckets.get(condition_id)
+        if bucket is None:
+            bucket = deque(maxlen=self._maxlen)
+            self._buckets[condition_id] = bucket
+        bucket.appendleft(entry)
 
     # ---------- read side ----------
 
@@ -89,13 +90,14 @@ class SportsLiveHistoryBuffer:
 
         条目存储时已按 appendleft 维护倒序——直接遍历即可。
         """
-        with self._lock:
-            if condition_id:
-                buckets = (self._buckets.get(condition_id, ()),)
-            else:
-                buckets = tuple(self._buckets.values())
-            items: list[dict[str, Any]] = []
-            for bucket in buckets:
+        if condition_id:
+            bucket = self._buckets.get(condition_id)
+            items: list[dict[str, Any]] = list(bucket) if bucket else []
+        else:
+            # tuple(values()) 先快照桶引用,避免迭代中桶字典本身被改;每个桶是 deque,
+            # list(bucket) 一次性拷出,后续过滤/排序在本地 list 完成。
+            items = []
+            for bucket in tuple(self._buckets.values()):
                 items.extend(bucket)
         if since_iso is not None:
             items = [e for e in items if (e.get("created_at") or "") >= since_iso]
@@ -111,15 +113,13 @@ class SportsLiveHistoryBuffer:
         return tuple(items), total
 
     def tracked_condition_count(self) -> int:
-        with self._lock:
-            return len(self._buckets)
+        return len(self._buckets)
 
     # ---------- MarketScopedStore 协议 ----------
 
     def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
         del token_ids
-        with self._lock:
-            self._buckets.pop(condition_id, None)
+        self._buckets.pop(condition_id, None)
 
 
 __all__ = ["SportsLiveHistoryBuffer"]
