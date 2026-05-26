@@ -201,6 +201,39 @@ def decide_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Tra
 
     token_id = context.token_id or context.orderbook.token_id
     decision_metadata: dict[str, object] = {}
+    # Kelly 内核审计字段——decide_entry 时 context.allocation 已含 Kelly 计算结果,
+    # 平铺到 decision.metadata 让 decision_records 可见 prob_p / fair_value / edge /
+    # f_star / capped_by 等核心数据(§15 量化复盘 + 策略调参依赖).
+    allocation = context.allocation
+    if allocation is not None:
+        decision_metadata["kelly"] = {
+            "prob_p": str(allocation.prob_p) if allocation.prob_p is not None else None,
+            "prob_confidence": (
+                str(allocation.prob_confidence) if allocation.prob_confidence is not None else None
+            ),
+            "price_c": str(allocation.price_c) if allocation.price_c is not None else None,
+            "edge_gross": str(allocation.edge_gross) if allocation.edge_gross is not None else None,
+            "edge_net": str(allocation.edge_net) if allocation.edge_net is not None else None,
+            "fee_per_share_usdc": (
+                str(allocation.fee_per_share_usdc) if allocation.fee_per_share_usdc is not None else None
+            ),
+            "f_star": str(allocation.kelly_f_star) if allocation.kelly_f_star is not None else None,
+            "effective_kelly_fraction": (
+                str(allocation.effective_kelly_fraction)
+                if allocation.effective_kelly_fraction is not None
+                else None
+            ),
+            "effective_min_stake_usdc": (
+                str(allocation.effective_min_stake_usdc)
+                if allocation.effective_min_stake_usdc is not None
+                else None
+            ),
+            "capped_by": allocation.capped_by,
+            "is_round_up_overbet": allocation.is_round_up_overbet,
+            "buy_budget_usdc": str(allocation.buy_budget_usdc),
+            "target_budget_usdc": str(allocation.target_budget_usdc),
+            "current_exposure_usdc": str(allocation.current_exposure_usdc),
+        }
     from polymarket_trader.domain.decisions import DecisionSummary
     from polymarket_trader.workflow.outcomes import describe_sports_market
     descriptor = describe_sports_market(context.market)

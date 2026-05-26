@@ -168,7 +168,11 @@ def _sanitize_structure(value: Any, *, depth: int = 0, limit: int) -> Any:
             parsed = json.loads(value)
         except Exception:
             return _redact_text(value, limit=limit)
-        return _sanitize_structure(parsed, depth=depth + 1, limit=limit)
+        # JSON-encoded 字符串语义上和原值同层 (serialize_to_string + parse_back 不
+        # 改变嵌套深度). 不 +1, 否则 Decimal→str→re-parse 后 numeric primitive 误触
+        # _MAX_SENSITIVE_DEPTH → 把 orderbook bids/asks 的 price/size 全 [REDACTED],
+        # decision_records 复盘看不到深度分布.
+        return _sanitize_structure(parsed, depth=depth, limit=limit)
     if isinstance(value, (int, float, bool)):
         # 此路径仅处理 sanitize 后的 audit payload（如 raw_response_summary 的解析 JSON），
         # 不参与业务金额/价格判定——业务侧金额已在 domain 入口强制为 Decimal。这里允许
