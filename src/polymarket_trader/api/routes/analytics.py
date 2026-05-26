@@ -1,17 +1,15 @@
-"""Analytics 只读接口。
+"""Analytics 只读接口（漏斗 / 拒绝原因 / 执行质量 + edge / 校准 / missed 等报表）。
 
-提供漏斗、拒绝原因 top、执行质量三类聚合查询。
-不在路由层执行业务规则；service 注入由 app.state.analytics_service 提供。
+不在路由层执行业务规则；统一走 AnalyticsAggregator（§12.2 审计查询类）。
 """
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query
 
 from polymarket_trader.api.aggregators import AnalyticsAggregator
 from polymarket_trader.api.deps import build_time_range, get_runtime
-from polymarket_trader.app.analytics_service import AnalyticsService
 
 # 默认窗口：24h；本地常量，不进 Settings。
 DEFAULT_WINDOW_MS: int = 86_400_000
@@ -22,27 +20,17 @@ MAX_WINDOW_MS: int = 7 * 24 * 60 * 60 * 1000
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
-def get_analytics_service(request: Request) -> AnalyticsService:
-    provider = getattr(request.app.state, "get_analytics_service", None)
-    if callable(provider):
-        service = provider()
-        if service is not None:
-            return service
-    service = getattr(request.app.state, "analytics_service", None)
-    if service is None:
-        raise HTTPException(status_code=503, detail="analytics_service_unavailable")
-    return service
-
-
 @router.get("/funnel")
 async def get_funnel(
     window_ms: int = Query(default=DEFAULT_WINDOW_MS, gt=0, le=MAX_WINDOW_MS),
     end_ms: int | None = Query(default=None, ge=0),
     league: str | None = Query(default=None, min_length=1, max_length=64),
     market_type: str | None = Query(default=None, min_length=1, max_length=64),
-    service: AnalyticsService = Depends(get_analytics_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, Any]:
-    return await service.funnel(
+    return await AnalyticsAggregator(
+        session_factory=runtime.db_session_factory,
+    ).funnel(
         window_ms=window_ms,
         end_ms=end_ms,
         league=league,
@@ -56,9 +44,11 @@ async def get_rejections(
     end_ms: int | None = Query(default=None, ge=0),
     league: str | None = Query(default=None, min_length=1, max_length=64),
     market_type: str | None = Query(default=None, min_length=1, max_length=64),
-    service: AnalyticsService = Depends(get_analytics_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, Any]:
-    return await service.rejections(
+    return await AnalyticsAggregator(
+        session_factory=runtime.db_session_factory,
+    ).rejections(
         window_ms=window_ms,
         end_ms=end_ms,
         league=league,
@@ -73,9 +63,11 @@ async def get_execution_quality(
     end_ms: int | None = Query(default=None, ge=0),
     league: str | None = Query(default=None, min_length=1, max_length=64),
     market_type: str | None = Query(default=None, min_length=1, max_length=64),
-    service: AnalyticsService = Depends(get_analytics_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, Any]:
-    return await service.execution_quality(
+    return await AnalyticsAggregator(
+        session_factory=runtime.db_session_factory,
+    ).execution_quality(
         window_ms=window_ms,
         end_ms=end_ms,
         league=league,
@@ -92,9 +84,9 @@ async def get_edge_realization(
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, Any]:
     """Edge 实现度：预测 edge vs 实际 per-share 回报。"""
-
-    aggregator = AnalyticsAggregator(session_factory=runtime.db_session_factory)
-    return await aggregator.edge_realization_snapshot(
+    return await AnalyticsAggregator(
+        session_factory=runtime.db_session_factory,
+    ).edge_realization_snapshot(
         limit=limit,
         condition_id=condition_id,
         time_range=build_time_range(since=since, until=until),
@@ -111,9 +103,9 @@ async def list_risk_rejections(
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, Any]:
     """风控结构化拒绝详情。"""
-
-    aggregator = AnalyticsAggregator(session_factory=runtime.db_session_factory)
-    return await aggregator.list_risk_rejections(
+    return await AnalyticsAggregator(
+        session_factory=runtime.db_session_factory,
+    ).list_risk_rejections(
         limit=limit,
         offset=offset,
         condition_id=condition_id,
@@ -130,9 +122,9 @@ async def aggregate_risk_rejections(
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, Any]:
     """按 check_name 和 failed_field 聚合风控拒绝。"""
-
-    aggregator = AnalyticsAggregator(session_factory=runtime.db_session_factory)
-    return await aggregator.aggregate_risk_rejections(
+    return await AnalyticsAggregator(
+        session_factory=runtime.db_session_factory,
+    ).aggregate_risk_rejections(
         sample_limit=sample_limit,
         condition_id=condition_id,
         time_range=build_time_range(since=since, until=until),
@@ -148,11 +140,11 @@ async def get_calibration(
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, Any]:
     """定价模型校准 + Brier score / log-loss。"""
-
     from decimal import Decimal
 
-    aggregator = AnalyticsAggregator(session_factory=runtime.db_session_factory)
-    return await aggregator.calibration_snapshot(
+    return await AnalyticsAggregator(
+        session_factory=runtime.db_session_factory,
+    ).calibration_snapshot(
         bucket_size=Decimal(str(bucket_size)),
         time_range=build_time_range(since=since, until=until),
         sample_limit=sample_limit,
@@ -168,15 +160,15 @@ async def get_missed_opportunities(
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, Any]:
     """被风控/策略拒绝的决策事后盈利模拟。"""
-
     from decimal import Decimal
 
-    aggregator = AnalyticsAggregator(session_factory=runtime.db_session_factory)
-    return await aggregator.missed_opportunities_snapshot(
+    return await AnalyticsAggregator(
+        session_factory=runtime.db_session_factory,
+    ).missed_opportunities_snapshot(
         limit=limit,
         per_decision_usdc=Decimal(str(per_decision_usdc)),
         time_range=build_time_range(since=since, until=until),
     )
 
 
-__all__ = ("router", "DEFAULT_WINDOW_MS", "MAX_WINDOW_MS", "get_analytics_service")
+__all__ = ("router", "DEFAULT_WINDOW_MS", "MAX_WINDOW_MS")

@@ -788,3 +788,163 @@ async def _win_rate_breakdown(
 AnalyticsAggregator.error_rate_timeseries = _error_rate_timeseries  # type: ignore[attr-defined]
 AnalyticsAggregator.guard_stats_snapshot = _guard_stats_snapshot  # type: ignore[attr-defined]
 AnalyticsAggregator.win_rate_breakdown = _win_rate_breakdown  # type: ignore[attr-defined]
+
+
+# ===== 漏斗 / 拒绝原因 top / 执行质量（W5 收口：原 AnalyticsService 三方法） =====
+# 这 3 个查询的窗口语义（window_ms + end_ms → start_dt/end_dt）与 AnalyticsAggregator
+# 其他方法（time_range 风格）不一致，保留入参形态以维持前端契约 byte-for-byte 一致。
+
+
+def _resolve_window(
+    *, window_ms: int, end_ms: int | None
+) -> tuple[datetime, datetime]:
+    from datetime import datetime as _dt, timezone as _tz
+    if window_ms <= 0:
+        raise ValueError("window_ms must be positive")
+    end_dt = (
+        _dt.fromtimestamp(end_ms / 1000.0, tz=_tz.utc)
+        if end_ms is not None else _dt.now(_tz.utc)
+    )
+    start_dt = _dt.fromtimestamp(
+        (int(end_dt.timestamp() * 1000) - window_ms) / 1000.0, tz=_tz.utc,
+    )
+    return start_dt, end_dt
+
+
+def _round_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return round(float(value), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _funnel(
+    self: AnalyticsAggregator,
+    *,
+    window_ms: int,
+    end_ms: int | None = None,
+    league: str | None = None,
+    market_type: str | None = None,
+) -> dict[str, Any]:
+    """入场漏斗各阶段计数（discovered → eligible → candidate → accepted → ...）。"""
+    from polymarket_trader.infra.db.analytics_queries import (
+        FUNNEL_STAGES,
+        fetch_funnel_counts,
+    )
+
+    if self._session_factory is None:
+        return {
+            "window_ms": window_ms,
+            "stages": [{"name": name, "count": 0} for name in FUNNEL_STAGES],
+            "filters": {"league": league, "market_type": market_type},
+        }
+    start_dt, end_dt = _resolve_window(window_ms=window_ms, end_ms=end_ms)
+    async with self._session_factory() as session:
+        counts = await fetch_funnel_counts(
+            session,
+            window_start=start_dt, window_end=end_dt,
+            league=league, market_type=market_type,
+        )
+    stages = [
+        {"name": name, "count": int(counts.get(name, 0))} for name in FUNNEL_STAGES
+    ]
+    return {
+        "window_ms": window_ms,
+        "generated_at": end_dt.isoformat(),
+        "stages": stages,
+        "filters": {"league": league, "market_type": market_type},
+    }
+
+
+async def _rejections(
+    self: AnalyticsAggregator,
+    *,
+    window_ms: int,
+    end_ms: int | None = None,
+    league: str | None = None,
+    market_type: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """拒绝原因 Top N（按 reason 聚合，按出现次数降序）。"""
+    from polymarket_trader.infra.db.analytics_queries import fetch_rejection_reasons
+
+    if self._session_factory is None:
+        return {
+            "window_ms": window_ms,
+            "total": 0,
+            "top": [],
+            "filters": {"league": league, "market_type": market_type},
+        }
+    start_dt, end_dt = _resolve_window(window_ms=window_ms, end_ms=end_ms)
+    async with self._session_factory() as session:
+        total, rows = await fetch_rejection_reasons(
+            session,
+            window_start=start_dt, window_end=end_dt,
+            league=league, market_type=market_type, limit=limit,
+        )
+    top: list[dict[str, Any]] = []
+    for row in rows:
+        count = int(row["count"])
+        pct = (count / total * 100.0) if total > 0 else 0.0
+        top.append({"key": str(row["key"]), "count": count, "pct": round(pct, 4)})
+    return {
+        "window_ms": window_ms,
+        "generated_at": end_dt.isoformat(),
+        "total": total,
+        "top": top,
+        "filters": {"league": league, "market_type": market_type},
+    }
+
+
+async def _execution_quality(
+    self: AnalyticsAggregator,
+    *,
+    window_ms: int,
+    end_ms: int | None = None,
+    league: str | None = None,
+    market_type: str | None = None,
+) -> dict[str, Any]:
+    """订单执行质量（submit / fill latency 分位 + slippage bps）。"""
+    from polymarket_trader.infra.db.analytics_queries import fetch_execution_quality
+
+    if self._session_factory is None:
+        return {
+            "window_ms": window_ms,
+            "submit_latency_ms": {"p50": None, "p95": None},
+            "fill_latency_ms": {"p50": None, "p95": None},
+            "slippage_bps": {"mean": None, "p95": None},
+            "sample_size": 0,
+            "filters": {"league": league, "market_type": market_type},
+        }
+    start_dt, end_dt = _resolve_window(window_ms=window_ms, end_ms=end_ms)
+    async with self._session_factory() as session:
+        data = await fetch_execution_quality(
+            session,
+            window_start=start_dt, window_end=end_dt,
+            league=league, market_type=market_type,
+        )
+    return {
+        "window_ms": window_ms,
+        "generated_at": end_dt.isoformat(),
+        "submit_latency_ms": {
+            "p50": _round_or_none(data.get("submit_p50")),
+            "p95": _round_or_none(data.get("submit_p95")),
+        },
+        "fill_latency_ms": {
+            "p50": _round_or_none(data.get("fill_p50")),
+            "p95": _round_or_none(data.get("fill_p95")),
+        },
+        "slippage_bps": {
+            "mean": _round_or_none(data.get("slip_mean")),
+            "p95": _round_or_none(data.get("slip_p95")),
+        },
+        "sample_size": int(data.get("sample_size") or 0),
+        "filters": {"league": league, "market_type": market_type},
+    }
+
+
+AnalyticsAggregator.funnel = _funnel  # type: ignore[attr-defined]
+AnalyticsAggregator.rejections = _rejections  # type: ignore[attr-defined]
+AnalyticsAggregator.execution_quality = _execution_quality  # type: ignore[attr-defined]

@@ -14,7 +14,6 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 
 from polymarket_trader.app.admin_service import AdminService
-from polymarket_trader.app.analytics_service import AnalyticsService, SessionFactoryAnalyticsDAO
 from polymarket_trader.config import Settings
 from polymarket_trader.api.routes import (
     allocations,
@@ -108,9 +107,6 @@ def create_app(
             bound_service = bound_service.bind_runtime(bound_runtime)
         app.state.runtime = bound_runtime
         app.state.admin_service = bound_service
-        app.state.analytics_service = AnalyticsService(
-            dao=SessionFactoryAnalyticsDAO(bound_runtime.db_session_factory),
-        )
         app.state.get_runtime = lambda: app.state.runtime
         app.state.get_admin_service = lambda: app.state.admin_service
         if getattr(bound_runtime, "admin_service", None) is None:
