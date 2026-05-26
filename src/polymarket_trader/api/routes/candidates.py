@@ -5,7 +5,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.deps import get_admin_service
+from polymarket_trader.api.aggregators import CandidateAggregator
+from polymarket_trader.api.deps import get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
@@ -54,9 +55,10 @@ async def list_candidates(
     accepted: bool | None = Query(default=None),
     confirmable: bool | None = Query(default=None),
     league: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    return await service.list_strategy_candidates(
+    aggregator = CandidateAggregator(runtime=runtime)
+    return await aggregator.list_strategy_candidates(
         limit=limit,
         offset=offset,
         condition_id=condition_id,

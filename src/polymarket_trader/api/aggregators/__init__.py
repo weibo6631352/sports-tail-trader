@@ -36,6 +36,7 @@ runtime/data_graph.py (DataGraph)
 """
 
 from .analytics_aggregator import AnalyticsAggregator
+from .candidate_aggregator import CandidateAggregator
 from .market_detail_aggregator import MarketDetailAggregator
 from .outbox_aggregator import OutboxAggregator
 from .portfolio_aggregator import PortfolioAggregator, PortfolioExposureView
@@ -47,6 +48,7 @@ from .timeline_aggregator import TimelineAggregator
 
 __all__ = [
     "AnalyticsAggregator",
+    "CandidateAggregator",
     "MarketDetailAggregator",
     "OutboxAggregator",
     "PortfolioAggregator",
