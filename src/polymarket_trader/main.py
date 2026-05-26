@@ -1108,7 +1108,7 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
     # 唯一权威），所以 poller 调到也 no-op，不抢 store。
     runtime.scheduler.register_job(
         "user_account_poll",
-        lambda: runtime.reconcile_worker._authority_refresher.refresh_account(
+        lambda: runtime.reconcile_worker.authority_refresher.refresh_account(
             trace_id=f"user-account-poll-{uuid4().hex}",
             markets=(),
         ),
