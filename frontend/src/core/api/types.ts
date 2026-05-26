@@ -52,9 +52,15 @@ export type ReadinessSnapshot = {
 export type RuntimeIdentity = {
   wallet_address?: string | null
   funder_address?: string | null
+  signature_type?: number | null
+  profile_address?: string | null
   profile_name?: string | null
   profile_pseudonym?: string | null
-  profile_avatar?: string | null
+  // Polymarket gamma public-profile API 返回 `profileImage`,后端 normalize 为
+  // profile_image —— 之前前端误用 profile_avatar 导致头像取不到。
+  profile_image?: string | null
+  profile_verified?: boolean | null
+  profile_x_username?: string | null
 }
 
 export type RuntimeSettings = {
@@ -210,7 +216,12 @@ export type FeePreview = {
 export type MarketView = {
   market_slug: string
   condition_id: string
+  event_id?: string | null
+  event_title?: string | null
   event_slug?: string | null
+  icon_url?: string | null
+  end_date?: Iso | null
+  game_start_time?: Iso | null
   category?: string | null
   league?: string | null
   market_type?: string | null
