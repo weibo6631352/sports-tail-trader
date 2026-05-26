@@ -5,7 +5,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.aggregators import CandidateAggregator, RuntimeAggregator
+from polymarket_trader.api.aggregators import (
+    CandidateAggregator,
+    RuntimeAggregator,
+    SportsQueryAggregator,
+)
 from polymarket_trader.api.deps import get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
@@ -83,13 +87,13 @@ async def get_data_freshness(runtime: Any = Depends(get_runtime)) -> dict[str, o
 
 @router.get("/live-states")
 async def list_live_states(
-    # 默认上限放大到 2000：直播状态条数可能上千，过小的 limit 会把正在直播的
-    # 赛事截掉。服务层已把 phase=live 排到最前，limit 再大也不漏直播。
     limit: int = Query(default=2000, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    return await service.list_sports_live_states(limit=limit, offset=offset)
+    return await SportsQueryAggregator(runtime=runtime).list_sports_live_states(
+        limit=limit, offset=offset,
+    )
 
 
 @router.get("/live-source-gaps")
@@ -98,9 +102,9 @@ async def list_live_source_gaps(
     offset: int = Query(default=0, ge=0),
     prefix: str | None = Query(default=None),
     include_future_schedule: bool = Query(default=False),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    return await service.list_sports_live_source_gaps(
+    return await SportsQueryAggregator(runtime=runtime).list_sports_live_source_gaps(
         limit=limit,
         offset=offset,
         prefix=prefix,
