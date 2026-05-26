@@ -34,10 +34,11 @@ from polymarket_trader.app.admin_controls_mixin import AdminControlsMixin
 
 @dataclass(frozen=True, slots=True)
 class AdminService(AdminControlsMixin):
-    """Coordinates read-only admin queries and controlled manual operations.
+    """Coordinates controlled manual operations.
 
-    Read methods 来自 ``AdminQueryMixin``；受控操作来自 ``AdminControlsMixin``；
-    私有 helper（_serializer / _runtime_view / _resolve_market / ...）保留在本类内。
+    受控操作来自 ``AdminControlsMixin``；本类只保留 helper（_serializer /
+    _resolve_market / _account_snapshot / ...）供 mixin 调用。所有只读查询
+    已迁到 ``api/aggregators/*``，本类不再装查询逻辑。
     """
 
     runtime: RuntimeComponents | None = None
@@ -334,9 +335,6 @@ class AdminService(AdminControlsMixin):
     def _registry_snapshot(self) -> MarketRegistrySnapshot:
         registry = self.runtime.registry if self.runtime else None
         return registry.snapshot() if registry is not None else MarketRegistrySnapshot(tuple())
-
-    def _has_db_session_factory(self) -> bool:
-        return self.runtime is not None and self.runtime.db_session_factory is not None
 
     def _market_ws_snapshot(self, token_id: str) -> OrderbookSnapshot | None:
         worker = self.runtime.market_ws_worker if self.runtime else None

@@ -12,8 +12,8 @@
 # 设计
 
 aggregator 持 `session_factory` + `runtime`（用于无 DB 时降级到内存快照）+
-`serializer`（共享 admin_serialization 复用，不为了 §10 强行拆——serializer
-是稳定 utility，多 aggregator 共享反而消除重复）。
+`serializer`（`api/serialization/admin.py:AdminSerializer`，多 aggregator
+共享同一份 wire-format 实现）。
 
 `session_factory=None` 时 → 返回空 page（前端友好降级，不抛 500）。
 """

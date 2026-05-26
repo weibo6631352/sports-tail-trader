@@ -52,7 +52,6 @@ from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.serialization import decimal_text, page_payload
 
 
-# 旧的 admin_service_helpers 排序字段——本 aggregator 唯一使用方，下沉至此
 MarketFeeSortField = Literal[
     "market_slug",
     "fee_rate_bps",
