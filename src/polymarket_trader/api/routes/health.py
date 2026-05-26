@@ -27,34 +27,6 @@ async def health(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
     return {"status": report.status, "detail": report.detail}
 
 
-@router.get("/health/live_sources")
-async def health_live_sources(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
-    """每个 (provider, sport) bucket 健康——stale > 60s → degraded；feeder FAILED → unhealthy。"""
-    report = _reporter(runtime).live_sources()
-    return {"status": report.status, "detail": report.detail}
-
-
-@router.get("/health/ws")
-async def health_ws(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
-    """market_ws + user_ws 连接健康——connected=False or 30s 无消息 → degraded。"""
-    report = _reporter(runtime).ws()
-    return {"status": report.status, "detail": report.detail}
-
-
-@router.get("/health/decision")
-async def health_decision(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
-    """event_bus 队列深度——超过 warn 阈值 → degraded。"""
-    report = _reporter(runtime).decision()
-    return {"status": report.status, "detail": report.detail}
-
-
-@router.get("/health/account")
-async def health_account(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
-    """账户健康——balance<0 → unhealthy；last_reconcile > 300s → degraded。"""
-    report = _reporter(runtime).account()
-    return {"status": report.status, "detail": report.detail}
-
-
 @router.get("/ready")
 async def ready(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
     return RuntimeAggregator(runtime=runtime).readiness_snapshot()

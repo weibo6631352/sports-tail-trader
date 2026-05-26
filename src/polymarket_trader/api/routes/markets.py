@@ -59,18 +59,6 @@ async def get_market_detail(
     return payload
 
 
-@router.post("/batch")
-async def get_markets_batch(
-    condition_ids: list[str],
-    level: Literal["summary", "detail"] = Query("summary"),
-    runtime: Any = Depends(get_runtime),
-) -> dict[str, object]:
-    """批量 market 详情——避免 N 次单调（原架构方案 §12.3 ⑤）。"""
-    aggregator = MarketDetailAggregator(data_graph=runtime.data_graph)
-    items = aggregator.batch_detail(tuple(condition_ids), level=level)
-    return {"markets": list(items), "count": len(items)}
-
-
 @router.get("/orderbook")
 async def get_market_orderbook(
     market_slug: str | None = Query(default=None),
@@ -123,92 +111,6 @@ async def get_market_midpoint(
     if payload is None:
         raise HTTPException(status_code=404, detail="market not found")
     return payload
-
-
-@router.get("/orderbook-direction")
-async def get_orderbook_direction(
-    token_id: str = Query(min_length=1),
-    window_seconds: float | None = Query(default=None, ge=0.5, le=120.0),
-    windows: str | None = Query(default=None, description="逗号分隔的多窗口秒数,如 2,5,10,30"),
-    runtime: Any = Depends(get_runtime),
-) -> dict[str, object]:
-    """读盘口多时点 delta 信号(best bid/ask price + size 变化)。
-
-    单时点 bid/ask 深度比会被 MM 远端"墙"骗;真买卖压来自窗口内 best 价位移 +
-    size 消耗。返回 direction_score [-1,+1] + raw deltas + confidence + samples。
-    每次查询落 audit(ORDERBOOK_DIRECTION_QUERIED),供事后复盘。
-
-    用法:
-    - 单窗口(向后兼容): ``?window_seconds=10`` → 返回扁平 signal dict
-    - 多窗口: ``?windows=2,5,10,30`` → 返回 {token_id, signals: [...]} 一次查询比对各窗口
-    - 都不传时默认 ``window_seconds=10``
-    """
-    if windows is not None:
-        try:
-            window_list = [float(w.strip()) for w in windows.split(",") if w.strip()]
-        except ValueError:
-            raise HTTPException(status_code=422, detail="windows must be comma-separated floats")
-        if not window_list:
-            raise HTTPException(status_code=422, detail="windows must contain at least one value")
-        for w in window_list:
-            if w < 0.5 or w > 120.0:
-                raise HTTPException(status_code=422, detail=f"each window must be in [0.5, 120.0], got {w}")
-        aggregator = MarketMiscAggregator(runtime=runtime, session_factory=runtime.db_session_factory)
-        return await aggregator.get_orderbook_direction_multi(token_id=token_id, windows=tuple(window_list))
-    aggregator = MarketMiscAggregator(runtime=runtime, session_factory=runtime.db_session_factory)
-    return await aggregator.get_orderbook_direction(
-        token_id=token_id, window_seconds=window_seconds if window_seconds is not None else 10.0,
-    )
-
-
-@router.get("/orderbook-depth")
-async def get_orderbook_depth(
-    token_id: str = Query(min_length=1),
-    windows: str = Query(default="2,3,5,10", description="逗号分隔的窗口秒数"),
-    runtime: Any = Depends(get_runtime),
-) -> dict[str, object]:
-    """完整盘口资金分布 + 我方 resting/持仓 + 多窗口波动。"""
-    try:
-        windows_s = tuple(float(w.strip()) for w in windows.split(",") if w.strip())
-    except ValueError:
-        raise HTTPException(status_code=422, detail="windows must be comma-separated floats")
-    if not windows_s:
-        windows_s = (2.0, 3.0, 5.0, 10.0)
-    return MarketMiscAggregator(runtime=runtime).orderbook_depth_snapshot(
-        token_id=token_id, windows_s=windows_s,
-    )
-
-
-@router.get("/liquidity-summary")
-async def get_liquidity_summary(
-    top_n: int = Query(default=20, ge=1, le=100),
-    runtime: Any = Depends(get_runtime),
-) -> dict[str, object]:
-    """全市场盘口资金聚合 + 双边比例 + whale 大单 + by_classification + top N 深度。"""
-    return MarketMiscAggregator(runtime=runtime).liquidity_summary_snapshot(top_n=top_n)
-
-
-@router.get("/event-bundle")
-async def get_event_bundle(
-    event_slug: str = Query(min_length=1),
-    runtime: Any = Depends(get_runtime),
-) -> dict[str, object]:
-    """一个 event 下所有 condition_id 的市场聚合视图（ML/Totals/Spreads/分节 prop 一次拿）。"""
-    return MarketMiscAggregator(runtime=runtime).event_bundle_snapshot(event_slug=event_slug)
-
-
-@router.get("/data-health")
-async def get_market_data_health(
-    condition_id: str | None = Query(default=None),
-    token_id: str | None = Query(default=None),
-    runtime: Any = Depends(get_runtime),
-) -> dict[str, object]:
-    """单市场所有数据源连接状态 + 新鲜度。"""
-    if condition_id is None and token_id is None:
-        raise HTTPException(status_code=422, detail="condition_id or token_id required")
-    return MarketMiscAggregator(runtime=runtime).market_data_health_snapshot(
-        condition_id=condition_id, token_id=token_id,
-    )
 
 
 @router.get("/orderbook-history")
