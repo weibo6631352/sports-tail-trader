@@ -6,7 +6,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.aggregators import MarketDetailAggregator
+from polymarket_trader.api.aggregators import MarketDetailAggregator, SettlementAggregator
 from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.api.rate_limit import rate_limit
 from polymarket_trader.app.admin_service import AdminService
@@ -352,13 +352,14 @@ class SettleMarketRequest(BaseModel):
 @router.get("/{condition_id}/settlement")
 async def get_market_settlement(
     condition_id: str,
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """单市场最新 settlement——含 winning_token_id / outcome / 时间戳，加上
-    我们最后一次 accepted 决策的 fair_value 偏差（``outcome - fair``，正数
-    表示低估了赢家）。"""
+    """单市场最新 settlement（走 SettlementAggregator）— 含 winning_token_id /
+    outcome / 时间戳，加上我们最后一次 accepted 决策的 fair_value 偏差
+    （``outcome - fair``，正数表示低估了赢家）。"""
 
-    payload = await service.get_market_settlement(condition_id=condition_id)
+    aggregator = SettlementAggregator(session_factory=runtime.db_session_factory)
+    payload = await aggregator.settlement_for(condition_id)
     if payload is None:
         raise HTTPException(status_code=404, detail="settlement_not_found")
     return payload
@@ -371,11 +372,12 @@ async def list_market_settlements(
     condition_id: str | None = Query(default=None),
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """市场结算历史——按 ``event_title='market_settled'`` 投影。"""
+    """市场结算历史（走 SettlementAggregator）— 按 ``event_title='market_settled'`` 投影。"""
 
-    return await service.list_market_settlements(
+    aggregator = SettlementAggregator(session_factory=runtime.db_session_factory)
+    return await aggregator.list_settlements(
         limit=limit,
         offset=offset,
         condition_id=condition_id,

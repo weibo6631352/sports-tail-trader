@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
 
-from polymarket_trader.api.deps import build_time_range, get_admin_service
+from polymarket_trader.api.aggregators import TimelineAggregator
+from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
 router = APIRouter(prefix="/audit-events", tags=["audit-events"])
@@ -23,9 +26,11 @@ async def list_audit_events(
     # 默认 False:大表 count subquery 每次 ~870ms,monitor 高频拉取不需要 total.
     # 前端如需总数显式传 include_total=true.
     include_total: bool = Query(default=False),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    return await service.list_audit_events(
+    """走 TimelineAggregator（基于 DB session_factory）—— admin_query/timeline.py 已被替代。"""
+    aggregator = TimelineAggregator(session_factory=runtime.db_session_factory)
+    return await aggregator.list_audit_events(
         limit=limit,
         offset=offset,
         trace_id=trace_id,

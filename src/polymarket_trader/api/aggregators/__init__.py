@@ -38,12 +38,16 @@ runtime/data_graph.py (DataGraph)
 from .market_detail_aggregator import MarketDetailAggregator
 from .portfolio_aggregator import PortfolioAggregator, PortfolioExposureView
 from .position_aggregator import PositionAggregator
+from .settlement_aggregator import SettlementAggregator
 from .sports_live_aggregator import SportsLiveAggregator
+from .timeline_aggregator import TimelineAggregator
 
 __all__ = [
     "MarketDetailAggregator",
     "PortfolioAggregator",
     "PortfolioExposureView",
     "PositionAggregator",
+    "SettlementAggregator",
     "SportsLiveAggregator",
+    "TimelineAggregator",
 ]
