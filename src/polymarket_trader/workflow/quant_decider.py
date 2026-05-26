@@ -325,7 +325,7 @@ def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Entry
         if math_view is not None:
             return math_view
 
-        cap = config.tail_locked_outcome_max_entry_price
+        cap = config.tail_implied_fallback_max_entry_price
         implied_p = implied_fair_value_from_price_cap(cap, min_edge_required=implied_min_edge_required)
         # 动态 conf：流动性薄 / 价差宽时 implied_p 更不可靠 → κ 进一步收缩。
         # 公式 = base × min(1, depth/baseline) × max(0.25, 1 - spread/widening)

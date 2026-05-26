@@ -34,7 +34,6 @@ from polymarket_trader.workflow.outright.types import (
     OutrightEvaluation,
     OutrightRejectReason,
     outright_action_for_permission,
-    to_tail_action,
 )
 from polymarket_trader.workflow.tail.types import ExecutionPermission
 
@@ -128,7 +127,6 @@ def evaluate_outright_opportunity(
         "exit_price_target": str(exit_target),
         "best_ask": str(best_ask),
         "snapshot_age_seconds": age,
-        "tail_action": to_tail_action(action).value,
     }
     if implied is not None:
         metadata["implied_mid_prob"] = str(implied)

@@ -7,7 +7,6 @@ from decimal import Decimal, ROUND_CEILING
 
 from polymarket_trader.domain.market import TradingStatus
 from polymarket_trader.domain.order import Order, OrderSide, OrderType
-from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.domain.decisions import DecisionContext, QuantDecision, TradingDecision
 
@@ -102,27 +101,8 @@ def build_recovery_quant_decision(
                 _open_order_shares(order)
             )
 
-    for position in positions:
-        open_exit_shares = open_exit_by_token.get(position.token_id, Decimal("0"))
-        uncovered_shares = position.shares - open_exit_shares
-        if uncovered_shares <= Decimal("0"):
-            continue
-        # 未覆盖持仓不由恢复侧挂静态价 SELL：动态退出引擎 ``decide_exit`` 每个
-        # reconcile 周期都会从实时盘口重估 HOLD/EXIT 并下单。恢复侧仅在 missing_target
-        # （动态引擎判定无法兜底）时考虑补 profit-take 补单。
-        if not missing_target:
-            continue
-        if missing_target and context.market.trading_status != TradingStatus.ELIGIBLE:
-            continue
-        profit_take_action = _recovery_profit_take_action(
-            config,
-            context,
-            position,
-            uncovered_shares=uncovered_shares,
-            recovery_metadata=recovery_metadata,
-        )
-        if profit_take_action is not None:
-            actions.append(profit_take_action)
+    # 未覆盖持仓不由恢复侧挂静态价 SELL：动态退出引擎 ``decide_exit`` 每个 reconcile
+    # 周期都会从实时盘口重估 HOLD/EXIT 并下单——恢复侧不再补 profit-take 单。
 
     pause_trading = context.market.trading_status in {
         TradingStatus.PAUSED,
@@ -177,100 +157,12 @@ def _is_open_exit_order(order: Order) -> bool:
     return order.side == OrderSide.SELL and order.open
 
 
-def _is_profit_take_exit_order(order: Order) -> bool:
-    """识别策略恢复侧或入场后跟单生成的 profit-take SELL。"""
-
-    return order.reason in {"strategy_profit_take", "recovery_profit_take"}
-
-
 def _open_order_shares(order: Order) -> Decimal:
     if order.remaining_shares is not None:
         return max(order.remaining_shares, Decimal("0"))
     if order.size_shares is not None:
         return max(order.size_shares, Decimal("0"))
     return Decimal("0")
-
-
-def _recovery_profit_take_action(
-    config: TradingWorkflowConfig,
-    context: DecisionContext,
-    position: Position,
-    *,
-    uncovered_shares: Decimal,
-    recovery_metadata: dict[str, object],
-) -> TradingDecision | None:
-    """给历史遗留的高成本价未覆盖仓位补一张小利润 SELL。
-
-    该路径只处理已经实际持仓的退出，不新增 BUY，也不绕过交易主链路。低均价仓位
-    仍保持 settlement-only，避免为了很小价差长期挂出不必要的 SELL。
-    """
-
-    if not config.tail_recovery_profit_take_enabled:
-        return None  # 功能未开启，跳过止盈补单。
-    if position.shares <= Decimal("0") or position.cost_usdc <= Decimal("0"):
-        return None  # 仓位数据异常（空仓或零成本），无法计算均价，跳过。
-    average_price = position.cost_usdc / position.shares
-    if average_price < config.tail_recovery_profit_take_min_avg_price or average_price >= Decimal("1"):
-        return None  # 均价过低（结算效率合理，不需要提前止盈）或异常越界。
-    target_price, price_source = _recovery_profit_take_price(context, position.token_id, average_price)
-    if target_price is None or target_price > Decimal("1"):
-        return None  # 无法确定有效止盈价（盘口缺失或价格越界）。
-    expected_profit = uncovered_shares * (target_price - average_price)
-    if expected_profit < config.tail_profit_take_min_profit_usdc:
-        return None  # 预期毛利润低于最小阈值，不值得挂单。
-    exit_metadata = dict(recovery_metadata)
-    exit_metadata.update(
-        build_position_plan_metadata(
-            config,
-            context,
-            token_id=position.token_id,
-            source_reason="recovery_profit_take",
-            target_size_shares=uncovered_shares,
-        )
-    )
-    exit_metadata.update(
-        {
-            "exit_mode": "profit_take",
-            "exit_source_reason": "recovery_profit_take",
-            "profit_take_target_price": str(target_price),
-            "profit_take_price_source": price_source,
-            "profit_take_expected_profit_usdc": _decimal_metadata_text(expected_profit),
-            "recovery_position_avg_price": _decimal_metadata_text(average_price),
-        }
-    )
-    plan = exit_metadata.get("position_plan")
-    if isinstance(plan, dict):
-        plan["target_exit_price"] = str(target_price)
-        plan["primary_action"] = "place_recovery_profit_take_gtc_sell"
-        plan["settlement_rule"] = "keep_profit_take_order_until_fill_or_authoritative_resolution"
-        plan["recovery_rule"] = "preserve_existing_profit_take_exit_order"
-    exit_metadata["exit_target_price"] = str(target_price)
-    return TradingDecision.sell(
-        reason="recovery_profit_take",
-        token_id=position.token_id,
-        price=target_price,
-        size_shares=uncovered_shares,
-        market_slug=position.market_slug or (context.market.market_slug if context.market is not None else None),
-        metadata=exit_metadata,
-    )
-
-
-def _recovery_profit_take_price(
-    context: DecisionContext,
-    token_id: str,
-    average_price: Decimal,
-) -> tuple[Decimal | None, str]:
-    """优先使用当前可成交 bid，否则退回均价上方一档止盈价。"""
-
-    tick_price = _next_tick_price(context, average_price)
-    orderbook = _orderbook_for_token(context, token_id)
-    best_bid = None if orderbook is None else orderbook.best_bid
-    if best_bid is not None and best_bid > average_price and (
-        tick_price is None or best_bid > tick_price
-    ):
-        tick_size = resolve_tick_size(orderbook, context.market)
-        return cap_price_to_clob_limit(best_bid, tick_size=tick_size), "best_bid"
-    return tick_price, "next_tick"
 
 
 def _orderbook_for_token(context: DecisionContext, token_id: str):

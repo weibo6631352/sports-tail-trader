@@ -21,7 +21,6 @@ from polymarket_trader.config import load_strategy_config
 from polymarket_trader.workflow.tail import (
     ExecutionPermission,
     SportsMarketType,
-    TailPolicy,
 )
 
 
@@ -224,15 +223,13 @@ class TradingWorkflowConfig:
         SportsMarketType.SPREADS,
         SportsMarketType.BINARY_PROP,
     )
-    tail_totals_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
-    tail_moneyline_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
-    tail_spreads_execution_permission: ExecutionPermission = ExecutionPermission.AUTO_EXECUTE
     tail_min_entry_price: Decimal = Decimal("0.10")
     tail_totals_max_entry_price: Decimal = Decimal("0.99")
     tail_moneyline_max_entry_price: Decimal = Decimal("0.98")
-    # 锁定结果的入场价上限。锁定方向必然结算到 1.0，0.98 保证 ≥2% 确定毛利——
-    # Polymarket 手续费 ∝ price×(1-price)，p=0.98 处手续费极小，2% 毛利稳覆盖。
-    tail_locked_outcome_max_entry_price: Decimal = Decimal("0.98")
+    # implied fair value 路径的入场价上限（无 math_lock 时 Kelly fallback 用）。
+    # 0.98 保证 ≥2% 确定毛利—— Polymarket 手续费 ∝ price×(1-price)，
+    # p=0.98 处手续费极小，2% 毛利稳覆盖。
+    tail_implied_fallback_max_entry_price: Decimal = Decimal("0.98")
     tail_spreads_max_entry_price: Decimal = Decimal("0.96")
     tail_min_liquidity_usdc: Decimal = Decimal("1")
     # default 兜底阈值：basketball/volleyball/amfootball/hockey 等走 inplay GZIP 的运动
@@ -262,18 +259,6 @@ class TradingWorkflowConfig:
     # 直播信号意味着该 market 已脱离入场窗口（赛事已结束 / 联赛不被任何数据源覆盖），
     # 继续扫描只是 noise。reconcile 看到 pause 后会把 market 从订阅集合排除。
     tail_stale_no_live_state_seconds: int = 86_400
-    tail_max_under_seconds_remaining: int = 30
-    tail_min_under_safety_margin: Decimal = Decimal("2")
-    # MLB Under 总分入场最早可考虑的局数；早于此局一律拒绝。
-    tail_mlb_under_min_inning: int = 6
-    # MLB Under 每提前一局（早于 9 局）额外要求的 safety margin。
-    tail_mlb_under_inning_margin_step: Decimal = Decimal("2")
-    tail_min_moneyline_lead: int = 6
-    tail_soccer_min_moneyline_lead: int = 1
-    tail_hockey_min_moneyline_lead: int = 1
-    tail_mlb_eighth_moneyline_min_lead: int = 2
-    tail_mlb_ninth_moneyline_min_lead: int = 3
-    tail_min_spread_safety_margin: Decimal = Decimal("2")
     # 单场景 (single-game tail) implied fair value 公式：``cap = fair × (1 - edge_required)``
     # 解出 fair。500 bps = 5% 表示策略相信"fair 比 cap 至少高 5%"。
     # 用于 Kelly sizing 的 prob_p。outright path 直接用 the-odds-api 真概率。
@@ -369,8 +354,6 @@ class TradingWorkflowConfig:
     # 动态结算时间估算：live 时 = ceil(seconds_remaining/60) + buffer；
     # 已结束时 = buffer；无比赛状态时回退 tail_settlement_hold_minutes。
     tail_settlement_buffer_minutes: int = 60
-    tail_recovery_profit_take_enabled: bool = True
-    tail_recovery_profit_take_min_avg_price: Decimal = Decimal("0.90")
 
     # Series 结算时间估算：每场比赛间隔（包含主客场轮换/交通/休息日）。
     # NBA/NHL 季后赛典型约 2-3 天；使用偏保守的 2.5 天作为默认。
@@ -446,37 +429,6 @@ class TradingWorkflowConfig:
     # 仅当前体育扫尾策略关心；framework Settings 不持有，CLAUDE.md §10。
     league_source_affinity: Mapping[str, tuple[str, ...]] = field(
         default_factory=_default_league_source_affinity
-    )
-
-
-def tail_policy_from_config(config: TradingWorkflowConfig) -> TailPolicy:
-    """把当前策略配置转换成体育扫尾纯业务策略参数。"""
-
-    return TailPolicy(
-        enabled_market_types=config.tail_enabled_market_types,
-        totals_execution_permission=config.tail_totals_execution_permission,
-        moneyline_execution_permission=config.tail_moneyline_execution_permission,
-        spreads_execution_permission=config.tail_spreads_execution_permission,
-        min_entry_price=config.tail_min_entry_price,
-        totals_max_entry_price=config.tail_totals_max_entry_price,
-        moneyline_max_entry_price=config.tail_moneyline_max_entry_price,
-        locked_outcome_max_entry_price=config.tail_locked_outcome_max_entry_price,
-        spreads_max_entry_price=config.tail_spreads_max_entry_price,
-        min_liquidity_usdc=config.tail_min_liquidity_usdc,
-        max_game_state_age_seconds=config.tail_max_game_state_age_seconds,
-        baseball_max_game_state_age_seconds=config.tail_baseball_max_game_state_age_seconds,
-        tennis_max_game_state_age_seconds=config.tail_tennis_max_game_state_age_seconds,
-        esports_max_game_state_age_seconds=config.tail_esports_max_game_state_age_seconds,
-        max_under_seconds_remaining=config.tail_max_under_seconds_remaining,
-        min_under_safety_margin=config.tail_min_under_safety_margin,
-        mlb_under_min_inning=config.tail_mlb_under_min_inning,
-        mlb_under_inning_margin_step=config.tail_mlb_under_inning_margin_step,
-        min_moneyline_lead=config.tail_min_moneyline_lead,
-        soccer_min_moneyline_lead=config.tail_soccer_min_moneyline_lead,
-        hockey_min_moneyline_lead=config.tail_hockey_min_moneyline_lead,
-        mlb_eighth_moneyline_min_lead=config.tail_mlb_eighth_moneyline_min_lead,
-        mlb_ninth_moneyline_min_lead=config.tail_mlb_ninth_moneyline_min_lead,
-        min_spread_safety_margin=config.tail_min_spread_safety_margin,
     )
 
 

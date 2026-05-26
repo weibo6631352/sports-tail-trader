@@ -11,11 +11,11 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Mapping
 
-from polymarket_trader.workflow.tail.types import ExecutionPermission, TailAction
+from polymarket_trader.workflow.tail.types import ExecutionPermission
 
 
 class OutrightAction(StrEnum):
-    """outright 评估后的建议动作。沿用 TailAction 字面值便于 framework 透明传递。"""
+    """outright 评估后的建议动作。"""
 
     REJECT = "reject"
     RECORD = "record"
@@ -86,16 +86,3 @@ def outright_action_for_permission(permission: ExecutionPermission) -> OutrightA
     return OutrightAction.AUTO_EXECUTE
 
 
-# 同侧映射 TailAction，方便 framework 把 outright 决策转成 TradingDecision 时
-# 用同一份枚举做下游 metadata。
-_OUTRIGHT_TO_TAIL_ACTION: dict[OutrightAction, TailAction] = {
-    OutrightAction.REJECT: TailAction.REJECT,
-    OutrightAction.RECORD: TailAction.RECORD,
-    OutrightAction.AUTO_EXECUTE: TailAction.AUTO_EXECUTE,
-    OutrightAction.ALERT: TailAction.ALERT,
-    OutrightAction.MANUAL_CONFIRM: TailAction.MANUAL_CONFIRM,
-}
-
-
-def to_tail_action(action: OutrightAction) -> TailAction:
-    return _OUTRIGHT_TO_TAIL_ACTION.get(action, TailAction.REJECT)

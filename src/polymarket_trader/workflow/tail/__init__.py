@@ -1,13 +1,12 @@
 """体育策略类型集合包。
 
-历史上承载扫尾评估器（OUTCOME_NOT_LOCKED / sport-specific dispatch），
-现已删除——「门禁过了即进场」哲学下，进场判断只剩硬约束（live source / cash /
-best_ask / state），进场后行为全部走 position_plan。
+历史扫尾评估器（TailPolicy / TailEvaluation / SportsTailCandidate / TailAction）
+已删除——「门禁过了即进场」量化哲学下，进场判断只剩硬约束（live source / cash /
+best_ask / state），进场后走 position_plan + 动态退出引擎。
 
 本包只保留：
-- 通用体育类型（re-export from sports_framework）
-- 策略层基础类型（TailPolicy / TailAction / ExecutionPermission，仅供 Kelly /
-  exit overlay 等下游消费）
+- 通用体育类型（re-export from sports）
+- ``ExecutionPermission`` 枚举（outright / series family 权限）
 """
 
 from __future__ import annotations
@@ -26,13 +25,7 @@ from polymarket_trader.sports import (
     live_game_state_from_metadata,
 )
 
-from .types import (
-    ExecutionPermission,
-    SportsTailCandidate,
-    TailAction,
-    TailEvaluation,
-    TailPolicy,
-)
+from .types import ExecutionPermission
 
 __all__ = [
     "BaseballGameState",
@@ -45,10 +38,6 @@ __all__ = [
     "SportsMarketSide",
     "SportsMarketSnapshot",
     "SportsMarketType",
-    "SportsTailCandidate",
-    "TailAction",
-    "TailEvaluation",
-    "TailPolicy",
     "TennisGameState",
     "live_game_state_from_metadata",
 ]
