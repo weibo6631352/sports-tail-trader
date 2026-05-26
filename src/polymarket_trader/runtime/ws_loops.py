@@ -41,16 +41,14 @@ def should_subscribe_ws(
        说"不要对这个市场下单"，订阅 WS 也没决策价值。
     3. **没有 entry_metadata** → 不订阅。说明 live_state_worker 从来没匹配上这个
        market（discovery 找到但没直播数据），盘口推送对决策没意义。
-    4. **OUTRIGHT 旁路** → metadata 有 ``season_odds_snapshot`` → 订阅。赛季级市场
-       不依赖单场直播 "live" phase，靠 season_odds 定价变动触发。
-    5. **live_state_phase != "live"** → 不订阅。phase=ended/paused/scheduled/cancelled/
-       postponed/disputed/retired/unknown 都不该订阅。
-    6. **phase == "live"** → 订阅。"现在在打" 是触发盘口高频推送的唯一非持仓条件。
-
-    注：``live_state_signal_allowed`` 在此 gate 不再单独判断——它由 ``entry_signal_gate``
-    根据 ``event.status`` 决定（LIVE/ENDED → True，其他 → False），而 ``phase ==
-    "live"`` 是 ``signal_allowed=True`` 的更严格子集（ENDED 也 True 但 phase != live
-    时已被拦）。字段仍在 match_service / operator audit 等其他路径使用。
+    4. **live_state_signal_allowed=False** → 不订阅。worker 明确表示该 market
+       不应发交易信号（赔率缺失/未开始/等结算/等）。当前等价于 phase 检查的
+       子集,保留为独立语义闸门——表达"被市场门限拒绝"的意图,对未来引入
+       "LIVE 但赔率缺失也拒"等扩展更安全。
+    5. **live_state_phase != "live"** → 不订阅。phase=ended/paused/scheduled 都
+       不该订阅。phase 缺失（""）只在 OUTRIGHT 等无直播概念市场出现——目前
+       不予订阅（OUTRIGHT 决策不依赖盘口高频推送，定期 reconcile 足够）。
+    6. **其余** → 订阅。phase=live + signal_allowed=True 表示"现在在打 + 可发信号"。
     """
 
     if has_exposure:
@@ -65,16 +63,20 @@ def should_subscribe_ws(
     if entry_metadata is None:
         return False
 
+    signal_allowed = getattr(entry_metadata, "live_state_signal_allowed", None)
     metadata = getattr(entry_metadata, "metadata", None)
     has_season_odds = isinstance(metadata, dict) and "season_odds_snapshot" in metadata
 
     # OUTRIGHT 路径：metadata 有 season_odds_snapshot → 订阅来捕获定价变动，
-    # 即便 phase 不在 "live"（live_state_worker 对赛季级市场不发 "在打" 信号）。
+    # 即便 signal_allowed=False（live_state_worker 对赛季级市场不发"在打"信号）。
     if has_season_odds:
         return True
 
-    # 非 OUTRIGHT：phase == "live" → 订阅。phase=ended/paused/scheduled/cancelled
-    # 等任何非 "live" 状态都不订阅,phase 缺失（""）也拒（OUTRIGHT 走上面分支）。
+    # 非 OUTRIGHT：要求 signal_allowed=True（live_state_worker 明确放行）+
+    # phase=live（确实在打）。signal_allowed=None / False 一律拒绝——表示
+    # worker 还未对该 market 完成判断或显式拒绝。
+    if signal_allowed is not True:
+        return False
     phase = (getattr(entry_metadata, "live_state_phase", "") or "").strip().lower()
     return phase == "live"
 
