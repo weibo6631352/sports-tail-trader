@@ -263,7 +263,7 @@ class MarketDiscoveryWorker:
                 "parse_detail": parse_result.reject_detail,
                 "matched_keywords": parse_result.matched_keywords,
                 "accepted": outcome.accepted,
-                "strategy_reason": (
+                "decision_reason": (
                     outcome.universe_decision.reason
                     if outcome.universe_decision is not None
                     else None

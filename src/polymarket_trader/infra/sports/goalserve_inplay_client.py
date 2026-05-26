@@ -56,7 +56,7 @@ _INPLAY_SPORTS: tuple[str, ...] = (
     "baseball",
 )
 
-# 策略侧规范运动码 → inplay feed 路径 token 集合，用于 demand-driven 轮询：
+# 量化层规范运动码 → inplay feed 路径 token 集合，用于 demand-driven 轮询：
 # active_sports_provider 返回的规范码命中此映射时才轮询对应 feed token。
 SPORT_CODE_TO_INPLAY_KEYS: dict[str, frozenset[str]] = {
     "football": frozenset({"soccer"}),

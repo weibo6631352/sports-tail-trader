@@ -7,7 +7,7 @@
   path   — URL 后缀（跟在 {api_key}/ 后面）
   xml    — True 表示响应为 XML，False 表示 JSON（加 ?json=1）
 
-并发策略：
+并发方式：
   - 每次 list_events() 并发拉取所有运动（asyncio.gather with return_exceptions）
   - 单运动失败不阻塞其他
 """
@@ -71,7 +71,7 @@ _SPORT_FEEDS: dict[str, tuple[str, bool]] = {
     "table-tennis":     ("tennis_scores/tt_live",   True),
 }
 
-# 策略侧 _market_sport_codes 输出的规范运动码 → 本文件 _SPORT_FEEDS key 集合。
+# 量化层 _market_sport_codes 输出的规范运动码 → 本文件 _SPORT_FEEDS key 集合。
 # 用于 demand-driven 轮询：只有当某个规范码对应的 feed key 集合里至少有一个
 # 被 active_sports_provider 选中时，才真正发起该 sport 的 HTTP 抓取。
 SPORT_CODE_TO_FEED_KEYS: dict[str, frozenset[str]] = {

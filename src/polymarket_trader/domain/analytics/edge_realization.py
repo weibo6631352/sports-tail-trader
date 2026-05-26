@@ -1,7 +1,7 @@
 """Edge 实现度（edge-realization）分析。
 
 定价模型的核心检验：对每个 ``accepted=true`` 的决策，比较"预测 edge"
-和"实际 per-share 兑现回报"。预测 edge 来自策略 hook 的 ``decision_output``
+和"实际 per-share 兑现回报"。预测 edge 来自workflow hook 的 ``decision_output``
 （``fair_value`` 和 ``entry_price_cap`` / ``entry_price``）；实际回报从
 position 的 ``cash_pnl`` / ``realized_pnl`` 除以 ``cost_usdc`` 估算。
 

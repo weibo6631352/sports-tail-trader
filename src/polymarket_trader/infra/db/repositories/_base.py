@@ -23,7 +23,7 @@ class RepositoryPage(Generic[T]):
 class BaseRepository:
     """仓储基类。
 
-    仓储只负责 PostgreSQL 写读和幂等 upsert，不承担风控、策略和交易编排。
+    仓储只负责 PostgreSQL 写读和幂等 upsert，不承担风控、决策和交易编排。
     """
 
     def __init__(self, session: AsyncSession) -> None:

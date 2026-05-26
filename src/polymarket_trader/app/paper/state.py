@@ -50,7 +50,7 @@ class PaperVirtualLedger:
     def observe_unrealized(self, token_id: str, current_best_bid: Decimal) -> None:
         """每次 orderbook 更新时调用，跟踪该持仓的最深浮亏 + 价格时序。
 
-        策略层不该调（这是统计指标），由 paper_balance_syncer 后台调用。
+        workflow 层不该调（这是统计指标），由 paper_balance_syncer 后台调用。
         - 最深浮亏：每次更新 max_unrealized_loss（取 min）
         - 价格时序：30s 采样一次 best_bid（控制内存 / 频率）
         """

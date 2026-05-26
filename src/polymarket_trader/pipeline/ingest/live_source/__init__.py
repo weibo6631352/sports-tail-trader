@@ -7,7 +7,7 @@
 - `registry` —— `LiveSourceRegistry` 引用计数订阅 + active sport demand
 - `subscription_policy` —— `SportsSubscriptionPolicy` 每 market 订哪个 source
 - `feeder` —— `LiveSourceFeeder` per-provider snapshot 拉取 + bucket 分发
-- `matcher` —— `LiveSourceMatcher` market ↔ event 候选选择（wrap match hook）
+- `matcher` —— `LiveSourceMatcher` market ↔ event 候选选择（调 workflow.match_live_state）
 - `calibrator` —— `LiveSourceCalibrator` team/time/league 三角验证
 - `match_service` —— `LiveStateMatchService` 编排 matcher + calibrator + 写
   store + 发 ENTRY_SIGNAL_TRIGGERED

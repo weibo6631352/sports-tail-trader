@@ -140,7 +140,7 @@ class DerivedMetrics:
     """单 token 在某一时刻 (computed_at) 的完整派生指标。
 
     所有字段在 ``compute_derived()`` 一次性算出 → 写入 ``OrderbookDerivedStore``;
-    operator endpoint 与策略层后续只读, 不重算。
+    operator endpoint 与workflow 层后续只读, 不重算。
     """
     computed_at: datetime
     token_id: str

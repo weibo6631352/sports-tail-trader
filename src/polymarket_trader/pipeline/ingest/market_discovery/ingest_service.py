@@ -41,7 +41,7 @@ class MarketTracker(Protocol):
 
 
 class MarketIngestService:
-    """Coordinates market discovery, strategy universe filtering, and registry updates."""
+    """Coordinates market discovery, workflow universe filtering, and registry updates."""
 
     def __init__(
         self,
@@ -72,8 +72,8 @@ class MarketIngestService:
         self._filter_ttl_seconds: float = 7_200.0
 
     @property
-    def strategy(self) -> "TradingWorkflow":
-        """返回市场发现链路正在使用的扩展筛选 hooks。"""
+    def workflow(self) -> "TradingWorkflow":
+        """返回市场发现链路正在使用的 workflow 实例。"""
 
         return self._workflow
 
@@ -346,8 +346,8 @@ class MarketIngestService:
             "matched_fields": parse_result.matched_fields,
             "matched_keywords": parse_result.matched_keywords,
             "accepted": market is not None,
-            "strategy_selected": universe_decision.selected if universe_decision is not None else None,
-            "strategy_reason": universe_decision.reason if universe_decision is not None else None,
+            "universe_selected": universe_decision.selected if universe_decision is not None else None,
+            "decision_reason": universe_decision.reason if universe_decision is not None else None,
             "market": _serialize_market(market),
             "tracked_market": _serialize_market(tracked_market),
             "tracking_retained": tracking_retained,

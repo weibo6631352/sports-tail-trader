@@ -86,7 +86,6 @@ class DomainEventType(StrEnum):
     ALLOCATION_DECISION_RECORDED = "allocation_decision_recorded"
     RISK_REJECTION_RECORDED = "risk_rejection_recorded"
     MARKET_SETTLED = "market_settled"
-    PARAMETER_OVERRIDE_APPLIED = "parameter_override_applied"
     # 操盘读 OrderbookDeltaStore.direction_signal 时落审计,记录窗口内 best bid/ask
     # delta + direction_score。供事后复盘"为什么这一刻判断买/卖压 → 决定加仓/退场"。
     ORDERBOOK_DIRECTION_QUERIED = "orderbook_direction_queried"

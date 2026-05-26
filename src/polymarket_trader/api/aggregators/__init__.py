@@ -24,7 +24,7 @@
 - `runtime_aggregator` —— health / readiness / runtime snapshot / workers /
   metrics / paper-ledger / risk-metrics / outbox queue depth / data freshness
 - `portfolio_aggregator` / `position_aggregator` —— 组合暴露 + 持仓
-- `candidate_aggregator` —— 策略候选投影（含 3s TTL 缓存）
+- `candidate_aggregator` —— 候选投影（含 3s TTL 缓存）
 - `market_misc_aggregator` / `market_detail_aggregator` —— 盘口 / 流动性 /
   数据健康 / 历史快照
 - `sports_query_aggregator` / `sports_live_aggregator` —— 直播状态 + 覆盖缺口

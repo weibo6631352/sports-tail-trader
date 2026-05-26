@@ -1,13 +1,13 @@
-"""体育策略通用层。
+"""体育通用类型层。
 
-任何体育策略都可以复用的能力：
+任何 workflow 都可以复用的能力：
 - 直播比赛状态归一化（LiveGameState / TennisGameState 与外部 metadata 的解析）
 - 联赛识别（MLB / NFL / Tennis）
 - 体育盘口结构化建模（SportsMarketSnapshot / SportsMarketFamily / SportsMarketScope）
 - Market slug 通用解析（结算范围识别）
 
-扫尾策略专属语义（TailPolicy / TailEvaluation / profit-take 阈值 / TailRejectReason 等）
-不在本包，留在 ``polymarket_trader.workflow.tail``；本包不反向依赖任何具体策略包。
+workflow 层专属语义（profit-take 阈值 / execution permission 等）不在本包，
+留在 ``polymarket_trader.workflow`` 子模块；本包不反向依赖任何具体 workflow 包。
 """
 
 from __future__ import annotations

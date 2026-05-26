@@ -103,11 +103,6 @@ REJECTION_REASON_CATEGORIES: dict[str, str] = {
     "open_buy_detected": "operational",
     "open_exit_detected": "operational",
     "resting_buy_not_allowed": "operational",
-    # 策略级
-    "consecutive_loss_pause": "strategy_risk",
-    "event_exposure_limit": "strategy_risk",
-    "league_exposure_limit": "strategy_risk",
-    "daily_entry_limit": "strategy_risk",
 }
 
 
@@ -374,16 +369,16 @@ async def fetch_kelly_calibration(
     window_start: datetime,
     window_end: datetime,
 ) -> dict[str, Any]:
-    """Kelly implied_p 校准统计——用于检测策略 prob_p 估计的系统性偏倚。
+    """Kelly implied_p 校准统计——用于检测 prob_p 估计的系统性偏倚。
 
     扫描窗口内的 ``allocations``，按 raw_payload.kelly 子键取出每笔分配的
     ``prob_p`` / ``price_c`` / ``edge_net``。配对同 condition / token 的最近
     fills 推算实际成交价 vs implied fair。返回：
 
     * sample_size：样本数
-    * mean_implied_p：策略平均 implied_p
+    * mean_implied_p：平均 implied_p
     * mean_realized_price_lag_seconds：从分配到 fill 的平均延迟
-    * mean_edge_net：策略宣称的平均 edge
+    * mean_edge_net：平均 edge
 
     注：完整 Brier score 需要 market 终态结算结果（非本函数职责，需
     ``positions.settled_zero_value`` 关联），先返回前置指标。

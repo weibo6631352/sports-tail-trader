@@ -1,7 +1,7 @@
 """基于真实运行态数据的虚拟盘演练。
 
 虚拟盘只替换最后的订单提交端：market、orderbook、账户快照、直播状态 metadata、
-策略配置、风控和可用时的订单签名都来自当前运行态；真正 submit 时由
+量化配置、风控和可用时的订单签名都来自当前运行态；真正 submit 时由
 ``app/paper`` 撮合引擎模拟 level-by-level 成交 + 官方 fee 公式 + fill 状态机。
 """
 
@@ -41,7 +41,7 @@ class _OrderbookFallbackClient(Protocol):
 
     runtime.clob_client 实际是 ``infra.polymarket.ClobClient``；这里只显式声明
     本模块用到的 ``get_orderbook``，避免 ``getattr+callable`` 双层 duck-typing
-    （CLAUDE.md §14：framework 不依赖具体策略实现，但调用侧也应通过显式契约
+    （CLAUDE.md §14：framework 不依赖具体 workflow 实现，但调用侧也应通过显式契约
     访问 infra，禁止靠属性试探判断对象身份）。
     """
 
@@ -209,7 +209,7 @@ async def _select_candidate(
     if has_explicit_request and explicit_market is None:
         # 显式请求的 market / condition / token 注册表查不到。直接返回
         # not_found 而不是退化到 _registry_markets() 全市场扫描——后者会
-        # 让分析师在不知情时基于错误的 baseline 做策略决策。
+        # 让分析师在不知情时基于错误的 baseline 做量化决策。
         empty_market = _empty_market()
         return _CandidateSelection(
             market=empty_market,
@@ -543,13 +543,13 @@ def _rejection(
 ) -> dict[str, Any]:
     summary = None if plan is None else plan.summary
     extras = dict(summary.extras) if summary is not None else {}
-    # action / execution_permission 在 reject 时常被策略侧留空（StrategySummary 默认值是 ""）。
-    # 用 extras 里的 tail_action / outright_action / execution_permission（如有）兜底，再
+    # action / execution_permission 在 reject 时常被决策器侧留空（DecisionSummary 默认值是 ""）。
+    # 用 extras 里的 decision_action / outright_action / execution_permission（如有）兜底，再
     # 不行就映射 stage → 一个有诊断价值的字面值，避免 by_action / by_execution_permission
     # 维度只剩 "unknown" 一个桶（§10 拒绝原因可审计）。
     summary_action = (summary.action or "").strip() if summary is not None else ""
     fallback_action = (
-        str(extras.get("tail_action") or extras.get("outright_action") or "").strip()
+        str(extras.get("decision_action") or extras.get("outright_action") or "").strip()
     )
     if summary_action:
         action_label = summary_action

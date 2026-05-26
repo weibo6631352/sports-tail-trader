@@ -22,11 +22,6 @@ from polymarket_trader.infra.sports.goalserve_pregame_client import (
     PregameMatch,
     PregameOutcome,
 )
-from polymarket_trader.infra.sports.season_odds_client import (
-    SeasonOddsClient,
-    TheOddsApiClient,
-    parse_theoddsapi_outrights_payload,
-)
 
 __all__ = [
     "GoalserveInplayClient",
@@ -39,13 +34,10 @@ __all__ = [
     "PregameOutcome",
     "GoalserveOdds",
     "GoalserveOutcome",
-    "SeasonOddsClient",
-    "TheOddsApiClient",
     "SportsDataClientError",
     "SportsDataRateLimitError",
     "SportsDataResponseError",
     "SportsDataTimeoutError",
     "SportsDataTransportError",
     "parse_goalserve_inplay",
-    "parse_theoddsapi_outrights_payload",
 ]

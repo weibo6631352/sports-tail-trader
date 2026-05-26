@@ -1,6 +1,6 @@
 """ReconcileDecisionsAggregator —— reconcile diff 视图 + 决策录制查询。
 
-按 原架构方案 §12.2 审计查询类（走 DB）。decision_records 是策略
+按 原架构方案 §12.2 审计查询类（走 DB）。decision_records 是决策
 hook 决策的唯一真相（内存 ring buffer 已删），本 aggregator 只暴露 GET，
 落库在 decision_recorder worker。
 
@@ -89,7 +89,7 @@ class ReconcileDecisionsAggregator:
         accepted: bool | None = None,
         time_range: TimeRange | None = None,
     ) -> dict[str, Any]:
-        """暴露 decision_records 表（策略 hook 决策录制）。"""
+        """暴露 decision_records 表（workflow hook 决策录制）。"""
 
         if self._session_factory is None:
             empty: RepositoryPage[Any] = RepositoryPage(
@@ -111,7 +111,7 @@ class ReconcileDecisionsAggregator:
         return page_payload(page, serializer=_decision_record_payload)
 
     async def get_decision_record(self, record_id: str) -> dict[str, Any] | None:
-        """按 record_id 取单条策略决策详情。"""
+        """按 record_id 取单条决策详情。"""
 
         if self._session_factory is None:
             return None

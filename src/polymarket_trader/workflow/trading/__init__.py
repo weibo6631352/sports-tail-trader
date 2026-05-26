@@ -1,13 +1,11 @@
-"""当前策略的交易决策子模块。
+"""量化决策器内部辅助模块。
 
-子模块（全部供 QuantDecider 类内部使用，不直接暴露给 framework）：
 - helpers: metadata 工具、enrich_decision、bid/tick fallback、tick 对齐
-- allocation: 候选过滤、Kelly 分配辅助
-- exit_overlay: 动态退出 / profit_take metadata 工具
-- matching: 直播状态匹配
-- pricing: 价格上限
+- allocation: 候选过滤、AllocationSnapshot 构造、partial-state 兜底
 
-量化决策器入口在 ``polymarket_trader.workflow.quant_decider.QuantDecider``。
+量化决策器入口在 ``polymarket_trader.workflow.quant_decider``；量化信号入口
+（math_prob / goalserve_prob / 三层 max 融合）在
+``polymarket_trader.workflow.quant_signal``。
 """
 
 from __future__ import annotations

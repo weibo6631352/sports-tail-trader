@@ -516,8 +516,8 @@ class RuntimeAggregator:
         if not isinstance(settings, Settings):
             return None
         budget: Decimal | None = settings.portfolio_budget_usdc
-        strategy = self._runtime.workflow if self._runtime else None
-        kelly = strategy.config if strategy is not None else TradingWorkflowConfig()
+        workflow = self._runtime.workflow if self._runtime else None
+        kelly = workflow.config if workflow is not None else TradingWorkflowConfig()
         max_position_fraction = kelly.kelly_max_position_fraction
         min_stake = kelly.kelly_min_stake_usdc
         candidates: list[Decimal] = []

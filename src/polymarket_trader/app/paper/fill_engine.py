@@ -2,7 +2,7 @@
 
 设计要点：
 - 沙箱不破坏 §3 的"OrderExecutor 唯一下单出口"——本模块只是 client 实现细节；
-- BUY 一律按 taker / FAK 模拟（策略侧禁止长期 resting BUY，§3）；
+- BUY 一律按 taker / FAK 模拟（决策侧禁止长期 resting BUY，§3）；
 - SELL GTC 返回 LIVE（资金/仓位都不动），与生产 limit SELL 行为一致；
 - SELL FAK 走 taker 撮合；
 - 撮合不到任何份额返回 NO_FILL；超出可用流动性返回 PARTIAL_FILL。
@@ -156,9 +156,9 @@ def _simulate_sell(
 
     is_gtc = request.order_type == OrderType.GTC
     # GTC SELL：先尝试按当前 best_bid 撮合（实盘下行为 = 挂上 book 等买盘吃，但
-    # exit_overlay/profit_take_overlay 在每次 orderbook update 都会 reprice，
-    # 行为退化为"每个 tick 重试 sell，能成就成"——paper 这样模拟与策略实际 PnL
-    # 高度一致）。不能成才返回 LIVE 让策略下一 tick 继续 reprice。
+    # 动态退出在每次 orderbook update 都会 reprice，行为退化为"每个 tick 重试
+    # sell，能成就成"——paper 这样模拟与量化实际 PnL 高度一致）。不能成才返回
+    # LIVE 让决策器下一 tick 继续 reprice。
     # FAK SELL：与原逻辑一致——撮合不到直接 NO_FILL。
     match = match_taker_sell(orderbook, size_shares, limit_price)
     if not match.is_filled:

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 import tomllib
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, ClassVar, TypeVar
 from urllib.parse import quote
 
-from pydantic import Field, SecretStr, TypeAdapter, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     portfolio_budget_usdc: Decimal = Field(default=Decimal("0"), ge=Decimal("0"))
     # paper_trading_mode：开启后所有下单走 PaperSubmitOnlyOrderClient，签名仍真实
     # （走 trading_client.sign_order），但 submit 不上链——改用真实 Polymarket WS
-    # 盘口 + 撮合引擎模拟成交，账本累积虚拟 PnL。复盘/策略验证用，不动真钱。
+    # 盘口 + 撮合引擎模拟成交，账本累积虚拟 PnL。复盘/量化验证用，不动真钱。
     # 用法：.env 设 PAPER_TRADING_MODE=true 后重启即可，无需改任何其他配置。
     paper_trading_mode: bool = Field(default=False)
     # reconcile 周期：从 60 → 20s，让 chain balance/shares 同步更接近实时。
@@ -110,7 +110,7 @@ class Settings(BaseSettings):
     # ================================================================
     # 体育直播状态源（Goalserve：inplay / livescore / pregame）
     # ================================================================
-    # 外部体育直播状态源只提供入场前事实，不承载策略阈值或交易参数。
+    # 外部体育直播状态源只提供入场前事实，不承载量化阈值或交易参数。
     # 默认 ``True``：strategies/current 的入场链路依赖直播状态，关闭后整个 funnel
     # 在 candidates 阶段卡死（实测 25k discovered / 0 filtered_in）。所以默认开 +
     # supervisor 启动期对"trading 已就绪但 sports_live_state 关闭"发告警。
@@ -138,23 +138,6 @@ class Settings(BaseSettings):
     goalserve_pregame_timeout_s: float = Field(default=30.0, ge=1.0)
     # ts 增量拉取；每次只拿变化部分，300s 足以在 ts 未超期前更新一次。
     goalserve_pregame_interval_seconds: int = Field(default=300, ge=60)
-
-    # ================================================================
-    # 赛季 / 单场 H2H 赔率（the-odds-api：驱动 series winner p_per_game）
-    # ================================================================
-    sports_season_odds_provider: str = "theoddsapi"
-    sports_season_odds_api_key: SecretStr | None = None
-    sports_season_odds_base_url: str = "https://api.the-odds-api.com"
-    sports_season_odds_regions: str = "us,eu"
-    sports_season_odds_interval_seconds: int = Field(default=1800, ge=300)
-    sports_season_odds_ttl_seconds: int = Field(default=1800, ge=60)
-
-    sports_game_odds_provider: str = "theoddsapi"
-    sports_game_odds_api_key: SecretStr | None = None
-    sports_game_odds_base_url: str = "https://api.the-odds-api.com"
-    sports_game_odds_regions: str = "us,eu"
-    sports_game_odds_interval_seconds: int = Field(default=1800, ge=300)
-    sports_game_odds_ttl_seconds: int = Field(default=1800, ge=60)
 
     # ================================================================
     # 性能 / 队列 / 超时
@@ -464,7 +447,7 @@ def _csv_codes(value: str) -> tuple[str, ...]:
 
 
 class ConfigFileLoadError(RuntimeError):
-    """策略 / 配置文件加载或校验失败时抛出。"""
+    """配置文件加载或校验失败时抛出。"""
 
 
 T = TypeVar("T")
@@ -487,19 +470,3 @@ def load_mapping_file(config_path: str) -> dict[str, Any]:
     return data
 
 
-def load_strategy_config(config_type: type[T], config_path: str | None) -> T | None:
-    """从 TOML/JSON 文件加载策略配置 dataclass。config_path=None 直接返回 None。"""
-
-    if config_path is None:
-        return None
-    if not is_dataclass(config_type):
-        raise ConfigFileLoadError(f"strategy config type must be a dataclass: {config_type!r}")
-    data = load_mapping_file(config_path)
-    allowed = {field.name for field in fields(config_type)}
-    values = {key: value for key, value in data.items() if key in allowed}
-    try:
-        return TypeAdapter(config_type).validate_python(values)
-    except ValidationError as exc:
-        raise ConfigFileLoadError(
-            f"failed to build config {config_type.__name__} from {config_path}: {exc}"
-        ) from exc

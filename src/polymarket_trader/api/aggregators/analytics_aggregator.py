@@ -158,48 +158,6 @@ class AnalyticsAggregator:
             "totals": aggregate_totals(rows),
         }
 
-    # ---------- parameter sweep ----------
-    async def run_parameter_sweep(
-        self,
-        *,
-        candidates: dict[str, Any],
-        per_decision_usdc: Decimal = Decimal("10"),
-        time_range: TimeRange | None = None,
-        decision_limit: int = 2000,
-        settlement_limit: int = 2000,
-    ) -> dict[str, Any]:
-        from polymarket_trader.domain.analytics.parameter_sweep import build_parameter_sweep
-
-        if self._session_factory is None:
-            return build_parameter_sweep(
-                decisions=(),
-                settlements=(),
-                candidates=candidates,
-                per_decision_usdc=per_decision_usdc,
-            )
-
-        async def _query(repos: RepositoryGroup) -> tuple[Any, Any]:
-            decision_page = await repos.decision.list_decisions_snapshot(
-                limit=decision_limit,
-                offset=0,
-                time_range=time_range,
-            )
-            settle_page = await repos.audit.list_audit_events_snapshot(
-                limit=settlement_limit,
-                offset=0,
-                event_title=DomainEventType.MARKET_SETTLED.value,
-                time_range=None,
-            )
-            return decision_page, settle_page
-
-        decision_page, settle_page = await with_repositories(self._session_factory, _query)
-        return build_parameter_sweep(
-            decisions=tuple(decision_page.items or ()),
-            settlements=tuple(settle_page.items or ()),
-            candidates=candidates,
-            per_decision_usdc=per_decision_usdc,
-        )
-
     # ---------- missed opportunities ----------
     async def missed_opportunities_snapshot(
         self,

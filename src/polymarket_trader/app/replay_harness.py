@@ -1,9 +1,9 @@
-"""基于 ``DecisionRecord`` 的策略回放与对比。
+"""基于 ``DecisionRecord`` 的决策回放与对比。
 
 工作流：
     1. 实盘录制：framework 把每次 hook 调用以 ``DECISION_RECORDED`` 投到 outbox，
        ``PersistenceWorker`` 落到 ``decision_records`` 表。
-    2. 改完一行策略代码后，在 ReplayHarness 上灌入旧录制 + 新 hooks。
+    2. 改完一行决策代码后，在 ReplayHarness 上灌入旧录制 + 新 hooks。
     3. ReplayHarness 比对新旧 decision_output，输出每条 record 的 diff 分类。
 
 这是一个**离线复盘工具**，不进 P0 主链路。它故意不重建 ``DecisionContext`` 对象，
@@ -57,7 +57,7 @@ class ReplayReport:
 
 
 # 调用方提供的"基于 record + 新 hooks 重算 decision_output"的回调。
-# 让 ReplayHarness 不直接 import 策略框架细节——调用方决定如何重建 context。
+# 让 ReplayHarness 不直接 import workflow 细节——调用方决定如何重建 context。
 ReplayDecisionFn = Callable[[DecisionRecord], Mapping[str, Any]]
 
 

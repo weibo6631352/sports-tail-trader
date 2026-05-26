@@ -6,7 +6,7 @@
 查询），不属于 composition root 职责。
 
 两个函数都返回 callable（closure），让 main.py 拿到后直接传给 worker。
-closure 捕获 registry / strategy / market_metadata_store 三个长生命周期对象，
+closure 捕获 registry / workflow / market_metadata_store 三个长生命周期对象，
 其它输入由 worker 调用时每次传入。
 """
 

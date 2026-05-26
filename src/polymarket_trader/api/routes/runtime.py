@@ -501,7 +501,7 @@ async def get_decision_record(
     record_id: str,
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """按 ``record_id`` 取单条策略决策详情。"""
+    """按 ``record_id`` 取单条决策详情。"""
 
     aggregator = ReconcileDecisionsAggregator(session_factory=runtime.db_session_factory)
     payload = await aggregator.get_decision_record(record_id)

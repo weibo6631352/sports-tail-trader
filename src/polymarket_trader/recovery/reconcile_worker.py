@@ -154,7 +154,7 @@ class ReconcileWorker:
         )
         # audit 节流:reconcile 每 20s 跑 200+ markets,逐条 publish
         # TRADING_PAUSED/RECONCILE_APPLIED/RECONCILE_DIFF_DETECTED 1h 累计 250k+
-        # 条 audit(占 audit_events 55%).策略:
+        # 条 audit(占 audit_events 55%).方案:
         # - TRADING_PAUSED_FOR_MARKET: 状态去重(only new pause,不重发已 paused)
         # - RECONCILE_APPLIED: 60s/condition_id 最小间隔
         # - RECONCILE_DIFF_DETECTED: 保留(真实操作历史)但 30s 兜底

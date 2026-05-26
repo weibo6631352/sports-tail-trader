@@ -21,7 +21,7 @@ inplay 赔率）。
 
 # inplay 覆盖运动（CLAUDE.md §9）
 
-`INPLAY_COVERED_SPORTS` 列出 Goalserve inplay feed 覆盖的 8 个 sport，使用**策略
+`INPLAY_COVERED_SPORTS` 列出 Goalserve inplay feed 覆盖的 8 个 sport，使用 **workflow
 规范码**（与 `_market_sport_codes` / `SPORT_CODE_TO_INPLAY_KEYS.keys()` 一致），
 不是 inplay feed 内部的路径 token。这样保证 subscription_policy → registry →
 feeder → goalserve client 整链 sport 语义统一，client 内部 SPORT_CODE_TO_INPLAY_KEYS

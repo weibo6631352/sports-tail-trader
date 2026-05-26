@@ -2,7 +2,7 @@
 
 周期性调用 GoalservePregameOddsClient.fetch_all()，用 ts 增量减少流量；
 快照存内存，同时把能匹配到市场的 pregame_moneyline 写入 MarketMetadataStore，
-供策略 gates.py 在 goalserve_moneyline（inplay）缺失时作为 fallback 验证信号。
+供 quant_decider 在 goalserve_moneyline（inplay）缺失时作为 fallback 验证信号。
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _normalize_team(name: str) -> str:
 
 
 class GoalservePregameWorker:
-    """周期性拉取 Goalserve 赛前赔率，供策略层按需查询。
+    """周期性拉取 Goalserve 赛前赔率，供workflow 层按需查询。
 
     ts 增量：每次成功拉取后保存各运动的 ts，下次携带以减少数据量。
     单运动失败不影响其他运动（客户端内部已处理）。
@@ -188,7 +188,7 @@ class GoalservePregameWorker:
         return index
 
     def get_snapshots(self) -> dict[str, GoalservePregameSnapshot]:
-        """返回最新赛前赔率快照（{sport: snapshot}），供策略层只读查询。"""
+        """返回最新赛前赔率快照（{sport: snapshot}），供workflow 层只读查询。"""
 
         return dict(self._snapshots)
 

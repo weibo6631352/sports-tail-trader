@@ -1,4 +1,4 @@
-"""运行时 market 跟踪保留策略。
+"""运行时 market 跟踪保留方案。
 
 该模块只判断一个 market 是否还值得留在 registry / WS 跟踪集合中，不负责
 交易决策、下单或前端展示。调用方必须在移除前确认没有账户风险敞口。
@@ -79,7 +79,7 @@ def inactive_market_reason(
         return f"market_{market.trading_status.value}"
     if market.trading_status == TradingStatus.PAUSED and market.reject_reason:
         # 无敞口的 PAUSED market 只保留审计拒绝原因，不再占用运行时跟踪集合。
-        # 后续 discovery 若重新变成可交易，会按目标策略重新纳入 registry。
+        # 后续 discovery 若重新变成可交易，会按目标方案重新纳入 registry。
         return market.reject_reason
     if market_end_date_elapsed(market, now=now):
         return "market_end_date_elapsed"

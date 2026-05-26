@@ -40,8 +40,6 @@ class AllocationMarketSnapshot:
     best_ask: Decimal | None = None
     best_ask_size: Decimal | None = None
     idempotency_key: str | None = None
-    scale_in_allowed: bool = False
-    strategy_budget_cap_usdc: Decimal | None = None
 
     @property
     def condition_id(self) -> str:
@@ -70,8 +68,8 @@ class AllocationMarketSnapshot:
         return None
 
 
-# 策略侧给 Kelly 提供 (prob_p, prob_confidence, source_label) 的 callback。
-# source_label 仅作审计标记（"outright_real" / "tail_implied" 等），不影响公式。
+# workflow 给 Kelly 提供 (prob_p, prob_confidence, source_label) 的 callback。
+# source_label 仅作审计标记（"outright_real" / "implied_fv" 等），不影响公式。
 ProbProvider = Callable[[AllocationMarketSnapshot], "ProbView"]
 
 
@@ -96,18 +94,20 @@ def kelly_plan(
     kelly_allow_round_up_to_market_min: bool = True,
     kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
 ) -> AllocationPlan:
-    """Kelly 资金分配。替代旧 equal_weight_plan。
+    """Kelly 资金分配——纯算法，不做 eligibility 过滤。
 
     工作流：
-    1. 对每个 market 跑 ``_allocation_skip_reason``——保留旧 eligibility 语义。
-    2. 对 eligible market 用 prob_provider 取 ``(prob_p, prob_confidence)``，
+    1. 调用方负责过滤（single_game 走 trading/_allocation_skip_reason superset；
+       outright/series 自有 evaluator + fair_value 缺失时 prob_view.prob_p=None）。
+    2. 本函数仅做算法防御：缺 price_c 或 prob_p → reject 写明 missing_price_or_prob。
+    3. 对每个 market 用 prob_provider 取 ``(prob_p, prob_confidence)``，
        与 ``best_ask`` 一起喂 ``kelly_stake()``。
-    3. 按 ``f_star`` 降序排序——edge 大的优先得到 bankroll。
-    4. **§1 sequential bankroll**：依次分配，``remaining_bankroll = bankroll -
+    4. 按 ``f_star`` 降序排序——edge 大的优先得到 bankroll。
+    5. **§1 sequential bankroll**：依次分配，``remaining_bankroll = bankroll -
        Σ(已开 BUY exposure) - Σ(本轮已分配 stake)``。避免并发 over-bet。
-    5. 每个 Allocation 带完整 Kelly 审计字段（prob_p / edge / f_star / capped_by 等）。
+    6. 每个 Allocation 带完整 Kelly 审计字段（prob_p / edge / f_star / capped_by 等）。
 
-    skip 与 reject 一律 buy_budget=0 + reason 写明，不静默丢弃。
+    reject 一律 buy_budget=0 + reason 写明，不静默丢弃。
     """
 
     market_snapshots = tuple(markets)
@@ -115,10 +115,6 @@ def kelly_plan(
     budget_changes: list[MarketBuyBudgetChanged] = []
     plan_reason = ""
 
-    # 单次扫描：一遍出 (skip_reason / exposure / prob_view / price_c / kelly_estimate)
-    # 全部信息；避免之前"skip filter loop + estimate loop + alloc loop"三次重算
-    # current_exposure 与 _compute_kelly。kelly_estimate 用初始 remaining_bankroll
-    # 仅作排序键——真分配阶段再用滚动 remaining_bankroll 重算 stake。
     @dataclass(slots=True)
     class _Candidate:
         snapshot: AllocationMarketSnapshot
@@ -132,23 +128,6 @@ def kelly_plan(
     for snapshot in market_snapshots:
         exposure_usdc = current_exposure_usdc(snapshot.position, snapshot.open_orders)
         open_exposure_total += exposure_usdc
-        skip_reason = _allocation_skip_reason(snapshot)
-        if skip_reason:
-            allocations.append(
-                Allocation(
-                    condition_id=snapshot.condition_id,
-                    target_budget_usdc=Decimal("0"),
-                    buy_budget_usdc=Decimal("0"),
-                    market_slug=snapshot.market_slug,
-                    token_id=snapshot.token_id,
-                    current_exposure_usdc=exposure_usdc,
-                    released_budget_usdc=Decimal("0"),
-                    reason=skip_reason,
-                    idempotency_key=snapshot.idempotency_key,
-                    release_reason=skip_reason,
-                )
-            )
-            continue
         prob_view = prob_provider(snapshot)
         price_c = snapshot.effective_best_ask
         if prob_view.prob_p is None or price_c is None or price_c <= Decimal("0"):
@@ -195,7 +174,7 @@ def kelly_plan(
     eligible.sort(key=lambda item: item.estimate_f_star, reverse=True)
 
     # mutually_exclusive_loser gate 已删——宽进严管：即便同 condition 多 outcome
-    # 各自有 edge 信号也允许同时下单，由持仓策略 + Kelly 自身的 fraction 管控
+    # 各自有 edge 信号也允许同时下单，由 quant_decider + Kelly 自身的 fraction 管控
     # 总暴露。3-way prop / NEG_RISK 同 market 多 token 都按独立 candidate 评估。
 
     for candidate in eligible:
@@ -227,15 +206,8 @@ def kelly_plan(
                 )
             )
             continue
-        # 应用策略侧 strategy_budget_cap_usdc（scale-in 路径设的额外硬上限）
         stake_usdc = stake.stake_usdc
         capped_by = stake.capped_by
-        if (
-            snapshot.strategy_budget_cap_usdc is not None
-            and stake_usdc > snapshot.strategy_budget_cap_usdc
-        ):
-            stake_usdc = snapshot.strategy_budget_cap_usdc
-            capped_by = "strategy_budget_cap"
         allocations.append(
             Allocation(
                 condition_id=snapshot.condition_id,
@@ -346,42 +318,6 @@ def _reject_allocation(
     )
 
 
-def _allocation_skip_reason(
-    snapshot: AllocationMarketSnapshot,
-) -> str:
-    has_open_exit = _has_open_order(snapshot, OrderSide.SELL) or (
-        snapshot.position is not None and snapshot.position.open_sell_shares > Decimal("0")
-    )
-    if has_open_exit and not snapshot.scale_in_allowed:
-        return "open_exit_detected"
-    if (
-        snapshot.position is not None
-        and snapshot.position.shares > Decimal("0")
-        and not snapshot.scale_in_allowed
-    ):
-        return "position_already_open"
-    if _has_open_order(snapshot, OrderSide.BUY):
-        return "open_entry_detected"
-    if not snapshot.tradable:
-        return "market_not_tradable"
-    if not snapshot.market_active:
-        return "market_not_active"
-    if not snapshot.market_open:
-        return "market_not_open"
-    if not snapshot.clob_enabled:
-        return "clob_disabled"
-    if snapshot.resolved:
-        return "market_resolved"
-    if snapshot.cancelled:
-        return "market_cancelled"
-    if snapshot.archived:
-        return "market_archived"
-    if not snapshot.risk_allowed:
-        return "risk_limit_reached"
-
-    return ""
-
-
 def _has_open_order(snapshot: AllocationMarketSnapshot, side: OrderSide) -> bool:
     """判断当前 token 是否已有同方向开放订单，避免入场路径重复占仓。"""
 
@@ -399,7 +335,6 @@ def _market_liquidity_usdc(
 def _ask_depth_notional(
     orderbook: OrderbookSnapshot | None,
 ) -> Decimal:
-    # 无价格上限版本，仅供 kelly_plan 内部使用；有 price_cap 的版本在 trading/gates.py。
     if orderbook is None:
         return Decimal("0")
     depth_usdc = Decimal("0")

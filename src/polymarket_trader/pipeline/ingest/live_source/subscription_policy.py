@@ -10,9 +10,9 @@
 
 # sport_resolver
 
-policy 本身不内置运动识别——sport_resolver 由策略层注入（处理 market.category /
+policy 本身不内置运动识别——sport_resolver 由workflow 层注入（处理 market.category /
 market.tags / market.sports_market_type / slug 关键词等多源信号融合）。这样运动
-识别逻辑随策略演化，不污染 framework。
+识别逻辑随 workflow 演化，不污染 framework。
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def _always_active(_: Market) -> bool:
 class SportsSubscriptionPolicy:
     """Market → 应订阅的 LiveSourceKey 列表。
 
-    `sport_resolver` 由策略层注入（处理 market.category / sports_market_type /
+    `sport_resolver` 由workflow 层注入（处理 market.category / sports_market_type /
     slug 关键词等运动识别逻辑）。`active_predicate` 决定是否值得为该 market 拉
     直播数据——典型实现按 game_start_time / end_date 判断 is_live / is_near_start /
     start_unknown（参 旧 sports_polling_demand._is_market_active）。

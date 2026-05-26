@@ -1,6 +1,6 @@
-"""当前策略的本地 universe 精筛逻辑。
+"""当前量化本地 universe 精筛逻辑。
 
-远端 discovery 只负责“粗筛”，真正是否纳入策略 universe，
+远端 discovery 只负责“粗筛”，真正是否纳入 universe，
 仍然由这里统一判断。这样做的好处是：
 
 1. 即使远端搜索条件放宽，本地最终语义仍然稳定。
@@ -11,30 +11,30 @@ from __future__ import annotations
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.decisions import UniverseDecision
-from polymarket_trader.workflow.tail import SportsMarketFamily, SportsMarketType
+from polymarket_trader.sports import SportsMarketFamily, SportsMarketType
 from polymarket_trader.sports.slug import is_unsupported_period_total
 
 from polymarket_trader.workflow.config import TradingWorkflowConfig
 
 
 def select_market(config: TradingWorkflowConfig, market: Market) -> UniverseDecision:
-    """判断某个 market 是否属于当前策略 universe。
+    """判断某个 market 是否属于当前 universe。
 
     参数：
         config:
-            当前策略配置，提供 token 级筛选条件。
+            当前 workflow 配置，提供 token 级筛选条件。
         market:
             已经过框架基础分类后的内部 ``Market`` 对象。
 
     返回：
         ``UniverseDecision``：
-        - ``include`` 表示纳入策略 universe；
+        - ``include`` 表示纳入 universe；
         - ``exclude`` 表示排除，并附带原因。
 
     规则：
         - 分类或标签文本至少命中一个体育 token；
         - market 文本和 outcomes 能解析成目标盘口类型；
-        - 盘口类型在策略白名单内。
+        - 盘口类型在 workflow 白名单内。
     """
 
     from polymarket_trader.workflow.outcomes import describe_sports_market
@@ -51,8 +51,8 @@ def select_market(config: TradingWorkflowConfig, market: Market) -> UniverseDeci
 
     category_tokens = _normalized_tokens(_universe_text(market))
     if family == SportsMarketFamily.SINGLE_GAME:
-        # single_game 必须命中体育 token 才进入策略 universe，避免泛体育候选噪音。
-        if not set(config.tail_category_tokens) & category_tokens:
+        # single_game 必须命中体育 token 才进入 universe，避免泛体育候选噪音。
+        if not set(config.sports_category_tokens) & category_tokens:
             return UniverseDecision.exclude(reason="category_not_matched")
         # 分节/分局/前N局 totals（如 1st half total、1st quarter total、
         # 1st inning total）无完整结算模型，提前排除避免浪费 sizing 计算。
@@ -60,21 +60,11 @@ def select_market(config: TradingWorkflowConfig, market: Market) -> UniverseDeci
             _universe_text(market).lower()
         ):
             return UniverseDecision.exclude(reason="unsupported_period_total_record_only")
-        if descriptor.market_type not in config.tail_enabled_market_types:
+        if descriptor.market_type not in config.enabled_market_types:
             return UniverseDecision.exclude(reason="market_type_disabled")
-    elif family == SportsMarketFamily.OUTRIGHT:
-        # outright：枚举的 market_type 是 binary_prop/moneyline；按 outright 自己的
-        # 白名单过滤，避免和 single_game 共用 tail_enabled_market_types。
-        if descriptor.market_type not in config.tail_outright_enabled_market_types:
-            return UniverseDecision.exclude(reason="outright_market_type_disabled")
-    else:
-        # series：classify_series_sub_type 返回 OTHER 表示文本无系列赛关键词，直接拒绝。
-        from polymarket_trader.workflow.series.classifier import classify_series_sub_type
-        from polymarket_trader.workflow.series.types import SeriesSubType
-
-        sub_type = classify_series_sub_type(market)
-        if sub_type == SeriesSubType.OTHER:
-            return UniverseDecision.exclude(reason="series_sub_type_unclassifiable")
+    # OUTRIGHT / SERIES 不再有 family-specific 决策代码——全部走主路径，由
+    # estimate_signal 三层（math_prob / goalserve / microprice）取真信号；
+    # 没真信号的市场会被 Kelly 自然拒绝。
     return UniverseDecision.include(
         reason="market_selected",
         metadata={

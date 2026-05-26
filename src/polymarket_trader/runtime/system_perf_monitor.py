@@ -111,8 +111,8 @@ class SystemPerfMonitor:
         # event loop scheduler lag: 后台 task 定期 await asyncio.sleep(0.1),
         # 实际超过预期就反映 loop 被卡.deque ms 值,最近 200 点.
         self.eventloop_lags_ms: deque[float] = deque(maxlen=200)
-        # 策略 hook 耗时分位:hook_name → deque[ms]
-        self.strategy_hook_latencies: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=200))
+        # workflow hook 耗时分位:hook_name → deque[ms]
+        self.hook_latencies: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=200))
         # active 并发 HTTP request 数(middleware enter/exit 计数器)
         self.active_http_requests: int = 0
         self.peak_active_http_requests: int = 0
@@ -283,10 +283,11 @@ class SystemPerfMonitor:
                 (time.time(), float(cpu_ms), float(wall_ms))
             )
 
-    def record_strategy_hook(self, hook_name: str, latency_ms: float) -> None:
-        """策略 hook 调用耗时(evaluate/risk/exit_overlay 等)."""
+    def record_hook_latency(self, hook_name: str, latency_ms: float) -> None:
+        """记录 hook 调用耗时——当前只有 ``quant_decide``，后续接入更多 hook
+        （如 ``match_live_state``）也走同一份监控。"""
         with self._lock:
-            self.strategy_hook_latencies[hook_name].append(latency_ms)
+            self.hook_latencies[hook_name].append(latency_ms)
 
     def http_request_enter(self) -> int:
         """middleware 入口,返回当前 active 数."""
@@ -739,7 +740,7 @@ class SystemPerfMonitor:
                     getattr(self, "endpoint_step_latencies", {}), limit=30
                 ),
                 "eventloop_lag": _eventloop_lag_summary(self.eventloop_lags_ms),
-                "strategy_hooks": _strategy_hooks_summary(self.strategy_hook_latencies),
+                "hook_latencies": _hooks_summary(self.hook_latencies),
                 "http_concurrent": {
                     "active": self.active_http_requests,
                     "peak": self.peak_active_http_requests,
@@ -796,7 +797,7 @@ def _eventloop_lag_summary(lags):
     }
 
 
-def _strategy_hooks_summary(hook_map):
+def _hooks_summary(hook_map):
     out = []
     for name, lats in hook_map.items():
         if not lats: continue

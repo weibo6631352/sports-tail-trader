@@ -114,7 +114,7 @@ class ReconcilePlan:
 
 
 class ReconcileService:
-    """Builds strategy-driven reconcile diffs from hot snapshots."""
+    """Builds workflow-driven reconcile diffs from hot snapshots."""
 
     def __init__(
         self,
@@ -325,8 +325,8 @@ class ReconcileService:
         """为已有未覆盖持仓补充退出决策。
 
         recovery 可以因为比赛结束、状态异常或 market 暂停而拒绝新入场；
-        但已有仓位的退出保护不能被“没有 live”阻断。这里仍只调用策略
-        ``decide_exit``，不在 app 层写具体策略价格或仓位规则。
+        但已有仓位的退出保护不能被“没有 live”阻断。这里仍只调用 quant_decider
+        ``decide_exit``，不在 app 层写具体决策价格或仓位规则。
         """
 
         decisions: list[TradingDecision] = []

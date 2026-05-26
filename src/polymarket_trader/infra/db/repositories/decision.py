@@ -16,7 +16,7 @@ from polymarket_trader.infra.db.repositories._base import (
 
 
 class DecisionRecordRepository(BaseRepository):
-    """策略决策录制仓储。
+    """决策录制仓储。
 
     Append-only：每条决策一行；查询走 ``created_at`` 倒序，
     `dump` 端点按 trace_id / condition_id / accepted / 时间窗过滤。

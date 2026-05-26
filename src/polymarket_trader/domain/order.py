@@ -44,7 +44,7 @@ class OrderResultStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ExecutionTimestamps:
-    # signal_at = 策略 decision 时刻（信号产生时），用于 supervisor 测量
+    # signal_at = 量化决策器 decision 时刻（信号产生时），用于 supervisor 测量
     # entry_signal_to_submit_ms（信号→submit 整链路延迟）。
     signal_at: datetime | None = None
     queued_at: datetime | None = None
@@ -146,7 +146,7 @@ ManagedOrderIntent: TypeAlias = TradableOrderIntent | OrderControlIntent
 
 @dataclass(frozen=True, slots=True)
 class OrderRecord:
-    # 该字段标识订单归属的策略实例，用于审计、查询过滤、跨策略数据隔离。
+    # 该字段标识订单归属的 workflow 实例，用于审计、查询过滤、跨 workflow 数据隔离。
     condition_id: str
     token_id: str
     side: OrderSide

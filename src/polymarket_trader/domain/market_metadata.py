@@ -24,8 +24,8 @@ def _utc_now() -> datetime:
 class EntryMetadataRecord:
     """入场判断前可补充的运行时 metadata 快照。
 
-    `metadata` 是策略可透传的自由 dict（operator 详情透传用）；framework 决策只读
-    强类型 `live_state_*` 字段，避免依赖策略私有 metadata key。
+    `metadata` 是workflow 可透传的自由 dict（operator 详情透传用）；framework 决策只读
+    强类型 `live_state_*` 字段，避免依赖 workflow 私有 metadata key。
     """
 
     condition_id: str | None = None

@@ -1,6 +1,6 @@
 """audit_events 月度分区维护——配套 §13.4 monthly partition。
 
-分区策略：
+分区方式：
 - 每月初创建未来 1 个月的分区（提前预留写入位置）
 - 按 retention 删除超过最长 tier（30d）的分区——用 `DROP PARTITION` 替代 batch DELETE
 

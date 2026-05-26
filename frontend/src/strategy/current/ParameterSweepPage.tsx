@@ -123,9 +123,9 @@ export function ParameterSweepPage() {
     ) as SweepInputs
   }, [paramSpecs, registry])
   const [inputs, setInputs] = useState<SweepInputs>({
-    tail_outright_min_edge_bps: '',
-    tail_outright_max_entry_price: '',
-    tail_outright_min_orderbook_depth_usdc: '',
+    outright_min_edge_bps: '',
+    outright_max_entry_price: '',
+    outright_min_orderbook_depth_usdc: '',
     entry_no_price_max: '',
   })
   // seedInputs 是 useMemo——paramSpecs 或 registry 变化时引用更新。

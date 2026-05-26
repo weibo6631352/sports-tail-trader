@@ -1,6 +1,6 @@
-"""当前策略对“被过滤市场是否继续保留跟踪”的规则。
+"""“被过滤市场是否继续保留跟踪”的规则。
 
-这个文件处理的是 market 已经不再属于当前策略 universe 之后，
+这个文件处理的是 market 已经不再属于当前 universe 之后，
 框架是否仍然保留 registry 记录和 WS 订阅。
 """
 
@@ -54,7 +54,7 @@ def build_filtered_tracking_market(
     existing_market: Market,
     reason: str,
 ) -> Market:
-    """为“继续跟踪但已被策略排除”的 market 生成运行时状态。
+    """为“继续跟踪但已被 workflow 排除”的 market 生成运行时状态。
 
     参数：
         candidate_market:
@@ -62,7 +62,7 @@ def build_filtered_tracking_market(
         existing_market:
             registry 中已存在的 market。
         reason:
-            本次被策略排除的原因。
+            本次被 workflow 排除的原因。
 
     返回：
         一个适合继续保留在运行时里的 ``Market``。

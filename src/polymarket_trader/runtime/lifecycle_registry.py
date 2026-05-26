@@ -9,7 +9,7 @@
 # 与 InProcessLifecycleBus 的关系
 
 `InProcessLifecycleBus`（`lifecycle_bus.py`）是**事件发布订阅总线**——框架向
-策略广播业务事件（ORDER_SUBMITTED / ORDER_FILLED / LIVE_STATE_UPDATED 等）。
+workflow 广播业务事件（ORDER_SUBMITTED / ORDER_FILLED / LIVE_STATE_UPDATED 等）。
 
 `LifecycleRegistry`（本模块）是**资源清理协调器**——market 进出 universe 时
 通知所有需要联动的 store / worker / subscriber 执行 evict / subscribe / cleanup。

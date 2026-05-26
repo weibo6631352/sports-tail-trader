@@ -1,4 +1,4 @@
-"""CandidateAggregator —— 策略候选投影（运营查询类，DataGraph + 3s TTL 缓存）。
+"""CandidateAggregator —— 候选投影（运营查询类，DataGraph + 3s TTL 缓存）。
 
 按 原架构方案 §12.2 ① 运营查询类（走 DataGraph / 内存 + 短 TTL 缓存）。
 
@@ -6,7 +6,7 @@
 
 | Endpoint | 方法 |
 |---|---|
-| `GET /candidates` | `list_strategy_candidates(...)` |
+| `GET /candidates` | `list_candidates(...)` |
 
 # 设计
 
@@ -180,7 +180,7 @@ class CandidateAggregator:
         account: AccountSnapshot,
     ):
         settings = self._runtime.settings
-        strategy_config = self._runtime.workflow.config
+        workflow_config = self._runtime.workflow.config
         return self._runtime.decision_context_builder.build_trade_plan(
             market=market,
             orderbook=orderbook,
@@ -189,12 +189,12 @@ class CandidateAggregator:
             trace_id=None,
             portfolio_budget_usdc=settings.portfolio_budget_usdc,
             available_usdc=account.available_usdc,
-            kelly_fraction=strategy_config.kelly_fraction,
-            kelly_max_position_fraction=strategy_config.kelly_max_position_fraction,
-            kelly_min_edge=strategy_config.kelly_min_edge,
-            kelly_min_stake_usdc=strategy_config.kelly_min_stake_usdc,
-            kelly_allow_round_up_to_market_min=strategy_config.kelly_allow_round_up_to_market_min,
-            kelly_round_up_max_overbet_ratio=strategy_config.kelly_round_up_max_overbet_ratio,
+            kelly_fraction=workflow_config.kelly_fraction,
+            kelly_max_position_fraction=workflow_config.kelly_max_position_fraction,
+            kelly_min_edge=workflow_config.kelly_min_edge,
+            kelly_min_stake_usdc=workflow_config.kelly_min_stake_usdc,
+            kelly_allow_round_up_to_market_min=workflow_config.kelly_allow_round_up_to_market_min,
+            kelly_round_up_max_overbet_ratio=workflow_config.kelly_round_up_max_overbet_ratio,
             positions=account.positions,
             open_orders=account.open_orders,
             metadata=self._entry_metadata_for_market(market),
@@ -206,8 +206,8 @@ class CandidateAggregator:
         summary = plan.summary
         extras = dict(summary.extras) if summary is not None else {}
         execution_permission = extras.get("execution_permission") if extras else None
-        strategy_action = summary.action if summary is not None else ""
-        if strategy_action == "auto_execute" and not plan.ready_to_trade:
+        decision_action = summary.action if summary is not None else ""
+        if decision_action == "auto_execute" and not plan.ready_to_trade:
             action_label = "reject"
             block_reason = ""
             allocation = plan.allocation
@@ -215,7 +215,7 @@ class CandidateAggregator:
                 block_reason = str(allocation.release_reason or allocation.reason or "")
             reason_text = block_reason or plan.reason or (summary.reason if summary is not None else "")
         else:
-            action_label = strategy_action
+            action_label = decision_action
             reason_text = (summary.reason if summary is not None else "") or plan.reason or ""
         accepted = bool(action_label and action_label != "reject")
         confirmable = (
@@ -257,7 +257,7 @@ class CandidateAggregator:
             "decision_kind": None if plan.decision_kind is None else plan.decision_kind.value,
             "reason": reason_text,
             "action": action_label,
-            "strategy_action": strategy_action,
+            "decision_action": decision_action,
             "execution_permission": execution_permission,
             "label": summary.label if summary is not None else "",
             "market_type": summary.market_type if summary is not None else "",
@@ -286,7 +286,7 @@ class CandidateAggregator:
         }
 
     @cpu_track("candidates_evaluation")
-    async def list_strategy_candidates(
+    async def list_candidates(
         self,
         *,
         limit: int = 100,

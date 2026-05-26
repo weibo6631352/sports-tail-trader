@@ -1,25 +1,21 @@
-"""量化决策器类——所有持仓期决策的单一入口。
+"""量化决策器——所有 BUY / SELL / HOLD / replace 决策的单一入口。
 
 按 ``context.quant_trigger_kind`` 分派子流程：
-- ``market_tick``：market_ws book / price_change 触发的盘口事件 → BUY / SELL / replace
+- ``market_tick``：market_ws book / price_change 触发
 - ``reconcile_cycle``：周期扫账户 → 清理僵尸订单 / pause 信号
 
 类内不持有可变运行时状态（每次 ``decide`` 调用从 context 拿最新快照）。
-原 ``polymarket_trader.workflow.trading.hooks`` 的 size_entry / decide_entry /
-_maybe_reprice_stale_sell / _math_lock_prob_view / _position_entry_price /
-_empty_sizing 全部并入本模块，作为 QuantDecider 的内部实现。
+入场走 Kelly + quant_signal 真概率信号；持仓时本模块不预设任何动作——
+后续买卖决策由用户在量化信号入口（fair_value / Kelly 或自有信号源）接入。
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from datetime import datetime, timezone
-from decimal import Decimal, ROUND_FLOOR
+from decimal import Decimal
 
 from polymarket_trader.domain.allocation import Allocation, AllocationPlan
-from polymarket_trader.domain.kelly import implied_fair_value_from_price_cap
-from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.domain.decisions import DecisionContext, EntrySizing, QuantDecision, TradingDecision
 from polymarket_trader.runtime.runtime_ports import RuntimePorts
 
@@ -29,6 +25,7 @@ from polymarket_trader.workflow.allocation import (
     kelly_plan,
 )
 from polymarket_trader.workflow.config import TradingWorkflowConfig
+from polymarket_trader.workflow.quant_signal import math_prob
 from polymarket_trader.workflow.trading.allocation import (
     _allocation_skip_reason,
     _candidate_snapshots,
@@ -40,181 +37,19 @@ from polymarket_trader.workflow.trading.allocation import (
     _skipped_allocation,
     _market_skip_metadata,
 )
-from polymarket_trader.workflow.trading.exit_overlay import (
-    _capital_efficiency_gate,
-    evaluate_dynamic_exit,
-)
 from polymarket_trader.workflow.allocation import _ask_depth_notional
-from polymarket_trader.workflow.trading.helpers import _metadata_text
 
 logger = logging.getLogger(__name__)
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _maybe_reprice_stale_sell(
-    config: TradingWorkflowConfig,
-    context: DecisionContext,
-    *,
-    now: datetime,
-) -> TradingDecision | None:
-    """检查 token 下现有 SELL 单是否价位 stale，需 cancel-replace 到 entry+offset。
-
-    两条触发路径（任一命中即 replace）：
-    1. **profit_take 路径**：SELL price > entry+offset + 2 tick → 替换到 entry+offset
-       （§17 准量化提前止盈，旧 $0.99 死等结算最大单一损失源）
-    2. **fair_value 路径**（原有）：SELL price > fair_value × 1.5 → 替换到
-       max(best_bid+tick, fair_value × 0.95)（防 fair value 大幅跌穿后死单）
-
-    替换价不超过原 SELL price - tick，避免 cancel-replace 价更高反而难成交。
-    """
-
-    from polymarket_trader.workflow.trading.exit_overlay import _estimate_fair_value, _exit_orderbook
-
-    token_id = (
-        context.token_id
-        or (context.position.token_id if context.position is not None else None)
-    )
-    if token_id is None:
-        logger.info("reprice_skip", extra={"reason": "no_token_id"})
-        return None
-    open_sells = [
-        o for o in (context.open_orders or ())
-        if o.side == OrderSide.SELL and o.token_id == token_id and o.open and o.remaining_shares
-    ]
-    if not open_sells:
-        logger.info(
-            "reprice_skip",
-            extra={
-                "reason": "no_open_sells",
-                "token_id": token_id,
-                "open_orders_count": len(context.open_orders or ()),
-                "open_orders_sides": [o.side.value for o in (context.open_orders or ())],
-            },
-        )
-        return None
-    orderbook = _exit_orderbook(context, token_id)
-    if orderbook is None or orderbook.best_bid is None:
-        logger.info(
-            "reprice_skip",
-            extra={
-                "reason": "no_orderbook" if orderbook is None else "no_best_bid",
-                "token_id": token_id,
-                "open_sells_count": len(open_sells),
-                "open_sells_prices": [str(s.price) for s in open_sells],
-            },
-        )
-        return None
-    fair_value, fair_source = _estimate_fair_value(
-        context,
-        token_id=token_id,
-        best_bid=orderbook.best_bid,
-        best_ask=orderbook.best_ask,
-    )
-    tick = orderbook.tick_size or Decimal("0.01")
-    # 目标 SELL 价 = max(entry+min_offset, fair_value × 0.97)
-    # × 0.97 留 3% 缓冲让对手方愿意吃单（按 CLOB 撮合规则按对手价成交，留缓冲
-    # 实际可能成交在更高价）。min_offset 保证至少覆盖手续费（30bps × 2 = 0.6%）。
-    min_profit_offset = Decimal("0.02")
-    target_from_fair = (fair_value * Decimal("0.97")).quantize(Decimal("0.001"))
-    target_from_entry: Decimal | None = None
-    position = context.position
-    if (
-        position is not None
-        and position.shares > Decimal("0")
-        and position.cost_usdc > Decimal("0")
-    ):
-        avg_price = position.cost_usdc / position.shares
-        target_from_entry = avg_price + min_profit_offset
-    if target_from_entry is not None:
-        sell_target = max(target_from_fair, target_from_entry)
-    else:
-        sell_target = target_from_fair
-    # cap：不超过 exit_no_price（避免 CLOB 上限拒单）
-    sell_target = min(sell_target, config.exit_no_price - tick)
-
-    for sell in open_sells:
-        sell_price = sell.price
-        if sell_price is None:
-            continue
-        # 触发：当前 SELL 价比目标价高 ≥ 2 tick 且远离实际可成交盘口
-        # 同时保护：如果 SELL 已接近 fair_value × 1.05，认为已经合理不动
-        if sell_price <= sell_target + tick * Decimal("2"):
-            logger.info(
-                "reprice_skip",
-                extra={
-                    "reason": "sell_price_already_close_to_target",
-                    "token_id": token_id,
-                    "sell_price": str(sell_price),
-                    "sell_target": str(sell_target),
-                    "fair_value": str(fair_value),
-                    "fair_value_source": fair_source,
-                },
-            )
-            continue
-        # 新价：tick 对齐到 sell_target，但不超过原价 - tick（避免反向更难成交）
-        # 必须最后再做一次 floor 对齐——上游 sell_price 可能来自历史未对齐挂单
-        # （如旧版本入场逻辑或手工挂单），sell_price - tick 不保证是 tick 倍数。
-        # 不对齐直接进 RiskManager 会被 tick_size_invalid 拒，反复重试刷日志。
-        aligned_target = (
-            (sell_target / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
-        )
-        raw_new_price = min(aligned_target, sell_price - tick)
-        new_price = (raw_new_price / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
-        if new_price <= Decimal("0") or new_price >= sell_price:
-            continue
-        return TradingDecision.replace(
-            order_id=sell.order_id,
-            token_id=token_id,
-            price=new_price,
-            size_shares=sell.remaining_shares or sell.size_shares or Decimal("0"),
-            market_slug=context.market.market_slug if context.market else None,
-            reason="exit_overlay_reprice_to_fair_value",
-            metadata={
-                "old_price": str(sell_price),
-                "new_price": str(new_price),
-                "fair_value": str(fair_value),
-                "fair_value_source": fair_source,
-                "sell_target": str(sell_target),
-                "target_from_fair": str(target_from_fair),
-                "target_from_entry": (
-                    str(target_from_entry) if target_from_entry is not None else None
-                ),
-                "best_bid": str(orderbook.best_bid),
-            },
-        )
-    return None
-
-
-def _math_lock_prob_view(
-    snap: AllocationMarketSnapshot,
-    context: DecisionContext,
-) -> "ProbView | None":
-    """math_lock fallback: 没 odds 源时用 math_lock 锁定概率作 Kelly p。
-
-    复用 exit_overlay._math_lock_fair_value 的实现（同一份 sport-specific
-    + series-winner lock 概率计算），仅在此处包成 ProbView 加 confidence=0.7。
-    confidence 0.7：数学模型基于 base rate 估计，不如真实 odds 准，留缓冲。
-    """
-
-    from polymarket_trader.workflow.trading.exit_overlay import _math_lock_fair_value
-
-    prob = _math_lock_fair_value(context, snap.token_id)
-    if prob is None or prob <= Decimal("0"):
-        return None
-    return ProbView(prob_p=prob, prob_confidence=Decimal("0.7"), source="math_lock")
 
 
 def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> EntrySizing:
     """为当前 market 计算本轮可用入场预算（Kelly sizing）。
 
     流程：
-    1. 走 tail / scale-in 门禁过滤候选；通过的进入 eligible_snapshots。
-    2. ``prob_provider`` 把 price_cap + min_edge 反推 implied_fair_value，
-       作为 Kelly 公式吃的 ``prob_p``；prob_confidence=tail_implied_prob_confidence
-       （默认 0.5）抑制 implied 的不确定性。
+    1. 走门禁过滤候选；通过的进入 eligible_snapshots。
+    2. ``prob_provider`` 仅消费 quant_signal.math_prob 真概率信号——
+       没真信号 → ProbView(prob_p=None) → kelly_plan 直接 reject。Kelly 不会被
+       反推/虚假 prob 喂养（trust Kelly fully）。
     3. ``kelly_plan`` 按 f_star 降序逐笔分配，bankroll 扣减保证不并发 over-bet。
        Kelly 自带单笔 fraction 上限和 drawdown halt，**不在 Kelly 之上叠加任何 cap**
        （CLAUDE.md §17 / feedback_trust_kelly_no_extra_caps）。
@@ -278,7 +113,7 @@ def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Entry
             buyable_liquidity_usdc=buyable_liquidity_usdc,
         )
         if skip_reason:
-            if _is_focus_snapshot(context, snapshot) and "tail_reason" not in sizing_metadata:
+            if _is_focus_snapshot(context, snapshot) and "decision_reason" not in sizing_metadata:
                 sizing_metadata.update(_market_skip_metadata(snapshot, skip_reason))
             skipped_allocations[(snapshot.condition_id, snapshot.token_id)] = _skipped_allocation(
                 snapshot,
@@ -287,40 +122,18 @@ def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Entry
             continue
         eligible_snapshots.append(replace(snapshot, liquidity_usdc=buyable_liquidity_usdc))
 
-    implied_min_edge_required = Decimal(config.tail_implied_min_edge_bps) / Decimal("10000")
-    implied_prob_confidence_base = config.tail_implied_prob_confidence
-    depth_baseline = config.tail_implied_conf_depth_baseline_usdc
-    spread_widening = config.tail_implied_conf_spread_widening
-
     def _prob_provider(snap: AllocationMarketSnapshot) -> ProbView:
-        """Kelly probability source — math_lock 优先，fallback implied_fair_value。"""
+        """Kelly probability source — 仅消费真概率信号。
 
-        math_view = _math_lock_prob_view(snap, context)
-        if math_view is not None:
-            return math_view
+        没真信号 (math_prob 不适用 / 缺少 live state) → prob_p=None →
+        kelly_plan 拒绝该市场。Kelly 不接受反推/虚假 prob。后续接入新量化
+        信号源时在 quant_signal.math_prob 里扩展即可。
+        """
 
-        cap = config.tail_implied_fallback_max_entry_price
-        implied_p = implied_fair_value_from_price_cap(cap, min_edge_required=implied_min_edge_required)
-        # 动态 conf：流动性薄 / 价差宽时 implied_p 更不可靠 → κ 进一步收缩。
-        # 公式 = base × min(1, depth/baseline) × max(0.25, 1 - spread/widening)
-        # baseline=25, widening=0.05 → conf 范围 [base/8, base]。
-        depth_factor = Decimal("1")
-        if snap.liquidity_usdc is not None and depth_baseline > Decimal("0"):
-            ratio = snap.liquidity_usdc / depth_baseline
-            if ratio < Decimal("1"):
-                depth_factor = ratio if ratio > Decimal("0") else Decimal("0")
-        spread_factor = Decimal("1")
-        if snap.spread is not None and spread_widening > Decimal("0"):
-            shrink = snap.spread / spread_widening
-            spread_factor = max(Decimal("0.25"), Decimal("1") - shrink) if shrink < Decimal("1") else Decimal("0.25")
-        confidence = implied_prob_confidence_base * depth_factor * spread_factor
-        if confidence < Decimal("0"):
-            confidence = Decimal("0")
-        return ProbView(
-            prob_p=implied_p,
-            prob_confidence=confidence,
-            source="tail_implied",
-        )
+        prob = math_prob(context, snap.token_id)
+        if prob is None or prob <= Decimal("0"):
+            return ProbView(prob_p=None, prob_confidence=Decimal("0"), source="no_math_prob_signal")
+        return ProbView(prob_p=prob, prob_confidence=Decimal("0.7"), source="math_prob")
 
     eligible_plan = kelly_plan(
         trace_id=context.trace_id,
@@ -376,22 +189,12 @@ def decide_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Tra
 
     token_id = context.token_id or context.orderbook.token_id
     decision_metadata: dict[str, object] = {}
-    efficiency_allowed, efficiency_reason, efficiency_metadata = _capital_efficiency_gate(
-        config,
-        context,
-        entry_price=entry_price,
-        amount_usdc=amount_usdc,
-        tail_metadata=decision_metadata,
-    )
-    decision_metadata.update(efficiency_metadata)
-    if not efficiency_allowed:
-        return TradingDecision.skip(reason=efficiency_reason, metadata=decision_metadata)
-    from polymarket_trader.domain.decisions import StrategySummary
+    from polymarket_trader.domain.decisions import DecisionSummary
     from polymarket_trader.workflow.outcomes import describe_sports_market
     descriptor = describe_sports_market(context.market)
-    summary = StrategySummary(
+    summary = DecisionSummary(
         action="auto_execute",
-        reason="strategy_entry",
+        reason="quant_entry",
         market_type=descriptor.market_type.value if descriptor.market_type is not None else "",
         best_ask=entry_price,
         extras={
@@ -400,7 +203,7 @@ def decide_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Tra
         },
     )
     return TradingDecision.buy(
-        reason="strategy_entry",
+        reason="quant_entry",
         token_id=token_id,
         price=entry_price,
         amount_usdc=amount_usdc,
@@ -482,43 +285,27 @@ class QuantDecider:
         return QuantDecision(actions=(decision,), reason=decision.reason)
 
     def _decide_entry_attempt(self, context: DecisionContext) -> TradingDecision:
-        """无持仓时的入场决策：按 market family 分派 sizing + 构造 BUY intent。
+        """无持仓时的入场决策——所有 family 走同一份主路径。
 
-        - ``OUTRIGHT`` / ``SERIES`` → 走各自子策略（赛季冠军 / 系列赛 winner）
-        - ``ESPORTS`` → 直接 skip（不自动交易）
-        - ``SINGLE_GAME`` / 未识别 → 走 ``trading.size_entry`` + ``trading.decide_entry``
+        - 所有 SportsMarketFamily（SINGLE_GAME / OUTRIGHT / SERIES / 未识别）
+          统一调 ``size_entry`` + ``decide_entry``；
+        - 单一信号入口是 ``estimate_signal``（math_prob / goalserve / microprice 三层），
+          没真信号的市场 → ProbView(prob_p=None) → Kelly 拒绝；
+        - ``ESPORTS`` 仍单独 skip——这类盘口没量化锁定信号。
         """
         from polymarket_trader.workflow.outcomes import SportsMarketFamily, describe_sports_market
-        from polymarket_trader.workflow.outright import (
-            decide_outright_entry,
-            size_outright_entry,
-        )
-        from polymarket_trader.workflow.series import (
-            decide_series_entry,
-            size_series_entry,
-        )
 
         if context.market is None or context.orderbook is None:
             return TradingDecision.skip(reason="missing_market_state")
 
         descriptor = describe_sports_market(context.market)
-        family = descriptor.market_family
-
-        if family == SportsMarketFamily.ESPORTS:
+        if descriptor.market_family == SportsMarketFamily.ESPORTS:
             return TradingDecision.skip(
                 reason="esports_not_auto_tradable",
                 metadata={"market_family": SportsMarketFamily.ESPORTS.value},
             )
 
-        # family-specific sizer + decider 路由
-        if family == SportsMarketFamily.OUTRIGHT:
-            sizing = size_outright_entry(self._config, context, self._ports)
-        elif family == SportsMarketFamily.SERIES:
-            sizing = size_series_entry(self._config, context, self._ports)
-        else:
-            # SINGLE_GAME 默认路径
-            sizing = size_entry(self._config, context)
-
+        sizing = size_entry(self._config, context)
         if sizing.allocation is None or sizing.allocation.buy_budget_usdc <= Decimal("0"):
             return TradingDecision.skip(reason=sizing.reason or "no_allocation")
         focus_context = replace(
@@ -527,109 +314,21 @@ class QuantDecider:
             allocation=sizing.allocation,
             allocation_plan=sizing.allocation_plan,
         )
-        if family == SportsMarketFamily.OUTRIGHT:
-            return decide_outright_entry(self._config, focus_context, self._ports)
-        if family == SportsMarketFamily.SERIES:
-            return decide_series_entry(self._config, focus_context, self._ports)
         return decide_entry(self._config, focus_context)
 
     def _decide_position_action(self, context: DecisionContext) -> TradingDecision:
+        """持仓时 market_tick——量化决策器**不预设任何动作**。
 
-        config = self._config
+        所有持仓后的买卖决策（SELL / replace / HOLD）由用户在主量化决策入口
+        （quant_signal / Kelly / 自有信号源）后续接入产生；本方法当前 skip。
+        """
 
-        now = context.now or _utc_now()
-        if context.account_snapshot is not None:
-            last_reconcile = context.account_snapshot.last_reconcile_at
-            if last_reconcile is None:
-                return TradingDecision.skip(reason="reconcile_never_completed")
-            if last_reconcile.tzinfo is None:
-                last_reconcile = last_reconcile.replace(tzinfo=timezone.utc)
-            age = (
-                now.astimezone(timezone.utc) - last_reconcile.astimezone(timezone.utc)
-            ).total_seconds()
-            if age > 60.0:
-                return TradingDecision.skip(
-                    reason="reconcile_stale_skip_exit",
-                    metadata={"reconcile_age_seconds": str(age)},
-                )
-
-        size_shares = context.size_shares
-        if size_shares is not None and size_shares > Decimal("0"):
-            uncovered_shares = size_shares
-        elif context.position is not None:
-            uncovered_shares = context.position.shares - context.position.open_sell_shares
-        else:
-            return TradingDecision.skip(reason="missing_position_state")
-
-        if uncovered_shares < Decimal("0.1"):
-            replace_decision = _maybe_reprice_stale_sell(config, context, now=now)
-            if replace_decision is not None:
-                return replace_decision
-            return TradingDecision.skip(
-                reason="no_uncovered_shares",
-                metadata={"uncovered_shares": str(uncovered_shares)},
-            )
-
-        if (
-            context.position is not None
-            and (
-                context.position.current_value is None
-                or context.position.current_value <= Decimal("0")
-            )
-            and context.orderbook is None
-        ):
-            return TradingDecision.skip(reason="position_zero_value_no_orderbook")
-
-        token_id = (
-            context.token_id
-            or (context.position.token_id if context.position is not None else None)
-            or _metadata_text(context, "token_id")
-        )
-        entry_price = _position_entry_price(context)
-        exit_price = config.exit_no_price
-        decision_metadata: dict[str, object] = {"source_reason": "quant_exit"}
-        if uncovered_shares is not None:
-            decision_metadata["target_size_shares"] = str(uncovered_shares)
-
-        exit_reason = "quant_exit"
-        if entry_price is not None:
-            dynamic = evaluate_dynamic_exit(
-                config,
-                context,
-                token_id=token_id,
-                entry_price=entry_price,
-            )
-            if dynamic is not None:
-                decision_metadata.update(dynamic.metadata)
-                if not dynamic.should_exit:
-                    return TradingDecision.skip(
-                        reason=dynamic.reason,
-                        metadata=decision_metadata,
-                    )
-                assert dynamic.exit_price is not None
-                exit_price = dynamic.exit_price
-                exit_reason = dynamic.reason
-                decision_metadata["exit_target_price"] = str(exit_price)
-
-        if exit_price is not None and context.orderbook is not None:
-            tick = context.orderbook.tick_size or Decimal("0.01")
-            if tick > Decimal("0"):
-                exit_price = (exit_price / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
-        return TradingDecision.sell(
-            reason=exit_reason,
-            token_id=token_id,
-            price=exit_price,
-            size_shares=uncovered_shares,
-            market_slug=(
-                context.market.market_slug
-                if context.market is not None
-                else _metadata_text(context, "market_slug")
-            ),
-            metadata=decision_metadata,
-        )
+        return TradingDecision.skip(reason="quant_position_hold")
 
     # ---- reconcile_cycle：周期路径 ----------------------------------
 
     def _decide_reconcile(self, context: DecisionContext) -> QuantDecision:
         from polymarket_trader.workflow.recovery import build_recovery_quant_decision
         return build_recovery_quant_decision(self._config, context)
+
+

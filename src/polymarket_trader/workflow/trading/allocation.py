@@ -119,22 +119,18 @@ def _allocation_skip_reason(
     has_open_exit = _has_open_order(snapshot, OrderSide.SELL) or (
         snapshot.position is not None and snapshot.position.open_sell_shares > Decimal("0")
     )
-    if has_open_exit and not snapshot.scale_in_allowed:
+    if has_open_exit:
         return "open_exit_detected"
-    if (
-        snapshot.position is not None
-        and snapshot.position.shares > Decimal("0")
-        and not snapshot.scale_in_allowed
-    ):
+    if snapshot.position is not None and snapshot.position.shares > Decimal("0"):
         return "position_already_open"
     # ws_eligible 已删——市场的 universe / 时间窗口判断由 discovery + market_ingest_service
     # 一次写入 registry，trading_status != ELIGIBLE 才是真正的"不可交易"信号。
     # 走到 allocation 这一步说明 worker 已收到 entry_signal_published（live_state
-    # 工作者明确 signal_allowed=True），无需在策略层二次门控。
+    # 工作者明确 signal_allowed=True），无需在workflow 层二次门控。
     if not is_primary_token(snapshot.market, snapshot.token_id):
         return "unsupported_outcome"
     # 直播源状态审查：没直播源 / 直播源未适配 → 拒绝入场。
-    # 决策必须基于活的直播状态（数学锁定 / 末段守卫 / 概率视图都依赖 LiveGameState）；
+    # 决策必须基于活的直播状态（数学概率 / 末段守卫 / 概率视图都依赖 LiveGameState）；
     # 缺直播源等于盲下，缺解析适配等于"看得到数据但读不懂"，两种都视作高风险，宁可错过。
     descriptor = describe_sports_market(snapshot.market)
     if descriptor.market_family == SportsMarketFamily.UNSUPPORTED or descriptor.market_type is None:
@@ -164,7 +160,7 @@ def _allocation_skip_reason(
         return "missing_best_ask"
 
     # 入场端只保留"物理/状态硬约束"——价格上限/下限、价差、流动性等门槛已删，
-    # 交给入场后的持仓策略 + exit overlay 管控（宽进严管哲学）。
+    # 由量化决策器统一管控。
     # 之前曾经存在的：
     #   - price_above_entry_max  → 删（持仓后 take_profit/stop_loss 接管）
     #   - spread_above_max       → 删（持仓后流动性问题由 exit overlay 处理）
@@ -180,8 +176,8 @@ def _market_skip_metadata(
 
     descriptor = describe_sports_market(snapshot.market)
     metadata: dict[str, object] = {
-        "tail_action": "reject",
-        "tail_reason": reason,
+        "decision_action": "reject",
+        "decision_reason": reason,
         "market_family": descriptor.market_family.value,
     }
     if descriptor.market_type is not None:

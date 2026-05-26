@@ -3,7 +3,7 @@
 认证方式：API key 嵌入 URL，GZIP 压缩（httpx 自动处理 Content-Encoding: gzip）。
 增量更新：首次拉取获得 ts 时间戳，后续请求携带 &ts=... 只拿变更部分。
 
-输出：GoalservePregameSnapshot，包含每个运动的赔率列表，供策略层交叉验证 Polymarket 定价。
+输出：GoalservePregameSnapshot，包含每个运动的赔率列表，供workflow 层交叉验证 Polymarket 定价。
 不走 SportsLiveSnapshot 路径（pregame 不是实时比赛状态）。
 """
 

@@ -17,31 +17,6 @@ from polymarket_trader.app.operator_service import OperatorService
 router = APIRouter(prefix="/positions", tags=["positions"])
 
 
-@router.get("/signals")
-async def get_position_signals(
-    condition_id: str | None = Query(default=None, min_length=1, max_length=128),
-    token_id: str | None = Query(default=None, min_length=1, max_length=80),
-    service: OperatorService = Depends(get_operator_service),
-) -> dict[str, object]:
-    """持仓信号 operator endpoint：返回最近 decide_exit 决策的完整 5 类投票 +
-    流动性 tier + math_lock 支持情况 + fair_value 来源等。
-
-    命名"持仓信号"反映实际语义：评估每个持仓的市场状态（HOLD vs EXIT）
-    而非单纯 exit 决策。无 condition_id/token_id 过滤时返回全部持仓快照。
-
-    返回 metadata 字段（dynamic_exit_* 内部命名兼容旧 audit/测试）：
-    - dynamic_exit_bullish_vote / dynamic_exit_bearish_vote
-    - dynamic_exit_vote_reasons（5 类信号的具体投票说明）
-    - dynamic_exit_liquidity_tier (very_thin/thin/healthy)
-    - dynamic_exit_bid_signal_weight
-    - dynamic_exit_fair_value + fair_value_source
-    - dynamic_exit_math_lock_prob / goalserve_implied
-    - dynamic_exit_best_bid / depth_imbalance / clearing_price
-    """
-
-    return service.get_position_signals(condition_id=condition_id, token_id=token_id)
-
-
 # 实测 Polymarket clob 自带这两个真实流动性接口:
 # /midpoint?token_id=X  → {"mid": "0.755"}   (UI 卖出按钮显示的就是 mid 价,实际可成交)
 # /price?token_id=X&side=SELL → {"price": "0.76"} (考虑接盘 spread 的 best sellable)

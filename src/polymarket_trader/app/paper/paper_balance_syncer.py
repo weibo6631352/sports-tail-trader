@@ -8,7 +8,7 @@
 
 - balance: ``paper_ledger.available_usdc`` → ``balance_usdc``（否则 reconcile
   写回真链上 $0.x 余额阻塞 Kelly）
-- positions: ``paper_ledger.positions`` → ``replace_positions``（否则策略读
+- positions: ``paper_ledger.positions`` → ``replace_positions``（否则 workflow 读
   stale account_state 持仓反复 reprice 已平仓 token，触发 simulate_fill
   卖空 ledger 持仓 → available 凭空涨的 bug）
 """

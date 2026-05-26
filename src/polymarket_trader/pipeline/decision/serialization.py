@@ -150,11 +150,11 @@ def serialize_plan_metadata(plan: TradePlan) -> dict[str, object]:
     payload: dict[str, object] = {
         "decision_kind": None if plan.decision_kind is None else plan.decision_kind.value,
         "intent_tags": tuple(sorted(plan.intent.intent_tags)) if plan.intent is not None else (),
-        "strategy_payload": jsonable(plan.metadata or {}),
+        "decision_payload": jsonable(plan.metadata or {}),
     }
     if plan.summary is not None:
         summary = plan.summary
-        payload["strategy_summary"] = {
+        payload["decision_summary"] = {
             "action": summary.action,
             "reason": summary.reason,
             "label": summary.label,
@@ -169,7 +169,7 @@ def serialize_plan_metadata(plan: TradePlan) -> dict[str, object]:
             "extras": jsonable(summary.extras or {}),
         }
     else:
-        payload["strategy_summary"] = None
+        payload["decision_summary"] = None
     return payload
 
 

@@ -1,6 +1,6 @@
 """仓位 PnL 按维度分解（只读聚合）。
 
-回答"哪个 strategy / market / category / outcome 是赚钱主力，哪个在烧钱"。
+回答"哪个 workflow / market / category / outcome 是赚钱主力，哪个在烧钱"。
 当前 ``GET /portfolio`` 只给整体快照，``/positions`` 只给单仓位列表——
 按维度 group_by 后才能定位资金效率瓶颈。
 """

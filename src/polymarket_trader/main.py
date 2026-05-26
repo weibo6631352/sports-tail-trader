@@ -25,12 +25,12 @@ from polymarket_trader.app.entry_metadata_providers import (
     build_entry_metadata_for_market_provider,
 )
 from polymarket_trader.pipeline.ingest.market_discovery.ingest_service import MarketIngestService
-from polymarket_trader.app.ports import bind_runtime_season_state, build_runtime_ports
+from polymarket_trader.app.ports import build_runtime_ports
 from polymarket_trader.recovery.reconcile_service import ReconcileService
 from polymarket_trader.recovery.settlement_scanner import SettlementScannerService
 from polymarket_trader.pipeline.decision.decision_context_builder import DecisionContextBuilder
 from polymarket_trader.pipeline.execution.order_gateway import OrderGateway
-from polymarket_trader.config import ConfigLoadError, Settings, StartupReadiness, load_settings
+from polymarket_trader.config import Settings, StartupReadiness, load_settings
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
 from polymarket_trader.infra.db import (
@@ -60,8 +60,6 @@ from polymarket_trader.infra.sports import (
     GoalserveInplayClient,
     GoalserveLivescoreClient,
     GoalservePregameOddsClient,
-    SeasonOddsClient,
-    TheOddsApiClient,
 )
 from polymarket_trader.pipeline.ingest.live_source import (
     LiveSourceCalibrator,
@@ -76,7 +74,6 @@ from polymarket_trader.pipeline.ingest.live_source import (
     is_market_live_active,
 )
 from polymarket_trader.workflow.live_state import _market_sport_codes
-from polymarket_trader.storage.season_state_store import SeasonStateStore
 from polymarket_trader.logging import LoggingRuntime, configure_logging
 from polymarket_trader.observability.metrics import MetricsRegistry
 from polymarket_trader.runtime import (
@@ -96,7 +93,6 @@ from polymarket_trader.pipeline.ingest.market_discovery.discovery_runner import 
     run_market_discovery_scan,
 )
 from polymarket_trader.app.decision_recorder import DecisionEventRecorder
-from polymarket_trader.app.parameter_store import ParameterStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
 from polymarket_trader.runtime.lifecycle_registry import LifecycleRegistry
@@ -122,17 +118,11 @@ from polymarket_trader.app.audit import AuditDeduper, GarbageFilter, Persistence
 from polymarket_trader.api.ws import OperatorWsPublisher
 from polymarket_trader.runtime.observability_bridge import ObservabilityBridge
 from polymarket_trader.recovery import ReconcileWorker, ReconcileWorkerResult
-from polymarket_trader.pipeline.ingest.odds.sports_season_odds_worker import SportsSeasonOddsWorker
-from polymarket_trader.pipeline.ingest.odds.game_odds_worker import GameOddsWorker
 from polymarket_trader.pipeline.ingest.odds.goalserve_pregame_worker import GoalservePregameWorker
 from polymarket_trader.pipeline.decision import MarketTickWorker
 from polymarket_trader.workflow.config import load_workflow_config
 from polymarket_trader.workflow.workflow import TradingWorkflow
 from polymarket_trader.pipeline.feedback.user_ws import UserWsWorker
-from polymarket_trader.infra.sports.game_odds_client import (
-    GameOddsClient,
-    TheOddsApiGameOddsClient,
-)
 from polymarket_trader.runtime.paper_runtime import build_paper_runtime
 from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
 
@@ -210,14 +200,8 @@ class RuntimeComponents:
     operator_service: OperatorService | None = None
     sse_subscription_registry: SseSubscriptionRegistry | None = None
     bootstrap_summary: dict[str, Any] = field(default_factory=dict)
-    season_state_store: SeasonStateStore | None = None
-    season_odds_worker: SportsSeasonOddsWorker | None = None
-    season_odds_client: SeasonOddsClient | None = None
-    game_odds_worker: GameOddsWorker | None = None
-    game_odds_client: GameOddsClient | None = None
     pregame_worker: GoalservePregameWorker | None = None
     pregame_client: GoalservePregameOddsClient | None = None
-    parameter_store: ParameterStore | None = None
     # paper 模式虚拟账本（paper_trading_mode=true 时注入）。
     # operator API /runtime/paper-ledger 暴露 ledger.available_usdc / positions /
     # 累计 fee / 已实现 + 浮动 PnL，复盘必查。
@@ -348,107 +332,6 @@ def _build_live_source_components(
     )
 
 
-def _build_season_odds_worker(
-    settings: Settings,
-    *,
-    registry: MarketRegistry,
-    market_metadata_store: MarketMetadataStore,
-    workflow: TradingWorkflow,
-    event_bus: EventBus | None = None,
-) -> tuple[SportsSeasonOddsWorker, SeasonOddsClient] | tuple[None, None]:
-    """按 settings 装配 sports_season_odds_worker；缺 api_key 或未启用 outright 时返回 (None, None)。
-
-    第二项是底层 httpx-backed odds client，用于运行时 shutdown 时关闭。
-    """
-
-    token_secret = settings.sports_season_odds_api_key
-    api_key = token_secret.get_secret_value() if token_secret is not None else None
-    if not api_key or settings.sports_season_odds_provider != "theoddsapi":
-        return None, None
-    client = TheOddsApiClient(
-        api_key=api_key,
-        base_url=settings.sports_season_odds_base_url,
-        regions=tuple(
-            r.strip().lower()
-            for r in settings.sports_season_odds_regions.split(",")
-            if r.strip()
-        ),
-    )
-    _classifier = workflow
-
-    def _is_outright(market: Market) -> bool:
-        return _classifier.is_outright_market(market) if _classifier is not None else False
-
-    def _sport_key(market: Market) -> str | None:
-        return _classifier.sport_key_for_season_odds(market) if _classifier is not None else None
-
-    def _market_key(market: Market) -> str:
-        return market.event_slug or market.market_slug or ""
-
-    worker = SportsSeasonOddsWorker(
-        odds_client=client,
-        registry=registry,
-        market_metadata_store=market_metadata_store,
-        sport_key_for=_sport_key,
-        is_outright_market=_is_outright,
-        market_key_for=_market_key,
-        ttl_seconds=settings.sports_season_odds_ttl_seconds,
-        enabled=True,
-        event_bus=event_bus,
-    )
-    return worker, client
-
-
-def _build_game_odds_worker(
-    settings: Settings,
-    *,
-    registry: MarketRegistry,
-    market_metadata_store: MarketMetadataStore,
-    workflow: TradingWorkflow,
-    event_bus: EventBus | None = None,
-) -> tuple[GameOddsWorker, GameOddsClient] | tuple[None, None]:
-    """按 settings 装配 game_odds_worker；缺 api_key 时返回 (None, None)。"""
-
-    token_secret = settings.sports_game_odds_api_key
-    api_key = token_secret.get_secret_value() if token_secret is not None else None
-    if not api_key or settings.sports_game_odds_provider != "theoddsapi":
-        return None, None
-    client = TheOddsApiGameOddsClient(
-        api_key=api_key,
-        base_url=settings.sports_game_odds_base_url,
-        regions=tuple(
-            r.strip().lower()
-            for r in settings.sports_game_odds_regions.split(",")
-            if r.strip()
-        ),
-    )
-
-    _classifier = workflow
-
-    def _sport_key(market: Market) -> str | None:
-        return _classifier.sport_key_for_game_odds(market) if _classifier is not None else None
-
-    def _is_series_winner(market: Market) -> bool:
-        return _classifier.is_series_winner_market(market) if _classifier is not None else False
-
-    def _game_key(market: Market) -> str | None:
-        # 与 series_state 同源 key：让两个 worker 用同一标识，便于审计串联。
-        return market.event_slug or market.market_slug or None
-
-    worker = GameOddsWorker(
-        client=client,
-        registry=registry,
-        market_metadata_store=market_metadata_store,
-        sport_key_for=_sport_key,
-        is_series_winner_market=_is_series_winner,
-        game_key_for=_game_key,
-        ttl_seconds=settings.sports_game_odds_ttl_seconds,
-        enabled=True,
-        event_bus=event_bus,
-    )
-    return worker, client
-
-
 def _build_pregame_worker(
     settings: Settings,
     *,
@@ -538,19 +421,17 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # ``clob_client.get_balance_allowance()`` 写入真实链上 USDC。在 reconcile
     # 拿到第一个权威值前，bankroll=0 → Kelly 全拒，正是安全态。
     lifecycle_bus = InProcessLifecycleBus()
-    parameter_store = ParameterStore(event_bus=event_bus)
     runtime_ports = build_runtime_ports(
         lifecycle_bus=lifecycle_bus,
-        parameter_store=parameter_store,
         metrics_registry=metrics,
     )
-    # 直接装配 quant 策略——量化决策器就是这个交易系统本身。
+    # 直接装配 quant_decider——量化决策器就是这个交易系统本身。
     workflow_config = load_workflow_config()
     workflow = TradingWorkflow(config=workflow_config, ports=runtime_ports)
-    workflow_issues = workflow.validate_config(settings)
-    if workflow_issues:
-        raise ConfigLoadError(list(workflow_issues))
-    parameter_store.bind_settings(settings)
+    # 启动期断言：3 个硬条件直接 assert，不走 ConfigIssue 链。
+    assert workflow_config.discovery_tag_slugs, "discovery_tag_slugs 为空，远端 discovery 拿不到候选市场"
+    assert workflow_config.enabled_market_types, "enabled_market_types 为空，量化入场将永远 SKIP"
+    assert settings.portfolio_budget_usdc > Decimal("0"), "PORTFOLIO_BUDGET_USDC <= 0，无法支撑自动入场"
     # §13.3 写入侧 dedupe + garbage filter——PersistenceWorker 入口同步过滤后
     # 才走 _persist_batch，避免高频重复 / synthetic heartbeat / debug 事件污染
     # audit_events 表（CLAUDE.md §0 + §13.7 payload <2KB 限制）
@@ -583,7 +464,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     )
     # DataGraph 是 4 个扁平 store 的层次化视图入口（原架构方案 §3.1）。
     # DecisionContextBuilder / API aggregators / 未来其他决策路径都从这里读，
-    # 避免散落跨 store 拼接。snapshot-and-release 策略，P0 路径无长锁。
+    # 避免散落跨 store 拼接。snapshot-and-release 方式，P0 路径无长锁。
     data_graph = DataGraph(
         market_registry=registry,
         orderbook_history_buffer=orderbook_history_buffer,
@@ -623,6 +504,19 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     lifecycle_registry.register_prune_listener(
         "gamma_snapshot_store",
         lambda cid, _tokens: gamma_snapshot_store.prune(cid),
+    )
+    # 比赛事件流 buffer 整场保留——市场销毁/结算时由 prune 一次性 drop，
+    # 避免下场比赛复用同一 condition_id 时拿到上场残留事件（极小概率，但
+    # condition_id 复用风险存在）。
+    lifecycle_registry.register_prune_listener(
+        "match_event_history_buffer",
+        lambda cid, _tokens: match_event_history_buffer.clear(cid),
+    )
+    # Goalserve 赔率时序 buffer 同上——市场结束后 120s 时间窗外的样本
+    # 不再有意义，整桶清理释放内存。
+    lifecycle_registry.register_prune_listener(
+        "goalserve_odds_history_buffer",
+        lambda cid, _tokens: goalserve_odds_history_buffer.clear(cid),
     )
     market_ws_worker = MarketWsWorker(
         event_bus=event_bus,
@@ -714,8 +608,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         kelly_allow_round_up_to_market_min=workflow_config.kelly_allow_round_up_to_market_min,
         kelly_round_up_max_overbet_ratio=workflow_config.kelly_round_up_max_overbet_ratio,
         entry_metadata_provider=entry_metadata_for_event,
-        orderbook_direction_signal_reader=orderbook_delta_store.direction_signal,
-        parameter_store=parameter_store,
     )
     reconcile_service = ReconcileService(
         workflow=workflow,
@@ -785,36 +677,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # prune 时立即 unsubscribe_all。reconcile_subscriptions 仍由 scheduler 2s
     # + discovery 完成 hook 周期触发作自愈兜底。
     live_source_lifecycle_binder.bind_to_lifecycle_registry(lifecycle_registry)
-    season_state_store = SeasonStateStore()
-    bind_runtime_season_state(runtime_ports, season_state_store)
-    # 注：ESPN-based season-state + series-state worker 已经删除（只服务传统
-    # 体育，对当前 e-sports 100% 浪费）。store 保留，strategy ports 仍可绑，
-    # 没有 writer 等于空 store——strategy 读到 None 时门控自然跳过。
-    season_odds_worker, season_odds_client = _build_season_odds_worker(
-        settings,
-        registry=registry,
-        market_metadata_store=market_metadata_store,
-        workflow=workflow,
-        event_bus=event_bus,
-    )
-    game_odds_worker, game_odds_client = _build_game_odds_worker(
-        settings,
-        registry=registry,
-        market_metadata_store=market_metadata_store,
-        workflow=workflow,
-        event_bus=event_bus,
-    )
-    # odds workers + user_ws 的 prune listeners
-    if season_odds_worker is not None:
-        lifecycle_registry.register_prune_listener(
-            "season_odds_worker",
-            season_odds_worker.evict_market,
-        )
-    if game_odds_worker is not None:
-        lifecycle_registry.register_prune_listener(
-            "game_odds_worker",
-            game_odds_worker.evict_market,
-        )
     lifecycle_registry.register_prune_listener("user_ws_worker", user_ws_worker.evict_market)
     # account_state 的 _fills 也按 market lifecycle 清(fills 已写 DB,内存不必常驻 dead market).
     lifecycle_registry.register_prune_listener(
@@ -866,7 +728,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         readiness=readiness,
         workflow=workflow,
         logging_runtime=logging_runtime,
-        parameter_store=parameter_store,
         gamma_client=gamma_client,
         clob_client=clob_client,
         data_client=data_client,
@@ -906,11 +767,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         live_source_lifecycle_binder=live_source_lifecycle_binder,
         live_source_feeders=live_source_feeders,
         live_source_closers=live_source_closers,
-        season_state_store=season_state_store,
-        season_odds_worker=season_odds_worker,
-        season_odds_client=season_odds_client,
-        game_odds_worker=game_odds_worker,
-        game_odds_client=game_odds_client,
         pregame_worker=pregame_worker,
         pregame_client=pregame_client,
         decision_context_builder=decision_context_builder,
@@ -1034,7 +890,7 @@ async def bootstrap_runtime(runtime: RuntimeComponents) -> RuntimeComponents:
             extra={"readiness": None if snapshot.readiness is None else snapshot.readiness.as_dict()},
         )
     # 启动期合理性告警：交易客户端已就绪但直播状态 worker 关闭——意味着 funnel 上游
-    # 永远拿不到 candidates，运维容易误以为"策略选择性谨慎"。明确告警让人在 .env
+    # 永远拿不到 candidates，运维容易误以为"workflow 选择性谨慎"。明确告警让人在 .env
     # 里打开 SPORTS_LIVE_STATE_ENABLED 或确认是有意关闭。
     runtime_settings = runtime.settings
     wallet_secret = runtime_settings.wallet_private_key
@@ -1043,7 +899,7 @@ async def bootstrap_runtime(runtime: RuntimeComponents) -> RuntimeComponents:
     if not runtime_settings.sports_live_state_enabled and wallet_present and funded:
         logger.warning(
             "sports_live_state worker disabled while trading config is funded — "
-            "strategy entry-signals depend on live state; funnel will stay at 0 candidates "
+            "quant entry-signals depend on live state; funnel will stay at 0 candidates "
             "until SPORTS_LIVE_STATE_ENABLED=true",
         )
     return runtime
@@ -1080,12 +936,6 @@ async def shutdown_runtime(runtime: RuntimeComponents) -> None:
     for closer in runtime.live_source_closers:
         with suppress(Exception):
             await closer()
-    if runtime.season_odds_client is not None:
-        with suppress(Exception):
-            await runtime.season_odds_client.aclose()
-    if runtime.game_odds_client is not None:
-        with suppress(Exception):
-            await runtime.game_odds_client.aclose()
     if runtime.pregame_client is not None:
         with suppress(Exception):
             await runtime.pregame_client.aclose()
@@ -1118,10 +968,6 @@ def _register_runtime_workers(runtime: RuntimeComponents) -> None:
         worker_name = feeder.name.replace("live-source-feeder:", "live_source_feeder_")
         runtime.supervisor.register_worker(worker_name, priority="P2")
     runtime.supervisor.register_worker("live_source_reconcile", priority="P2", state=WorkerLifecycleState.RUNNING, detail="scheduler-driven; first run after interval")
-    if runtime.season_odds_worker is not None:
-        runtime.supervisor.register_worker("sports_season_odds_sync", priority="P2")
-    if runtime.game_odds_worker is not None:
-        runtime.supervisor.register_worker("sports_game_odds_sync", priority="P2")
     if runtime.pregame_worker is not None:
         runtime.supervisor.register_worker("sports_pregame_odds_sync", priority="P2")
     runtime.supervisor.register_worker("persistence", priority="P3")
@@ -1270,7 +1116,7 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         run_immediately=False,
     )
     # 持仓周期评估：5s 一次主动 trigger decide_exit，覆盖薄盘场景（orderbook
-    # 长期不更新但比赛/赔率/math_lock 仍在变）。复用 _handle_orderbook_snapshot_updated
+    # 长期不更新但比赛/赔率/math_prob 仍在变）。复用 _handle_orderbook_snapshot_updated
     # 路径包括 MTM 刷新 + 多信号投票止损/止盈 reprice。
     runtime.scheduler.register_job(
         "position_heartbeat",
@@ -1305,26 +1151,6 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         start=True,
         run_immediately=False,
     )
-    if runtime.season_odds_worker is not None:
-        runtime.scheduler.register_job(
-            "sports_season_odds_sync",
-            lambda: _run_sports_season_odds_sync(runtime),
-            priority="P2",
-            interval_seconds=float(runtime.settings.sports_season_odds_interval_seconds),
-            tags=("sports_season_odds",),
-            start=True,
-            run_immediately=True,
-        )
-    if runtime.game_odds_worker is not None:
-        runtime.scheduler.register_job(
-            "sports_game_odds_sync",
-            lambda: _run_sports_game_odds_sync(runtime),
-            priority="P2",
-            interval_seconds=float(runtime.settings.sports_game_odds_interval_seconds),
-            tags=("sports_game_odds",),
-            start=True,
-            run_immediately=True,
-        )
     if runtime.pregame_worker is not None:
         runtime.scheduler.register_job(
             "sports_pregame_odds_sync",
@@ -1438,7 +1264,7 @@ async def _publish_position_heartbeat_tick(runtime: RuntimeComponents) -> None:
     """周期性合成 ORDERBOOK_SNAPSHOT_UPDATED 事件 trigger 持仓评估。
 
     薄盘场景：orderbook 可能数十秒没新 push（无人挂单），订阅触发的 reprice
-    路径完全静默。但比赛比分/Goalserve 赔率/math_lock 仍在变——必须主动 trigger
+    路径完全静默。但比赛比分/Goalserve 赔率/math_prob 仍在变——必须主动 trigger
     decide_exit 才能基于最新非盘口数据决策止损/止盈。
 
     5s 周期：每个 token 合成一个 event publish 到 trading queue，复用现有
@@ -1629,46 +1455,6 @@ async def _run_live_source_reconcile(runtime: RuntimeComponents) -> None:
         detail=f"added={result['added']} removed={result['removed']} errors={result['errors']}",
     )
     _sync_runtime_metrics(runtime)
-
-
-async def _run_sports_season_odds_sync(runtime: RuntimeComponents) -> None:
-    worker = runtime.season_odds_worker
-    if worker is None:
-        return
-    runtime.supervisor.heartbeat_worker("sports_season_odds_sync", detail="syncing")
-    try:
-        refreshed = await worker.sync_once()
-    except Exception as exc:
-        runtime.supervisor.mark_worker_error(
-            "sports_season_odds_sync",
-            detail="sync_failed",
-            last_error=str(exc),
-        )
-        raise
-    runtime.supervisor.heartbeat_worker(
-        "sports_season_odds_sync",
-        detail=f"refreshed={refreshed}",
-    )
-
-
-async def _run_sports_game_odds_sync(runtime: RuntimeComponents) -> None:
-    worker = runtime.game_odds_worker
-    if worker is None:
-        return
-    runtime.supervisor.heartbeat_worker("sports_game_odds_sync", detail="syncing")
-    try:
-        refreshed = await worker.sync_once()
-    except Exception as exc:
-        runtime.supervisor.mark_worker_error(
-            "sports_game_odds_sync",
-            detail="sync_failed",
-            last_error=str(exc),
-        )
-        raise
-    runtime.supervisor.heartbeat_worker(
-        "sports_game_odds_sync",
-        detail=f"refreshed={refreshed}",
-    )
 
 
 async def _run_sports_pregame_odds_sync(runtime: RuntimeComponents) -> None:

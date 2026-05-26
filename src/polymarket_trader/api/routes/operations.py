@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
 from typing import Any
-from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.aggregators import AnalyticsAggregator, ReconcileDecisionsAggregator
+from polymarket_trader.api.aggregators import ReconcileDecisionsAggregator
 from polymarket_trader.api.deps import build_time_range, get_operator_service, get_runtime
-from polymarket_trader.api.middleware.rate_limit import rate_limit
 from polymarket_trader.app.operator_service import OperatorService
 from polymarket_trader.app.virtual_paper_trading import run_virtual_paper_trade
 
@@ -27,32 +24,9 @@ class ReconcileRequest(BaseModel):
     authorized_by: str = Field(default="operator", min_length=1, max_length=64)
 
 
-class ParameterSweepRequest(BaseModel):
-    """参数扫描请求。
-
-    ``candidates`` 是 ``{参数键: 候选值列表}``；笛卡尔积上限 1000 由 service
-    侧守门。``per_decision_usdc`` 控制单笔模拟仓位规模，默认 10 USDC。
-    ``since`` / ``until`` 限定回放窗口（ms）。
-    """
-
-    candidates: dict[str, list[Any]] = Field(default_factory=dict)
-    # 用 Decimal 直接接 JSON 数字/字符串：float 中间桥接会在反序列化时引入精度
-    # 漂移（CLAUDE.md「金额/价格用 Decimal，不用浮点」）。ge=0.01 (1 美分)
-    # 防止 1e-300 / 1e-9 这种亚精度值传到 service。
-    per_decision_usdc: Decimal = Field(
-        default=Decimal("10.0"),
-        ge=Decimal("0.01"),
-        le=Decimal("100000.0"),
-    )
-    since: int | None = Field(default=None, ge=0)
-    until: int | None = Field(default=None, ge=0)
-    decision_limit: int = Field(default=2000, ge=1, le=20_000)
-    settlement_limit: int = Field(default=2000, ge=1, le=20_000)
-
-
 # Polymarket condition_id 是 32-byte hash, 0x 前缀 + 64 hex 字符。
 # token_id 是 78-位十进制大整数（uint256）。
-# 这两个正则是 Polymarket 协议天然给定的格式，不是策略层口味——任何不符合
+# 这两个正则是 Polymarket 协议天然给定的格式，不是workflow 层口味——任何不符合
 # 这个格式的字符串都不可能是真实市场 ID，应当 422 拦下。
 _CONDITION_ID_PATTERN = r"^0x[0-9a-fA-F]{64}$"
 _TOKEN_ID_PATTERN = r"^[0-9]+$"
@@ -117,50 +91,6 @@ async def list_reconcile_diffs(
         include_started=include_started,
         include_applied=include_applied,
     )
-
-
-@router.get("/parameter-sweep/params")
-async def parameter_sweep_params() -> list[dict[str, object]]:
-    """返回所有可调参数的元数据（类型、范围、标签、示例），供前端渲染 UI。
-
-    单一来源：前端不再维护本地副本，新增/删除参数只改 parameter_sweep.py。
-    """
-    from polymarket_trader.domain.analytics.parameter_sweep import supported_parameter_specs
-    return supported_parameter_specs()
-
-
-@router.post("/parameter-sweep")
-async def parameter_sweep(
-    request: ParameterSweepRequest,
-    runtime: Any = Depends(get_runtime),
-    _rate: None = Depends(rate_limit(endpoint="parameter_sweep", qps=0.5, burst=2)),
-) -> dict[str, object]:
-    """对历史决策回放给定参数候选笛卡尔积，输出每组 hypothetical PnL 排序。"""
-
-    aggregator = AnalyticsAggregator(session_factory=runtime.db_session_factory)
-    try:
-        return await aggregator.run_parameter_sweep(
-            candidates=request.candidates,
-            per_decision_usdc=request.per_decision_usdc,
-            time_range=build_time_range(since=request.since, until=request.until),
-            decision_limit=request.decision_limit,
-            settlement_limit=request.settlement_limit,
-        )
-    except ValueError as exc:
-        # ValueError 的文本可能含内部 schema 细节，不能透传给客户端。固定错误
-        # 码 + trace_id 让运维侧在日志里反查具体原因，§10 可审计性保留。
-        trace_id = uuid4().hex
-        logger.warning(
-            "parameter_sweep validation failed",
-            extra={"trace_id": trace_id, "error": str(exc)},
-        )
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "reason": "parameter_sweep_validation_failed",
-                "trace_id": trace_id,
-            },
-        ) from exc
 
 
 @router.post("/virtual-paper-trade")

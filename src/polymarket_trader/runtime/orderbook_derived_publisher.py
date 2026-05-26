@@ -1,7 +1,7 @@
 """派生指标 publisher——同步算 + 同步写 store。
 
 P0 量化决策需要"snapshot 与 derived 的新鲜度对齐":
-策略 hook 接到 ORDERBOOK_SNAPSHOT_UPDATED 事件时, derived store 必须已含
+workflow hook 接到 ORDERBOOK_SNAPSHOT_UPDATED 事件时, derived store 必须已含
 当前 snapshot 对应的派生指标, 而非异步任务还在算的旧版。
 
 实测 ``compute_derived`` 单次 ~245μs (含 60 档双边 + 50 sample history),
@@ -16,7 +16,7 @@ P0 影响审计:
 组合优化 (#75):
 publisher 拼装 OFI 风向信号嵌入 DerivedMetrics, 让 operator /markets/orderbook-depth
 一站式拿到所有可观测信号 (深度 + 流动性 + 滑点 + 风向). delta_store 仍独立服务
-P0 策略层 (按需 direction_signal 查询), 算法不重复.
+P0 workflow 层 (按需 direction_signal 查询), 算法不重复.
 """
 from __future__ import annotations
 

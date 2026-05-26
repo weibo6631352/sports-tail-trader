@@ -35,7 +35,7 @@ def build_signed_order(
     request: OrderExecutionRequest,
 ) -> Any:
     # py-clob-client-v2 的 order_args/market_order_args 强制要求 float。
-    # 策略层（round_to_tick）在构造请求前已将价格/数量对齐到 tick_size（≥ 0.01），
+    # workflow 层（round_to_tick）在构造请求前已将价格/数量对齐到 tick_size（≥ 0.01），
     # 因此 float 转换引入的精度误差（≤ 1 ULP ≈ 1e-15）远小于最小 tick 粒度。
     requested_order_type = order_type_text(request.order_type).upper()
     order_type_enum = exported["order_type"]

@@ -1,6 +1,6 @@
 """体育直播真实样本校验工具。
 
-本模块服务当前体育扫尾策略的离线验收：把采集到的 Goalserve inplay payload
+本模块服务当前量化决策的离线验收：把采集到的 Goalserve inplay payload
 和 Polymarket market 样本放在同一个 fixture 中，校验 Goalserve 字段归一化结果、
 比赛状态字段以及 market/game 匹配是否符合人工预期。
 

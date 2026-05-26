@@ -69,7 +69,7 @@ class PersistenceRecordBuilder:
         event_type = _event_type_text(event)
         payload = dict(event.payload)
 
-        # DECISION_RECORDED 是策略 hook 录制，专写 ``decision_records`` 表；
+        # DECISION_RECORDED 是workflow hook 录制，专写 ``decision_records`` 表；
         # 它的 input/output payload 体积可观且语义与 audit / order 完全不重叠，
         # 因此独立成 kind，不再投到 audit_events，避免 audit 表被复盘数据稀释。
         if event_type in _DECISION_EVENT_TYPES:

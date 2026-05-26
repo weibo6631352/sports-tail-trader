@@ -14,7 +14,6 @@ class MarketPauseSource(StrEnum):
     MANUAL = "manual"
     RECONCILE = "reconcile"
     RISK = "risk"
-    STRATEGY = "strategy"
 
 
 class MarketPauseReason(StrEnum):

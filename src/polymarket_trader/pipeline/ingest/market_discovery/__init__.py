@@ -7,7 +7,7 @@ discovery_runner.run_market_discovery_scan (2s 周期)
     │ 调 gamma /events?live=true
     ↓
 ingest_service.MarketIngestService.upsert_market
-    │ workflow.select_market (策略决定是否纳入 universe)
+    │ workflow.select_market (workflow 决定是否纳入 universe)
     ↓
 market_registry.upsert
     ↓ (首次 cid → lifecycle_registry.emit_added)

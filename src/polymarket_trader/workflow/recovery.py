@@ -1,4 +1,4 @@
-"""当前策略的恢复与修复语义。"""
+"""当前量化恢复与修复语义。"""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.domain.decisions import DecisionContext, QuantDecision, TradingDecision
 
 from polymarket_trader.workflow.config import TradingWorkflowConfig
-from polymarket_trader.workflow.outcomes import describe_sports_market, SportsMarketFamily, tail_token_targets
-from polymarket_trader.workflow.tail import LiveGameStatus, live_game_state_from_metadata
+from polymarket_trader.workflow.outcomes import describe_sports_market, SportsMarketFamily, sports_token_targets
+from polymarket_trader.sports import LiveGameStatus, live_game_state_from_metadata
 
 
 def build_recovery_quant_decision(
@@ -27,7 +27,7 @@ def build_recovery_quant_decision(
     if context.market is None:
         return QuantDecision(reason="missing_market_state")
 
-    managed_token_ids = {target.token_id for target in tail_token_targets(context.market)}
+    managed_token_ids = {target.token_id for target in sports_token_targets(context.market)}
     missing_target = not managed_token_ids
 
     account_snapshot = context.account_snapshot
@@ -103,7 +103,7 @@ def build_recovery_quant_decision(
         account_snapshot is not None and account_snapshot.is_market_paused(context.market.condition_id)
     ) or abnormal_pause_reason is not None or missing_target
     return QuantDecision(
-        reason="strategy_recovery",
+        reason="quant_recovery",
         actions=tuple(actions),
         pause_trading=pause_trading,
         pause_reason=abnormal_pause_reason
@@ -125,11 +125,11 @@ def _should_cancel_open_entry_order(
     context: DecisionContext,
     order: Order,
 ) -> bool:
-    """撤掉超过策略 TTL 的历史开放 BUY，避免旧 GTC 买单长期占用资金。"""
+    """撤掉超过 TTL 的历史开放 BUY，避免旧 GTC 买单长期占用资金。"""
 
     if not _is_open_entry_order(order):
         return False
-    max_resting_seconds = config.tail_entry_maker_max_resting_seconds
+    max_resting_seconds = config.entry_maker_max_resting_seconds
     if max_resting_seconds <= 0:
         # max_resting_seconds <= 0 表示"配置：立即撤单"，不是超时。
         return True
@@ -170,7 +170,7 @@ def _stale_no_live_state_pause_reason(
         return None
     if live_game_state_from_metadata(context.metadata) is not None:
         return None
-    threshold_seconds = config.tail_stale_no_live_state_seconds
+    threshold_seconds = config.stale_no_live_state_seconds
     if threshold_seconds <= 0:
         return None
     now = context.now or datetime.now(timezone.utc)
@@ -203,7 +203,7 @@ def _abnormal_live_state_pause_reason(
     }:
         return f"sports_live_state_{game.status.value}"
     if game.status == LiveGameStatus.ENDED:
-        # 已结束但 Polymarket 未封盘是当前策略的确定性机会，不按直播异常暂停。
+        # 已结束但 Polymarket 未封盘是当前量化确定性机会，不按直播异常暂停。
         return None
     if game.observed_at is not None and _live_state_age_seconds(context, game.observed_at) > (
         _max_live_state_age_seconds(config, game)
@@ -226,23 +226,23 @@ def _max_live_state_age_seconds(config: TradingWorkflowConfig, game: LiveEvent) 
 
     league = game.league.strip().lower()
     if game.tennis_state is not None or "tennis" in league or league in {"atp", "wta"}:
-        return config.tail_tennis_max_game_state_age_seconds
+        return config.tennis_max_game_state_age_seconds
     if game.baseball_state is not None or league in {"mlb", "baseball"}:
-        return config.tail_baseball_max_game_state_age_seconds
+        return config.baseball_max_game_state_age_seconds
     if game.esports_state is not None or (game.sport or "").strip().lower() == "esports":
-        return config.tail_esports_max_game_state_age_seconds
+        return config.esports_max_game_state_age_seconds
     # 足球(J1/J2/各联赛)livescore feed 更新慢(30-60s),用单独 soccer 阈值;
     # 之前缺这个分支导致 recovery 用 default 10s,reconcile 把所有 J2 market 标
     # sports_live_state_stale → pause_trading_for_market → 即使 candidate accepted
     # 也下不了单。
     if game.soccer_state is not None or (game.sport or "").strip().lower() == "soccer" or league in {"j1", "j2", "j1100", "j2100"} or any(k in league for k in ("soccer","football","liga","league","serie")):
-        return config.tail_soccer_max_game_state_age_seconds
+        return config.soccer_max_game_state_age_seconds
     # cricket/rugby/handball：Goalserve inplay 不覆盖，仅 livescore getfeed，feed
     # 周期 30-90s。走专属 livescore_only 阈值避免 default 60s 仍然偶发误标 stale。
     sport_text = (game.sport or "").strip().lower()
     if game.cricket_state is not None or game.handball_state is not None or sport_text in {"cricket", "rugby", "handball", "rugbyleague"} or "rugby" in league or "cricket" in league or "handball" in league:
-        return config.tail_livescore_only_max_game_state_age_seconds
-    return config.tail_max_game_state_age_seconds
+        return config.livescore_only_max_game_state_age_seconds
+    return config.default_max_game_state_age_seconds
 
 
 def _recovery_metadata(
@@ -252,7 +252,7 @@ def _recovery_metadata(
     abnormal_pause_reason: str | None,
 ) -> dict[str, object]:
     metadata: dict[str, object] = {
-        "recovery_reason": abnormal_pause_reason or "strategy_recovery",
+        "recovery_reason": abnormal_pause_reason or "quant_recovery",
     }
     if abnormal_pause_reason is not None:
         metadata["recovery_pause_reason"] = abnormal_pause_reason

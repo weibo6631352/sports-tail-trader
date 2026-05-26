@@ -1,6 +1,6 @@
-"""Orderbook 计算工具：策略侧高频复用的盘口计算。
+"""Orderbook 计算工具：高频复用的盘口计算。
 
-这些函数都返回 ``Decimal | None``——盘口缺侧时返回 None，策略自行决定降级路径，
+这些函数都返回 ``Decimal | None``——盘口缺侧时返回 None，调用方自行决定降级路径，
 不在工具函数里默默替换成 0。
 """
 
@@ -36,7 +36,7 @@ def depth_at_price(
 ) -> Decimal:
     """返回指定 side（"bid"/"ask"）在 ``price`` 价位上的累计 size。
 
-    ask 侧统计 price 及以下（策略愿意吃的最高价）；bid 侧统计 price 及以上。
+    ask 侧统计 price 及以下（愿意吃的最高价）；bid 侧统计 price 及以上。
     缺盘口时返回 0。
     """
 

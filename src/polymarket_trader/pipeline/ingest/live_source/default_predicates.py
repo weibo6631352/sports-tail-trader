@@ -10,7 +10,7 @@
   end_date 对体育单场常 == game_start_time，无法直接用 end > now 判 live）
 
 逻辑迁移自旧 `runtime/sports_polling_demand._is_market_active`，本模块作为
-SportsSubscriptionPolicy 的默认值。策略层可注入更精细的 active_predicate
+SportsSubscriptionPolicy 的默认值。workflow 层可注入更精细的 active_predicate
 （如按 sport 区分窗口、按风险 budget 限制订阅密度）。
 """
 

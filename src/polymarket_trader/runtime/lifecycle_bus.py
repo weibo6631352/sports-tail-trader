@@ -1,6 +1,6 @@
 """framework 内部 lifecycle 总线实现。
 
-策略通过 ``RuntimePorts.lifecycle`` 拿到的是 ``LifecycleBus`` Protocol 的只读视图；
+workflow 通过 ``RuntimePorts.lifecycle`` 拿到的是 ``LifecycleBus`` Protocol 的只读视图；
 本模块的 ``InProcessLifecycleBus`` 同时暴露 ``publish`` 给 framework 自己用，
 publish 接口被抽象为 ``LifecyclePublisher`` Protocol，让 framework 内部依赖这个
 Protocol 而不是具体实现，将来换 in-process / cross-process 实现都不破调用面。
@@ -23,9 +23,9 @@ from typing import Any, Protocol
 
 # ===== from former contracts/lifecycle.py =====
 class LifecycleEvent(StrEnum):
-    """framework 暴露给策略订阅的生命周期事件。
+    """framework 暴露给 workflow 订阅的生命周期事件。
 
-    策略不能 publish。framework 在主链路已有事件发出点增量发布到 lifecycle bus，
+    workflow 不能 publish。framework 在主链路已有事件发出点增量发布到 lifecycle bus，
     避免破坏 P0 队列分配。回调异步执行、抛错只走 telemetry，不影响主链路。
 
     每个事件的 envelope.payload 字段：
@@ -70,7 +70,7 @@ class LifecycleEnvelope:
 
 @dataclass(frozen=True, slots=True)
 class SubscriptionHandle:
-    """订阅 handle；策略持有以便 ``unsubscribe``。"""
+    """订阅 handle；workflow 持有以便 ``unsubscribe``。"""
 
     subscription_id: int
 
@@ -79,9 +79,9 @@ LifecycleCallback = Callable[[LifecycleEnvelope], Awaitable[None]]
 
 
 class LifecycleBus(Protocol):
-    """策略订阅 framework lifecycle 事件的只读总线。
+    """workflow 订阅 framework lifecycle 事件的只读总线。
 
-    策略只能 ``subscribe`` / ``unsubscribe``——publish 是 framework 内部接口。
+    workflow 只能 ``subscribe`` / ``unsubscribe``——publish 是 framework 内部接口。
     """
 
     def subscribe(self, event: LifecycleEvent, callback: LifecycleCallback) -> SubscriptionHandle: ...

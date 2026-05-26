@@ -5,7 +5,7 @@
 - list_sports_live_events_history → DB audit 查询
 - list_sports_live_states / list_sports_live_source_gaps → 内存运营查询
   （基于 market_metadata_store + registry）
-- outright_team_resolution → strategy 内部诊断
+- outright_team_resolution → workflow 内部诊断
 - soccer_injuries_snapshot / h2h_snapshot → goalserve_lazy_client 代理
 
 姊妹 `SportsLiveAggregator` 走新 LiveStateStore / LiveSourceRegistry 架构，
@@ -50,13 +50,13 @@ def _market_slug_prefix(market: Market) -> str:
     return slug.split("-", 1)[0] or "unknown"
 
 
-def _runtime_strategy(runtime: Any) -> Any | None:
+def _runtime_workflow(runtime: Any) -> Any | None:
     try:
         return runtime.workflow
     except (RuntimeError, AttributeError):
         pass
     try:
-        return runtime.market_ingest_service.strategy
+        return runtime.market_ingest_service.workflow
     except AttributeError:
         return None
 
@@ -68,20 +68,20 @@ def _live_source_gap_scope_markets(
 
     系列赛/冠军/奖项/转会等长期市场不依赖单场直播源，避免缺口噪声污染。
     """
-    hooks = _runtime_strategy(runtime)
-    if hooks is None:
+    workflow = _runtime_workflow(runtime)
+    if workflow is None:
         return tuple(markets)
     scoped: list[Market] = []
     for market in markets:
         try:
-            decision = hooks.select_market(market)
+            decision = workflow.select_market(market)
         except Exception:  # noqa: BLE001
             continue
         if not decision.selected:
             continue
         family = (
-            hooks.market_family_label(market)
-            if hasattr(hooks, "market_family_label") else None
+            workflow.market_family_label(market)
+            if hasattr(workflow, "market_family_label") else None
         )
         if family is not None and family != "single_game":
             continue
@@ -354,8 +354,8 @@ class SportsQueryAggregator:
     ) -> dict[str, Any] | None:
         """对指定 outright market 跑 resolve_market_team_debug，返回 trace。"""
 
-        strategy = self._runtime.workflow if self._runtime else None
-        if strategy is None or not hasattr(strategy, "resolve_outright_team_debug_payload"):
+        workflow = self._runtime.workflow if self._runtime else None
+        if workflow is None or not hasattr(workflow, "resolve_outright_team_debug_payload"):
             return None
         registry = self._runtime.registry if self._runtime else None
         if registry is None:
@@ -367,7 +367,7 @@ class SportsQueryAggregator:
             market = registry.get_by_slug(market_slug)
         if market is None:
             return None
-        return strategy.resolve_outright_team_debug_payload(market)
+        return workflow.resolve_outright_team_debug_payload(market)
 
     # ===== Goalserve lazy 客户端代理 =====
 

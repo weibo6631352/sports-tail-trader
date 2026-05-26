@@ -115,9 +115,9 @@ def _build_record(
         "sell": sell,
         "position": None if position is None else serializer.position(position),
         "pnl": pnl,
-        "strategy_summary": audit_payload.get("strategy_summary"),
+        "decision_summary": audit_payload.get("decision_summary"),
         "decision_kind": audit_payload.get("decision_kind"),
-        "strategy_payload": audit_payload.get("strategy_payload"),
+        "decision_payload": audit_payload.get("decision_payload"),
         "candidate_reasons": audit_payload.get("candidate_reasons"),
         "first_fill_at": jsonable(min((_fill_time(fill) for fill in item_fills), default=None)),
         "last_fill_at": jsonable(max((_fill_time(fill) for fill in item_fills), default=None)),
@@ -181,17 +181,17 @@ def _fill_leg(fills: Sequence[Fill], *, side: str) -> dict[str, Any]:
 
 
 def _audit_context(audit_events: Sequence[AuditEvent]) -> dict[str, Any]:
-    """从 audit events 提取 framework 中性的复盘字段：strategy_summary 强类型、
-    decision_kind 枚举值、strategy_payload 策略私有透传 dict。framework 不再按
-    具体 metadata key 名（如 live_game）查找——一律读 strategy_payload 整体。
+    """从 audit events 提取 framework 中性的复盘字段：decision_summary 强类型、
+    decision_kind 枚举值、decision_payload 决策私有透传 dict。framework 不再按
+    具体 metadata key 名（如 live_game）查找——一律读 decision_payload 整体。
     """
 
     reasons: list[str] = []
     result: dict[str, Any] = {
         "candidate_reasons": reasons,
-        "strategy_summary": None,
+        "decision_summary": None,
         "decision_kind": None,
-        "strategy_payload": None,
+        "decision_payload": None,
     }
     for event in audit_events:
         if event.reason:
@@ -200,18 +200,18 @@ def _audit_context(audit_events: Sequence[AuditEvent]) -> dict[str, Any]:
         plan_payload = payload.get("plan_metadata")
         if not isinstance(plan_payload, Mapping):
             plan_payload = payload
-        if result["strategy_summary"] is None:
-            summary = plan_payload.get("strategy_summary") if isinstance(plan_payload, Mapping) else None
+        if result["decision_summary"] is None:
+            summary = plan_payload.get("decision_summary") if isinstance(plan_payload, Mapping) else None
             if isinstance(summary, Mapping):
-                result["strategy_summary"] = dict(summary)
+                result["decision_summary"] = dict(summary)
         if result["decision_kind"] is None:
             kind = plan_payload.get("decision_kind") if isinstance(plan_payload, Mapping) else None
             if kind:
                 result["decision_kind"] = kind
-        if result["strategy_payload"] is None:
-            sp = plan_payload.get("strategy_payload") if isinstance(plan_payload, Mapping) else None
+        if result["decision_payload"] is None:
+            sp = plan_payload.get("decision_payload") if isinstance(plan_payload, Mapping) else None
             if isinstance(sp, Mapping):
-                result["strategy_payload"] = dict(sp)
+                result["decision_payload"] = dict(sp)
     return result
 
 

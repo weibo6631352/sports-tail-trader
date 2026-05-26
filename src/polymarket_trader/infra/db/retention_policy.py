@@ -1,4 +1,4 @@
-"""audit_events 分层 retention 策略（原架构方案 §13.5）。
+"""audit_events 分层 retention 方案（原架构方案 §13.5）。
 
 不同类别的 audit 事件价值不等——交易类需保留长（复盘 + 资金审计）；
 拒绝/heartbeat 类只需短期（看趋势 + debug 边界）。本模块集中维护

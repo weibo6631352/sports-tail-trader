@@ -15,10 +15,10 @@ from polymarket_trader.infra.db.base import (
 
 
 class DecisionRecordModel(Base, TimestampMixin):
-    """策略 hook 决策录制表。
+    """workflow hook 决策录制表。
 
     append-only 时间序列：每次 ``decide_entry`` / ``decide_exit`` 等 hook
-    返回结果都会写一行，作为离线复盘与策略回归对比的权威来源。
+    返回结果都会写一行，作为离线复盘与决策回归对比的权威来源。
     ``created_at`` 作为时间维度索引，``accepted`` / ``reason`` 用于
     dump 端点的拒绝原因聚合查询。
     """

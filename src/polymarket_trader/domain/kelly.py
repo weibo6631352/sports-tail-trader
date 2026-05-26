@@ -321,7 +321,7 @@ class KellyExitSignal:
     shares 比例（``sell_fraction`` ∈ [0,1]）。0 表示继续持有，1 表示全部退出。
 
     简化模型：``sell_fraction = clip((c - p) / (1 - p), 0, 1)``——Kelly 在反向
-    edge 时的对称解。当前未自动接入策略 decide_exit；调用时机由策略层决定。
+    edge 时的对称解。当前未自动接入quant_decider 的 decide；调用时机由workflow 层决定。
     """
 
     sell_fraction: Decimal
@@ -362,7 +362,7 @@ def apply_vol_scaling(
     """vol-scaling: 高波动市场缩仓——``stake' = stake × min(1, baseline/realized)²``。
 
     经验法则：σ 翻倍 → stake 减到 1/4。极薄盘口 / 大新闻事件下波动飙升时
-    Kelly 公式假设的 p 估计更不可靠，应额外缩仓。strategy 可调，default 不接入。
+    Kelly 公式假设的 p 估计更不可靠，应额外缩仓。workflow 可调，default 不接入。
     """
 
     if realized_vol <= _ZERO or baseline_vol <= _ZERO:
@@ -382,7 +382,7 @@ def apply_settlement_discount(
     """长持仓的资金占用机会成本折现：stake' = stake × (1 - r × T_year)。
 
     简化模型（线性近似 exp(-rT)）。outright family 长持仓（数月）应折，tail
-    （分钟级）影响可忽略。strategy 可调，default 不接入。
+    （分钟级）影响可忽略。workflow 可调，default 不接入。
     """
 
     if settlement_seconds <= 0 or annualized_rate <= _ZERO:
@@ -401,37 +401,13 @@ def apply_dispute_premium(
 ) -> Decimal:
     """争议性市场（如 ambiguous resolution）edge 扣除——要求 N bps 额外补偿。
 
-    Polymarket 历史上有 UMA dispute 案（如 Khamenei 案）。strategy 标记的
+    Polymarket 历史上有 UMA dispute 案（如 Khamenei 案）。workflow 标记的
     high-dispute 市场应在原 edge 基础上扣 100-300 bps。default 不接入。
     """
 
     if premium_bps <= 0:
         return edge
     return edge - Decimal(premium_bps) / Decimal("10000")
-
-
-def implied_fair_value_from_price_cap(
-    price_cap: Decimal,
-    *,
-    min_edge_required: Decimal,
-) -> Decimal | None:
-    """tail 路径反推 implied fair_value：``cap = fair × (1 - edge_required)``。
-
-    现状策略只配 ``tail_*_max_entry_price``（愿意买入的最高价）+ ``min_edge_bps``，
-    隐含了"心里的 fair_value"。把这层信念显式化为 Kelly 公式吃的 ``p``，避免
-    Kelly 链路双口径。
-
-    ``min_edge_required >= 1`` 没有数学意义；返回 None 让调用侧降级 record-only。
-    """
-
-    if min_edge_required >= _ONE or min_edge_required < _ZERO:
-        return None
-    fair_value = price_cap / (_ONE - min_edge_required)
-    if fair_value <= _ZERO:
-        return None
-    if fair_value > _ONE:
-        return _ONE
-    return fair_value
 
 
 def _fee_per_share_usdc(
@@ -501,5 +477,4 @@ __all__ = [
     "apply_vol_scaling",
     "apply_settlement_discount",
     "apply_dispute_premium",
-    "implied_fair_value_from_price_cap",
 ]

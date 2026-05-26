@@ -22,7 +22,7 @@ _LIVE_STATE_MAX_BYTES = 256 * 1024
 
 
 class LiveStateRequest(BaseModel):
-    """人工或外部采集器写入的策略可见 live_state；framework 不解析 payload 字段语义。"""
+    """人工或外部采集器写入的 workflow 可见 live_state；framework 不解析 payload 字段语义。"""
 
     payload: dict[str, Any] = Field(default_factory=dict)
     signal_allowed: bool | None = None
@@ -62,7 +62,7 @@ async def list_candidates(
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
     aggregator = CandidateAggregator(runtime=runtime)
-    return await aggregator.list_strategy_candidates(
+    return await aggregator.list_candidates(
         limit=limit,
         offset=offset,
         condition_id=condition_id,

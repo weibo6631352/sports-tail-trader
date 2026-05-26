@@ -296,11 +296,11 @@ class OrderGateway:
         risk_decision: RiskDecision | None,
         order_result: OrderResult | None,
     ) -> None:
-        """把订单结果转译为 lifecycle 事件供策略订阅。
+        """把订单结果转译为 lifecycle 事件供 workflow 订阅。
 
         映射按 ``operation`` 优先：cancel/replace 操作只发 ORDER_CANCELLED 或
-        ORDER_REJECTED，避免在 cancel 路径里发出 ORDER_SUBMITTED / ORDER_FILLED 误导策略。
-        NO_FILL / UNKNOWN_TIMEOUT 这种"等待状态"不产生事件，避免给策略噪音。
+        ORDER_REJECTED，避免在 cancel 路径里发出 ORDER_SUBMITTED / ORDER_FILLED 误导决策。
+        NO_FILL / UNKNOWN_TIMEOUT 这种"等待状态"不产生事件，避免给决策噪音。
         """
 
         if self._lifecycle_bus is None:

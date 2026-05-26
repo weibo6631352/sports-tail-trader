@@ -5,13 +5,13 @@
 ## 怎么看
 
 - 开发规则与分层边界：[../CLAUDE.md](../CLAUDE.md)
-- 运行配置：[config.md](./config.md)
 - 启动与页面操作：[使用说明书](./使用说明书.md)
-- 故障处理：[runbook.md](./runbook.md)
-- 系统工作流（主管道 + 兜底）：[工作流](./工作流.md)
 - 市场 discovery 链路：[市场发现链路](./市场发现链路.md)
 - Goalserve 数据接口：[goalserve.md](./goalserve.md)
 - HTTP API：起服务后访问 `http://127.0.0.1:8000/docs`（Swagger）
+
+策略配置 / runbook / 工作流文档不再单独维护——以 [CLAUDE.md](../CLAUDE.md) +
+源码 + `git log` 为唯一权威。
 
 ## 维护
 

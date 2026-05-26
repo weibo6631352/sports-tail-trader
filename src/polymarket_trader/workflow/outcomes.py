@@ -1,6 +1,6 @@
-"""当前策略的体育盘口 outcome 解析。
+"""当前量化体育盘口 outcome 解析。
 
-体育扫尾策略不再假设固定交易 ``NO`` token，而是按盘口类型解析目标方向。
+量化决策不再假设固定交易 ``NO`` token，而是按盘口类型解析目标方向。
 解析失败时返回显式原因，由 universe、trading 和 recovery 决定是否跳过或暂停。
 """
 
@@ -12,7 +12,7 @@ from functools import lru_cache
 import re
 
 from polymarket_trader.domain.market import Market
-from polymarket_trader.workflow.tail import SportsMarketFamily, SportsMarketSide, SportsMarketType
+from polymarket_trader.sports import SportsMarketFamily, SportsMarketSide, SportsMarketType
 
 _GENERIC_OUTCOMES = {"yes", "no"}
 # 盘口线标记词。"totals" 复数与 "handicap-home-1" 这类在标记词和数字之间夹
@@ -25,7 +25,7 @@ _LINE_MARKER_PATTERN = (
 
 @dataclass(frozen=True, slots=True)
 class SportsTokenTarget:
-    """一个可由体育扫尾策略管理的 token 方向。"""
+    """一个可由量化决策管理的 token 方向。"""
 
     token_id: str
     side: SportsMarketSide
@@ -57,7 +57,7 @@ class SportsMarketDescriptor:
 def primary_token_id(market: Market) -> str:
     """返回第一个可管理 token，保留给旧调用侧使用。
 
-    新代码应优先使用 ``tail_token_targets()``，避免重新引入“固定主 token”假设。
+    新代码应优先使用 ``sports_token_targets()``，避免重新引入“固定主 token”假设。
     """
 
     descriptor = describe_sports_market(market)
@@ -72,8 +72,8 @@ def is_primary_token(market: Market, token_id: str | None) -> bool:
     return token_id in describe_sports_market(market).target_token_ids
 
 
-def tail_token_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
-    """返回体育扫尾可管理的 token 方向。"""
+def sports_token_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
+    """返回量化可管理的 token 方向。"""
 
     return describe_sports_market(market).targets
 
@@ -112,7 +112,7 @@ def target_for_token(market: Market, token_id: str | None) -> SportsTokenTarget 
 
     if token_id is None:
         return None
-    for target in tail_token_targets(market):
+    for target in sports_token_targets(market):
         if target.token_id == token_id:
             return target
     return None
@@ -135,7 +135,7 @@ def _market_type(
         return SportsMarketType.SPREADS
     if _is_binary_yes_no_market(market):
         # 单场 Yes/No 胜负盘（"Will the Lakers win the game?" + Yes/No）当作
-        # MONEYLINE 处理：路由到现成的扫尾锁定 + 赔率差价 moneyline 评估器。
+        # MONEYLINE 处理：路由到现成的锁定 + 赔率差价 moneyline 评估器。
         # 其余 Yes/No prop（BTTS、首球、半场赛果、NRFI 等）仍归 BINARY_PROP。
         if _is_single_game_yes_no_moneyline(market, text, market_family):
             return SportsMarketType.MONEYLINE
@@ -164,19 +164,31 @@ def _market_family(market: Market, text: str) -> SportsMarketFamily:
         ),
     ):
         # esports 双方对阵胜负盘走 single_game MONEYLINE：有 livescore 直播源 +
-        # best-of 锁定模型，可自动扫尾。判定条件——含 vs/at 对阵标记、恰 2 个
+        # best-of 锁定模型，可自动交易。判定条件——含 vs/at 对阵标记、恰 2 个
         # outcome 且 outcome 是战队名（非 Yes/No、非 Over/Under）。其余 esports
         # 盘口（total games、odd/even kills、rampage、penta kill 等 prop）无定价
         # 模型，仍归 ESPORTS family 做可审计 record-only（§9 不静默丢弃）。
         if _is_esports_moneyline_market(market, combined_text):
             return SportsMarketFamily.SINGLE_GAME
         return SportsMarketFamily.ESPORTS
-    # tennis "total games" 是单场 totals 盘口，不是系列赛——先排除再进 classifier。
-    # series 关键词单一来源在 ``series.classifier``；本函数不再硬编码列表，避免双口径。
+    # tennis "total games" 是单场 totals 盘口，不是系列赛——先排除。
+    # series 关键词内联识别：系列赛胜者 / best-of / total games / handicap 子类型
+    # 都归 SERIES family，由 quant_decider 主路径统一通过 estimate_signal 取信号。
     if not _is_tennis_text(combined_text):
-        from polymarket_trader.workflow.series import SeriesSubType, classify_series_sub_type
-
-        if classify_series_sub_type(market) != SeriesSubType.OTHER:
+        if _contains_any(
+            combined_text,
+            (
+                " series winner",
+                "win the series",
+                "win this series",
+                "wins the series",
+                "to win the series",
+                " best of ",
+                " best-of-",
+                "series total games",
+                "series handicap",
+            ),
+        ):
             return SportsMarketFamily.SERIES
     if _contains_any(
         text,
@@ -203,7 +215,7 @@ def _market_family_reason(market_family: SportsMarketFamily) -> str:
     if market_family == SportsMarketFamily.SINGLE_GAME:
         return "market_selected"
     if market_family == SportsMarketFamily.SERIES:
-        # series 走 ``strategy._decide_series_entry`` → ``series.evaluator``。本字段是
+        # series 已删。本字段是
         # universe 排除的展示原因（family 不在 single_game / outright 白名单时使用），
         # 真正的拒绝原因走 evaluator 的 ``SeriesRejectReason``。
         return "series_market_pending_model"
@@ -581,7 +593,7 @@ def _is_single_game_yes_no_moneyline(
 def _is_season_or_competition_prop(text: str) -> bool:
     """识别真实 Gamma 样本里的赛季/赛事归属型 Yes/No 市场。
 
-    这些市场可以解析方向，但不属于单场直播扫尾，不进入自动交易 universe。
+    这些市场可以解析方向，但不属于单场直播，不进入自动交易 universe。
     """
 
     strong_competition_phrases = (

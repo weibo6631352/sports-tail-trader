@@ -1170,9 +1170,9 @@ export type OperatorInterventionsAggregate = {
 // strategy parameter_store 的 (scope, key) 映射全在 strategy scope。
 
 export type SweepParameterKey =
-  | 'tail_outright_min_edge_bps'
-  | 'tail_outright_max_entry_price'
-  | 'tail_outright_min_orderbook_depth_usdc'
+  | 'outright_min_edge_bps'
+  | 'outright_max_entry_price'
+  | 'outright_min_orderbook_depth_usdc'
   | 'entry_no_price_max'
 
 export type SweepCandidateResult = {

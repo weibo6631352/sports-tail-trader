@@ -159,7 +159,7 @@ async def get_missed_opportunities(
     until: int | None = Query(default=None, ge=0),
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, Any]:
-    """被风控/策略拒绝的决策事后盈利模拟。"""
+    """被风控/决策器拒绝的决策事后盈利模拟。"""
     from decimal import Decimal
 
     return await AnalyticsAggregator(

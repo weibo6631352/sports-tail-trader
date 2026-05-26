@@ -31,7 +31,7 @@ _PRIORITY_CONDITION_REFRESH_SECONDS = 15.0
 _PRIORITY_CONDITION_REFRESH_BUDGET_PER_TICK = 1
 # 单次失败的基础回退，下次重试至少等这么久。
 MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS = 5
-# 指数回退上限：5 → 10 → 20 → 40 → 60s 后封顶。tail 策略对发现实时性要求高，
+# 指数回退上限：5 → 10 → 20 → 40 → 60s 后封顶。量化对发现实时性要求高，
 # 一次 gamma 超时不应让我们 60s 无新市场；同时避免长期故障打爆 gamma API。
 MARKET_DISCOVERY_RETRY_BACKOFF_MAX_SECONDS = 60
 
@@ -332,9 +332,9 @@ async def expand_live_event_market_discovery(runtime: RuntimeComponents) -> None
             timeout_s=2.0,
         )
         raw_events: list[Any] = []
-        store = getattr(runtime, "gamma_snapshot_store", None)
+        store = runtime.gamma_snapshot_store
         for event in events:
-            if store is not None and event.markets:
+            if event.markets:
                 store.upsert_many(event.markets)
             raw_events.extend(event.to_raw_market_events(source="gamma.events_slug"))
         if raw_events:
@@ -389,9 +389,7 @@ async def refresh_priority_condition_ids(runtime: RuntimeComponents) -> None:
             continue
         # priority refresh 也把单条结果回写 store，让后续 reconcile/settlement 读路径
         # 命中而不必另外打 /markets。
-        store = getattr(runtime, "gamma_snapshot_store", None)
-        if store is not None:
-            store.upsert(market_dto)
+        runtime.gamma_snapshot_store.upsert(market_dto)
         await runtime.market_discovery_worker.ingest_source_page(
             {"markets": [dict(market_dto.raw)]},
             source="gamma.priority_refresh",
@@ -473,9 +471,9 @@ async def fetch_full_market_discovery_page(
     # events 端点返回的 nested markets 已经包含完整 GammaMarketDTO（tick/fee/
     # outcomes/closed/token_ids），顺手写进 gamma_snapshot_store——下游 reconcile
     # /settlement_scanner 不必再单独打 /markets 拉同一份数据。
-    store = getattr(runtime, "gamma_snapshot_store", None)
+    store = runtime.gamma_snapshot_store
     for event in events:
-        if store is not None and event.markets:
+        if event.markets:
             store.upsert_many(event.markets)
         raw_events.extend(event.to_raw_market_events(source="gamma.events_keyset"))
     return tuple(raw_events), next_cursor
@@ -486,23 +484,23 @@ _FRAMEWORK_DISCOVERY_PARAM_KEYS = {"limit", "after_cursor"}
 
 
 def _discovery_queries(runtime: RuntimeComponents) -> tuple[DiscoveryQuery, ...]:
-    hooks = runtime.workflow
-    queries = (*_live_game_discovery_queries(runtime, hooks), *_configured_discovery_queries(hooks))
+    workflow = runtime.workflow
+    queries = (*_live_game_discovery_queries(runtime, workflow), *_configured_discovery_queries(workflow))
     return _dedupe_discovery_queries(queries) or (DEFAULT_DISCOVERY_QUERY,)
 
 
-def _configured_discovery_queries(hooks: Any) -> tuple[DiscoveryQuery, ...]:
-    method = getattr(hooks, "discovery_queries", None)
+def _configured_discovery_queries(workflow: Any) -> tuple[DiscoveryQuery, ...]:
+    method = getattr(workflow, "discovery_queries", None)
     if not callable(method):
         return (DEFAULT_DISCOVERY_QUERY,)
     queries = tuple(query for query in method() if isinstance(query, DiscoveryQuery) and query.name.strip())
     return queries or (DEFAULT_DISCOVERY_QUERY,)
 
 
-def _live_game_discovery_queries(runtime: RuntimeComponents, hooks: Any) -> tuple[DiscoveryQuery, ...]:
-    """从所有 LiveStateStore bucket 合并 events 中提取策略高意图查询。
+def _live_game_discovery_queries(runtime: RuntimeComponents, workflow: Any) -> tuple[DiscoveryQuery, ...]:
+    """从所有 LiveStateStore bucket 合并 events 中提取 workflow 高意图查询。
 
-    ``hooks`` 形参未使用——live state discovery 直接走 ``runtime.workflow``，
+    ``workflow`` 形参未使用——live state discovery 直接走 ``runtime.workflow``，
     保留参数只为与同模块其它 query builder 签名一致。
 
     新架构（pipeline/ingest/live_source/）每个 (provider, sport) bucket 独立维护

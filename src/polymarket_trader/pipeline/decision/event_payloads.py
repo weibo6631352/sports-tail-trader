@@ -95,7 +95,7 @@ def _merge_nested_order_payload(payload: dict[str, object]) -> dict[str, object]
 
     用户 WS 投影事件通常把订单和成交分别放在 ``order`` / ``fill`` 中；
     交易 worker 只消费框架内部 ``OrderResult`` 语义，所以这里在 worker
-    边界做一次 DTO 规整，避免策略或 app 层理解外部 payload 结构。
+    边界做一次 DTO 规整，避免 workflow 或 app 层理解外部 payload 结构。
     """
 
     order_payload = payload.get("order")

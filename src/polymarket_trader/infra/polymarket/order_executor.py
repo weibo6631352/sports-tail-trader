@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_signal_at(intent: ManagedOrderIntent) -> datetime | None:
-    """从 intent.metadata 提取 signal_at（策略 decide_entry 时刻）。
+    """从 intent.metadata 提取 signal_at（量化决策器 decide_entry 时刻）。
 
     只有 Buy/SellOrderIntent 有 metadata；Cancel/Replace 不携带 signal_at。
     缺失返回 None——supervisor 的 entry_signal_to_submit_ms gauge 在 None 时不更新。

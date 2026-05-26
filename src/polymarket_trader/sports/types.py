@@ -1,6 +1,6 @@
-"""体育策略通用类型层：枚举 + 内部 dataclass。
+"""体育通用类型层：枚举 + 内部 dataclass。
 
-不依赖任何评估或解析逻辑；任何体育策略都可以从这里取业务对象。
+不依赖任何评估或解析逻辑；任何体育 workflow 都可以从这里取业务对象。
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ class SportsMarketScopeType(StrEnum):
 
 
 class LiveGameStatus(StrEnum):
-    """策略侧直播比赛状态。"""
+    """直播比赛状态。"""
 
     SCHEDULED = "scheduled"
     LIVE = "live"
@@ -88,7 +88,7 @@ class LiveGameStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class LiveGameState:
-    """策略评估所需的直播比赛状态。
+    """决策评估所需的直播比赛状态。
 
     所有 sport-specific state（baseball/tennis/soccer/esports/cricket/volleyball）均复用
     ``polymarket_trader.domain.sports_live`` 中的单一定义，与 infra 归一化保持
@@ -236,7 +236,7 @@ class LiveGameState:
 
 @dataclass(frozen=True, slots=True)
 class SportsMarketSnapshot:
-    """策略评估所需的体育盘口快照。"""
+    """决策评估所需的体育盘口快照。"""
 
     market_type: SportsMarketType
     side: SportsMarketSide

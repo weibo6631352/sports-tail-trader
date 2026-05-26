@@ -1,8 +1,7 @@
 """体育盘口 slug 解析与结算范围（scope）识别。
 
-只承载"任何体育策略都需要"的通用解析。具体盘口类型（如 tennis set winner /
-tennis set games total）的细节解析仍可在策略私有包内扩展，参见
-``polymarket_trader.workflow.tail.slug``。
+只承载"任何体育 workflow 都需要"的通用解析。具体盘口类型（如 tennis set winner /
+tennis set games total）的细节解析仍可在 workflow 私有包内扩展。
 """
 
 from __future__ import annotations

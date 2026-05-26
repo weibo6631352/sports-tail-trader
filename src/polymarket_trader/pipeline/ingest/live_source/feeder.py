@@ -52,7 +52,7 @@ SportNormalizer = Callable[[str], str | None]
 
 
 # Goalserve client parsers 内部部分用 inplay 路径 token（soccer / basket / hockey /
-# amfootball）而非策略规范码（football / basketball / ice-hockey / american-football）。
+# amfootball）而非 workflow 规范码（football / basketball / ice-hockey / american-football）。
 # feeder 在分桶前归一化，让 LiveSourceKey.sport 与 subscription_policy 输出的规范码
 # 严格一致。新增 sport 时同步补这张映射，否则会被默认归一化为原文（即 raw token）。
 _SPORT_TOKEN_TO_CODE: dict[str, str] = {

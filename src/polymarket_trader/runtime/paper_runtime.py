@@ -54,7 +54,7 @@ def build_paper_runtime(
     paper_ledger.fund(settings.portfolio_budget_usdc)
     # paper 模式禁用真签名：py-clob-client.sign_order 会调链上 balance check，
     # 链上实际余额很少（多被 active orders 锁住）→ 立即报 "not enough balance"
-    # 阻塞所有下单。paper 模式不上链，签名走本地虚拟即可，不损失策略验证价值。
+    # 阻塞所有下单。paper 模式不上链，签名走本地虚拟即可，不损失决策验证价值。
     execution_client = PaperSubmitOnlyOrderClient(
         real_sign_client=None,
         market_lookup=registry.get_by_token_id,

@@ -82,31 +82,6 @@ class OperatorService:
     def bind_runtime(self, runtime: RuntimeComponents) -> "OperatorService":
         return OperatorService(runtime=runtime)
 
-    def get_position_signals(
-        self, *, condition_id: str | None = None, token_id: str | None = None
-    ) -> dict[str, object]:
-        """返回最近一次 decide_exit 决策的完整持仓信号快照。
-
-        命名"持仓信号"而非"exit 决策信号"——内部 metadata 仍用 dynamic_exit_*
-        前缀保持 audit/测试兼容，对外接口语义是持仓评估的多信号 breakdown：
-        5 类投票（fair_value/imbalance/best_bid/goalserve/math_lock）+ 流动性
-        tier + math_lock 是否支持 + fair_value 来源等。
-
-        condition_id / token_id 都缺 → 返回全部持仓 signals 列表。
-        """
-
-        if self.runtime is None or self.runtime.market_tick_worker is None:
-            return {"items": []}
-        cache = self.runtime.market_tick_worker._token_position_signals
-        items: list[dict[str, object]] = []
-        for tid, signals in cache.items():
-            if token_id is not None and tid != token_id:
-                continue
-            if condition_id is not None and signals.get("condition_id") != condition_id:
-                continue
-            items.append(signals)
-        return {"items": items, "total": len(items)}
-
     def _serializer(self) -> ApiSerializer:
         return ApiSerializer(
             account_snapshot_provider=self._account_snapshot,
@@ -136,10 +111,10 @@ class OperatorService:
         manual_confirmation: "ManualConfirmation | None" = None,
     ):
         # runtime.settings 是 main.py 启动后绑定的强字段——operator 路径不可能在
-        # settings 缺失时执行。kelly_* 从策略侧 TradingWorkflow.config 读取；
-        # 策略配置是 kelly_* 的唯一真相来源，不再走框架 Settings。
+        # settings 缺失时执行。kelly_* 从 TradingWorkflow.config 读取；
+        # workflow_config 是 kelly_* 的唯一真相来源，不再走框架 Settings。
         settings = self.runtime.settings
-        strategy_config = self.runtime.workflow.config
+        workflow_config = self.runtime.workflow.config
         return self._decision_builder().build_trade_plan(
             market=market,
             orderbook=orderbook,
@@ -150,12 +125,12 @@ class OperatorService:
             trace_id=trace_id,
             portfolio_budget_usdc=settings.portfolio_budget_usdc,
             available_usdc=account.available_usdc,
-            kelly_fraction=strategy_config.kelly_fraction,
-            kelly_max_position_fraction=strategy_config.kelly_max_position_fraction,
-            kelly_min_edge=strategy_config.kelly_min_edge,
-            kelly_min_stake_usdc=strategy_config.kelly_min_stake_usdc,
-            kelly_allow_round_up_to_market_min=strategy_config.kelly_allow_round_up_to_market_min,
-            kelly_round_up_max_overbet_ratio=strategy_config.kelly_round_up_max_overbet_ratio,
+            kelly_fraction=workflow_config.kelly_fraction,
+            kelly_max_position_fraction=workflow_config.kelly_max_position_fraction,
+            kelly_min_edge=workflow_config.kelly_min_edge,
+            kelly_min_stake_usdc=workflow_config.kelly_min_stake_usdc,
+            kelly_allow_round_up_to_market_min=workflow_config.kelly_allow_round_up_to_market_min,
+            kelly_round_up_max_overbet_ratio=workflow_config.kelly_round_up_max_overbet_ratio,
             positions=account.positions,
             open_orders=account.open_orders,
             metadata=metadata if metadata is not None else self._entry_metadata_for_market(market),
@@ -167,10 +142,10 @@ class OperatorService:
         summary = plan.summary
         extras = dict(summary.extras) if summary is not None else {}
         execution_permission = extras.get("execution_permission") if extras else None
-        strategy_action = summary.action if summary is not None else ""
-        # 策略想 auto_execute 但 plan 因 framework 风控 / 资金 / 盘口被挡住时，
-        # operator UI 展示统一标 reject，让运营能区分"策略主动拒绝"vs"被框架挡住"。
-        if strategy_action == "auto_execute" and not plan.ready_to_trade:
+        decision_action = summary.action if summary is not None else ""
+        # 决策器想 auto_execute 但 plan 因 framework 风控 / 资金 / 盘口被挡住时，
+        # operator UI 展示统一标 reject，让运营能区分"量化决策器主动拒绝"vs"被框架挡住"。
+        if decision_action == "auto_execute" and not plan.ready_to_trade:
             action_label = "reject"
             block_reason = ""
             allocation = plan.allocation
@@ -178,7 +153,7 @@ class OperatorService:
                 block_reason = str(allocation.release_reason or allocation.reason or "")
             reason_text = block_reason or plan.reason or (summary.reason if summary is not None else "")
         else:
-            action_label = strategy_action
+            action_label = decision_action
             reason_text = (summary.reason if summary is not None else "") or plan.reason or ""
         accepted = bool(action_label and action_label != "reject")
         confirmable = (
@@ -223,7 +198,7 @@ class OperatorService:
             "decision_kind": None if plan.decision_kind is None else plan.decision_kind.value,
             "reason": reason_text,
             "action": action_label,
-            "strategy_action": strategy_action,
+            "decision_action": decision_action,
             "execution_permission": execution_permission,
             "label": summary.label if summary is not None else "",
             "market_type": summary.market_type if summary is not None else "",
@@ -531,7 +506,7 @@ class OperatorService:
         event_slug: str | None = None,
         source: str = "manual",
     ) -> dict[str, Any]:
-        """人工写入策略可见的 live_state 状态。framework 不解析 ``payload`` 字段语义。"""
+        """人工写入决策器可见的 live_state 状态。framework 不解析 ``payload`` 字段语义。"""
 
         store = self._entry_metadata_store()
         if store is None:
@@ -559,7 +534,7 @@ class OperatorService:
         note: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """人工确认体育扫尾候选，并经交易服务和风控提交。"""
+        """人工确认量化候选，并经交易服务和风控提交。"""
 
         trace_id = trace_id or uuid4().hex
         market = self._resolve_market(
@@ -856,7 +831,7 @@ class OperatorService:
         reason: str = "operator_cancel_order",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """人工撤单。走 OrderGateway → OrderExecutor，与策略撤单同一条主链路。"""
+        """人工撤单。走 OrderGateway → OrderExecutor，与决策器撤单同一条主链路。"""
 
         trace_id = trace_id or uuid4().hex
         logger.warning(

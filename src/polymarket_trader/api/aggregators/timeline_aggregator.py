@@ -92,7 +92,7 @@ class TimelineAggregator:
         token_id: str | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        """聚合成交、持仓、审计和策略 metadata，返回只读复盘视图。"""
+        """聚合成交、持仓、审计和决策 metadata，返回只读复盘视图。"""
 
         filters = TradeReplayFilters(
             condition_id=condition_id,

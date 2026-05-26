@@ -1,6 +1,6 @@
-"""当前体育扫尾策略的远端发现查询构造。
+"""当前量化决策的远端发现查询构造。
 
-远端 discovery 只能做粗筛；本文件负责把策略配置转换成 Polymarket Gamma
+远端 discovery 只能做粗筛；本文件负责把 workflow 配置转换成 Polymarket Gamma
 支持的 ``DiscoveryQuery``。最终是否可交易仍由 universe、盘口解析、直播状态
 和风控决定。
 """

@@ -21,30 +21,30 @@ const META: Record<string, ParamMetadata> = {
     hint: '组合总预算上限；缩小会立即影响后续 allocation。',
   },
   // strategy 段 —— 风控/入场价直接影响成单。
-  'strategy.tail_outright_min_edge_bps': {
+  'strategy.outright_min_edge_bps': {
     risk: 'high',
     group: 'Outright 定价',
     inputHint: 'bps',
     hint: '最小入场 edge（bps）；缩小 = 入场门槛降低 = 单更多但胜率可能下降。',
   },
-  'strategy.tail_outright_max_entry_price': {
+  'strategy.outright_max_entry_price': {
     risk: 'high',
     group: 'Outright 定价',
     inputHint: 'price_0_to_1',
     hint: '最大入场价（0–1）；扩大会接到更贵的标的。',
   },
-  'strategy.tail_outright_min_orderbook_depth_usdc': {
+  'strategy.outright_min_orderbook_depth_usdc': {
     risk: 'medium',
     group: 'Outright 流动性',
     inputHint: 'usdc',
   },
-  'strategy.tail_outright_exit_edge_target': {
+  'strategy.outright_exit_edge_target': {
     risk: 'medium',
     group: 'Outright 退出',
     inputHint: 'decimal',
     hint: '目标 edge（小数；0.03 = 3%）。',
   },
-  'strategy.tail_outright_min_profit_per_share': {
+  'strategy.outright_min_profit_per_share': {
     risk: 'medium',
     group: 'Outright 退出',
     inputHint: 'decimal',
@@ -55,28 +55,28 @@ const META: Record<string, ParamMetadata> = {
     inputHint: 'price_0_to_1',
     hint: 'No-side 允许的最大价格——安全阈值，避免高位接盘。',
   },
-  'strategy.tail_moneyline_max_entry_price': {
+  'strategy.moneyline_max_entry_price': {
     risk: 'high',
     group: 'Moneyline tail',
     inputHint: 'price_0_to_1',
   },
-  'strategy.tail_spreads_max_entry_price': {
+  'strategy.spreads_max_entry_price': {
     risk: 'high',
     group: 'Spread tail',
     inputHint: 'price_0_to_1',
   },
-  'strategy.tail_min_liquidity_usdc': {
+  'strategy.min_liquidity_usdc': {
     risk: 'medium',
     group: '通用 tail 流动性',
     inputHint: 'usdc',
   },
-  'strategy.tail_outright_budget_usdc': {
+  'strategy.outright_budget_usdc': {
     risk: 'high',
     group: 'Outright 预算',
     inputHint: 'usdc',
-    hint: 'Outright 家族总预算（USDC）；默认 0 = 全部 outright 拒绝（仅审计）。启用自动交易需 ≥ tail_outright_max_per_market_usdc。',
+    hint: 'Outright 家族总预算（USDC）；默认 0 = 全部 outright 拒绝（仅审计）。启用自动交易需 ≥ outright_max_per_market_usdc。',
   },
-  'strategy.tail_stale_no_live_state_seconds': {
+  'strategy.stale_no_live_state_seconds': {
     risk: 'medium',
     group: '直播源诊断',
     inputHint: 'integer',

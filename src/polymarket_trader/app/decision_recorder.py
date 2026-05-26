@@ -1,13 +1,13 @@
 """决策录制 producer 侧 helper。
 
-策略 hook 返回 ``TradingDecision`` 后，framework 在主链路同步构造
+workflow hook 返回 ``TradingDecision`` 后，framework 在主链路同步构造
 ``DecisionRecord`` 并经 outbox 投递；``PersistenceWorker`` 异步落库到
 ``decision_records`` 表。
 
 P0 热路径硬约束（CLAUDE.md §3 / §7）：
 - 不允许 ``await`` 数据库；只允许同步 ``outbox.put_nowait``。
 - 序列化失败必须吞掉异常，不阻塞决策返回。
-- 拒绝原因 / accepted 仅复用现有策略字段，不发明新枚举值。
+- 拒绝原因 / accepted 仅复用现有决策字段，不发明新枚举值。
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ class _OutboxSink(Protocol):
 
 
 class DecisionEventRecorder:
-    """同步把策略决策投递到 outbox。
+    """同步把量化决策投递到 outbox。
 
     暴露 ``record(...)`` 接口供 DecisionContextBuilder / ReconcileService 旁路调用，
     内部不维护任何缓冲：每次 record 直接构造 ``OutboxEvent`` 并 ``put_nowait``。
@@ -82,8 +82,9 @@ def build_decision_record_from_hook(
 ) -> DecisionRecord | None:
     """把 hook 调用入参与返回值收敛成 ``DecisionRecord``。
 
-    ``condition_id`` 是 DB 索引的强字段；调用侧拿不到（``decide_follow_up`` 等
-    上下文没有市场对象的极端情况）时返回 None，让 framework 选择跳过录制。
+    ``condition_id`` 是 DB 索引的强字段；调用侧拿不到时返回 None，让 framework
+    选择跳过录制。``hook_name`` 区分 audit 录入的来源——当前只有 ``quant_decide``，
+    后续接入更多 hook（如 ``match_live_state``）也走同一份录入函数。
     """
 
     if not condition_id:
@@ -117,7 +118,7 @@ def _safe_jsonable(value: Any) -> dict[str, Any]:
 def _decision_outcome(payload: Mapping[str, Any]) -> tuple[bool, str | None]:
     """从 ``TradingDecision`` 投影出 ``accepted`` 与 ``reason``。
 
-    accepted 语义：策略返回的 ``decision_kind`` 表示"产生了可执行 intent"
+    accepted 语义：量化决策器返回的 ``decision_kind`` 表示"产生了可执行 intent"
     即视为接受；任何 skip / decline / no_signal 等已存在的字符串都保留原值
     放进 reason，不发明新枚举。
     """
@@ -138,7 +139,7 @@ def _decision_outcome(payload: Mapping[str, Any]) -> tuple[bool, str | None]:
     if isinstance(decision_kind, str) and decision_kind.strip().lower() in {"skip", "decline"}:
         return False, reason
     # tuple of decisions（decide_follow_up 返回 tuple）单独处理；payload 已经被
-    # jsonable 投成 list/dict。空 tuple = 策略主动选择不产生 follow-up，明确
+    # jsonable 投成 list/dict。空 tuple = 量化决策器主动选择不产生 follow-up，明确
     # 落 reason 防止 audit 显示「拒绝且无原因」的歧义（§10 可审计性）。
     if isinstance(action, list):
         if not action:

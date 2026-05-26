@@ -48,7 +48,7 @@ class Market:
     category: str | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
     # Polymarket Gamma 的 sportsMarketType：对运动专属 prop 家族（method-of-victory、
-    # F1 props、cricket props 等）可靠填充，对常规盘口多为空。策略层用它做精确的
+    # F1 props、cricket props 等）可靠填充，对常规盘口多为空。workflow 层用它做精确的
     # prop 家族识别，避免泛化兜底拒绝原因（CLAUDE.md §17）。
     sports_market_type: str | None = None
     matched_keywords: tuple[str, ...] = field(default_factory=tuple)

@@ -2,7 +2,7 @@
 
 Sports Tail Trader 是跑实盘资金的 Polymarket 体育**量化交易**后端运行时，覆盖整个体育市场——Moneyline、Totals、Spreads、分节/分盘 prop、系列赛、outright 等所有能建立胜率判断与风控闭环的盘口家族。错误的改动会直接导致下错单、爆仓、资金错配或绕开风控，本文先列**不可违反的硬约束**，再讲结构、落点与协作。
 
-跨模块可长期复用的规则写本文件；策略阈值、关键词、仓位参数等易变细节走仓库根的 `strategy_config.toml`（启动期自动加载到 `TradingWorkflowConfig`）。
+策略配置只走 `TradingWorkflowConfig` dataclass 默认值，无 TOML / env 间接层，无运行时 override；调阈值改代码默认值后重启。
 
 ## 0. 部署环境约束（第一性原理）
 
@@ -35,8 +35,9 @@ Polymarket market WS 推送是整个交易系统的决策驱动源——每条 `
 
 ## 1. 项目速览
 
-- 主包 [src/polymarket_trader](./src/polymarket_trader)：分 `api / app / domain / workflow / pipeline / recovery / infra / observability / runtime / sports / storage`
-- 策略实现 [src/polymarket_trader/workflow](./src/polymarket_trader/workflow)：`TradingWorkflow` + `QuantDecider` + `tail/outright/series` 子策略；frozen 配置由仓库根 [`strategy_config.toml`](./strategy_config.toml) 启动期自动加载
+- 主包 [src/polymarket_trader](./src/polymarket_trader)：分 `api / app / domain / workflow / pipeline / recovery / infra / observability / runtime / sports`
+- 策略实现 [src/polymarket_trader/workflow](./src/polymarket_trader/workflow)：`TradingWorkflow` 装配 + `QuantDecider` 决策；所有 family 走同一份 Kelly + fair_value 主路径，**无 family 专属子包**
+- 量化信号入口 [workflow/fair_value.py](./src/polymarket_trader/workflow/fair_value.py)：math_lock / goalserve_implied / orderbook microprice 三层 max 融合——接入新信号源在这里扩展
 - 前端管理台 [frontend](./frontend)：Operator UI
 - 长期文档 [docs/](./docs/)：当前状态以代码和 `git log` 为准
 - Python 3.12，`src` layout，FastAPI + asyncpg + SQLAlchemy + py-clob-client-v2 + websockets
@@ -243,17 +244,15 @@ runtime → domain
 
 **实盘演化闭环**：跑实盘观察 → 定位瓶颈 → 改进策略或链路 → 验证 → 重启/继续观察 → 再次改进。除非用户明确要求停止/暂停，agent 不应在单轮观察或单次改动后主动结束。优化优先级：发现速度、盘口热态更新速度、决策延迟、成交链路延迟；不为速度牺牲风控、幂等、可审计性。
 
-### 买卖原则
+### 决策原则
 
-**买入**：有明确优势（比赛状态支持、胜率判断可信）才买；入场价合理（不追高），由 `max_entry_price` 门控。
+**所有买卖决策由 `quant_decider.QuantDecider` 统一接管**——不要在其他模块（recovery / operator / api）写交易决策逻辑。
 
-**卖出**（避免过度持有也避免等结算输全部）：
+**入场**：有真概率信号（math_lock / goalserve / 用户自定义量化信号源任一）才入场；Kelly sizing 决定金额；无真信号 → `ProbView(prob_p=None)` → Kelly 拒绝。
 
-- **止盈**：浮盈达目标倍数（如买价 × 1.6）应主动挂 GTC 卖单锁定收益
-- **锁定确定性**：价格超 0.92 接近锁定时挂 GTC 卖单，避免黑天鹅
-- **市场期望过高时减仓**：持仓后价格大幅高于我们判断（过度反应）考虑部分平仓
-- **止损**：直播源赔率突然反向大幅下移（跌破买价 × 0.5 或比赛明显逆转）主动卖出止损；只持仓等结算在输方向是 0 回收
-- **实现路径**：`auto_exit_enabled=True`、`profit_take_overlay_enabled=True` + `profit_take_target_price`、recovery 持仓监控；不手动干预
+**持仓后**：当前 `_decide_position_action` 默认 skip——所有买卖决策（SELL / replace / HOLD）由用户在量化信号入口（`workflow/fair_value.py` 或自有信号源）接入后产生。**不预设任何退出规则**（无止盈倍数 / 锁定价 / 止损阈值 / GTC tail-bid 之类的 magic number），让真量化信号驱动。
+
+**信号接入**：要让系统对某类信号做出 BUY/SELL/HOLD 反应，在 `fair_value.math_lock_fair_value` 或 `estimate_fair_value` 里加新的信号源——三层 max 融合会自动让信号反映到 prob_p，Kelly 自然产生决策。
 
 **直播源赔率 vs Polymarket 价格差价**（重要机会）：
 

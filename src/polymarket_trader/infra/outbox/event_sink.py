@@ -27,7 +27,6 @@ _PERSISTABLE_EVENT_TYPES = {
     DomainEventType.MARKET_SETTLED.value,
     # === 风控 / 人工干预(合规审计必须)===
     DomainEventType.RISK_REJECTION_RECORDED.value,
-    DomainEventType.PARAMETER_OVERRIDE_APPLIED.value,
     DomainEventType.TRADING_PAUSED.value,
     DomainEventType.TRADING_RESUMED.value,
     # === 订单生命周期(资金动作 + 合规审计必须)===
@@ -51,9 +50,9 @@ _PERSISTABLE_EVENT_TYPES = {
     # 这里不收;DIFF_DETECTED/APPLIED 是真实修复记录必须留.
     DomainEventType.RECONCILE_DIFF_DETECTED.value,
     DomainEventType.RECONCILE_APPLIED.value,
-    # === 砍掉(decision_records 已记策略上下文,无需重复写 audit)===
+    # === 砍掉(decision_records 已记决策上下文,无需重复写 audit)===
     # SPORTS_LIVE_STATE_RECORDED — 心跳,decision_snapshot 已含 live_state
-    # ALLOCATION_DECISION_RECORDED — 策略评估,decision_records 已记
+    # ALLOCATION_DECISION_RECORDED — 决策评估,decision_records 已记
     # RECONCILE_STARTED — supervisor heartbeat 已记
     # MARKET_DISCOVERED / MARKET_UPDATED — 元数据流水
     # MARKET_FILTERED_IN / MARKET_FILTERED_OUT — 过滤流水

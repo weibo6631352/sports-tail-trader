@@ -7,10 +7,7 @@ import logging
 from collections import OrderedDict
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
-
-if TYPE_CHECKING:
-    from polymarket_trader.app.parameter_store import ParameterStore
+from typing import Any, Callable, Iterable, Mapping
 from uuid import uuid4
 
 from polymarket_trader.observability.cpu_track import cpu_track
@@ -88,8 +85,8 @@ POSITION_INCREASE_LIFECYCLES = {
 # idempotency_index 双重承担。失败积极重试（§17 哲学）：下一次 WS push / signal
 # 自然触发新一轮评估，无需 lifecycle 集合判定。
 #
-# POSITION_INCREASE_LIFECYCLES 仍保留——"已有持仓时，加仓必须有策略显式标记"
-# 是真实业务规则（防止策略意图不明的二次买入），不是失败重试 gate。
+# POSITION_INCREASE_LIFECYCLES 仍保留——"已有持仓时，加仓必须有量化决策显式标记"
+# 是真实业务规则（防止意图不明的二次买入），不是失败重试 gate。
 
 
 # 赔率时序 store（module-level，纯观测）：market_slug → deque[(ts_iso, ml_home_p, ml_away_p, tt_over_p, tt_under_p, sp_home_p, sp_away_p)]
@@ -207,7 +204,7 @@ def _entry_gate_closed_for_event(
     """账户或单市场入场闸门关闭时,不对高频盘口事件构建交易计划。
 
     §11 框架不自动 pause,但 operator MANUAL pause 仍是强门禁(运维显式说 stop):
-    - 框架自动检测 not_tradable → 不再 pause,让策略 hook 自己看 context 判断
+    - 框架自动检测 not_tradable → 不再 pause,让workflow hook 自己看 context 判断
     - operator pause_market_manual → 仍写入 _market_pauses,这里 block entry
     """
     if snapshot is None:
@@ -239,8 +236,6 @@ class MarketTickWorker:
         kelly_allow_round_up_to_market_min: bool = True,
         kelly_round_up_max_overbet_ratio: Decimal = Decimal("1"),
         entry_metadata_provider: EntryMetadataProvider | None = None,
-        orderbook_direction_signal_reader: "Callable[..., Any] | None" = None,
-        parameter_store: "ParameterStore | None" = None,
         heartbeat: HeartbeatCallback | None = None,
         idle_heartbeat_seconds: float = _TRADING_DECISION_IDLE_HEARTBEAT_SECONDS,
     ) -> None:
@@ -252,20 +247,15 @@ class MarketTickWorker:
         self._account_state_store = account_state_store
         self._positions_provider = positions_provider or self._build_positions_provider()
         self._open_orders_provider = open_orders_provider or self._build_open_orders_provider()
-        # 静态启动值（来自 Settings）；运行时通过 ``parameter_store`` 的 override
-        # 覆盖。每次 review 前用 property 读出当前值——这样 agent PUT 后立刻生效。
-        self._portfolio_budget_usdc_default = portfolio_budget_usdc
-        self._kelly_fraction_default = kelly_fraction
-        self._kelly_max_position_fraction_default = kelly_max_position_fraction
-        self._kelly_min_edge_default = kelly_min_edge
-        self._kelly_min_stake_usdc_default = kelly_min_stake_usdc
-        self._kelly_allow_round_up_default = kelly_allow_round_up_to_market_min
-        self._kelly_round_up_max_overbet_ratio_default = kelly_round_up_max_overbet_ratio
-        self._parameter_store = parameter_store
+        # Kelly + budget 静态启动值（来自 Settings + workflow_config）。
+        self._portfolio_budget_usdc = portfolio_budget_usdc
+        self._kelly_fraction = kelly_fraction
+        self._kelly_max_position_fraction = kelly_max_position_fraction
+        self._kelly_min_edge = kelly_min_edge
+        self._kelly_min_stake_usdc = kelly_min_stake_usdc
+        self._kelly_allow_round_up = kelly_allow_round_up_to_market_min
+        self._kelly_round_up_max_overbet_ratio = kelly_round_up_max_overbet_ratio
         self._entry_metadata_provider = entry_metadata_provider
-        # 注入 OrderbookDeltaStore.direction_signal callable（保留 layering：
-        # worker 不直接 import runtime/orderbook_delta 类型，仅通过 callable 取 dict）。
-        self._orderbook_direction_signal_reader = orderbook_direction_signal_reader
         # supervisor 注入的轻量回调；worker 不直接持有 Supervisor，避免 P0 模块反向耦合到 runtime。
         self._heartbeat = heartbeat
         # 单测可以设 < 1s 让 idle heartbeat 路径快速触发；运行时仍用 60s 默认。
@@ -277,11 +267,6 @@ class MarketTickWorker:
         # main.py position_heartbeat 5s 周期 publish 合成 event，但合成
         # 事件处理时检查：该 token 5s 内已有真实 event 就 skip，避免重复评估。
         self._token_last_real_orderbook_at: OrderedDict[str, datetime] = OrderedDict()
-        # token_id → 最近一次 decide_exit 决策的完整 metadata 快照。
-        # /positions/signals operator endpoint 从此读取，给 UI/操盘人实时展示
-        # 5 类投票 + 流动性 tier + math_lock 是否支持 + fair_value 来源。
-        # 仅持仓 token 写入，无持仓 token 不会有 entry，自动 LRU 由内存压力管理。
-        self._token_position_signals: OrderedDict[str, dict[str, Any]] = OrderedDict()
         # 如果 reason 包含动态文本(本来不该如此),应在 source 端归一化,而非 LRU 兜底.
         self._skip_reason_histogram: dict[tuple[str, str], int] = {}
         # condition_id → [(lifecycle, timestamp), …]，记录每次状态转换的时间点。
@@ -301,84 +286,17 @@ class MarketTickWorker:
     def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
         """registry prune callback:清自己的 cid/token 索引 dict,防内存泄漏.
 
-        4 个 dict:
+        3 个 dict:
         - _market_lifecycle (cid)
         - _token_last_real_orderbook_at (token)
-        - _token_position_signals (token)
         - _last_allocation_state_hash (cid+token tuple key,有 cap 但 prune 联动更干净)
         """
         self._market_lifecycle.pop(condition_id, None)
         for tok in token_ids:
             self._token_last_real_orderbook_at.pop(tok, None)
-            self._token_position_signals.pop(tok, None)
             self._last_allocation_state_hash.pop((condition_id, tok), None)
         # _lifecycle_timeline 已有 LRU cap,但 prune 联动让其立即清:
         self._lifecycle_timeline.pop(condition_id, None)
-
-    def _fetch_orderbook_direction(self, token_id: str | None) -> dict[str, Any] | None:
-        """从 OrderbookDeltaStore 取 10s 窗口方向信号，序列化成 dict 注入
-        DecisionContext.metadata['orderbook_direction']。
-
-        策略消费归一化复合信号（direction_score / price_momentum / flow_imbalance /
-        direction_label / confidence），替代单时点 bid/ask 深度比 imbalance ratio——
-        后者会被 MM 假墙骗，flow_imbalance 是窗口内 best 价位移 + real_depth 消耗
-        的真实订单流方向，更可靠。
-        """
-        if self._orderbook_direction_signal_reader is None or not token_id:
-            return None
-        try:
-            signal = self._orderbook_direction_signal_reader(token_id, window_seconds=10.0)
-        except Exception:
-            return None
-        if signal is None:
-            return None
-        as_metadata = getattr(signal, "as_metadata", None)
-        if callable(as_metadata):
-            return dict(as_metadata())
-        return None
-
-    def _param_override(self, key: str, default: Any) -> Any:
-        store = self._parameter_store
-        if store is None:
-            return default
-        return store.get("settings", key, default=default)
-
-    @property
-    def _portfolio_budget_usdc(self) -> Decimal:
-        return self._param_override("portfolio_budget_usdc", self._portfolio_budget_usdc_default)
-
-    @property
-    def _kelly_fraction(self) -> Decimal:
-        return self._param_override("kelly_fraction", self._kelly_fraction_default)
-
-    @property
-    def _kelly_max_position_fraction(self) -> Decimal:
-        return self._param_override(
-            "kelly_max_position_fraction", self._kelly_max_position_fraction_default
-        )
-
-    @property
-    def _kelly_min_edge(self) -> Decimal:
-        return self._param_override("kelly_min_edge", self._kelly_min_edge_default)
-
-    @property
-    def _kelly_min_stake_usdc(self) -> Decimal:
-        return self._param_override(
-            "kelly_min_stake_usdc", self._kelly_min_stake_usdc_default
-        )
-
-    @property
-    def _kelly_allow_round_up(self) -> bool:
-        return self._param_override(
-            "kelly_allow_round_up_to_market_min", self._kelly_allow_round_up_default
-        )
-
-    @property
-    def _kelly_round_up_max_overbet_ratio(self) -> Decimal:
-        return self._param_override(
-            "kelly_round_up_max_overbet_ratio",
-            self._kelly_round_up_max_overbet_ratio_default,
-        )
 
     async def run(self) -> None:
         if self._event_bus is None:
@@ -469,10 +387,8 @@ class MarketTickWorker:
             self._token_last_real_orderbook_at.move_to_end(event.token_id)
             while len(self._token_last_real_orderbook_at) > _TOKEN_STATE_DICT_CAP:
                 self._token_last_real_orderbook_at.popitem(last=False)
-        # 订阅驱动 reprice：每个 orderbook tick 检查该 token 是否有持仓，
-        # 有 → 跑 decide_exit 让 _maybe_reprice_stale_sell 用最新 best_bid/fair_value
-        # 评估是否 cancel-replace stale SELL。不依赖 60s reconcile 周期。
-        # 在 entry 路径之前先 reprice，确保盘口快速反弹时 SELL 立即跟价。
+        # 订阅驱动：每个 orderbook tick 检查该 token 是否有持仓，
+        # 有 → 跑量化决策器；当前持仓决策器 skip，后续接入信号后这里会自然产生 SELL。
         has_snapshot = snapshot is not None
         has_cid = bool(event.condition_id)
         has_tid = bool(event.token_id)
@@ -555,7 +471,7 @@ class MarketTickWorker:
         )
         # AllocationPlan 决策过程结构化落库——payload 含每个候选的 reason /
         # release_reason / target_budget / buy_budget，回答"为什么选这个市场
-        # 不选那个"。P3 异步，失败静默；策略层不感知。
+        # 不选那个"。P3 异步，失败静默；workflow 层不感知。
         await self._publish_allocation_decision(event=event, plan=plan)
         if plan.market is None or plan.orderbook is None or event.token_id != plan.orderbook.token_id:
             # silent skip 历史上让"candidate ready=True 却无 order_created"难诊断；
@@ -748,11 +664,11 @@ class MarketTickWorker:
         snapshot: AccountSnapshot,
         position: Position,
     ) -> "MarketTickWorkerResult | None":
-        """在真实持仓更新后让策略决定是否需要退出保护单。
+        """在真实持仓更新后让workflow 决定是否需要退出保护单。
 
         用户 WS 的成交可能晚于初次下单响应到达。此时热态里已经有持仓，但
         同步 BUY 结果不一定触发跟单 SELL；这里以 position/open_orders 为事实，
-        调策略 ``decide_exit``。当前策略默认等待结算会返回 SKIP；如策略返回
+        调 quant_decider。当前量化决策器默认等待结算会返回 SKIP；如决策器返回
         SELL intent，仍走统一风控和执行器。
         """
 
@@ -766,9 +682,6 @@ class MarketTickWorker:
             "source_event_id": event.event_id,
             "source_reason": event.reason,
         }
-        direction = self._fetch_orderbook_direction(position.token_id)
-        if direction is not None:
-            exit_metadata["orderbook_direction"] = direction
         quant_decision = self._decision_builder.quant_decide(
             DecisionContext(
                 trace_id=event.trace_id,
@@ -795,26 +708,7 @@ class MarketTickWorker:
             decision = quant_decision.actions[0]
         else:
             decision = TradingDecision.skip(reason=quant_decision.reason or "quant_no_action")
-        # 缓存决策 metadata 供 /positions/signals operator endpoint 暴露。每次
-        # decide_exit 后更新当前 token 的 signals 快照，UI/操盘人可实时看到
-        # 5 类投票 + 流动性 tier + math_lock 是否支持 + fair_value 来源。
-        if position.token_id and decision.metadata:
-            self._token_position_signals[position.token_id] = {
-                "condition_id": position.condition_id,
-                "token_id": position.token_id,
-                "market_slug": (market.market_slug if market is not None else position.market_slug),
-                "evaluated_at": _utc_now().isoformat(),
-                "decision_action": decision.action.value,
-                "decision_reason": decision.reason,
-                "decision_price": str(decision.price) if decision.price is not None else None,
-                "metadata": {k: v for k, v in decision.metadata.items() if k.startswith("dynamic_exit_")},
-            }
-            self._token_position_signals.move_to_end(position.token_id)
-            while len(self._token_position_signals) > _TOKEN_STATE_DICT_CAP:
-                self._token_position_signals.popitem(last=False)
-        # SELL 直接挂；REPLACE 是 reprice 路径（_maybe_reprice_stale_sell 把 stale
-        # $0.99 SELL cancel-replace 到 fair_value × 0.97），不接 REPLACE 会让订阅
-        # 触发的 reprice 决策静默丢弃。
+        # SELL 直接挂；REPLACE 是 cancel-replace 路径（量化决策器后续接入信号后可能产出）。
         if decision.action not in {TradeAction.SELL, TradeAction.REPLACE}:
             return None
         intent = self._decision_builder.build_intent_from_decision(
@@ -1016,7 +910,7 @@ class MarketTickWorker:
         # decision_snapshot：把"做决策时所看到的真实数据"嵌入 audit payload，
         # 供事后复盘"为什么这笔在这个价位下单/不下单"。否则只看 candidate 的
         # reason/budget 是黑盒——无法分辨：信号触发是因为盘口真错位 vs Goalserve
-        # odds stale vs orderbook 已单边下杀策略没看。
+        # odds stale vs orderbook 已单边下杀决策没看。
         # 体积控制：只摘关键字段（best_bid/ask/sizes/spread/depth/tick + 关键
         # 直播/赔率字段），不存全部 bids/asks 层级（每秒变化高频）。
         decision_snapshot: dict[str, Any] = {}
@@ -1099,21 +993,19 @@ class MarketTickWorker:
                 "price_impact_100usdc": _buy_impact(top_asks, Decimal("100")),
             }
         if plan.metadata is not None:
-            # 完整透传所有策略输出的信号字段（不需逐项列）：goalserve odds、
-            # orderbook_direction（OFI/microprice 漂移）、live_game（含 baseball/
-            # basketball/tennis state 各局段比分）、math_lock_prob、kelly 决策、
-            # 排名信号、家族识别等。自由 dict 透传到 audit payload 供复盘 + 训练。
+            # 完整透传所有决策输出的信号字段（不需逐项列）：goalserve odds、
+            # live_game（含 baseball/basketball/tennis state 各局段比分）、
+            # math_prob、kelly 决策、排名信号、家族识别等。自由 dict 透传到
+            # audit payload 供复盘 + 训练。
             metadata_keys_of_interest = (
-                "orderbook_direction",
                 "goalserve_moneyline",
                 "goalserve_totals",
                 "goalserve_spread",
                 "goalserve_halftime",
                 "live_game",
-                "math_lock_prob",
-                "math_lock_metadata",
+                "math_prob",
+                "math_prob_meta",
                 "live_match",
-                "tail_metadata",
                 "kelly_stake",
                 "kelly_f_star",
                 "edge_net",
@@ -1212,19 +1104,12 @@ class MarketTickWorker:
         event: DomainEvent,
         snapshot: AccountSnapshot | None,
     ) -> dict[str, object]:
-        """构造入场策略 metadata。
+        """构造入场决策 metadata。
 
-        Worker 只合并事件事实和外部 provider 提供的补充事实，不解释具体策略字段。
+        Worker 只合并事件事实和外部 provider 提供的补充事实，不解释具体决策字段。
         """
 
         metadata: dict[str, object] = dict(event.payload)
-        # 注入 orderbook_direction（10s 窗口 OFI/microprice/momentum 综合方向信号），
-        # 与 exit_metadata 同源——入场决策必须能识别"盘口已单边下杀"场景，否则
-        # 仅看 best_ask < fair_value 会在 ask 厚 bid 薄、microprice 快速下走时
-        # 强行进场，落地即亏（实战案例：mlb spread BUY @ 0.31 → 20s 后 SELL @ 0.26）。
-        direction = self._fetch_orderbook_direction(event.token_id)
-        if direction is not None:
-            metadata["orderbook_direction"] = direction
         if self._entry_metadata_provider is None:
             return metadata
         try:
@@ -1454,10 +1339,10 @@ def _match_position(
 
 
 def _plan_allows_position_increase(plan: TradePlan) -> bool:
-    """判断计划是否是策略显式标记的受控加仓。
+    """判断计划是否是量化决策器显式标记的受控加仓。
 
-    依据策略在决策对象上声明的 intent_tags（含 ``"scale_in"``）+ intent
-    自身的 ``allow_open_exit_overlap`` 双重标记，避免读策略私有 metadata 字符串。
+    依据决策对象上声明的 intent_tags（含 ``"scale_in"``）+ intent
+    自身的 ``allow_open_exit_overlap`` 双重标记，避免读决策私有 metadata 字符串。
     """
 
     intent = plan.intent
@@ -1468,7 +1353,7 @@ def _plan_allows_position_increase(plan: TradePlan) -> bool:
 
 
 def _state_allows_position_increase(state: MarketLifecycle, plan: TradePlan) -> bool:
-    """只有持仓相关生命周期允许策略受控加仓继续走主链路。"""
+    """只有持仓相关生命周期允许量化决策器受控加仓继续走主链路。"""
 
     return state in POSITION_INCREASE_LIFECYCLES and _plan_allows_position_increase(plan)
 
@@ -1478,7 +1363,7 @@ def _state_allows_entry_attempt(state: MarketLifecycle, plan: TradePlan) -> bool
 
     简化后只保留两条硬规则：
     - PAUSED：人工/auto 暂停明确表达"系统不该对该 market 下单"，必须 block。
-    - 已有持仓（POSITION_OPEN / FOLLOW_UP_ORDER_OPEN）：加仓必须由策略 plan
+    - 已有持仓（POSITION_OPEN / FOLLOW_UP_ORDER_OPEN）：加仓必须由量化决策器 plan
       显式标记，防止意图不明的二次买入。
 
     其余状态（WATCHING_ORDERBOOK / ENTRY_READY / 失败后未转换的状态）一律允许

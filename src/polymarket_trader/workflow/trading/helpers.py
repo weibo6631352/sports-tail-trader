@@ -1,5 +1,5 @@
 """通用辅助：从 DecisionContext.metadata 中读 Decimal / 文本；Fill 金额计算；
-决策元数据投影（enrich_decision / build_strategy_summary）；tick_size 解析。
+决策元数据投影（enrich_decision / build_decision_summary）；tick_size 解析。
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from polymarket_trader.domain.events import Fill
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.domain.decisions import DecisionContext, DecisionKind, StrategySummary, TradingDecision
+from polymarket_trader.domain.decisions import DecisionContext, DecisionKind, DecisionSummary, TradingDecision
 
 if TYPE_CHECKING:
     from polymarket_trader.domain.market import Market
@@ -104,23 +104,17 @@ def decimal_from_metadata(value: object) -> Decimal | None:
 
 
 def enrich_decision(decision: TradingDecision, *, default_kind: DecisionKind) -> TradingDecision:
-    """把策略私有 metadata 投影成 framework 中性的 StrategySummary / decision_kind / intent_tags。
+    """把决策私有 metadata 投影成 framework 中性的 DecisionSummary + decision_kind。
 
-    策略 metadata 仍然透传 audit，但 framework 只读强类型字段。
+    决策 metadata 仍然透传 audit，但 framework 只读强类型字段。
     """
     metadata = dict(decision.metadata or {})
-    is_scale_in = metadata.get("opportunity_type") == "scale_in_advantage"
-    decision_kind = decision.decision_kind if decision.decision_kind is not None else (
-        DecisionKind.SCALE_IN if is_scale_in else default_kind
-    )
-    intent_tags = decision.intent_tags if decision.intent_tags else (
-        frozenset({"scale_in"}) if is_scale_in else frozenset()
-    )
-    summary = decision.summary if decision.summary is not None else _build_strategy_summary(metadata)
-    return replace(decision, decision_kind=decision_kind, intent_tags=intent_tags, summary=summary)
+    decision_kind = decision.decision_kind if decision.decision_kind is not None else default_kind
+    summary = decision.summary if decision.summary is not None else _build_decision_summary(metadata)
+    return replace(decision, decision_kind=decision_kind, summary=summary)
 
 
-def _build_strategy_summary(metadata: Mapping[str, Any]) -> StrategySummary:
+def _build_decision_summary(metadata: Mapping[str, Any]) -> DecisionSummary:
     live_game = (
         metadata.get("live_game") if isinstance(metadata.get("live_game"), Mapping) else {}
     )
@@ -129,9 +123,9 @@ def _build_strategy_summary(metadata: Mapping[str, Any]) -> StrategySummary:
     period = live_game.get("period") or ""
     label_parts = [str(p).strip() for p in (home, "vs" if home and away else "", away, period) if str(p).strip()]
     label = " ".join(label_parts)
-    return StrategySummary(
-        action=str(metadata.get("tail_action") or ""),
-        reason=str(metadata.get("tail_reason") or ""),
+    return DecisionSummary(
+        action=str(metadata.get("decision_action") or ""),
+        reason=str(metadata.get("decision_reason") or ""),
         label=label,
         market_type=str(metadata.get("market_type") or ""),
         side=str(metadata.get("side") or ""),

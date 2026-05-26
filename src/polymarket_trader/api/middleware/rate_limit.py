@@ -53,7 +53,7 @@ class _TokenBucket:
 class _LimiterRegistry:
     """全 process 单例，按 (endpoint_name, client_key) → bucket 索引。
 
-    清理策略：被动 LRU——dict 增长超过 ``_MAX_KEYS`` 时丢弃最老的一半。绝大多数
+    清理方式：被动 LRU——dict 增长超过 ``_MAX_KEYS`` 时丢弃最老的一半。绝大多数
     情况下 client IP 是有限集，bucket 不会爆。
     """
 

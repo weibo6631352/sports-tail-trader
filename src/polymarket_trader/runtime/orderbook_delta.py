@@ -46,7 +46,7 @@ class OrderbookDirectionSignal:
     抬升 = 卖方在砸盘(NO 方向)。size 减少作为辅助置信度,可能是被吃也可能
     是撤单,单独不可靠。
 
-    导出 3 个归一化 [-1,+1] 复合信号供策略消费:
+    导出 3 个归一化 [-1,+1] 复合信号供 workflow 消费:
     - direction_score: 价位移整体方向(mid_delta 归一)
     - price_momentum:  价位移速率(velocity 归一,反映抢/砸的力度)
     - flow_imbalance:  size 消耗失衡(ask 被吃多于 bid 被吃 = 买方主动 → 正)
@@ -93,7 +93,7 @@ class OrderbookDirectionSignal:
     def as_metadata(self) -> dict[str, Any]:
         """序列化成 dict 注入 DecisionContext.metadata['orderbook_direction']。
 
-        策略只消费归一化复合信号 + label + confidence；不暴露 raw deltas
+        workflow 只消费归一化复合信号 + label + confidence；不暴露 raw deltas
         （留给 operator 审计 endpoint）。Decimal 转 str 以保证 JSON 安全。
         """
         return {
@@ -128,7 +128,7 @@ class OrderbookDeltaStore:
     - observe(snapshot): P0 路径上由 market_ws worker 在每次 snapshot 更新时
       调用,sync only,无 await/IO/lock(deque append CPython atomic)。
     - direction_signal(token_id, window_seconds): 读窗口内的 first/last sample
-      算 delta + score,供策略 / operator 查询。
+      算 delta + score,供 workflow / operator 查询。
     """
 
     def __init__(
@@ -435,7 +435,7 @@ def _confidence(samples: tuple[OrderbookSample, ...]) -> Decimal:
     """sample 数越多 + best price 都齐全(非 None)→ 置信度越高。
 
     极简: sample_count/10 封顶 1.0,best_bid/ask 任一全程缺失 → 折半。
-    策略侧可根据自己阈值再加工。
+    workflow 可根据自己阈值再加工。
     """
 
     base = Decimal(min(len(samples), 10)) / Decimal("10")

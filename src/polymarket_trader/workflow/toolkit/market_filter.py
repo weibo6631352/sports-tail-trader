@@ -1,4 +1,4 @@
-"""市场过滤 DSL：策略侧不再写散落的 if/else 链。
+"""市场过滤 DSL：避免散落的 if/else 链。
 
 链式 API，所有条件 AND 组合：
     >>> dsl = MarketFilterDSL().slug_contains("nba").time_to_resolution_at_most(timedelta(hours=2))
