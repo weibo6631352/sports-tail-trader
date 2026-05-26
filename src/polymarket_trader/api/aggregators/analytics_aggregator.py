@@ -61,7 +61,7 @@ class AnalyticsAggregator:
         condition_id: str | None = None,
         time_range: TimeRange | None = None,
     ) -> dict[str, Any]:
-        from polymarket_trader.app.edge_realization import (
+        from polymarket_trader.domain.analytics.edge_realization import (
             aggregate_by_predicted_edge_buckets,
             build_edge_realization,
         )
@@ -111,7 +111,7 @@ class AnalyticsAggregator:
         condition_id: str | None = None,
         position_limit: int = 5000,
     ) -> dict[str, Any]:
-        from polymarket_trader.app.pnl_breakdown import (
+        from polymarket_trader.domain.analytics.pnl_breakdown import (
             aggregate_totals,
             build_pnl_breakdown,
             is_valid_group_by,
@@ -168,7 +168,7 @@ class AnalyticsAggregator:
         decision_limit: int = 2000,
         settlement_limit: int = 2000,
     ) -> dict[str, Any]:
-        from polymarket_trader.app.parameter_sweep import build_parameter_sweep
+        from polymarket_trader.domain.analytics.parameter_sweep import build_parameter_sweep
 
         if self._session_factory is None:
             return build_parameter_sweep(
@@ -208,7 +208,7 @@ class AnalyticsAggregator:
         per_decision_usdc: Decimal = Decimal("10"),
         time_range: TimeRange | None = None,
     ) -> dict[str, Any]:
-        from polymarket_trader.app.missed_opportunities import build_missed_opportunities
+        from polymarket_trader.domain.analytics.missed_opportunities import build_missed_opportunities
 
         if self._session_factory is None:
             return build_missed_opportunities(
@@ -247,7 +247,7 @@ class AnalyticsAggregator:
         time_range: TimeRange | None = None,
         sample_limit: int = 2000,
     ) -> dict[str, Any]:
-        from polymarket_trader.app.calibration import build_calibration
+        from polymarket_trader.domain.analytics.calibration import build_calibration
 
         if self._session_factory is None:
             return {
@@ -332,7 +332,7 @@ class AnalyticsAggregator:
         if self._session_factory is None:
             raise RuntimeError("db_session_factory unavailable")
 
-        from polymarket_trader.app.portfolio_history_service import PortfolioHistoryService
+        from polymarket_trader.domain.analytics.portfolio_history_service import PortfolioHistoryService
         from polymarket_trader.infra.db import AccountSnapshotRepository
 
         session_factory = self._session_factory
@@ -366,8 +366,8 @@ class AnalyticsAggregator:
         if self._session_factory is None:
             raise RuntimeError("db_session_factory unavailable")
 
-        from polymarket_trader.app.portfolio_history_service import PortfolioHistoryService
-        from polymarket_trader.app.risk_metrics import build_risk_metrics
+        from polymarket_trader.domain.analytics.portfolio_history_service import PortfolioHistoryService
+        from polymarket_trader.domain.analytics.risk_metrics import build_risk_metrics
         from polymarket_trader.infra.db import AccountSnapshotRepository
 
         session_factory = self._session_factory

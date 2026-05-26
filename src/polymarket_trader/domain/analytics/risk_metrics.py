@@ -18,7 +18,7 @@ from decimal import Decimal
 from typing import Any, Sequence
 
 from polymarket_trader.domain.account import AccountHistoryPoint
-from polymarket_trader.app.portfolio_history_service import compute_max_drawdown
+from polymarket_trader.domain.analytics.portfolio_history_service import compute_max_drawdown
 
 
 def build_risk_metrics(

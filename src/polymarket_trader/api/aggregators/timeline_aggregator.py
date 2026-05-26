@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from polymarket_trader.serialization import jsonable, page_payload
 from polymarket_trader.app.admin_serialization import AdminSerializer
-from polymarket_trader.app.trade_replay import TradeReplayFilters, build_trade_replay_records
+from polymarket_trader.domain.analytics.trade_replay import TradeReplayFilters, build_trade_replay_records
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.domain.time_filters import TimeRange
@@ -194,7 +194,7 @@ class TimelineAggregator:
     ) -> dict[str, Any]:
         """单笔交易/单个市场全生命周期 timeline。"""
 
-        from polymarket_trader.app.trade_timeline import (
+        from polymarket_trader.domain.analytics.trade_timeline import (
             TradeTimelineInputs,
             build_trade_timeline,
         )

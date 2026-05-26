@@ -14,7 +14,7 @@ from polymarket_trader.api.aggregators import (
     RuntimeAggregator,
 )
 from polymarket_trader.api.deps import get_runtime
-from polymarket_trader.app.portfolio_history_service import (
+from polymarket_trader.domain.analytics.portfolio_history_service import (
     DEFAULT_INTERVAL_MS,
     DEFAULT_WINDOW_MS,
 )

@@ -125,7 +125,7 @@ async def parameter_sweep_params() -> list[dict[str, object]]:
 
     单一来源：前端不再维护本地副本，新增/删除参数只改 parameter_sweep.py。
     """
-    from polymarket_trader.app.parameter_sweep import supported_parameter_specs
+    from polymarket_trader.domain.analytics.parameter_sweep import supported_parameter_specs
     return supported_parameter_specs()
 
 
