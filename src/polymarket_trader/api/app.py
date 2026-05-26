@@ -35,6 +35,7 @@ from polymarket_trader.api.routes import (
     stream,
     trade_replays,
     trades,
+    ws_admin,
 )
 from polymarket_trader.api.routes import runtime as runtime_route
 from polymarket_trader.main import create_runtime, shutdown_runtime
@@ -51,6 +52,8 @@ _AUTH_EXEMPT_PREFIXES: tuple[str, ...] = (
     "/redoc",
     # SSE / 只读 stream：前端 EventSource 不支持自定义 header，浏览器侧靠 CORS + token query 防御
     "/stream/",
+    # WebSocket admin stream：浏览器 WebSocket 同样不支持自定义 header，token 走 query param
+    "/admin/stream",
 )
 
 
@@ -274,4 +277,5 @@ def create_app(
     app.include_router(analytics.router)
     app.include_router(exports.router)
     app.include_router(stream.router)
+    app.include_router(ws_admin.router)
     return app
