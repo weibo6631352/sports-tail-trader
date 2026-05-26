@@ -21,7 +21,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from polymarket_trader.api.deps import build_time_range
-from polymarket_trader.api.rate_limit import rate_limit
+from polymarket_trader.api.middleware.rate_limit import rate_limit
 from polymarket_trader.app.export_service import (
     ALLOWED_RESOURCES as _EXPORT_ALLOWED_RESOURCES,
     columns_for_resource,

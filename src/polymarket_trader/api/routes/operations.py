@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from polymarket_trader.api.aggregators import AnalyticsAggregator, ReconcileDecisionsAggregator
 from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
-from polymarket_trader.api.rate_limit import rate_limit
+from polymarket_trader.api.middleware.rate_limit import rate_limit
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.app.virtual_paper_trading import run_virtual_paper_trade
 

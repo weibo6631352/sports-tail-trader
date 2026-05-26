@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 
 from polymarket_trader.api.aggregators import TimelineAggregator
 from polymarket_trader.api.deps import build_time_range, get_runtime
-from polymarket_trader.api.rate_limit import rate_limit
+from polymarket_trader.api.middleware.rate_limit import rate_limit
 
 router = APIRouter(prefix="/trades", tags=["trades"])
 
