@@ -83,6 +83,63 @@ class TimelineAggregator:
         page = await with_repositories(self._session_factory, _query)
         return page_payload(page, serializer=self._serializer.audit_event)
 
+    async def get_audit_events_by_condition(
+        self,
+        *,
+        condition_id: str,
+        channels: tuple[str, ...],
+        time_range: TimeRange | None = None,
+        per_channel_limit: int = 50,
+    ) -> dict[str, Any]:
+        """单 condition 多 channel 审计事件时间线——一次拉齐复盘 §15 四步骤。
+
+        参数 ``channels`` 是 event_title 多选。返回 ``by_channel`` 按 channel
+        分组 + ``chronological`` 按 created_at 倒序的统一时间序列；同一事件
+        在两处都会出现（前端按需选择视图）。
+
+        典型用法（"为什么这次 BUY 触发"）::
+
+            channels = ("order_created", "allocation_decision_recorded",
+                        "sports_live_state_recorded", "order_matched")
+        """
+
+        if self._session_factory is None or not channels:
+            return {
+                "condition_id": condition_id,
+                "channels_requested": list(channels),
+                "per_channel_limit": per_channel_limit,
+                "by_channel": {ch: {"count": 0, "items": []} for ch in channels},
+                "chronological": [],
+            }
+
+        async def _query(repos: RepositoryGroup) -> tuple[Any, ...]:
+            return await repos.audit.list_by_condition_and_titles(
+                condition_id=condition_id,
+                event_titles=channels,
+                time_range=time_range,
+                per_channel_limit=per_channel_limit,
+            )
+
+        events = await with_repositories(self._session_factory, _query)
+        by_channel: dict[str, list[dict[str, Any]]] = {ch: [] for ch in channels}
+        chronological: list[dict[str, Any]] = []
+        for event in events:
+            payload = self._serializer.audit_event(event)
+            chronological.append(payload)
+            bucket = by_channel.get(event.event_title)
+            if bucket is not None and len(bucket) < per_channel_limit:
+                bucket.append(payload)
+        return {
+            "condition_id": condition_id,
+            "channels_requested": list(channels),
+            "per_channel_limit": per_channel_limit,
+            "by_channel": {
+                ch: {"count": len(items), "items": items}
+                for ch, items in by_channel.items()
+            },
+            "chronological": chronological,
+        }
+
     async def list_trade_replays(
         self,
         *,

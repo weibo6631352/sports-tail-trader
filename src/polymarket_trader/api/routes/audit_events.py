@@ -41,6 +41,56 @@ async def list_audit_events(
     )
 
 
+# 默认 channels：复盘 §15 四步流程 "为什么这次 BUY"。
+# 按需扩展时直接在 query string 传 ?channels=a,b,c 覆盖默认。
+_DEFAULT_BY_CONDITION_CHANNELS: tuple[str, ...] = (
+    "order_created",
+    "allocation_decision_recorded",
+    "sports_live_state_recorded",
+    "order_matched",
+    "order_rejected",
+    "fill_recorded",
+    "risk_rejection_recorded",
+)
+
+
+@router.get("/by-condition/{condition_id}")
+async def get_audit_events_by_condition(
+    condition_id: str,
+    channels: str | None = Query(
+        default=None,
+        description="逗号分隔的 event_title 列表，缺省 = 复盘默认 7 类",
+    ),
+    per_channel_limit: int = Query(default=50, ge=1, le=500),
+    since: int | None = Query(default=None, ge=0),
+    until: int | None = Query(default=None, ge=0),
+    runtime: Any = Depends(get_runtime),
+) -> dict[str, object]:
+    """单 condition 多 channel 审计事件时间线——一次拉齐复盘 §15 四步骤。
+
+    避免 agent/操盘连发 N 次 ``/audit-events?event_title=...&condition_id=...``。
+    单 SQL 命中 ``ix_audit_events_condition_id`` + ``ix_audit_events_event_title``
+    复合过滤；返回 ``by_channel`` 分组视图 + ``chronological`` 统一时间序列。
+    """
+
+    if channels:
+        ch_tuple = tuple(c.strip() for c in channels.split(",") if c.strip())
+        if not ch_tuple:
+            ch_tuple = _DEFAULT_BY_CONDITION_CHANNELS
+    else:
+        ch_tuple = _DEFAULT_BY_CONDITION_CHANNELS
+
+    aggregator = TimelineAggregator(
+        session_factory=runtime.db_session_factory, runtime=runtime
+    )
+    return await aggregator.get_audit_events_by_condition(
+        condition_id=condition_id,
+        channels=ch_tuple,
+        time_range=build_time_range(since=since, until=until),
+        per_channel_limit=per_channel_limit,
+    )
+
+
 @router.get("/operators")
 async def aggregate_operator_interventions(
     operator: str | None = Query(default=None, min_length=1, max_length=64),

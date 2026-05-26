@@ -123,6 +123,43 @@ class AuditEventRepository(BaseRepository):
         rows, total = await self._paginate(stmt, limit=limit, offset=offset, with_total=with_total)
         return RepositoryPage(items=tuple(row.to_domain() for row in rows), total=total, limit=limit, offset=offset)
 
+    async def list_by_condition_and_titles(
+        self,
+        *,
+        condition_id: str,
+        event_titles: Sequence[str],
+        time_range: TimeRange | None = None,
+        per_channel_limit: int = 50,
+    ) -> tuple[AuditEvent, ...]:
+        """单 SQL 按 condition + event_title IN (...) 拉取审计事件。
+
+        利用 ``ix_audit_events_condition_id`` + ``ix_audit_events_event_title``
+        命中索引；总 LIMIT = per_channel_limit * N channels（保证每个 channel
+        在最坏情况也能拿满，调用方按 channel 分组截断）。
+
+        返回按 ``created_at`` 倒序的 AuditEvent 元组，按 channel 的分组由
+        调用方完成（这里不绑定输出形态）。
+        """
+
+        if not event_titles:
+            return ()
+        per_channel_limit = max(1, min(per_channel_limit, 500))
+        stmt = (
+            select(AuditEventModel)
+            .where(AuditEventModel.condition_id == condition_id)
+            .where(AuditEventModel.event_title.in_(tuple(event_titles)))
+            .order_by(AuditEventModel.created_at.desc(), AuditEventModel.id.desc())
+            .limit(per_channel_limit * len(event_titles))
+        )
+        if time_range is not None and not time_range.is_empty:
+            since_dt, until_dt = time_range.to_datetime_range()
+            if since_dt is not None:
+                stmt = stmt.where(AuditEventModel.created_at >= since_dt)
+            if until_dt is not None:
+                stmt = stmt.where(AuditEventModel.created_at <= until_dt)
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return tuple(row.to_domain() for row in rows)
+
     async def stream_audit_events_in_range(
         self,
         *,
