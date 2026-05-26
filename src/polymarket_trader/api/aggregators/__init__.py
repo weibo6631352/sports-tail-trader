@@ -47,6 +47,7 @@ from .runtime_aggregator import RuntimeAggregator
 from .settlement_aggregator import SettlementAggregator
 from .sports_live_aggregator import SportsLiveAggregator
 from .timeline_aggregator import TimelineAggregator
+from .trading_query_aggregator import TradingQueryAggregator
 
 __all__ = [
     "AnalyticsAggregator",
@@ -62,4 +63,5 @@ __all__ = [
     "SettlementAggregator",
     "SportsLiveAggregator",
     "TimelineAggregator",
+    "TradingQueryAggregator",
 ]

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
 
-from polymarket_trader.api.deps import build_time_range, get_admin_service
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.api.aggregators import TradingQueryAggregator
+from polymarket_trader.api.deps import build_time_range, get_runtime
 
 router = APIRouter(prefix="/fills", tags=["fills"])
 
@@ -19,9 +21,10 @@ async def list_fills(
     token_id: str | None = Query(default=None),
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    return await service.list_fills(
+    aggregator = TradingQueryAggregator(runtime=runtime)
+    return await aggregator.list_fills(
         limit=limit,
         offset=offset,
         trace_id=trace_id,

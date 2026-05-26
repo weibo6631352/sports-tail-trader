@@ -5,7 +5,10 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.deps import build_time_range, get_admin_service
+from typing import Any
+
+from polymarket_trader.api.aggregators import TradingQueryAggregator
+from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.api.rate_limit import rate_limit
 from polymarket_trader.app.admin_service import AdminService
 
@@ -70,10 +73,11 @@ async def list_orders(
     ),
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
     _rate: None = Depends(rate_limit(endpoint="list_orders", qps=2.0, burst=5)),
 ) -> dict[str, object]:
-    return await service.list_orders(
+    aggregator = TradingQueryAggregator(runtime=runtime)
+    return await aggregator.list_orders(
         limit=limit,
         offset=offset,
         open_only=open_only,

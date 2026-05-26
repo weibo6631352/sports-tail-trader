@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from typing import Literal
 
-from polymarket_trader.api.aggregators import PositionAggregator
+from polymarket_trader.api.aggregators import PositionAggregator, TradingQueryAggregator
 from polymarket_trader.api.deps import get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
@@ -125,15 +125,12 @@ async def force_exit(
 
 @router.get("/liquidity")
 async def positions_liquidity(
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, Any]:
     """对当前所有持仓并发拉 Polymarket 真实流动性(midpoint + best sell price),
     返回真实可卖价 = mid × shares。
-
-    解决问题:data-api 的 curPrice/currentValue 是 last-trade 价,冷门赛事滞后/高估
-    会让浮盈/止盈决策被误导。这里给 admin/UI/策略一个统一的"真实可卖价"基线。
     """
-    positions_resp = await service.list_positions(limit=500, offset=0)
+    positions_resp = await TradingQueryAggregator(runtime=runtime).list_positions(limit=500, offset=0)
     items = positions_resp.get("items", [])
     if not items:
         return {"items": []}
