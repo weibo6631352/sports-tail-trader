@@ -1,7 +1,7 @@
-"""当前体育扫尾策略的外部直播状态映射。
+"""当前量化决策的外部直播状态映射。
 
 本模块只处理体育事件与市场的文本匹配、运动类型识别和候选事件预过滤。
-不包含策略决策逻辑（尾盘条件、入场阈值等由 trading/gates.py 和 tail/ 承担）。
+不包含决策逻辑（尾盘条件、入场阈值等由 quant_decider 承担）。
 
 匹配按 ``LiveEvent.kind`` 分支：team_match 走 home/away 别名匹配，
 race 走 leader_driver / top-3 driver / event_name 关键字命中。
@@ -109,7 +109,7 @@ class LiveMarketMatch:
         return base
 
     def metadata(self) -> dict[str, Any]:
-        """返回当前策略读取的入场 metadata。"""
+        """返回当前 workflow 读取的入场 metadata。"""
 
         return {
             "live_game": live_event_metadata(self.event),
@@ -132,7 +132,7 @@ class LiveMarketMatch:
 
 
 def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
-    """把通用直播事件转换成体育扫尾策略的稳定 metadata。
+    """把通用直播事件转换成量化决策的稳定 metadata。
 
     team_match：导出 home/away 分数；
     race：导出 race_state（leader / laps / 状态旗）+ top-3 drivers；
@@ -202,18 +202,20 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
             "last_event_minute": event.soccer_state.last_event_minute,
             "home_halftime_score": event.soccer_state.home_halftime_score,
             "away_halftime_score": event.soccer_state.away_halftime_score,
-            # 进球事件流（anytime-goalscorer 评估器消费）：保留 player_name/
-            # player_id/team/minute/score_after，policy/evaluator 侧据此匹配
-            # Polymarket slug 中点名的球员。
-            "goal_events": [
+            # 比赛事件流：goal / 红黄牌 / 换人 / VAR 取消。下游策略/评估器
+            # 按 event_type 过滤需要的子集；player_name/player_id 供球员级
+            # 匹配（如 anytime-goalscorer 在 slug 中点名的球员）。
+            "match_events": [
                 {
-                    "player_name": g.player_name,
-                    "player_id": g.player_id,
-                    "team": g.team,
-                    "minute": g.minute,
-                    "score_after": g.score_after,
+                    "event_type": e.event_type,
+                    "player_name": e.player_name,
+                    "player_id": e.player_id,
+                    "team": e.team,
+                    "minute": e.minute,
+                    "score_after": e.score_after,
+                    "observed_at": e.observed_at.isoformat(),
                 }
-                for g in event.soccer_state.goal_events
+                for e in event.soccer_state.match_events
             ],
         },
         "esports_state": None if event.esports_state is None else {
@@ -377,7 +379,7 @@ def _pick_main_line_pair(outcomes: list[dict], home_names: tuple[str, ...], away
     Goalserve 同一 market 的 outcomes 可能含 N 组 (home, away) line（如 Run Lines 含
     7 个 line: -3.5/-2.5/-1.5/+1.5/+2.5/+3.5/+4.5,每对配对方向相反）。
 
-    策略：穷举所有 home×away 组合，选 implied_sum 在健康 vig 区间 [1.00, 1.20]
+    方式：穷举所有 home×away 组合，选 implied_sum 在健康 vig 区间 [1.00, 1.20]
     内、且 |home_impl - 0.5| + |away_impl - 0.5| 最小（最对称）的那对。
 
     无需关心 hc 配对规则（totals 是同号、spread 是反号）——只要 (home_eu, away_eu)
@@ -411,7 +413,7 @@ def _pick_main_line_pair(outcomes: list[dict], home_names: tuple[str, ...], away
 
 
 def _extract_goalserve_spread(event: LiveEvent) -> dict[str, Any] | None:
-    """从 Goalserve odds 提取让分盘（Spread/Handicap）数据，供策略方向确认用。
+    """从 Goalserve odds 提取让分盘（Spread/Handicap）数据，供决策方向确认用。
 
     让分盘口可验证"哪支球队被看好赢得更多分"，用于与 Moneyline 交叉确认方向性。
     返回 None 表示无让分盘口数据，不影响主入场判断。
@@ -469,7 +471,7 @@ def _extract_goalserve_spread(event: LiveEvent) -> dict[str, Any] | None:
 
 
 def _extract_goalserve_totals(event: LiveEvent) -> dict[str, Any] | None:
-    """从 Goalserve odds 提取大小分盘（Totals/Over-Under）数据，供策略进攻节奏判断用。
+    """从 Goalserve odds 提取大小分盘（Totals/Over-Under）数据，供决策进攻节奏判断用。
 
     大小分盘反映书商对比赛总得分走向的预判，篮球/冰球/棒球场景下可作辅助方向信号。
     返回 None 表示无大小分数据，不影响主入场判断。
@@ -532,7 +534,7 @@ def _extract_goalserve_halftime_odds(event: LiveEvent) -> dict[str, Any] | None:
     """从 Goalserve odds 提取半场/第二节盘口，作为领先方走势确认信号。
 
     半场盘口（2nd Half / 2nd Quarter 等）的赔率变化反映领先方能否保持优势，
-    可用于验证"当前领先程度是否足以支撑扫尾买入"。
+    可用于验证"当前领先程度是否足以支撑买入"。
     返回 None 表示无半场盘口，不影响主判断。
     """
     markets = _goalserve_markets(event)
@@ -750,7 +752,7 @@ def build_live_state_match(
     market: Market,
     events: tuple[LiveEvent, ...],
 ) -> LiveStateMatch | None:
-    """框架 hook ``match_live_state`` 的策略侧实现：返回强类型 LiveStateMatch。"""
+    """框架 hook ``match_live_state`` 的 workflow 实现：返回强类型 LiveStateMatch。"""
 
     match = best_live_match(market, events)
     if match is None:
@@ -808,7 +810,7 @@ def _market_text(market: Market) -> str:
 
 
 def _tennis_state_metadata(state: Any) -> dict[str, Any] | None:
-    """把强类型 TennisGameState 投影成策略稳定 metadata。"""
+    """把强类型 TennisGameState 投影成 workflow 稳定 metadata。"""
 
     if state is None:
         return None

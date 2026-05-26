@@ -1,4 +1,4 @@
-"""把外部 metadata（直播源、运行时入参）解析成策略侧 ``LiveGameState``。
+"""把外部 metadata（直播源、运行时入参）解析成 ``LiveGameState``。
 
 ``baseball_state`` 直接构造 ``polymarket_trader.domain.sports_live.BaseballGameState``，
 与 infra 归一化保持单一类型源。
@@ -16,15 +16,19 @@ from polymarket_trader.domain.sports_live import (
     EsportsGameState,
     HandballGameState,
     SoccerGameState,
-    SoccerGoalEvent,
+    SoccerMatchEvent,
     VolleyballGameState,
+)
+
+_SOCCER_EVENT_TYPES = frozenset(
+    {"goal", "yellowcard", "yellowred", "redcard", "subst", "var_cancelled"}
 )
 
 from .types import LiveGameState, LiveGameStatus, TennisGameState
 
 
 def live_game_state_from_metadata(metadata: Mapping[str, Any]) -> LiveGameState | None:
-    """从策略上下文 metadata 中读取直播比赛状态。
+    """从 workflow 上下文 metadata 中读取直播比赛状态。
 
     支持两种形态：
     - ``metadata["live_game"]`` 是映射对象；
@@ -199,35 +203,49 @@ def _soccer_state(value: object) -> SoccerGameState | None:
         last_event_minute=_optional_int(value.get("last_event_minute")),
         home_halftime_score=_optional_int(value.get("home_halftime_score")),
         away_halftime_score=_optional_int(value.get("away_halftime_score")),
-        goal_events=_soccer_goal_events(value.get("goal_events")),
+        match_events=_soccer_match_events(value.get("match_events")),
     )
 
 
-def _soccer_goal_events(value: object) -> tuple[SoccerGoalEvent, ...]:
-    """从 metadata 重建足球进球事件元组；非列表或字段缺失返回空元组。
+def _soccer_match_events(value: object) -> tuple[SoccerMatchEvent, ...]:
+    """从 metadata 重建足球比赛事件元组；非列表或字段缺失返回空元组。
 
-    anytime-goalscorer 评估器的输入——异常输入安静返回空，由评估器据缺数据
-    给精确拒绝原因，而不是在解析层抛异常阻断其它盘口评估。
+    下游策略/评估器的输入——异常输入安静返回空，由评估器据缺数据给精确
+    拒绝原因，而不是在解析层抛异常阻断其它盘口评估。``observed_at`` 缺失
+    /非 ISO8601、``minute`` 空串、``event_type`` 非白名单 → 丢弃该事件
+    （时序信号源不接受无时间戳/无类型的样本）。
     """
     if not isinstance(value, (tuple, list)):
         return ()
-    out: list[SoccerGoalEvent] = []
+    out: list[SoccerMatchEvent] = []
     for item in value:
         if not isinstance(item, Mapping):
+            continue
+        event_type = str(item.get("event_type") or "").strip().lower()
+        if event_type not in _SOCCER_EVENT_TYPES:
             continue
         team_raw = str(item.get("team") or "").strip().lower()
         if team_raw not in ("home", "away"):
             continue
-        minute = _optional_int(item.get("minute"))
-        if minute is None:
-            minute = 0
+        minute = str(item.get("minute") or "").strip()
+        if not minute:
+            continue
+        observed_raw = item.get("observed_at")
+        if not isinstance(observed_raw, str):
+            continue
+        try:
+            observed_at = datetime.fromisoformat(observed_raw)
+        except ValueError:
+            continue
         out.append(
-            SoccerGoalEvent(
+            SoccerMatchEvent(
+                event_type=event_type,  # type: ignore[arg-type]
                 player_name=str(item.get("player_name") or ""),
                 player_id=str(item.get("player_id") or ""),
                 team=team_raw,  # type: ignore[arg-type]
                 minute=minute,
                 score_after=str(item.get("score_after") or ""),
+                observed_at=observed_at,
             )
         )
     return tuple(out)

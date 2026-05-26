@@ -27,9 +27,14 @@ from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 from polymarket_trader.domain.decisions import DecisionContext, EntryCandidate, MarketTokenView, TradingDecision
 from polymarket_trader.domain.decisions import ManualConfirmation
-from polymarket_trader.domain.decisions import StrategySummary
+from polymarket_trader.domain.decisions import DecisionSummary
+from polymarket_trader.domain.decisions import SignalHistory
 from polymarket_trader.observability.trace import ensure_trace_id
 from polymarket_trader.runtime.data_graph import DataGraph
+from polymarket_trader.runtime.goalserve_odds_history_buffer import (
+    GoalserveOddsHistoryBuffer,
+)
+from polymarket_trader.runtime.match_event_history_buffer import MatchEventHistoryBuffer
 
 
 OrderbookReader = Callable[[str], OrderbookSnapshot | None]
@@ -50,7 +55,7 @@ class _KellySizingState:
 
 
 class DecisionContextBuilder:
-    """Bridge strategy decisions into framework plans and managed order intents."""
+    """Bridge quant decisions into framework plans and managed order intents."""
 
     def __init__(
         self,
@@ -58,6 +63,8 @@ class DecisionContextBuilder:
         workflow: "TradingWorkflow",
         data_graph: DataGraph | None = None,
         decision_recorder: DecisionEventRecorder | None = None,
+        match_event_history_buffer: MatchEventHistoryBuffer | None = None,
+        goalserve_odds_history_buffer: GoalserveOddsHistoryBuffer | None = None,
     ) -> None:
         """统一通过 DataGraph 读取 market / orderbook / position / open_orders。
 
@@ -73,6 +80,8 @@ class DecisionContextBuilder:
         self._workflow = workflow
         self._graph = data_graph
         self._decision_recorder = decision_recorder
+        self._match_event_history_buffer = match_event_history_buffer
+        self._goalserve_odds_history_buffer = goalserve_odds_history_buffer
 
     def build_trade_plan(
         self,
@@ -196,7 +205,7 @@ class DecisionContextBuilder:
         quant_decision = self._workflow.quant_decide(quant_context)
         try:
             from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
-            SystemPerfMonitor.get().record_strategy_hook(
+            SystemPerfMonitor.get().record_hook_latency(
                 "quant_decide", (_time.perf_counter() - _t0) * 1000
             )
         except Exception: pass
@@ -234,7 +243,7 @@ class DecisionContextBuilder:
             if intent is None and decision.reason:
                 reason = decision.reason
         if summary is None and reason:
-            summary = StrategySummary(reason=reason)
+            summary = DecisionSummary(reason=reason)
 
         # allocation_plan 字段保留为占位（empty）——历史下游 (worker audit / risk
         # review) 仍读这字段；QuantDecider 单 market tick 视角下没有多候选分配的结构，
@@ -290,6 +299,7 @@ class DecisionContextBuilder:
                 "available_usdc": effective_available_usdc,
             }
         )
+        signal_history = self._build_signal_history(market.condition_id)
         return DecisionContext(
             trace_id=trace_id,
             market=market,
@@ -317,6 +327,25 @@ class DecisionContextBuilder:
             quant_trigger_kind="market_tick",
             manual_confirmation=manual_confirmation,
             metadata=context_metadata,
+            signal_history=signal_history,
+        )
+
+    def _build_signal_history(self, condition_id: str) -> SignalHistory:
+        """决策时点拉一次所有时序信号源 buffer 的快照。
+
+        domain DecisionContext 不持 buffer 实例（跨层禁），只持 frozen tuple
+        快照。每接入新信号 buffer 在这里 += 一行 ``buffer.events(cid)``。
+        """
+
+        match_events: tuple = ()
+        if self._match_event_history_buffer is not None:
+            match_events = self._match_event_history_buffer.events(condition_id)
+        goalserve_odds: tuple = ()
+        if self._goalserve_odds_history_buffer is not None:
+            goalserve_odds = self._goalserve_odds_history_buffer.samples(condition_id)
+        return SignalHistory(
+            match_events=match_events,
+            goalserve_odds=goalserve_odds,
         )
 
     def _build_entry_candidates(
@@ -397,7 +426,7 @@ class DecisionContextBuilder:
     def _record_hook_latency(name: str, elapsed_s: float) -> None:
         try:
             from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
-            SystemPerfMonitor.get().record_strategy_hook(name, elapsed_s * 1000)
+            SystemPerfMonitor.get().record_hook_latency(name, elapsed_s * 1000)
         except Exception:
             pass
 
@@ -546,10 +575,10 @@ def _build_unavailable_summary(
     *,
     reason: str,
     sizing_extras: Mapping[str, Any] | None = None,
-) -> StrategySummary | None:
-    """把 framework 已知的早期拒绝上下文投影成最小 StrategySummary。
+) -> DecisionSummary | None:
+    """把 framework 已知的早期拒绝上下文投影成最小 DecisionSummary。
 
-    framework 不解释字段语义——sizing_extras 是策略 size_entry hook 返回的
+    framework 不解释字段语义——sizing_extras 是workflow 的 size_entry hook 返回的
     metadata，原样搬到 ``extras``，让 operator / virtual_paper 能展示 / 统计
     非-single_game 早期拒绝的诊断信息。
     """
@@ -559,7 +588,7 @@ def _build_unavailable_summary(
         extras.update(dict(sizing_extras))
     if not extras and not reason:
         return None
-    return StrategySummary(reason=reason, extras=extras)
+    return DecisionSummary(reason=reason, extras=extras)
 
 
 def _open_orders_for(

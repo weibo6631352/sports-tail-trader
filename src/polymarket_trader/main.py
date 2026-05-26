@@ -104,6 +104,10 @@ from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics as _sync
 from polymarket_trader.runtime.orderbook_delta import OrderbookDeltaStore
 from polymarket_trader.runtime.orderbook_derived_publisher import OrderbookDerivedPublisher
 from polymarket_trader.runtime.orderbook_derived_store import OrderbookDerivedStore
+from polymarket_trader.runtime.goalserve_odds_history_buffer import (
+    GoalserveOddsHistoryBuffer,
+)
+from polymarket_trader.runtime.match_event_history_buffer import MatchEventHistoryBuffer
 from polymarket_trader.runtime.orderbook_history_buffer import OrderbookHistoryBuffer
 from polymarket_trader.runtime.gamma_snapshot_store import GammaMarketSnapshotStore
 from polymarket_trader.runtime.registry import MarketRegistry
@@ -175,6 +179,8 @@ class RuntimeComponents:
     market_ws_worker: MarketWsWorker
     orderbook_delta_store: OrderbookDeltaStore
     orderbook_history_buffer: OrderbookHistoryBuffer
+    match_event_history_buffer: MatchEventHistoryBuffer
+    goalserve_odds_history_buffer: GoalserveOddsHistoryBuffer
     data_graph: DataGraph
     orderbook_derived_store: OrderbookDerivedStore
     orderbook_derived_publisher: OrderbookDerivedPublisher
@@ -226,6 +232,8 @@ def _build_live_source_components(
     market_metadata_store: MarketMetadataStore,
     event_bus: EventBus,
     workflow: TradingWorkflow,
+    match_event_history_buffer: MatchEventHistoryBuffer,
+    goalserve_odds_history_buffer: GoalserveOddsHistoryBuffer,
 ) -> tuple[
     LiveStateStore,
     LiveSourceRegistry,
@@ -269,6 +277,8 @@ def _build_live_source_components(
         matcher=matcher,
         calibrator=calibrator,
         event_bus=event_bus,
+        match_event_buffer=match_event_history_buffer,
+        goalserve_odds_buffer=goalserve_odds_history_buffer,
     )
 
     feeders: list[LiveSourceFeeder] = []
@@ -560,6 +570,17 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # 纯时间窗 15s(覆盖 2/3/5/10s + 余量),无 maxlen 兜底.
     # max_tokens=2000 LRU evict 防极端 token 爆.
     orderbook_history_buffer = OrderbookHistoryBuffer(max_age_s=15.0, max_tokens=2000)
+    # 比赛事件流（离散事件时序信号源）整场保留，市场 settled / prune 时
+    # 由 listener 一次性清。max_events_per_market=100 覆盖足球全事件类型
+    # 极端值 ~35（goal + cards + subst + VAR），留 ~3x 余量。
+    match_event_history_buffer = MatchEventHistoryBuffer(
+        max_events_per_market=100, max_markets=2000
+    )
+    # Goalserve 隐含概率时序（连续采样信号源），120s 时间窗，dedup-on-equal-last
+    # 让长时间不变的赔率几乎不占内存；典型实际占用 < 5MB。
+    goalserve_odds_history_buffer = GoalserveOddsHistoryBuffer(
+        max_age_s=120.0, max_markets=2000
+    )
     # DataGraph 是 4 个扁平 store 的层次化视图入口（原架构方案 §3.1）。
     # DecisionContextBuilder / API aggregators / 未来其他决策路径都从这里读，
     # 避免散落跨 store 拼接。snapshot-and-release 策略，P0 路径无长锁。
@@ -583,6 +604,19 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     lifecycle_registry.register_prune_listener(
         "orderbook_derived_store",
         orderbook_derived_store.evict_market,
+    )
+    # 比赛事件流 buffer 整场保留——市场销毁/结算时由 prune 一次性 drop，
+    # 避免下场比赛复用同一 condition_id 时拿到上场残留事件（极小概率，但
+    # condition_id 复用风险存在）。
+    lifecycle_registry.register_prune_listener(
+        "match_event_history_buffer",
+        lambda cid, _tokens: match_event_history_buffer.clear(cid),
+    )
+    # Goalserve 赔率时序 buffer 同上——市场结束后 120s 时间窗外的样本
+    # 不再有意义，整桶清理释放内存。
+    lifecycle_registry.register_prune_listener(
+        "goalserve_odds_history_buffer",
+        lambda cid, _tokens: goalserve_odds_history_buffer.clear(cid),
     )
     # market prune 时同步清 gamma snapshot store——市场被回收后没人会查它的
     # gamma 元数据，留在 store 里只是内存浪费。
@@ -645,6 +679,8 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         workflow=workflow,
         data_graph=data_graph,
         decision_recorder=decision_recorder,
+        match_event_history_buffer=match_event_history_buffer,
+        goalserve_odds_history_buffer=goalserve_odds_history_buffer,
     )
     order_gateway = OrderGateway(
         executor=order_executor,
@@ -741,6 +777,8 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         market_metadata_store=market_metadata_store,
         event_bus=event_bus,
         workflow=workflow,
+        match_event_history_buffer=match_event_history_buffer,
+        goalserve_odds_history_buffer=goalserve_odds_history_buffer,
     )
     live_source_match_service.attach()
     # 接入 LifecycleRegistry：market added 时立即 subscribe（C 模式事件驱动），
@@ -853,6 +891,8 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         market_ws_worker=market_ws_worker,
         orderbook_delta_store=orderbook_delta_store,
         orderbook_history_buffer=orderbook_history_buffer,
+        match_event_history_buffer=match_event_history_buffer,
+        goalserve_odds_history_buffer=goalserve_odds_history_buffer,
         data_graph=data_graph,
         orderbook_derived_store=orderbook_derived_store,
         orderbook_derived_publisher=orderbook_derived_publisher,

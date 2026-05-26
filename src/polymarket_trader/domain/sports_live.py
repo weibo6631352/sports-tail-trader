@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Literal, Mapping
 
@@ -188,21 +189,66 @@ class TennisGameState:
         return None
 
 
-@dataclass(frozen=True, slots=True)
-class SoccerGoalEvent:
-    """足球单粒进球事件（livescore feed events[type=goal] 归一化）。
+SoccerMatchEventType = Literal[
+    "goal",
+    "yellowcard",
+    "yellowred",
+    "redcard",
+    "subst",
+    "var_cancelled",
+]
 
-    供 anytime-goalscorer（球员是否进球）盘口扫尾锁定使用——比分数学上不可
-    逆，一旦某球员出现在 goal 事件中，YES 即永久锁定。``player_name`` 保留
-    Goalserve 原始格式（如 "A. Khaldi"），匹配时再做规范化；``player_id``
-    是 Goalserve playerId（跨场稳定 ID），便于多源对账。
+
+@dataclass(frozen=True, slots=True)
+class SoccerMatchEvent:
+    """足球单粒比赛事件（livescore feed ``<events>`` 节点归一化）。
+
+    覆盖全部可用于量化信号的事件类型——goal 直接影响盘口概率，redcard /
+    yellowred 触发人数优势概率突变，var_cancelled 让已被 priced-in 的进球
+    回滚，subst / yellowcard 是次级累积指标。
+
+    ``player_name`` 保留 Goalserve 原始格式（如 "A. Khaldi"），匹配时再做
+    规范化；``player_id`` 是 Goalserve playerId（跨场稳定 ID），便于多源
+    对账。subst 事件的 ``player_id`` / ``player_name`` 是换出球员，换入球员
+    通过 ``assist_*``（Goalserve schema）字段携带——本类暂不持，需要时再加。
+
+    两个时间维度并存：``minute`` 是比赛内分钟字符串（保留 ``"90+3"`` 这种
+    补时表达，禁止 int 化导致补时与 90 分钟事件碰撞），``observed_at`` 是
+    feed 解析时的 wall-clock UTC（时序分析、新鲜度判断、"刚发生"信号检测）。
     """
 
+    event_type: SoccerMatchEventType
     player_name: str
     player_id: str
     team: Literal["home", "away"]
-    minute: int
+    minute: str
     score_after: str
+    observed_at: datetime
+
+
+GoalserveOddsMarketType = Literal["moneyline", "spread", "totals", "halftime"]
+GoalserveOddsSide = Literal["home", "away", "draw", "over", "under"]
+
+
+@dataclass(frozen=True, slots=True)
+class GoalserveOddsSample:
+    """Goalserve 隐含概率时序信号——单一 (market_type, side) 的一次观测样本。
+
+    Goalserve inplay GZIP feed 推送的赔率反推隐含概率 ``1 / decimal_odds`` 已
+    在 metadata 提取层算好；本类把它转成时序样本，供下游分析最近 N 秒赔率
+    变化方向、速度、暂停切换等。
+
+    ``line``：totals 的 ``total_line`` / spread 的 ``home_handicap`` 等线值；
+    moneyline / halftime 为 None。``suspended`` 是 market 整盘暂停或本方向
+    单独暂停的合并值（任一为 true 即 True）——分析侧据此识别"曾经暂停"窗口。
+    """
+
+    market_type: GoalserveOddsMarketType
+    side: GoalserveOddsSide
+    implied_prob: Decimal
+    line: Decimal | None
+    suspended: bool
+    observed_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,9 +270,9 @@ class SoccerGameState:
     # 半场比分：仅在半场结束后由数据源给出；两者均非 None 即表示半场已锁定。
     home_halftime_score: int | None = None
     away_halftime_score: int | None = None
-    # 进球事件流（来自 livescore events feed）；anytime-goalscorer 扫尾锁定
-    # 唯一数据源。inplay GZIP feed 只提供整队比分，不携带球员级进球事件。
-    goal_events: tuple[SoccerGoalEvent, ...] = ()
+    # 比赛事件流（来自 livescore events feed）：goal / 红黄牌 / 换人 /
+    # VAR 取消。inplay GZIP feed 只提供整队比分，不携带球员级事件。
+    match_events: tuple[SoccerMatchEvent, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,7 +400,7 @@ class LiveEvent:
     observed_at: datetime | None = None
     # HTTP `Date` response header（Goalserve server 生成响应时间）。
     # 配合 utc_now() 算 live_feed_lag_seconds = stale 程度，决策侧据此降级
-    # （exit_overlay 在 lag > 阈值时不基于陈旧状态决策）。
+    # （动态退出在 lag > 阈值时不基于陈旧状态决策）。
     server_clock_at: datetime | None = None
     event_start_time: datetime | None = None
     event_name: str = ""
@@ -482,33 +528,16 @@ class SportsLiveSnapshot:
 
 # ===== from former contracts/live_state.py =====
 @dataclass(frozen=True, slots=True)
-class SeriesState:
-    """系列赛热态快照——framework 级类型，infra/workers/策略均使用此定义。
-
-    infra 层（series_state_client）生产，workers 层写入 metadata store，
-    策略层的 evaluator 消费。不允许策略包定义独立副本。
-    """
-
-    team_a: str
-    team_b: str
-    wins_a: int
-    wins_b: int
-    best_of: int
-    next_game_at: datetime | None
-    observed_at: datetime
-
-
-@dataclass(frozen=True, slots=True)
 class LiveStateMatch:
-    """策略 ``match_live_state`` hook 的返回值。
+    """``match_live_state`` hook 的返回值。
 
-    ``signal_allowed`` / ``signal_reason`` 让 framework 不必读策略私有 metadata
-    字段就能判断市场是否在策略期望的活跃窗口内（用于 ws 订阅、入场闸门等通用判断）。
-    ``phase`` 是策略归一后的活跃阶段标识（如 "live" / "ended" / "scheduled"），
+    ``signal_allowed`` / ``signal_reason`` 让 framework 不必读决策私有 metadata
+    字段就能判断市场是否在 workflow 期望的活跃窗口内（用于 ws 订阅、入场闸门等通用判断）。
+    ``phase`` 是 workflow 归一后的活跃阶段标识（如 "live" / "ended" / "scheduled"），
     framework 据此判断是否启动 ws 订阅或扩展 discovery，不再读 ``payload`` 嵌套字典。
     ``primary_source`` / ``contributing_sources`` / ``confidence`` 把"该 market
     实际匹配到的源"作为一等可观测信息（缺口 1：per-market 源选择可观测性）。
-    ``payload`` 是策略附带的展示用透传 dict，framework 不解析其字段语义，仅整体存储。
+    ``payload`` 是 workflow 附带的展示用透传 dict，framework 不解析其字段语义，仅整体存储。
     """
 
     market: Market

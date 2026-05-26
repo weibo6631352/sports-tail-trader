@@ -1,7 +1,7 @@
 """量化决策相关的所有数据类型。
 
 汇总自原 contracts/ 目录的 decisions / summary / manual_confirmation / context
-四份文件。整个交易系统只有一个量化决策器，不存在"框架抽象 + 策略实现"分层，
+四份文件。整个交易系统只有一个量化决策器，不存在"框架抽象 + workflow 实现"分层，
 这些数据类型直接放在 domain/ 里作为业务 domain 一等公民。
 """
 
@@ -20,6 +20,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order, OrderResult, OrderType
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
+from polymarket_trader.domain.sports_live import GoalserveOddsSample, SoccerMatchEvent
 
 
 class TradeAction(StrEnum):
@@ -48,11 +49,10 @@ class QuantTriggerKind(StrEnum):
 
 
 class DecisionKind(StrEnum):
-    """策略决策的语义分类。framework 用 decision_kind 而不是 metadata 字符串
-    判断"该决策是入场 / 加仓 / 退场 / 跟单 / 恢复"。策略下决策时必须显式声明。"""
+    """决策的语义分类。framework 用 decision_kind 而不是 metadata 字符串
+    判断"该决策是入场 / 退场 / 跟单 / 恢复"。决策时必须显式声明。"""
 
     ENTRY = "entry"
-    SCALE_IN = "scale_in"
     EXIT = "exit"
     FOLLOW_UP = "follow_up"
     RECOVERY = "recovery"
@@ -120,7 +120,7 @@ class TradingDecision:
     market_slug: str | None = None
     decision_kind: DecisionKind | None = None
     intent_tags: frozenset[str] = field(default_factory=frozenset)
-    summary: StrategySummary | None = None
+    summary: DecisionSummary | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -130,7 +130,7 @@ class TradingDecision:
         reason: str,
         decision_kind: DecisionKind | None = None,
         intent_tags: frozenset[str] | None = None,
-        summary: StrategySummary | None = None,
+        summary: DecisionSummary | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "TradingDecision":
         return cls(
@@ -155,7 +155,7 @@ class TradingDecision:
         market_slug: str | None = None,
         decision_kind: DecisionKind | None = None,
         intent_tags: frozenset[str] | None = None,
-        summary: StrategySummary | None = None,
+        summary: DecisionSummary | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "TradingDecision":
         return cls(
@@ -186,7 +186,7 @@ class TradingDecision:
         market_slug: str | None = None,
         decision_kind: DecisionKind | None = None,
         intent_tags: frozenset[str] | None = None,
-        summary: StrategySummary | None = None,
+        summary: DecisionSummary | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "TradingDecision":
         return cls(
@@ -214,7 +214,7 @@ class TradingDecision:
         market_slug: str | None = None,
         decision_kind: DecisionKind | None = None,
         intent_tags: frozenset[str] | None = None,
-        summary: StrategySummary | None = None,
+        summary: DecisionSummary | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "TradingDecision":
         return cls(
@@ -241,7 +241,7 @@ class TradingDecision:
         market_slug: str | None = None,
         decision_kind: DecisionKind | None = None,
         intent_tags: frozenset[str] | None = None,
-        summary: StrategySummary | None = None,
+        summary: DecisionSummary | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "TradingDecision":
         return cls(
@@ -295,11 +295,11 @@ class QuantDecision:
 
 
 @dataclass(frozen=True, slots=True)
-class StrategySummary:
-    """策略主动提供给 framework 的中性展示视图。
+class DecisionSummary:
+    """量化决策器主动提供给 framework 的中性展示视图。
 
-    framework 的 operator / UI / audit / 复盘读这里的字段，不读策略私有 metadata。
-    策略可把任何 framework 不解析、但 operator 详情页希望透传给前端的扩展结构放进
+    framework 的 operator / UI / audit / 复盘读这里的字段，不读决策私有 metadata。
+    调用方可把任何 framework 不解析、但 operator 详情页希望透传给前端的扩展结构放进
     ``extras``。framework 对 ``extras`` 整体序列化、不按字段名解释。
     """
 
@@ -369,11 +369,27 @@ class AccountSnapshotView(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class SignalHistory:
+    """决策时点的时序信号源快照——按 condition_id 聚合的时间序列。
+
+    DecisionContext 持有的是 buffer 在决策时点的**只读快照**，不是 buffer 实例
+    本身——domain 层不依赖 runtime/。每个字段是 frozen tuple，调用方拿到后可
+    跨线程/异步任务消费，buffer 自身在主 loop 继续追加不影响此处。
+
+    扩展时按"一个信号源一个字段"加：``orderbook_history`` /
+    ``live_state_history`` 等后续接入。
+    """
+
+    match_events: tuple[SoccerMatchEvent, ...] = ()
+    goalserve_odds: tuple[GoalserveOddsSample, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class DecisionContext:
-    """框架向策略 hook 输入的上下文。所有字段直接读取，不通过 sub-view 属性中转。"""
+    """框架向workflow hook 输入的上下文。所有字段直接读取，不通过 sub-view 属性中转。"""
 
     trace_id: str
-    # 框架内部禁止填默认值；策略 manifest/spec 提供单一来源（CLAUDE.md §10）。
+    # 框架内部禁止填默认值；workflow manifest/spec 提供单一来源（CLAUDE.md §10）。
     market: Market | None = None
     token_id: str | None = None
     orderbook: OrderbookSnapshot | None = None
@@ -401,10 +417,11 @@ class DecisionContext:
     # quant_decide 触发源——仅 Workflow 2 (WS / 周期 触发) 使用；entry path 不填。
     quant_trigger_kind: str = ""
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    signal_history: SignalHistory = field(default_factory=SignalHistory)
 
 
 
-# ===== DecisionRecord — 策略 hook 调用录制（DB 持久化用） =====
+# ===== DecisionRecord — workflow hook 调用录制（DB 持久化用） =====
 # 与上方 TradingDecision 系列类型同属 domain 决策层，但 DecisionRecord 是
 # "决策审计行"——录制 quant_decide 等 hook 一次调用的输入快照 + 输出 decision，
 # 由 ``infra/db/models/decision.py`` 持久化到 ``decision_records`` 表。

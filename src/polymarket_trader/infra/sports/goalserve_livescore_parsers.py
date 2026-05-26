@@ -40,7 +40,7 @@ from polymarket_trader.domain.sports_live import (
     RaceState,
     RugbyGameState,
     SoccerGameState,
-    SoccerGoalEvent,
+    SoccerMatchEvent,
     SportsLiveGameStatus,
     TennisGameState,
     VolleyballGameState,
@@ -523,7 +523,7 @@ def _parse_esports(scores: dict[str, Any], observed_at: datetime) -> list[LiveEv
     """解析 esports getfeed（CS2/Dota2/LoL/Valorant）。
 
     ``localteam.@score`` / ``awayteam.@score`` = 各队已赢局数（maps won），
-    扫尾胜负判定据此与 best-of 阈值比较。score 同时作为 LiveEvent.participants
+    胜负判定据此与 best-of 阈值比较。score 同时作为 LiveEvent.participants
     的 score，使已结束比赛走通用 ended-moneyline 评估器。
     """
     events: list[LiveEvent] = []
@@ -1143,8 +1143,13 @@ def _soccer_halftime_scores(match: dict[str, Any]) -> tuple[int | None, int | No
     return int(m.group(1)), int(m.group(2))
 
 
-def _extract_soccer_goal_events(match: dict[str, Any]) -> tuple[SoccerGoalEvent, ...]:
-    """从 soccernew/home match dict 提取所有进球事件。
+_SOCCER_EVENT_TYPES = {"goal", "yellowcard", "yellowred", "redcard", "subst"}
+
+
+def _extract_soccer_match_events(
+    match: dict[str, Any], observed_at: datetime
+) -> tuple[SoccerMatchEvent, ...]:
+    """从 soccernew/home match dict 提取所有比赛事件。
 
     livescore feed 的 events 实际形态（已与真实 XML/JSON 对账）：
       - XML 转 dict 后：``match["events"]["_children"]`` = 各 event 属性 dict
@@ -1152,10 +1157,12 @@ def _extract_soccer_goal_events(match: dict[str, Any]) -> tuple[SoccerGoalEvent,
       - ?json=1 形态：``match["events"]["event"]`` = list/dict，key 带 ``@``
         前缀。两种形态都接受。
 
-    只收 ``type=goal`` 事件；yellowcard / subst / var / redcard 等跳过——
-    点球罚失（``pen miss``）也不计为进球。``@team`` 字段：``localteam``
-    映射 ``home``；``visitorteam`` 映射 ``away``——其它值（含空）丢弃，
-    不臆测。
+    捕获事件类型：goal / yellowcard / yellowred / redcard / subst。VAR 取消
+    走独立 ``<var_cancelled>`` 节点，单独抽取。``minute`` 保留原始字符串
+    （含 ``"90+3"`` 补时表达，禁止 int 化），让下游按时序原样使用。
+
+    ``@team`` 字段：``localteam`` 映射 ``home``；``visitorteam`` 映射 ``away``
+    ——其它值（含空）丢弃，不臆测（CLAUDE.md §17：拒绝可审计、不静默吞数据）。
     """
     events_container = match.get("events")
     if not isinstance(events_container, dict):
@@ -1170,13 +1177,11 @@ def _extract_soccer_goal_events(match: dict[str, Any]) -> tuple[SoccerGoalEvent,
         raw_events.extend(e for e in inner if isinstance(e, dict))
     elif isinstance(inner, dict):
         raw_events.append(inner)
-    if not raw_events:
-        return ()
-    goals: list[SoccerGoalEvent] = []
+    out: list[SoccerMatchEvent] = []
     for e in raw_events:
         # 兼容裸 key 与 @key 两种形态。
         etype = _str_val(e.get("type") or e.get("@type")).lower()
-        if etype != "goal":
+        if etype not in _SOCCER_EVENT_TYPES:
             continue
         team_raw = _str_val(e.get("team") or e.get("@team")).lower()
         if team_raw == "localteam":
@@ -1184,27 +1189,67 @@ def _extract_soccer_goal_events(match: dict[str, Any]) -> tuple[SoccerGoalEvent,
         elif team_raw == "visitorteam":
             team = "away"
         else:
-            # 队归属未知不臆测（CLAUDE.md §17：拒绝可审计、不静默吞数据）。
             continue
-        minute = _int_val(e.get("minute") or e.get("@minute"))
-        if minute is None:
-            minute = 0
+        minute = _str_val(e.get("minute") or e.get("@minute"))
+        if not minute:
+            continue
         player_name = _str_val(e.get("player") or e.get("@player"))
         player_id = _str_val(e.get("playerId") or e.get("@playerId"))
         if not player_name and not player_id:
-            # 无人名也无 ID 的进球事件无法用于球员级匹配，丢弃。
+            # 无人名也无 ID 的事件无法用于球员级匹配，丢弃。
             continue
         score_after = _str_val(e.get("result") or e.get("@result"))
-        goals.append(
-            SoccerGoalEvent(
+        out.append(
+            SoccerMatchEvent(
+                event_type=etype,  # type: ignore[arg-type]
                 player_name=player_name,
                 player_id=player_id,
                 team=team,
                 minute=minute,
                 score_after=score_after,
+                observed_at=observed_at,
             )
         )
-    return tuple(goals)
+    # VAR 取消独立节点：goal 已被 VAR 撤销时由 livescore 单独标出，给量化
+    # 信号侧用于"已 priced-in 进球回滚"判断。
+    var_container = match.get("var_cancelled")
+    if isinstance(var_container, dict):
+        var_nodes: list[dict[str, Any]] = []
+        if isinstance(var_container.get("_children"), list):
+            var_nodes.extend(
+                c for c in var_container["_children"] if isinstance(c, dict)
+            )
+        if isinstance(var_container.get("event"), list):
+            var_nodes.extend(
+                c for c in var_container["event"] if isinstance(c, dict)
+            )
+        for vn in var_nodes:
+            team_raw = _str_val(vn.get("team") or vn.get("@team")).lower()
+            if team_raw == "localteam":
+                team = "home"
+            elif team_raw == "visitorteam":
+                team = "away"
+            else:
+                continue
+            minute = _str_val(vn.get("minute") or vn.get("@minute"))
+            if not minute:
+                continue
+            player_name = _str_val(vn.get("player") or vn.get("@player"))
+            player_id = _str_val(vn.get("playerId") or vn.get("@playerId"))
+            if not player_name and not player_id:
+                continue
+            out.append(
+                SoccerMatchEvent(
+                    event_type="var_cancelled",
+                    player_name=player_name,
+                    player_id=player_id,
+                    team=team,
+                    minute=minute,
+                    score_after=_str_val(vn.get("result") or vn.get("@result")),
+                    observed_at=observed_at,
+                )
+            )
+    return tuple(out)
 
 
 def _parse_soccer_with_cats(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
@@ -1247,17 +1292,17 @@ def _parse_soccer_with_cats(scores: dict[str, Any], observed_at: datetime) -> li
             timer_raw = match.get("timer")
             seconds_remaining = _soccer_seconds_remaining(status_raw, timer_raw) if status == SportsLiveGameStatus.LIVE else None
             ht_home, ht_away = _soccer_halftime_scores(match)
-            goal_events = _extract_soccer_goal_events(match)
-            # 进球事件是 anytime-goalscorer 扫尾锁定的唯一数据源——只要存在
-            # 任一信号（半场比分或进球流）就构造 SoccerGameState，避免漏数据。
+            match_events = _extract_soccer_match_events(match, observed_at)
+            # 任一信号（半场比分或事件流）存在时即构造 SoccerGameState，
+            # 避免漏数据。
             if ht_home is not None and ht_away is not None:
                 soccer_state: SoccerGameState | None = SoccerGameState(
                     home_halftime_score=ht_home,
                     away_halftime_score=ht_away,
-                    goal_events=goal_events,
+                    match_events=match_events,
                 )
-            elif goal_events:
-                soccer_state = SoccerGameState(goal_events=goal_events)
+            elif match_events:
+                soccer_state = SoccerGameState(match_events=match_events)
             else:
                 soccer_state = None
             events.append(
