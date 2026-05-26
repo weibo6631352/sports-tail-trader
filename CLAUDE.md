@@ -149,7 +149,8 @@ runtime → domain
   - 链上余额（USDC balance/allowance、redeem 状态）：从 `clob_client.get_balance_allowance` / `data_client` 取，回写 account snapshot 并落 audit
   - 第三方外部数据（Goalserve odds/score、Polymarket orderbook）：通过对应 infra client 取，回写运行时 store
   - 任何查询动作落对应 audit_event，事后可复盘"agent 为什么这么做"
-- **agent / 操盘脚本**：调用统一前缀的 operator endpoints（`/runtime`, `/portfolio/*`, `/markets/*`, `/positions/*`, `/orders/*`, `/audit-events`, `/candidates/*`），不直接 import 内部 module 或调外部 URL
+- **agent / 操盘脚本**：调用统一前缀的 operator endpoints（`/runtime`, `/portfolio/*`, `/markets/*`, `/positions/*`, `/orders/*`, `/audit-events/*`, `/decision-context/{cid}`, `/candidates/*`），不直接 import 内部 module 或调外部 URL
+- **决策上下文一次拉齐**：单 condition 完整上下文用 `GET /decision-context/{cid}`——零 DB 默认返 market+positions+live_state；复盘走 `?include_audit=true` 附加 audit 时序。批量审计按 condition 维度的多 channel 时间线走 `GET /audit-events/by-condition/{cid}`
 
 ## 8. 设计与改造取向
 
@@ -264,15 +265,15 @@ runtime → domain
 **门禁调参原则**（拼概率，不过度保守）：
 
 - 门禁目的是防止明确错误，不是追求零风险。反复拦截本应成交的机会必须复盘并调整
-- 复盘路径：查 `/audit-events` + `/candidates` 的 `rejection_reason`，结合当时比分/赔率/结果判断拒绝是否合理；不合理的拒绝（成交是正期望）视为门禁设定问题
+- 复盘路径：单 condition 多 channel 一次拉齐用 `GET /audit-events/by-condition/{cid}`（默认 7 channel：order_created / allocation_decision_recorded / sports_live_state_recorded / order_matched / order_rejected / fill_recorded / risk_rejection_recorded），结合 `/candidates` 的 `rejection_reason` 判断拒绝是否合理；不合理的拒绝（成交是正期望）视为门禁设定问题
 - 在统计优势场景下宁可偶尔在边界情况输一笔，不能因过度保守在系统性优势场景下全部放弃
 - 审计日志是复盘工具不是决策权威
 
 **买入复盘与 bug 止损**：
 
-- 每次实盘买入事后必须复盘：查 `order_created`/`fill_recorded` 找成交，结合 `sports_live_state_recorded` + `allocation_decision_recorded` 判断买入是否由正确逻辑触发
+- 每次实盘买入事后必须复盘：`GET /audit-events/by-condition/{cid}` 一次拉齐 order_created / fill_recorded / sports_live_state_recorded / allocation_decision_recorded 等多 channel 时间线，判断买入是否由正确逻辑触发
 - 发现 bug 触发的买入（如 `"delayed"` 状态被误认 LIVE 导致雨延场买入）立即通过 `/positions/force-exit` 或手动市价卖出止损
-- 复盘工具：`/positions` / `/fills` / `/audit-events`，数据库 `audit_events` 表按 `condition_id` 过滤
+- 复盘工具：`/decision-context/{cid}?include_audit=true`（一次拉齐 market + positions + live_state + audit 时序）/ `/positions` / `/fills`
 
 **僵尸仓位（orphan position）**：
 

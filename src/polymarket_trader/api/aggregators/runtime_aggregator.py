@@ -176,19 +176,6 @@ class RuntimeAggregator:
             "workers": list(supervisor.get("worker_health", ())),
         }
 
-    def metrics_snapshot(self) -> dict[str, Any]:
-        supervisor = self._supervisor_snapshot()
-        runtime_status = self._runtime_status_snapshot(supervisor, self._readiness_payload(supervisor))
-        return {
-            "phase": runtime_status["phase"],
-            "automatic_trading_enabled": bool(supervisor.get("automatic_trading_enabled")),
-            "queue_depths": supervisor.get("queue_depths"),
-            "metrics": supervisor.get("metrics"),
-            "sports_live_sync": self._sports_live_sync_snapshot(),
-            "sse_active_subscribers": supervisor.get("sse_active_subscribers", 0),
-            "sse_dropped_events_total": supervisor.get("sse_dropped_events_total", 0),
-        }
-
     # ---------- portfolio snapshot ----------
     def portfolio_snapshot(self) -> dict[str, Any]:
         """账户聚合（余额 / 持仓 PnL / 暴露）——纯内存,零 DB。

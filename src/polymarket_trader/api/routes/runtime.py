@@ -156,11 +156,6 @@ async def workers(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
     return RuntimeAggregator(runtime=runtime).workers_snapshot()
 
 
-@router.get("/metrics")
-async def metrics(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
-    return RuntimeAggregator(runtime=runtime).metrics_snapshot()
-
-
 @router.get("/metrics/latency-percentiles")
 async def metrics_latency_percentiles(
     window_ms: int | None = Query(default=None, ge=0),
