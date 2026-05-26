@@ -1,8 +1,7 @@
-"""Allocation 层共享工具：ask depth / open order / pre-orderbook stub。
+"""Allocation 层共享工具：ask depth / open order 计算。
 
-历史上承载 _tail_entry_gate / _scale_in_entry_gate / Goalserve cross-validation
-等扫尾入场判断，全部删除——「门禁过了即进场」哲学下，allocation 层只保留硬约束
-（live source / state / best_ask），进场后行为走 position_plan。
+「门禁过了即进场」量化哲学下，allocation 层只保留硬约束（live source / state /
+best_ask），进场后行为走 position_plan + 动态退出引擎。
 """
 
 from __future__ import annotations
@@ -10,24 +9,8 @@ from __future__ import annotations
 from decimal import Decimal
 
 from polymarket_trader.domain.order import OrderSide
-from polymarket_trader.domain.decisions import DecisionContext
 
 from polymarket_trader.workflow.allocation import AllocationMarketSnapshot
-from polymarket_trader.workflow.config import TradingWorkflowConfig
-
-
-def _tail_pre_orderbook_skip_reason(
-    config: TradingWorkflowConfig,
-    context: DecisionContext,
-    snapshot: AllocationMarketSnapshot,
-) -> str:
-    """保留 stub——allocation.py 仍调用此点。
-
-    历史用途（family unsupported / live state missing）已上移到
-    ``_allocation_skip_reason`` 自身的直播源审查；此函数无业务逻辑。
-    """
-
-    return ""
 
 
 def _has_open_order(snapshot: AllocationMarketSnapshot, side: OrderSide) -> bool:

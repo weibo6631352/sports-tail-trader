@@ -311,7 +311,6 @@ class TradingWorkflowConfig:
     goalserve_halftime_veto_min_implied: Decimal = Decimal("0.30")
     # 是否启用半场 Money Line 否决（False 时仅写 metadata 不拒绝）。
     goalserve_halftime_veto_enabled: bool = True
-    tail_max_consecutive_losses: int = 3
     tail_scale_in_budget_fraction: Decimal = Decimal("0.5")
     tail_scale_in_max_buy_fills: int = 2
     tail_min_expected_profit_usdc: Decimal = Decimal("0.03")

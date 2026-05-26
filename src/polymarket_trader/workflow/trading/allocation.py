@@ -22,7 +22,6 @@ from polymarket_trader.sports.parsing import live_game_state_from_metadata
 from .gates import (
     _ask_depth_notional,
     _has_open_order,
-    _tail_pre_orderbook_skip_reason,
 )
 
 
@@ -146,9 +145,6 @@ def _allocation_skip_reason(
     if descriptor.market_family == SportsMarketFamily.SINGLE_GAME:
         if live_game_state_from_metadata(context.metadata) is None:
             return "missing_live_game_state"
-    tail_pre_orderbook_reason = _tail_pre_orderbook_skip_reason(config, context, snapshot)
-    if tail_pre_orderbook_reason:
-        return tail_pre_orderbook_reason
     if not snapshot.tradable:
         return "market_not_tradable"
     if not snapshot.market_active:

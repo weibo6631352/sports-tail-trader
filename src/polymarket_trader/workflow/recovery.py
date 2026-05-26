@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal
 
 from polymarket_trader.domain.market import TradingStatus
 from polymarket_trader.domain.order import Order, OrderSide, OrderType
@@ -11,10 +11,9 @@ from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.domain.decisions import DecisionContext, QuantDecision, TradingDecision
 
 from polymarket_trader.workflow.config import TradingWorkflowConfig
-from polymarket_trader.workflow.position_plan import cap_price_to_clob_limit, build_position_plan_metadata
+from polymarket_trader.workflow.position_plan import build_position_plan_metadata
 from polymarket_trader.workflow.outcomes import describe_sports_market, SportsMarketFamily, tail_token_targets
 from polymarket_trader.workflow.tail import LiveGameStatus, live_game_state_from_metadata
-from polymarket_trader.workflow.trading.helpers import resolve_tick_size
 
 
 def build_recovery_quant_decision(
@@ -94,13 +93,6 @@ def build_recovery_quant_decision(
         if missing_target:
             continue
 
-    open_exit_by_token: dict[str, Decimal] = {}
-    for order in open_orders:
-        if _is_open_exit_order(order):
-            open_exit_by_token[order.token_id] = open_exit_by_token.get(order.token_id, Decimal("0")) + (
-                _open_order_shares(order)
-            )
-
     # 未覆盖持仓不由恢复侧挂静态价 SELL：动态退出引擎 ``decide_exit`` 每个 reconcile
     # 周期都会从实时盘口重估 HOLD/EXIT 并下单——恢复侧不再补 profit-take 单。
 
@@ -151,37 +143,6 @@ def _should_cancel_open_entry_order(
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     return (now - opened_at).total_seconds() > max_resting_seconds
-
-
-def _is_open_exit_order(order: Order) -> bool:
-    return order.side == OrderSide.SELL and order.open
-
-
-def _open_order_shares(order: Order) -> Decimal:
-    if order.remaining_shares is not None:
-        return max(order.remaining_shares, Decimal("0"))
-    if order.size_shares is not None:
-        return max(order.size_shares, Decimal("0"))
-    return Decimal("0")
-
-
-def _orderbook_for_token(context: DecisionContext, token_id: str):
-    """从恢复上下文里找到对应 token 的盘口快照。"""
-
-    if context.orderbook is not None and context.orderbook.token_id == token_id:
-        return context.orderbook
-    for view in context.market_token_views:
-        if view.token_id == token_id:
-            return view.orderbook
-    return None
-
-
-def _next_tick_price(context: DecisionContext, price: Decimal) -> Decimal | None:
-    """返回当前价格上方一档 tick。"""
-
-    tick_size = resolve_tick_size(context.orderbook, context.market)
-    units = (price / tick_size).to_integral_value(rounding=ROUND_CEILING)
-    return cap_price_to_clob_limit((units + 1) * tick_size, tick_size=tick_size)
 
 
 def _decimal_metadata_text(value: Decimal) -> str:

@@ -48,7 +48,6 @@ from polymarket_trader.workflow.trading.exit_overlay import (
 )
 from polymarket_trader.workflow.trading.gates import _ask_depth_notional
 from polymarket_trader.workflow.trading.helpers import _metadata_text
-from polymarket_trader.workflow.trading.risk_limits import _apply_tail_risk_limits
 
 logger = logging.getLogger(__name__)
 
@@ -238,12 +237,13 @@ def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Entry
     """为当前 market 计算本轮可用入场预算（Kelly sizing）。
 
     流程：
-    1. 走原有 tail / scale-in 门禁过滤候选；通过的进入 eligible_snapshots。
-    2. ``prob_provider`` 把 tail price_cap + min_edge 反推 implied_fair_value，
+    1. 走 tail / scale-in 门禁过滤候选；通过的进入 eligible_snapshots。
+    2. ``prob_provider`` 把 price_cap + min_edge 反推 implied_fair_value，
        作为 Kelly 公式吃的 ``prob_p``；prob_confidence=tail_implied_prob_confidence
        （默认 0.5）抑制 implied 的不确定性。
     3. ``kelly_plan`` 按 f_star 降序逐笔分配，bankroll 扣减保证不并发 over-bet。
-    4. ``_apply_tail_risk_limits`` 套相关性硬上限（事件 / 联赛 / 日新增）。
+       Kelly 自带单笔 fraction 上限和 drawdown halt，**不在 Kelly 之上叠加任何 cap**
+       （CLAUDE.md §17 / feedback_trust_kelly_no_extra_caps）。
     """
 
     # EntryPlanner 是 DecisionContext 的唯一构造方，所有 kelly_* / bankroll
@@ -368,13 +368,6 @@ def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Entry
         eligible_plan=eligible_plan,
         skipped_allocations=skipped_allocations,
     )
-    plan, risk_metadata = _apply_tail_risk_limits(
-        config,
-        context,
-        plan=plan,
-        candidate_snapshots=candidate_snapshots,
-    )
-    sizing_metadata.update(risk_metadata)
     allocation = _pick_allocation(
         plan.allocations,
         context.market.condition_id if context.market is not None else None,

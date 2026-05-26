@@ -7,7 +7,6 @@
 - gates: ask depth / open order 工具
 - matching: 直播状态匹配
 - pricing: 价格上限
-- risk_limits: 风险限额收紧
 
 量化决策器入口在 ``polymarket_trader.workflow.quant_decider.QuantDecider``。
 """
