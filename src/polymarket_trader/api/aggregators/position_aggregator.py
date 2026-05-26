@@ -79,6 +79,8 @@ class PositionAggregator:
         return tuple(results)
 
     def _serialize(self, mv, ov: "OutcomeView", *, level: Level) -> dict[str, Any]:
+        from polymarket_trader.domain.account import MarketPauseSource
+
         pos = ov.position
         assert pos is not None  # caller 已 filter
 
@@ -86,6 +88,12 @@ class PositionAggregator:
         mtm_price = pos.cur_price if pos.cur_price is not None else ov.best_bid
         position_usdc = pos.shares * mtm_price if mtm_price is not None else Decimal("0")
 
+        # §17.6: 仓位 payload `is_paused` 只反 MANUAL(人工触发);
+        # auto pause(sports_live_state / reconcile / risk)走 /markets/detail
+        # 单独取,不掺杂到仓位状态——前端 badge 三/四态:归零/暂停(人工)/可赎回/持有
+        is_manual_paused = (
+            mv.pause is not None and mv.pause.source == MarketPauseSource.MANUAL
+        )
         summary = {
             "condition_id": mv.condition_id,
             "token_id": ov.token_id,
@@ -102,7 +110,7 @@ class PositionAggregator:
             "has_open_sell": ov.has_open_sell,
             "redeemable": pos.redeemable,
             "settled_zero_value": pos.settled_zero_value,
-            "is_paused": mv.is_paused,
+            "is_paused": is_manual_paused,
         }
         if level == "summary":
             return summary
