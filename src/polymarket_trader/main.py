@@ -617,6 +617,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         ("market_tick_worker", market_tick_worker),
         ("market_metadata_store", market_metadata_store),
         ("sports_live_history_buffer", sports_live_history_buffer),
+        ("decision_recorder", decision_recorder),
         ("reconcile_authority_refresher", reconcile_worker.authority_refresher),
         ("user_ws_worker", user_ws_worker),
         ("account_state_store", account_state_store),

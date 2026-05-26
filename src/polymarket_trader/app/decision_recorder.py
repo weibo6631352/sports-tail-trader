@@ -8,10 +8,23 @@ P0 热路径硬约束（CLAUDE.md §3 / §7）：
 - 不允许 ``await`` 数据库；只允许同步 ``outbox.put_nowait``。
 - 序列化失败必须吞掉异常，不阻塞决策返回。
 - 拒绝原因 / accepted 仅复用现有决策字段，不发明新枚举值。
+
+state-change dedup
+==================
+
+同一 (condition_id, token_id, hook_name) 上次 emit 的决策与本次输出一致
+（action / price / amount / size / order_id / decision_kind / reason 全部
+相同）→ 视为"交易状态未变化"——不写 DB,不进 outbox。
+
+quant_decider 每 tick 评估同一 candidate 反复返回相同 BUY intent / 同一
+SKIP reason 时,decision_records 表 1:1 暴涨（实测每秒 ~21 条）。只在状态
+真发生变化（BUY→SKIP / 价格变 / 金额变 / 不同 reason）时写一条,大幅减量。
+首次 emit 视为状态从无到有,必写。
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Mapping, Protocol
 
@@ -22,6 +35,27 @@ from polymarket_trader.serialization import jsonable
 logger = logging.getLogger(__name__)
 
 
+# state-change dedup 取这些字段作为 "交易状态" 指纹——任何变化都视为状态变。
+# 其他字段（intent_tags / metadata / summary）属于辅助上下文,不影响"状态"判定。
+_STATE_FIELDS: tuple[str, ...] = (
+    "action",
+    "decision_kind",
+    "reason",
+    "price",
+    "amount_usdc",
+    "size_shares",
+    "order_id",
+    "order_type",
+    "post_only",
+)
+
+
+def _state_fingerprint(decision_output: Mapping[str, Any]) -> str:
+    """从 decision_output 抽取 state 指纹——稳定 JSON 序列化后字符串作 key。"""
+    state = {k: decision_output.get(k) for k in _STATE_FIELDS}
+    return json.dumps(state, sort_keys=True, default=str)
+
+
 class _OutboxSink(Protocol):
     def put_nowait(self, event: OutboxEvent) -> bool: ...
 
@@ -29,24 +63,31 @@ class _OutboxSink(Protocol):
 class DecisionEventRecorder:
     """同步把量化决策投递到 outbox。
 
-    暴露 ``record(...)`` 接口供 DecisionContextBuilder / ReconcileService 旁路调用，
-    内部不维护任何缓冲：每次 record 直接构造 ``OutboxEvent`` 并 ``put_nowait``。
+    暴露 ``record(...)`` 接口供 DecisionContextBuilder / ReconcileService 旁路调用,
+    内部维护 ``(cid, tid, hook) → 上次 state 指纹`` 的 dedup 缓存——只在状态变化时
+    构造 OutboxEvent + ``put_nowait``。
+
+    缓存按 condition_id 实现 ``MarketScopedStore`` 协议,跟随 market lifecycle evict。
     """
 
-    __slots__ = ("_outbox",)
+    __slots__ = ("_outbox", "_last_state")
 
     def __init__(self, outbox: _OutboxSink | None) -> None:
         self._outbox = outbox
+        self._last_state: dict[tuple[str, str | None, str | None], str] = {}
 
     def record(self, record: DecisionRecord) -> None:
         if self._outbox is None:
             return
-        # 没产生可执行 intent 的决策不落 DB(skip/decline/noop/no_action/空 follow_up
-        # → accepted=False)。这类"评估了但没动作"的决策每秒数十条,1:1 占爆 DB。
-        # 拒绝原因仍由 risk_rejection_recorded / allocation_decision_recorded
-        # / market_filtered_out 等 audit_events channel 承接,§10 可审计性不丢。
-        if not record.accepted:
+        # state-change dedup:同 (cid, tid, hook) 上次 emit 的关键字段全相同 → 状态未变,
+        # 不写。BUY→SKIP / 价格变 / reason 变 / 首次 emit 都视为状态变化必写。
+        # decision_records 表此前 2 小时积累 151K 行,绝大多数是同一 candidate
+        # 反复评估返回相同 intent;dedup 后只在状态真变时落一条。
+        key = (record.condition_id, record.token_id, record.hook_name)
+        fingerprint = _state_fingerprint(record.decision_output)
+        if self._last_state.get(key) == fingerprint:
             return
+        self._last_state[key] = fingerprint
         log_context = {
             "trace_id": record.trace_id,
             "hook_name": record.hook_name,
@@ -74,6 +115,19 @@ class DecisionEventRecorder:
                 extra=log_context,
             )
             return
+
+    # ---------- MarketScopedStore 协议 ----------
+
+    def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
+        """market lifecycle 结束时清缓存,防内存泄漏。
+
+        清掉该 cid 下所有 (token_id, hook_name) 维度的 fingerprint 缓存。
+        """
+        del token_ids
+        # 不能在迭代时改 dict——先收集 key 再删除
+        keys_to_remove = [k for k in self._last_state if k[0] == condition_id]
+        for k in keys_to_remove:
+            self._last_state.pop(k, None)
 
 
 def build_decision_record_from_hook(
