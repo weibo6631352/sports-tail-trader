@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
 
-from polymarket_trader.api.deps import build_time_range, get_admin_service
+from polymarket_trader.api.aggregators import OutboxAggregator
+from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
 router = APIRouter(prefix="/outbox", tags=["outbox"])
@@ -26,13 +29,14 @@ async def list_outbox_pending(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     trace_id: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    return await service.list_outbox_pending(
-        limit=limit,
-        offset=offset,
-        trace_id=trace_id,
+    """Pending events（走 OutboxAggregator）—— 走 runtime.outbox（内存），无 DB。"""
+    aggregator = OutboxAggregator(
+        session_factory=runtime.db_session_factory,
+        runtime_outbox=runtime.outbox,
     )
+    return await aggregator.list_pending(limit=limit, offset=offset, trace_id=trace_id)
 
 
 @router.get("/failures")
@@ -44,15 +48,16 @@ async def list_outbox_failures(
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
     min_retry_count: int = Query(default=1, ge=0),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """Outbox 失败/重试事件。
+    """Outbox 失败/重试事件（走 OutboxAggregator）—— DB 是唯一真相，进程崩溃后
+    pending 内存丢，必须从 DB 拉历史失败事件。"""
 
-    DB 是唯一真相来源——筛选 ``retry_count >= min_retry_count`` 或带
-    ``last_error`` 的事件，按 ``updated_at`` 倒序，排查持久化链路问题刚需。
-    """
-
-    return await service.list_outbox_failures(
+    aggregator = OutboxAggregator(
+        session_factory=runtime.db_session_factory,
+        runtime_outbox=runtime.outbox,
+    )
+    return await aggregator.list_failures(
         limit=limit,
         offset=offset,
         trace_id=trace_id,
