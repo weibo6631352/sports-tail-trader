@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
 
-from polymarket_trader.api.deps import get_admin_service
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.api.aggregators import TimelineAggregator
+from polymarket_trader.api.deps import get_runtime
 
 router = APIRouter(prefix="/trade-replays", tags=["trade-replays"])
 
@@ -15,9 +17,12 @@ async def list_trade_replays(
     condition_id: str | None = Query(default=None),
     token_id: str | None = Query(default=None),
     trace_id: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    return await service.list_trade_replays(
+    aggregator = TimelineAggregator(
+        session_factory=runtime.db_session_factory, runtime=runtime
+    )
+    return await aggregator.list_trade_replays(
         limit=limit,
         offset=offset,
         condition_id=condition_id,

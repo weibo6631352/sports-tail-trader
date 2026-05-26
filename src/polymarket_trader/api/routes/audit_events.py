@@ -5,8 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 
 from polymarket_trader.api.aggregators import TimelineAggregator
-from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.api.deps import build_time_range, get_runtime
 
 router = APIRouter(prefix="/audit-events", tags=["audit-events"])
 
@@ -24,12 +23,12 @@ async def list_audit_events(
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
     # 默认 False:大表 count subquery 每次 ~870ms,monitor 高频拉取不需要 total.
-    # 前端如需总数显式传 include_total=true.
     include_total: bool = Query(default=False),
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """走 TimelineAggregator（基于 DB session_factory）—— admin_query/timeline.py 已被替代。"""
-    aggregator = TimelineAggregator(session_factory=runtime.db_session_factory)
+    aggregator = TimelineAggregator(
+        session_factory=runtime.db_session_factory, runtime=runtime
+    )
     return await aggregator.list_audit_events(
         limit=limit,
         offset=offset,
@@ -48,15 +47,14 @@ async def aggregate_operator_interventions(
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
     sample_limit: int = Query(default=2000, ge=1, le=10_000),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """人工干预审计聚合——按 ``operator`` 分组事件计数 + 类型分布。
+    """人工干预审计聚合——按 operator 分组事件计数 + 类型分布。"""
 
-    ``operator=None`` 时返回所有 operator 的总分布；指定后返回该 operator
-    的事件类型分布 + 最近 200 条详情。回答"谁动了什么"。
-    """
-
-    return await service.aggregate_operator_interventions(
+    aggregator = TimelineAggregator(
+        session_factory=runtime.db_session_factory, runtime=runtime
+    )
+    return await aggregator.aggregate_operator_interventions(
         operator=operator,
         time_range=build_time_range(since=since, until=until),
         sample_limit=sample_limit,
