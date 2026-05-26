@@ -265,13 +265,13 @@ runtime → domain
 **门禁调参原则**（拼概率，不过度保守）：
 
 - 门禁目的是防止明确错误，不是追求零风险。反复拦截本应成交的机会必须复盘并调整
-- 复盘路径：单 condition 多 channel 一次拉齐用 `GET /audit-events/by-condition/{cid}`（默认 7 channel：order_created / allocation_decision_recorded / sports_live_state_recorded / order_matched / order_rejected / fill_recorded / risk_rejection_recorded），结合 `/candidates` 的 `rejection_reason` 判断拒绝是否合理；不合理的拒绝（成交是正期望）视为门禁设定问题
+- 复盘路径：单 condition 多 channel 一次拉齐用 `GET /audit-events/by-condition/{cid}`（默认 8 channel：order_created / order_matched / order_rejected / fill_recorded / risk_rejection_recorded / reconcile_diff_detected / reconcile_applied / trading_paused_for_market——这些都是 audit_events 表实际持久化的 event_title）；直播状态时间线走 `GET /sports/live-events?condition_id={cid}`（内存 ring buffer 100 分钟历史）；决策评估时间线走 `GET /decision-context/{cid}?include_audit=true` 或 WS `candidates` channel；结合 `/candidates` 的 `rejection_reason` 判断拒绝是否合理；不合理的拒绝（成交是正期望）视为门禁设定问题
 - 在统计优势场景下宁可偶尔在边界情况输一笔，不能因过度保守在系统性优势场景下全部放弃
 - 审计日志是复盘工具不是决策权威
 
 **买入复盘与 bug 止损**：
 
-- 每次实盘买入事后必须复盘：`GET /audit-events/by-condition/{cid}` 一次拉齐 order_created / fill_recorded / sports_live_state_recorded / allocation_decision_recorded 等多 channel 时间线，判断买入是否由正确逻辑触发
+- 每次实盘买入事后必须复盘：`GET /audit-events/by-condition/{cid}` 拉 order_created / fill_recorded / order_matched / risk_rejection_recorded 时间线；配合 `GET /sports/live-events?condition_id={cid}` 看决策时点的直播状态、`GET /decision-context/{cid}?include_audit=true` 看 quant_decide 输入输出，判断买入是否由正确逻辑触发
 - 发现 bug 触发的买入（如 `"delayed"` 状态被误认 LIVE 导致雨延场买入）立即通过 `/positions/force-exit` 或手动市价卖出止损
 - 复盘工具：`/decision-context/{cid}?include_audit=true`（一次拉齐 market + positions + live_state + audit 时序）/ `/positions` / `/fills`
 

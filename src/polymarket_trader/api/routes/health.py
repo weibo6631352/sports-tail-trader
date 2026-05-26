@@ -18,12 +18,44 @@ def _reporter(runtime: Any) -> HealthReporter:
 
 @router.get("/health")
 async def health(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
-    """总体健康（原架构方案 §11.4）—— 5 维度 status 聚合。
+    """总体健康（原架构方案 §11.4）—— 4 维度 status 聚合。
 
     机器可读：status ∈ {healthy, degraded, unhealthy}，detail 列各维度独立 status。
     任一 unhealthy → unhealthy；任一 degraded → degraded。
+
+    具体维度详情走 ``/health/live-sources`` / ``/health/ws`` /
+    ``/health/decision`` / ``/health/account``——返回独立 detail (含 bucket 列表 /
+    idle_seconds / queue_depths / balance 等),用于具体定位.
     """
     report = _reporter(runtime).overall()
+    return {"status": report.status, "detail": report.detail}
+
+
+@router.get("/health/live-sources")
+async def health_live_sources(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
+    """直播源健康——bucket stale > 60s → degraded; feeder FAILED → unhealthy."""
+    report = _reporter(runtime).live_sources()
+    return {"status": report.status, "detail": report.detail}
+
+
+@router.get("/health/ws")
+async def health_ws(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
+    """WS 连接健康——market_ws/user_ws 分维度 connected + idle 检查."""
+    report = _reporter(runtime).ws()
+    return {"status": report.status, "detail": report.detail}
+
+
+@router.get("/health/decision")
+async def health_decision(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
+    """决策链路健康——trading_queue_depth > warn_depth → degraded."""
+    report = _reporter(runtime).decision()
+    return {"status": report.status, "detail": report.detail}
+
+
+@router.get("/health/account")
+async def health_account(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
+    """账户状态健康——last_reconcile > 300s → degraded; balance < 0 → unhealthy."""
+    report = _reporter(runtime).account()
     return {"status": report.status, "detail": report.detail}
 
 

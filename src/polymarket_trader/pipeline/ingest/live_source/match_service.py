@@ -121,6 +121,30 @@ class LiveStateMatchService:
             live_state_phase=match.phase,
             live_state_payload=match.payload,
         )
+        # SPORTS_LIVE_STATE_RECORDED 每次 _apply_match 都 broadcast,
+        # 供 sports_live_history_buffer ring + operator /sports/live-events 复盘。
+        # 不持久化到 audit_events(outbox_sink 显式排除),只走内存广播。
+        # signal_allowed 与否都 emit ——operator 要看"何时 signal 被 pause"。
+        self._event_bus.publish_nowait(
+            OutboxPriority.P3,
+            DomainEvent(
+                trace_id=f"live-state:{source.as_label()}:{market.condition_id}",
+                event_type=DomainEventType.SPORTS_LIVE_STATE_RECORDED.value,
+                event_id=uuid4().hex,
+                condition_id=market.condition_id,
+                market_slug=market.market_slug,
+                event_slug=market.event_slug,
+                reason=match.signal_reason or ("signal_allowed" if match.signal_allowed else "signal_blocked"),
+                payload={
+                    "source": source.as_label(),
+                    "source_event_id": match.event.source_event_id,
+                    "phase": match.phase,
+                    "signal_allowed": match.signal_allowed,
+                    "signal_reason": match.signal_reason,
+                    "match_payload": match.payload,
+                },
+            ),
+        )
         if not match.signal_allowed:
             return
         for outcome in market.outcomes:

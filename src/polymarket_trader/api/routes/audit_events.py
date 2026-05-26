@@ -41,16 +41,21 @@ async def list_audit_events(
     )
 
 
-# 默认 channels：复盘 §15 四步流程 "为什么这次 BUY"。
-# 按需扩展时直接在 query string 传 ?channels=a,b,c 覆盖默认。
+# 默认 channels：仅列实际写入 audit_events 表的 event_title。
+# sports_live_state_recorded → 不入 audit_events(outbox_sink 显式排除),
+#   查询走 /sports/live-events?condition_id={cid} 的内存 ring buffer
+# allocation_decision_recorded → 同上,查询走 WS candidates 实时流或 decision_records
+#   (/decision-context/{cid}?include_audit=true)
+# 把它们留在默认列表里只会让前端永远拿到空 channel,违反"接口返回的数据要合理".
 _DEFAULT_BY_CONDITION_CHANNELS: tuple[str, ...] = (
     "order_created",
-    "allocation_decision_recorded",
-    "sports_live_state_recorded",
     "order_matched",
     "order_rejected",
     "fill_recorded",
     "risk_rejection_recorded",
+    "reconcile_diff_detected",
+    "reconcile_applied",
+    "trading_paused_for_market",
 )
 
 
@@ -71,6 +76,11 @@ async def get_audit_events_by_condition(
     避免 agent/操盘连发 N 次 ``/audit-events?event_title=...&condition_id=...``。
     单 SQL 命中 ``ix_audit_events_condition_id`` + ``ix_audit_events_event_title``
     复合过滤；返回 ``by_channel`` 分组视图 + ``chronological`` 统一时间序列。
+
+    只查 ``audit_events`` 表内事件。如需其它复盘数据:
+    - 直播状态时间线 → ``GET /sports/live-events?condition_id={cid}``
+    - 决策评估时间线 → ``GET /decision-context/{cid}?include_audit=true``
+      或 WS ``candidates`` channel 实时流
     """
 
     if channels:

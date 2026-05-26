@@ -171,6 +171,75 @@ async def metrics_latency_percentiles(
     )
 
 
+@router.get("/system")
+async def system_perf(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
+    """系统级运行状态——CPU / 内存 / DB pool / 工作流阶段耗时 / 队列水位.
+
+    SystemPerfMonitor.snapshot() 一次性返回(全部 in-memory,无 DB):
+    - process_metrics: pid / threads / RSS / VMS / cpu_percent / open_files / fd
+    - system_metrics: cpu_count / load_avg / memory_used_pct / disk / net_io
+    - asyncio_metrics: task_count / running_task_names
+    - worker_frequencies: 每个 scheduler/worker 实际 tick rate vs 期望 drift
+    - event_latencies: 各 DomainEventType 端到端 P50/P90/P99 (queue→handle)
+    - decision_pipeline_latencies: 决策链路各 step 耗时分位
+    - memory_growth + pnl_drift + gc_stats: 长期跑泄漏/稳定性诊断
+    - http_endpoints: 每个 endpoint 调用数/error_rate/latency/throughput
+    - ws_traffic + ws_queues + db_query 分位: 协议/存储压力
+    - db_pool: SQLAlchemy 连接池 size/checkedin/checkedout/overflow
+
+    实时(non-cached). 调用成本 ~10-50ms (psutil syscalls + 内存遍历).
+    """
+    from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
+
+    snapshot = SystemPerfMonitor.get().snapshot()
+    # 补充 DB pool stats (SystemPerfMonitor 内不持有 engine 引用,只能在路由层取)
+    db_pool: dict[str, Any] = {}
+    try:
+        factory = getattr(runtime, "db_session_factory", None)
+        if factory is not None:
+            engine = getattr(factory, "kw", {}).get("bind") or getattr(factory, "bind", None)
+            if engine is None:
+                # async_sessionmaker.kw / .bind 命名版本差异;再兜底拿 sync_engine
+                sync_eng = getattr(engine, "sync_engine", None) if engine else None
+                engine = sync_eng or engine
+            pool = getattr(engine, "pool", None) or getattr(getattr(engine, "sync_engine", None), "pool", None)
+            if pool is not None:
+                db_pool = {
+                    "size": pool.size(),
+                    "checked_in": pool.checkedin(),
+                    "checked_out": pool.checkedout(),
+                    "overflow": pool.overflow(),
+                    "status": pool.status(),
+                }
+    except Exception as exc:  # noqa: BLE001
+        db_pool = {"error": str(exc)[:120]}
+    snapshot["db_pool"] = db_pool
+    # 内存 store 大小(buffer 容量 / bucket 数 / outbox 状态)
+    in_memory_stores: dict[str, Any] = {}
+    try:
+        history = getattr(runtime, "sports_live_history_buffer", None)
+        if history is not None:
+            in_memory_stores["sports_live_history_tracked_conditions"] = history.tracked_condition_count()
+    except Exception: pass
+    try:
+        ob_buf = getattr(runtime, "orderbook_history_buffer", None)
+        if ob_buf is not None:
+            in_memory_stores["orderbook_history_tracked_tokens"] = ob_buf.tracked_token_count() if hasattr(ob_buf, "tracked_token_count") else None
+    except Exception: pass
+    try:
+        registry = getattr(runtime, "registry", None)
+        if registry is not None:
+            in_memory_stores["registry_markets"] = len(registry.snapshot().markets)
+    except Exception: pass
+    try:
+        meta = getattr(runtime, "market_metadata_store", None)
+        if meta is not None:
+            in_memory_stores["market_metadata_records"] = len(list(meta.records()))
+    except Exception: pass
+    snapshot["in_memory_stores"] = in_memory_stores
+    return snapshot
+
+
 @router.get("/admin/decisions/dump")
 async def dump_decision_records(
     limit: int = Query(default=_DECISIONS_DUMP_DEFAULT_LIMIT, ge=1, le=_DECISIONS_DUMP_MAX_LIMIT),

@@ -34,15 +34,19 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
-# 复盘 §15 默认 channel 集，和 routes/audit_events.py by-condition 保持一致
+# 复盘默认 channel 集，和 routes/audit_events.py by-condition 保持一致。
+# 只列实际进 audit_events 表的 event_title:
+# - sports_live_state_recorded 走 /sports/live-events?condition_id={cid} 内存 ring
+# - allocation_decision_recorded 走 WS candidates 实时流 + decision_records
 DEFAULT_AUDIT_CHANNELS: tuple[str, ...] = (
     "order_created",
-    "allocation_decision_recorded",
-    "sports_live_state_recorded",
     "order_matched",
     "order_rejected",
     "fill_recorded",
     "risk_rejection_recorded",
+    "reconcile_diff_detected",
+    "reconcile_applied",
+    "trading_paused_for_market",
 )
 
 

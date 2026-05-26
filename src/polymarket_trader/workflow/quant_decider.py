@@ -25,7 +25,7 @@ from polymarket_trader.workflow.allocation import (
     kelly_plan,
 )
 from polymarket_trader.workflow.config import TradingWorkflowConfig
-from polymarket_trader.workflow.quant_signal import math_prob
+from polymarket_trader.workflow.quant_signal import goalserve_prob, math_prob
 from polymarket_trader.workflow.trading.allocation import (
     _allocation_skip_reason,
     _candidate_snapshots,
@@ -123,17 +123,29 @@ def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Entry
         eligible_snapshots.append(replace(snapshot, liquidity_usdc=buyable_liquidity_usdc))
 
     def _prob_provider(snap: AllocationMarketSnapshot) -> ProbView:
-        """Kelly probability source — 仅消费真概率信号。
+        """Kelly probability source — 真概率信号 max 融合 (§15 直播源赔率差价机会).
 
-        没真信号 (math_prob 不适用 / 缺少 live state) → prob_p=None →
-        kelly_plan 拒绝该市场。Kelly 不接受反推/虚假 prob。后续接入新量化
-        信号源时在 quant_signal.math_prob 里扩展即可。
+        来源:
+        - math_prob: sport-specific 数学公式 (baseball/soccer/basketball/tennis/hockey/cricket)
+          esports/MMA/电竞细分等无对应公式时返回 None
+        - goalserve_prob: Goalserve inplay 赔率隐含概率 (moneyline/totals/spread)
+          覆盖所有 8 sport,esports 主要靠这个
+
+        两者都缺 → prob_p=None → Kelly 拒绝。任一可用走 max 融合,选更高的真概率
+        信号 (保护我方持仓利润不被 stale 信号砸低 SELL 价)。
         """
 
-        prob = math_prob(context, snap.token_id)
-        if prob is None or prob <= Decimal("0"):
-            return ProbView(prob_p=None, prob_confidence=Decimal("0"), source="no_math_prob_signal")
-        return ProbView(prob_p=prob, prob_confidence=Decimal("0.7"), source="math_prob")
+        candidates: list[tuple[Decimal, str]] = []
+        math_p = math_prob(context, snap.token_id)
+        if math_p is not None and math_p > Decimal("0"):
+            candidates.append((math_p, "math_prob"))
+        gs_p = goalserve_prob(context, snap.token_id)
+        if gs_p is not None and gs_p > Decimal("0"):
+            candidates.append((gs_p, "goalserve_implied_prob"))
+        if not candidates:
+            return ProbView(prob_p=None, prob_confidence=Decimal("0"), source="no_real_prob_signal")
+        prob, source = max(candidates, key=lambda x: x[0])
+        return ProbView(prob_p=prob, prob_confidence=Decimal("0.7"), source=source)
 
     eligible_plan = kelly_plan(
         trace_id=context.trace_id,

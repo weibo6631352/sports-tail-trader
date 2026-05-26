@@ -37,4 +37,7 @@ class TradePlan:
 
     @property
     def ready_to_trade(self) -> bool:
-        return self.intent is not None and self.allocation is not None and self.market is not None
+        # allocation 已不再挂在 TradePlan(decision_context_builder 重构后 allocation
+        # 走 decision.metadata),所以这里不能再要求 allocation 非空——否则
+        # plan.ready_to_trade 永远 False,主入场链路 + VPT 都拿不到 intent 下单.
+        return self.intent is not None and self.market is not None

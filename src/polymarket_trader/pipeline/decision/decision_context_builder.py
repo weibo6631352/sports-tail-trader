@@ -297,7 +297,7 @@ class DecisionContextBuilder:
             orderbook=orderbook,
             market_token_views=_market_token_views(
                 market,
-                orderbook_reader=self._orderbook_reader,
+                orderbook_reader=self.lookup_orderbook,
                 account_snapshot=account_snapshot,
             ),
             account_snapshot=account_snapshot,

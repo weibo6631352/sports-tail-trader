@@ -148,6 +148,11 @@ class HealthReporter:
         now = _utc_now()
         results: dict[str, Any] = {}
         worst: HealthStatus = "healthy"
+        # market_ws 持续推 book/price_change(每秒级),30s idle = 真死
+        # user_ws 仅在用户动作(下单/成交/余额变动)时推消息,paper_mode + 无交易期
+        # 内长期 idle 是正常态,只看 connected 状态.idle 判断会让 health 长期误判
+        # degraded,把真问题(disconnect / 反复重连)淹没.
+        check_idle: dict[str, bool] = {"market_ws": True, "user_ws": False}
         for name, worker in (
             ("market_ws", self._runtime.market_ws_worker),
             ("user_ws", self._runtime.user_ws_worker),
@@ -160,12 +165,13 @@ class HealthReporter:
                 status: HealthStatus = "healthy"
                 if not connected:
                     status = "degraded"
-                elif stale_s is not None and stale_s > _WS_IDLE_S:
+                elif check_idle[name] and stale_s is not None and stale_s > _WS_IDLE_S:
                     status = "degraded"
                 results[name] = {
                     "connected": connected,
                     "last_message_at": last_msg.isoformat() if last_msg else None,
                     "idle_seconds": stale_s,
+                    "idle_checked": check_idle[name],
                     "status": status,
                 }
                 worst = _worst([worst, status])
@@ -179,11 +185,11 @@ class HealthReporter:
 
     def decision(self) -> HealthReport:
         try:
-            queue_depths = self._runtime.event_bus.queue_depths()
+            depths = self._runtime.event_bus.snapshot()
         except Exception as exc:  # noqa: BLE001
             return HealthReport(status="unhealthy", detail={"error": str(exc)})
         warn_depth = getattr(self._runtime.settings, "trading_queue_warn_depth", 100)
-        trading_depth = queue_depths.trading_queue_depth
+        trading_depth = depths.trading_queue_depth
         status: HealthStatus = (
             "degraded" if trading_depth > warn_depth else "healthy"
         )
@@ -191,9 +197,9 @@ class HealthReporter:
             status=status,
             detail={
                 "trading_queue_depth": trading_depth,
-                "trading_queue_capacity": queue_depths.trading_queue_capacity,
-                "maintenance_queue_depth": queue_depths.maintenance_queue_depth,
-                "persistence_queue_depth": queue_depths.persistence_queue_depth,
+                "trading_queue_capacity": depths.trading_queue_capacity,
+                "maintenance_queue_depth": depths.maintenance_queue_depth,
+                "persistence_queue_depth": depths.persistence_queue_depth,
                 "warn_depth": warn_depth,
             },
         )
