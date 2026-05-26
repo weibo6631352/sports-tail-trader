@@ -20,6 +20,7 @@ from polymarket_trader.api.routes import (
     analytics,
     audit_events,
     candidates,
+    decision_context,
     exports,
     fills,
     health,
@@ -224,6 +225,7 @@ def create_app(
     app.include_router(health.router)
     app.include_router(runtime_route.router)
     app.include_router(audit_events.router)
+    app.include_router(decision_context.router)
     app.include_router(candidates.router)
     app.include_router(allocations.router)
     app.include_router(markets.router)

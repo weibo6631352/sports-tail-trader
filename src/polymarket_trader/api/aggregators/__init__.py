@@ -46,6 +46,7 @@
 
 from .analytics_aggregator import AnalyticsAggregator
 from .candidate_aggregator import CandidateAggregator
+from .decision_context_aggregator import DecisionContextAggregator
 from .market_detail_aggregator import MarketDetailAggregator
 from .market_misc_aggregator import MarketMiscAggregator
 from .outbox_aggregator import OutboxAggregator
@@ -62,6 +63,7 @@ from .trading_query_aggregator import TradingQueryAggregator
 __all__ = [
     "AnalyticsAggregator",
     "CandidateAggregator",
+    "DecisionContextAggregator",
     "MarketDetailAggregator",
     "MarketMiscAggregator",
     "OutboxAggregator",
