@@ -41,6 +41,12 @@ class DecisionEventRecorder:
     def record(self, record: DecisionRecord) -> None:
         if self._outbox is None:
             return
+        # 没产生可执行 intent 的决策不落 DB(skip/decline/noop/no_action/空 follow_up
+        # → accepted=False)。这类"评估了但没动作"的决策每秒数十条,1:1 占爆 DB。
+        # 拒绝原因仍由 risk_rejection_recorded / allocation_decision_recorded
+        # / market_filtered_out 等 audit_events channel 承接,§10 可审计性不丢。
+        if not record.accepted:
+            return
         log_context = {
             "trace_id": record.trace_id,
             "hook_name": record.hook_name,
