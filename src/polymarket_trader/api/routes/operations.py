@@ -8,7 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.aggregators import ReconcileDecisionsAggregator
+from polymarket_trader.api.aggregators import AnalyticsAggregator, ReconcileDecisionsAggregator
 from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.api.rate_limit import rate_limit
 from polymarket_trader.app.admin_service import AdminService
@@ -132,18 +132,14 @@ async def parameter_sweep_params() -> list[dict[str, object]]:
 @router.post("/parameter-sweep")
 async def parameter_sweep(
     request: ParameterSweepRequest,
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
     _rate: None = Depends(rate_limit(endpoint="parameter_sweep", qps=0.5, burst=2)),
 ) -> dict[str, object]:
-    """对历史决策回放给定参数候选笛卡尔积，输出每组 hypothetical PnL 排序。
+    """对历史决策回放给定参数候选笛卡尔积，输出每组 hypothetical PnL 排序。"""
 
-    Read-only：不下单、不改 ``ParameterStore``。``decision_records`` +
-    ``market_settled`` 是输入；笛卡尔积上限 1000 / decision sample 上限
-    20000 由 service / pydantic 守门。
-    """
-
+    aggregator = AnalyticsAggregator(session_factory=runtime.db_session_factory)
     try:
-        return await service.run_parameter_sweep(
+        return await aggregator.run_parameter_sweep(
             candidates=request.candidates,
             per_decision_usdc=request.per_decision_usdc,
             time_range=build_time_range(since=request.since, until=request.until),

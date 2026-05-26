@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from polymarket_trader.api.aggregators import ReconcileDecisionsAggregator
+from polymarket_trader.api.aggregators import AnalyticsAggregator, ReconcileDecisionsAggregator
 from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
@@ -542,16 +542,12 @@ async def metrics(service: AdminService = Depends(get_admin_service)) -> dict[st
 async def metrics_latency_percentiles(
     window_ms: int | None = Query(default=None, ge=0),
     sample_limit: int = Query(default=500, ge=1, le=5000),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """订单执行 latency 分位数（queue→sign / sign→submit / submit→ack / queue→ack）。
+    """订单执行 latency 分位数（queue→sign / sign→submit / submit→ack / queue→ack）。"""
 
-    从 ``outbox_events.payload->timestamps`` 抽样最近 ``sample_limit`` 条 order
-    lifecycle 事件，计算每个 stage 的 p50/p90/p95/p99 毫秒数；现网延迟劣化
-    （签名变慢 / WS 卡顿）操盘观测刚需。
-    """
-
-    return await service.latency_percentiles_snapshot(
+    aggregator = AnalyticsAggregator(session_factory=runtime.db_session_factory)
+    return await aggregator.latency_percentiles_snapshot(
         window_ms=window_ms,
         sample_limit=sample_limit,
     )

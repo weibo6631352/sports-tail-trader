@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from polymarket_trader.api.aggregators import PortfolioAggregator
+from polymarket_trader.api.aggregators import AnalyticsAggregator, PortfolioAggregator
 from polymarket_trader.api.deps import get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.app.portfolio_history_service import (
@@ -66,10 +66,11 @@ async def get_portfolio_exposure(
 async def get_equity_curve(
     window_ms: int = Query(default=DEFAULT_WINDOW_MS, ge=1),
     interval_ms: int = Query(default=DEFAULT_INTERVAL_MS, ge=1),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
+    aggregator = AnalyticsAggregator(session_factory=runtime.db_session_factory)
     try:
-        return await service.portfolio_equity_curve(
+        return await aggregator.portfolio_equity_curve(
             window_ms=window_ms,
             interval_ms=interval_ms,
         )
@@ -82,17 +83,13 @@ async def get_risk_metrics(
     window_ms: int = Query(default=DEFAULT_WINDOW_MS, ge=1),
     interval_ms: int = Query(default=DEFAULT_INTERVAL_MS, ge=1),
     annualization_factor: float | None = Query(default=None, gt=0.0, le=10_000.0),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """组合级风险归因。
+    """组合级风险归因。"""
 
-    复用 equity-curve 的 downsampled 时间序列，计算 max drawdown / time
-    underwater / 波动率 / Sharpe-like / total return。``annualization_factor``
-    可选，例如按 1d 桶传 365 来年化 Sharpe。
-    """
-
+    aggregator = AnalyticsAggregator(session_factory=runtime.db_session_factory)
     try:
-        return await service.portfolio_risk_metrics(
+        return await aggregator.portfolio_risk_metrics(
             window_ms=window_ms,
             interval_ms=interval_ms,
             annualization_factor=annualization_factor,
@@ -109,18 +106,14 @@ async def get_pnl_breakdown(
     ),
     condition_id: str | None = Query(default=None, min_length=1),
     position_limit: int = Query(default=5000, ge=1, le=20000),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """按维度分解的 PnL 聚合。
+    """按维度分解的 PnL 聚合。"""
 
-    回答"哪个 strategy / market / category / outcome 是赚钱主力，哪个在烧钱"。
-    ``category`` 和 ``outcome`` 维度会做一次 markets 批量 join；其他维度直接
-    走 positions 表，零 join 成本。
-    """
-
+    aggregator = AnalyticsAggregator(session_factory=runtime.db_session_factory)
     try:
         return await asyncio.wait_for(
-            service.pnl_breakdown_snapshot(
+            aggregator.pnl_breakdown_snapshot(
                 group_by=group_by,
                 condition_id=condition_id,
                 position_limit=position_limit,
