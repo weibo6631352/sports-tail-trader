@@ -610,7 +610,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         ("gamma_snapshot_store", gamma_snapshot_store),
         ("market_tick_worker", market_tick_worker),
         ("market_metadata_store", market_metadata_store),
-        ("reconcile_authority_refresher", reconcile_worker._authority_refresher),
+        ("reconcile_authority_refresher", reconcile_worker.authority_refresher),
         ("user_ws_worker", user_ws_worker),
         ("account_state_store", account_state_store),
     ]

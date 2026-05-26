@@ -81,29 +81,19 @@ class MarketMetadataStore:
                 self._aliases[alias] = _record_key(record)
         return record
 
-    def remove(
-        self,
-        *,
-        condition_id: str | None = None,
-        market_slug: str | None = None,
-        event_slug: str | None = None,
-    ) -> bool:
-        key = _identity(condition_id=condition_id, market_slug=market_slug, event_slug=event_slug)
-        with self._lock:
-            primary_key = self._aliases.get(key, key)
-            removed = self._records.pop(primary_key, None) is not None
-            if removed:
-                self._remove_aliases_for_primary(primary_key)
-            return removed
-
     def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
         """``MarketScopedStore`` 协议：按 condition_id 删除（``token_ids`` 忽略）。
 
-        ``remove`` 同时支持 market_slug / event_slug 多 key 删除，本协议路径只走
-        condition_id——operator/其他路径仍可直接调 ``remove`` 用其他 key。
+        store 内部按 (condition_id / market_slug / event_slug) 三 key alias，但
+        lifecycle prune 只走 condition_id；删除该 condition 主记录后顺带清掉它
+        指向自己的所有 alias。``token_ids`` 忽略——按 condition 维度删除即可。
         """
         del token_ids
-        self.remove(condition_id=condition_id)
+        key = _identity(condition_id=condition_id)
+        with self._lock:
+            primary_key = self._aliases.get(key, key)
+            if self._records.pop(primary_key, None) is not None:
+                self._remove_aliases_for_primary(primary_key)
 
     def records(self) -> tuple[EntryMetadataRecord, ...]:
         with self._lock:

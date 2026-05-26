@@ -165,6 +165,15 @@ class ReconcileWorker:
         self._reconcile_applied_min_interval_s: float = 300.0
         self._reconcile_diff_min_interval_s: float = 180.0
 
+    @property
+    def authority_refresher(self) -> ReconcileAuthorityRefresher:
+        """对外公开的 authority_refresher 引用——lifecycle 注册等外部协调路径用。
+
+        worker 内部仍走 ``self._authority_refresher``；property 只是杜绝调用方
+        走 ``worker._authority_refresher`` 访问私有属性的味道。
+        """
+        return self._authority_refresher
+
     async def run(self) -> None:
         if self._event_bus is None:
             raise RuntimeError("ReconcileWorker requires an EventBus to run")
