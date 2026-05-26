@@ -12,7 +12,6 @@ from polymarket_trader.domain.sports_live import BaseballGameState, TennisGameSt
 from polymarket_trader.domain.decisions import DecisionContext
 
 from polymarket_trader.workflow.config import TradingWorkflowConfig
-from polymarket_trader.workflow.trading.helpers import cap_price_to_clob_limit
 from polymarket_trader.workflow.outcomes import target_for_token
 from polymarket_trader.workflow.tail import SportsMarketSide
 
@@ -1277,12 +1276,19 @@ def _profit_take_target_price(
         tick_size = Decimal("0.01")
     if multiplier is not None and multiplier > Decimal("1"):
         raw = entry_price * multiplier
-        return cap_price_to_clob_limit(raw, tick_size=tick_size)
+        return _cap_price_to_clob_limit(raw, tick_size=tick_size)
     units = (entry_price / tick_size).to_integral_value(rounding=ROUND_FLOOR)
     target = (units + 1) * tick_size
     if target <= entry_price:
         target += tick_size
-    return cap_price_to_clob_limit(target, tick_size=tick_size)
+    return _cap_price_to_clob_limit(target, tick_size=tick_size)
+
+
+def _cap_price_to_clob_limit(price: Decimal, *, tick_size: Decimal | None) -> Decimal:
+    """把目标价限制在 Polymarket CLOB 当前 tick 接受的最高价格内。"""
+
+    effective_tick = tick_size if tick_size is not None and tick_size > Decimal("0") else Decimal("0.01")
+    return min(price, Decimal("1") - effective_tick)
 
 
 def _effective_tick_size(context: DecisionContext) -> Decimal | None:

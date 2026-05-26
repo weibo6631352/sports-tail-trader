@@ -1,12 +1,11 @@
 """通用辅助：从 DecisionContext.metadata 中读 Decimal / 文本；Fill 金额计算；
-决策元数据投影（enrich_decision / build_strategy_summary）；tick_size 解析；
-价格 tick 对齐。
+决策元数据投影（enrich_decision / build_strategy_summary）；tick_size 解析。
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
-from decimal import Decimal, ROUND_FLOOR
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Mapping
 
 from polymarket_trader.domain.events import Fill
@@ -18,38 +17,6 @@ if TYPE_CHECKING:
 
 # Polymarket 标准最小 tick；仅在 orderbook 和 market 均未报告 tick_size 时兜底。
 _TICK_SIZE_FALLBACK = Decimal("0.01")
-
-
-def align_price_to_tick(price: Decimal, *, tick_size: Decimal | None) -> Decimal:
-    """把策略目标价格向下对齐到交易所允许的 tick。
-
-    卖出退出价是"目标上限"——当市场只支持 0.01 tick 时，0.995 应落到 0.99；
-    tick 缺失或异常时保持原价，由框架风控继续审计。
-    """
-
-    if tick_size is None or tick_size <= Decimal("0"):
-        return price
-    units = (price / tick_size).to_integral_value(rounding=ROUND_FLOOR)
-    if units <= 0:
-        return price
-    return units * tick_size
-
-
-def cap_price_to_clob_limit(price: Decimal, *, tick_size: Decimal | None = None) -> Decimal:
-    """把目标价限制在 Polymarket CLOB 当前 tick 接受的最高价格内。"""
-
-    effective_tick = tick_size if tick_size is not None and tick_size > Decimal("0") else _TICK_SIZE_FALLBACK
-    return min(price, Decimal("1") - effective_tick)
-
-
-def effective_tick_size(context: DecisionContext) -> Decimal | None:
-    """优先 orderbook.tick_size，次 market.tick_size，否则 None（caller 自决兜底）。"""
-
-    if context.orderbook is not None and context.orderbook.tick_size is not None:
-        return context.orderbook.tick_size
-    if context.market is not None:
-        return context.market.tick_size
-    return None
 
 
 def resolve_tick_size(

@@ -45,11 +45,7 @@ from polymarket_trader.workflow.trading.exit_overlay import (
     evaluate_dynamic_exit,
 )
 from polymarket_trader.workflow.allocation import _ask_depth_notional
-from polymarket_trader.workflow.trading.helpers import (
-    _metadata_text,
-    align_price_to_tick,
-    effective_tick_size,
-)
+from polymarket_trader.workflow.trading.helpers import _metadata_text
 
 logger = logging.getLogger(__name__)
 
@@ -196,43 +192,19 @@ def _math_lock_prob_view(
     snap: AllocationMarketSnapshot,
     context: DecisionContext,
 ) -> "ProbView | None":
-    """math_lock fallback: 没 odds 源时用统一数学模型估真概率作 Kelly p。
+    """math_lock fallback: 没 odds 源时用 math_lock 锁定概率作 Kelly p。
 
-    返回 ProbView with prob_p = lock_probability,confidence=0.7(数学模型置信度
-    比真实赔率低,补偿模型简化导致的估计误差)。method=unsupported / lock_p=0 时
-    返回 None,让 caller fallback 到下一层(implied 反推等)。
+    复用 exit_overlay._math_lock_fair_value 的实现（同一份 sport-specific
+    + series-winner lock 概率计算），仅在此处包成 ProbView 加 confidence=0.7。
+    confidence 0.7：数学模型基于 base rate 估计，不如真实 odds 准，留缓冲。
     """
 
-    from polymarket_trader.sports.math_lock import evaluate_math_lock
-    from polymarket_trader.sports.parsing import live_game_state_from_metadata
-    from polymarket_trader.workflow.outcomes import describe_sports_market, target_for_token
+    from polymarket_trader.workflow.trading.exit_overlay import _math_lock_fair_value
 
-    market = snap.market
-    descriptor = describe_sports_market(market)
-    if not descriptor.accepted or descriptor.market_type is None:
+    prob = _math_lock_fair_value(context, snap.token_id)
+    if prob is None or prob <= Decimal("0"):
         return None
-    target = target_for_token(market, snap.token_id)
-    if target is None:
-        return None
-    game = live_game_state_from_metadata(context.metadata)
-    if game is None:
-        return None
-    lock_result = evaluate_math_lock(
-        descriptor.market_type,
-        target.side,
-        descriptor.line,
-        game,
-        market_slug=market.market_slug,
-    )
-    if lock_result.method == "unsupported" or lock_result.lock_probability <= Decimal("0"):
-        return None
-    # math_lock 输出 [0,1] 锁定概率 = 我方持仓胜率近似。用作 Kelly prob_p。
-    # confidence=0.7: 数学模型基于 base rate 估计,不如真实 odds 准,留缓冲。
-    return ProbView(
-        prob_p=lock_result.lock_probability,
-        prob_confidence=Decimal("0.7"),
-        source=f"math_lock:{lock_result.method}",
-    )
+    return ProbView(prob_p=prob, prob_confidence=Decimal("0.7"), source="math_lock")
 
 
 def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> EntrySizing:
@@ -414,9 +386,6 @@ def decide_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Tra
     decision_metadata.update(efficiency_metadata)
     if not efficiency_allowed:
         return TradingDecision.skip(reason=efficiency_reason, metadata=decision_metadata)
-    decision_metadata["exit_target_price"] = str(
-        align_price_to_tick(config.exit_no_price, tick_size=effective_tick_size(context))
-    )
     from polymarket_trader.domain.decisions import StrategySummary
     from polymarket_trader.workflow.outcomes import describe_sports_market
     descriptor = describe_sports_market(context.market)
@@ -617,12 +586,8 @@ class QuantDecider:
             or _metadata_text(context, "token_id")
         )
         entry_price = _position_entry_price(context)
-        tick_size = effective_tick_size(context)
-        exit_price = align_price_to_tick(config.exit_no_price, tick_size=tick_size)
-        decision_metadata: dict[str, object] = {
-            "source_reason": "quant_exit",
-            "exit_target_price": str(exit_price),
-        }
+        exit_price = config.exit_no_price
+        decision_metadata: dict[str, object] = {"source_reason": "quant_exit"}
         if uncovered_shares is not None:
             decision_metadata["target_size_shares"] = str(uncovered_shares)
 
