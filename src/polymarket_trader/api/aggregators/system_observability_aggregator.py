@@ -542,8 +542,10 @@ class SystemObservabilityAggregator:
             except Exception as exc:  # noqa: BLE001
                 health["account_state"] = {"error": str(exc)}
 
-        # trade tape cache 状态（W3c 后会迁到 market_misc_aggregator）
-        from polymarket_trader.app.admin_service import _TRADE_TAPE_CACHE
+        # trade tape cache 状态（cache 在 market_misc_aggregator 模块内）
+        from polymarket_trader.api.aggregators.market_misc_aggregator import (
+            _TRADE_TAPE_CACHE,
+        )
 
         if _TRADE_TAPE_CACHE:
             ages = [

@@ -25,6 +25,10 @@ settlement / portfolio exposure 已在各自专门 aggregator 中）。
 | `GET /markets/prices-history` | `get_market_prices_history(...)` |
 | `GET /markets/liquidity` | `get_market_liquidity(...)` |
 | `GET /markets/impact` | `get_market_impact(...)` |
+| `GET /runtime/trade-tape` | `market_trade_tape(...)` |
+| `GET /runtime/derived-metrics` | `derived_metrics_snapshot(...)` |
+| `GET /runtime/odds-drift` | `odds_drift_snapshot(...)` |
+| `GET /runtime/arbitrage` | `arbitrage_snapshot()` |
 """
 
 from __future__ import annotations
@@ -1099,3 +1103,412 @@ class MarketMiscAggregator:
             result["pregame"] = {"enabled": False}
 
         return result
+
+
+# ===== module-level cache for trade tape =====
+# 2s cache 防止 admin 反复调爆 Polymarket data-api（无明示限速但避免被 ban）
+_TRADE_TAPE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+# 把 4 个 runtime/* 类方法补到 MarketMiscAggregator 上——这些方法本质是
+# "市场派生量化指标"，归类于 market 维度
+def _bind_market_misc_extensions() -> None:
+    """运行时把 4 个方法挂载到 MarketMiscAggregator 类。
+
+    用 monkey-patch 而非直接修改 class body 是为了让 4 个方法定义独立成块
+    便于未来按职责进一步拆分（与早期 12 个方法是同样的归类）。
+    """
+
+
+async def _market_trade_tape(
+    self: MarketMiscAggregator,
+    *,
+    condition_id: str,
+    limit: int = 50,
+) -> dict[str, object]:
+    """Polymarket 公开 trade tape — 该 market 最近 N 笔实际成交。
+
+    含每笔 side(BUY/SELL) / size / price / timestamp / wallet(proxyWallet)，
+    是 OFI 之外**真正订单流**的来源（OFI 只算盘口变化，trade tape 是实成交）。
+    """
+    import time as _time
+    import os as _os
+
+    import httpx as _httpx
+
+    cache_key = f"{condition_id}:{limit}"
+    cached = _TRADE_TAPE_CACHE.get(cache_key)
+    if cached and (_time.time() - cached[0]) < 2:
+        return cached[1]
+    url = f"https://data-api.polymarket.com/trades?market={condition_id}&limit={limit}"
+    proxy = _os.environ.get("HTTPS_PROXY") or _os.environ.get("https_proxy")
+    try:
+        mounts = (
+            {"https://": _httpx.AsyncHTTPTransport(proxy=proxy)} if proxy else None
+        )
+        async with _httpx.AsyncClient(mounts=mounts, trust_env=False, timeout=8) as client:
+            r = await client.get(url)
+            if r.status_code != 200:
+                return {"error": f"http {r.status_code}", "trades": []}
+            data = r.json()
+            trades = data if isinstance(data, list) else (data.get("data") or [])
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "trades": []}
+
+    from collections import Counter as _Counter
+
+    buys = sells = 0
+    buy_notional = sell_notional = Decimal("0")
+    wallets: _Counter[str] = _Counter()
+    large_trades: list[dict[str, Any]] = []
+    latest_ts = 0
+    normalized: list[dict[str, Any]] = []
+    for t in trades:
+        if not isinstance(t, dict):
+            continue
+        side = (t.get("side") or "").upper()
+        try:
+            size = Decimal(str(t.get("size", 0)))
+            price = Decimal(str(t.get("price", 0)))
+        except Exception:  # noqa: BLE001
+            continue
+        notional = size * price
+        ts = int(t.get("timestamp", 0))
+        latest_ts = max(latest_ts, ts)
+        wallet = (t.get("proxyWallet") or "")[:10]
+        wallets[wallet] += 1
+        if side == "BUY":
+            buys += 1
+            buy_notional += notional
+        elif side == "SELL":
+            sells += 1
+            sell_notional += notional
+        entry = {
+            "side": side,
+            "size": str(size),
+            "price": str(price),
+            "notional_usdc": str(notional.quantize(Decimal("0.01"))),
+            "timestamp": ts,
+            "wallet": wallet,
+            "outcome": t.get("outcome"),
+            "slug": t.get("slug"),
+        }
+        if notional >= Decimal("100"):
+            large_trades.append(entry)
+        normalized.append(entry)
+    total_count = buys + sells
+    notional_sum = buy_notional + sell_notional
+    result = {
+        "condition_id": condition_id,
+        "trades_count": total_count,
+        "buy_count": buys,
+        "sell_count": sells,
+        "buy_notional_usdc": str(buy_notional.quantize(Decimal("0.01"))),
+        "sell_notional_usdc": str(sell_notional.quantize(Decimal("0.01"))),
+        "net_flow_usdc": str((buy_notional - sell_notional).quantize(Decimal("0.01"))),
+        "buy_flow_pct": (
+            round(float(buy_notional / notional_sum * 100), 1) if notional_sum > 0 else None
+        ),
+        "avg_trade_size_usdc": (
+            str((notional_sum / total_count).quantize(Decimal("0.01")))
+            if total_count > 0 else "0"
+        ),
+        "large_trades_count": len(large_trades),
+        "unique_wallets": len(wallets),
+        "top_wallets": dict(wallets.most_common(5)),
+        "latest_trade_at": latest_ts,
+        "trades": normalized[:20],
+        "large_trades": large_trades[:10],
+    }
+    _TRADE_TAPE_CACHE[cache_key] = (_time.time(), result)
+    if len(_TRADE_TAPE_CACHE) > 200:
+        _TRADE_TAPE_CACHE.clear()
+    return result
+
+
+def _derived_metrics_snapshot(
+    self: MarketMiscAggregator, *, market_slug: str | None = None
+) -> dict[str, object]:
+    """派生量化指标：基于已有时序数据计算高阶统计/特征。
+
+    每个 market：odds_volatility / odds_drift_rate / market_efficiency / trend。
+    每个持仓：holding + max_drawdown + price_trend → quality_score 0-100。
+    """
+    from statistics import mean as _mean, stdev as _stdev
+
+    from polymarket_trader.pipeline.decision.worker import get_odds_drift_store
+
+    store = get_odds_drift_store()
+    if not store:
+        return {"markets": [], "summary": {"tracked": 0}}
+
+    results: list[dict] = []
+    for slug, dq in store.items():
+        if market_slug and slug != market_slug:
+            continue
+        samples = list(dq)
+        if len(samples) < 3:
+            continue
+        recent = samples[-60:]
+        home_probs = [float(s["ml_home_p"]) for s in recent if s.get("ml_home_p") is not None]
+        away_probs = [float(s["ml_away_p"]) for s in recent if s.get("ml_away_p") is not None]
+        home_std = round(_stdev(home_probs), 4) if len(home_probs) >= 2 else 0
+        away_std = round(_stdev(away_probs), 4) if len(away_probs) >= 2 else 0
+        short_window = samples[-15:] if len(samples) >= 15 else samples
+        ml_home_drift = None
+        if (
+            len(short_window) >= 2
+            and short_window[0].get("ml_home_p")
+            and short_window[-1].get("ml_home_p")
+        ):
+            ml_home_drift = round(
+                float(short_window[-1]["ml_home_p"]) - float(short_window[0]["ml_home_p"]), 4
+            )
+        vigs = []
+        for s in recent:
+            hp, ap = s.get("ml_home_p"), s.get("ml_away_p")
+            if hp is not None and ap is not None:
+                vigs.append(float(hp) + float(ap) - 1.0)
+        vig_mean = round(_mean(vigs), 4) if vigs else None
+        vig_std = round(_stdev(vigs), 4) if len(vigs) >= 2 else None
+        efficiency = None
+        if vig_std is not None and vig_std > 0:
+            efficiency = round(1.0 / (1.0 + vig_std * 10), 3)
+        trend = "stable"
+        if ml_home_drift is not None:
+            if ml_home_drift > 0.02:
+                trend = "home_strengthening"
+            elif ml_home_drift < -0.02:
+                trend = "away_strengthening"
+        results.append({
+            "market_slug": slug,
+            "samples_used": len(recent),
+            "odds_volatility": {
+                "ml_home_std": home_std,
+                "ml_away_std": away_std,
+                "max_volatility": max(home_std, away_std),
+            },
+            "drift_rate": {"ml_home_drift_30s": ml_home_drift, "trend": trend},
+            "market_efficiency": {
+                "vig_mean": vig_mean,
+                "vig_std": vig_std,
+                "efficiency_score": efficiency,
+            },
+            "last_sample": samples[-1],
+        })
+
+    position_quality: list[dict] = []
+    runtime = self._runtime
+    if runtime and runtime.paper_ledger:
+        ledger = runtime.paper_ledger
+        for tok, shares in ledger.positions.items():
+            if shares <= Decimal("0"):
+                continue
+            cost = ledger.cost_basis_usdc.get(tok, Decimal("0"))
+            entry_price = cost / shares if shares > 0 else Decimal("0")
+            history = ledger.position_price_history.get(tok, [])
+            first_fill = ledger.first_fill_at.get(tok)
+            holding_seconds = (
+                (datetime.now(timezone.utc) - first_fill).total_seconds()
+                if first_fill else 0
+            )
+            max_loss = ledger.max_unrealized_loss.get(tok, Decimal("0"))
+            price_trend = "unknown"
+            drift_pct = None
+            if len(history) >= 2:
+                try:
+                    first_bid = Decimal(str(history[0][1]))
+                    last_bid = Decimal(str(history[-1][1]))
+                    if first_bid > 0:
+                        drift_pct = round(float((last_bid - first_bid) / first_bid * 100), 2)
+                        if drift_pct > 2:
+                            price_trend = "rising"
+                        elif drift_pct < -2:
+                            price_trend = "falling"
+                        else:
+                            price_trend = "stable"
+                except Exception:  # noqa: BLE001
+                    pass
+            quality = 50
+            if max_loss >= Decimal("0"):
+                quality += 20
+            if price_trend == "rising":
+                quality += 20
+            elif price_trend == "falling":
+                quality -= 20
+            if holding_seconds > 14400:
+                quality -= 20
+            quality = max(0, min(100, quality))
+            position_quality.append({
+                "token_id": tok[:32],
+                "shares": str(shares),
+                "entry_price": str(entry_price.quantize(Decimal("0.0001"))),
+                "holding_seconds": round(holding_seconds, 0),
+                "holding_hours": round(holding_seconds / 3600, 2),
+                "max_drawdown_usdc": str(max_loss),
+                "price_trend": price_trend,
+                "drift_pct": drift_pct,
+                "quality_score": quality,
+            })
+
+    all_vols = [
+        r["odds_volatility"]["max_volatility"]
+        for r in results if r["odds_volatility"]["max_volatility"]
+    ]
+    all_effs = [
+        r["market_efficiency"]["efficiency_score"]
+        for r in results if r["market_efficiency"]["efficiency_score"]
+    ]
+    all_quality = [p["quality_score"] for p in position_quality]
+    return {
+        "markets_analyzed": len(results),
+        "positions_count": len(position_quality),
+        "summary": {
+            "avg_odds_volatility": round(_mean(all_vols), 4) if all_vols else None,
+            "max_odds_volatility": max(all_vols) if all_vols else None,
+            "avg_market_efficiency": round(_mean(all_effs), 3) if all_effs else None,
+            "avg_position_quality": round(_mean(all_quality), 1) if all_quality else None,
+        },
+        "markets": sorted(
+            results, key=lambda x: -x["odds_volatility"]["max_volatility"]
+        )[:30],
+        "position_quality": position_quality,
+    }
+
+
+def _odds_drift_snapshot(
+    self: MarketMiscAggregator,
+    *,
+    market_slug: str | None = None,
+    limit: int = 100,
+) -> dict[str, object]:
+    """Goalserve 赔率漂移时序（每 market 5s 采样，最多保留 200 点）。"""
+    from polymarket_trader.pipeline.decision.worker import get_odds_drift_store
+
+    store = get_odds_drift_store()
+    if market_slug:
+        samples = list(store.get(market_slug, []))[-limit:]
+        if not samples:
+            return {"market_slug": market_slug, "samples": [], "samples_count": 0}
+        first, last = samples[0], samples[-1]
+        try:
+            first_at = datetime.fromisoformat(first["at"])
+            last_at = datetime.fromisoformat(last["at"])
+            duration_s = (last_at - first_at).total_seconds()
+        except Exception:  # noqa: BLE001
+            duration_s = 0
+
+        def _diff(key: str) -> float | None:
+            a, b = first.get(key), last.get(key)
+            if a is None or b is None:
+                return None
+            return round(float(b) - float(a), 4)
+
+        return {
+            "market_slug": market_slug,
+            "samples_count": len(samples),
+            "duration_seconds": round(duration_s, 1),
+            "first_sample": first,
+            "last_sample": last,
+            "ml_home_drift": _diff("ml_home_p"),
+            "ml_away_drift": _diff("ml_away_p"),
+            "tt_over_drift": _diff("tt_over_p"),
+            "sp_home_drift": _diff("sp_home_p"),
+            "samples": samples,
+        }
+    summary = []
+    for slug, dq in store.items():
+        samples = list(dq)
+        if not samples:
+            continue
+        summary.append({
+            "market_slug": slug,
+            "samples_count": len(samples),
+            "first_at": samples[0]["at"],
+            "last_at": samples[-1]["at"],
+        })
+    summary.sort(key=lambda x: x["last_at"], reverse=True)
+    return {"tracked_markets": len(summary), "summary": summary[:50]}
+
+
+def _arbitrage_snapshot(self: MarketMiscAggregator) -> dict[str, object]:
+    """同 event 跨盘口套利检测——隐含概率和应该 ≤ 1 + vig。"""
+    runtime = self._runtime
+    if (
+        runtime is None or runtime.registry is None or runtime.market_ws_worker is None
+    ):
+        return {"events": [], "checked_count": 0}
+    from collections import defaultdict as _defaultdict
+
+    registry = runtime.registry
+    ws = runtime.market_ws_worker
+    markets = registry.snapshot().markets
+    by_event: dict[str, list] = _defaultdict(list)
+    for m in markets:
+        if not m.event_slug or m.trading_status != "eligible":
+            continue
+        by_event[m.event_slug].append(m)
+    results: list[dict] = []
+    for event_slug, ms in by_event.items():
+        if len(ms) < 2:
+            continue
+        for market in ms:
+            if len(market.token_ids) < 2:
+                continue
+            ask_sum = Decimal("0")
+            bid_sum = Decimal("0")
+            outcomes_data: list[dict] = []
+            valid = True
+            for token_id, outcome_label in zip(
+                market.token_ids, [o.outcome for o in market.outcomes], strict=False,
+            ):
+                ob = ws.snapshot(token_id)
+                if ob is None or ob.best_ask is None:
+                    valid = False
+                    break
+                ask_sum += ob.best_ask
+                if ob.best_bid is not None:
+                    bid_sum += ob.best_bid
+                outcomes_data.append({
+                    "outcome": outcome_label,
+                    "best_ask": str(ob.best_ask),
+                    "best_bid": str(ob.best_bid) if ob.best_bid else None,
+                })
+            if not valid:
+                continue
+            arb_signal = None
+            if ask_sum < Decimal("1.0"):
+                arb_signal = "buy_all_arbitrage"
+            elif ask_sum > Decimal("1.20"):
+                arb_signal = "high_vig_anomaly"
+            if arb_signal or (Decimal("0.95") <= ask_sum <= Decimal("1.10")):
+                results.append({
+                    "event_slug": event_slug,
+                    "market_slug": market.market_slug,
+                    "condition_id": market.condition_id[:10],
+                    "outcomes_count": len(outcomes_data),
+                    "ask_sum": str(ask_sum.quantize(Decimal("0.0001"))),
+                    "bid_sum": (
+                        str(bid_sum.quantize(Decimal("0.0001"))) if bid_sum > 0 else None
+                    ),
+                    "vig_pct": str(((ask_sum - Decimal("1")) * 100).quantize(Decimal("0.01"))),
+                    "arb_signal": arb_signal,
+                    "outcomes": outcomes_data,
+                })
+    results.sort(key=lambda x: float(x["vig_pct"]))
+    return {
+        "checked_events": len(by_event),
+        "results_count": len(results),
+        "arbitrage_opportunities": [
+            r for r in results if r["arb_signal"] == "buy_all_arbitrage"
+        ],
+        "anomalies": [r for r in results if r["arb_signal"] == "high_vig_anomaly"],
+        "all_results": results[:30],
+    }
+
+
+# 挂载到 class
+MarketMiscAggregator.market_trade_tape = _market_trade_tape  # type: ignore[attr-defined]
+MarketMiscAggregator.derived_metrics_snapshot = _derived_metrics_snapshot  # type: ignore[attr-defined]
+MarketMiscAggregator.odds_drift_snapshot = _odds_drift_snapshot  # type: ignore[attr-defined]
+MarketMiscAggregator.arbitrage_snapshot = _arbitrage_snapshot  # type: ignore[attr-defined]

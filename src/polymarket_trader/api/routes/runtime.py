@@ -6,13 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from polymarket_trader.api.aggregators import (
     AnalyticsAggregator,
+    MarketMiscAggregator,
     PaperTradingAggregator,
     ReconcileDecisionsAggregator,
     RuntimeAggregator,
+    SportsQueryAggregator,
     SystemObservabilityAggregator,
 )
-from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
-from polymarket_trader.app.admin_service import AdminService
+from polymarket_trader.api.deps import build_time_range, get_runtime
 
 router = APIRouter(tags=["runtime"])
 
@@ -68,15 +69,12 @@ async def equity_curve_snapshot(runtime: Any = Depends(get_runtime)) -> dict[str
 async def trade_tape_snapshot(
     condition_id: str = Query(..., description="Polymarket condition_id"),
     limit: int = Query(default=50, ge=1, le=500),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """Polymarket trade tape — 真实成交方向流量（非 OFI）。
-
-    OFI 只算盘口变化（add/cancel），trade tape 是**实际成交方向**——
-    谁是 taker（决定方向）。聚合：buy/sell notional 比、大单数、unique wallets、
-    top whale wallets。15s 内的 cache 防止 admin 反复调爆 polymarket data-api。
-    """
-    return await service.market_trade_tape(condition_id=condition_id, limit=limit)
+    """Polymarket trade tape — 真实成交方向流量（非 OFI）。聚合 buy/sell notional 比、大单数。"""
+    return await MarketMiscAggregator(runtime=runtime).market_trade_tape(
+        condition_id=condition_id, limit=limit,
+    )
 
 
 @router.get("/runtime/clv")
@@ -91,27 +89,23 @@ async def clv_snapshot(runtime: Any = Depends(get_runtime)) -> dict[str, object]
 @router.get("/runtime/derived-metrics")
 async def derived_metrics(
     market_slug: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """派生量化指标（基于已有时序数据计算高阶统计 / 特征）。
-
-    每个 market 算: odds_volatility / drift_rate / market_efficiency / trend label。
-    每个持仓算: holding_seconds / max_drawdown / price_trend / quality_score (0-100)。
-    summary 含全局 avg/max。
-    """
-    return service.derived_metrics_snapshot(market_slug=market_slug)
+    """派生量化指标——每市场 odds_volatility / drift_rate / market_efficiency；每持仓 quality_score。"""
+    return MarketMiscAggregator(runtime=runtime).derived_metrics_snapshot(
+        market_slug=market_slug,
+    )
 
 
 @router.get("/runtime/error-rate")
 async def error_rate(
     window_minutes: int = Query(default=15, ge=1, le=120),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """错误率时序（1min 桶聚合）+ 最近 1/5/15min 总错误率派生。
-
-    用途：找错误暴增时段，告警阈值校准。
-    """
-    return await service.error_rate_timeseries(window_minutes=window_minutes)
+    """错误率时序（1min 桶聚合）+ 最近 1/5/15min 总错误率派生。"""
+    return await AnalyticsAggregator(
+        session_factory=runtime.db_session_factory,
+    ).error_rate_timeseries(window_minutes=window_minutes)
 
 
 @router.get("/runtime/data-staleness")
@@ -364,35 +358,26 @@ async def data_sources_health(runtime: Any = Depends(get_runtime)) -> dict[str, 
 async def odds_drift(
     market_slug: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """Goalserve 赔率漂移时序（每 market 5s 采样，最多 200 点 ~16min）。
-
-    - 不传 market_slug: 返回所有 tracked market 摘要
-    - 含 market_slug: 完整时序 + 派生漂移率（ml_home/away/draw、totals over、spread home）
-    - 用途: 庄家收紧信号（vig 突然 inflate）、概率趋势识别
-    """
-    return service.odds_drift_snapshot(market_slug=market_slug, limit=limit)
+    """Goalserve 赔率漂移时序（每 market 5s 采样，最多 200 点 ~16min）。"""
+    return MarketMiscAggregator(runtime=runtime).odds_drift_snapshot(
+        market_slug=market_slug, limit=limit,
+    )
 
 
 @router.get("/runtime/arbitrage")
-async def arbitrage_snapshot(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """同 event 跨盘口套利检测 — 隐含概率和异常分析。
-
-    扫描 registry 所有 markets，按 event_slug 分组，对每个 market 取所有 outcome
-    的 best_ask 求和：
-    - sum < 1.0 = 套利机会（买所有 outcome 必赚 vig）
-    - sum > 1.2 = 异常分歧（市场极度混乱）
-    - 1.0 < sum < 1.10 = 健康 vig（5-10%）
-    """
-    return service.arbitrage_snapshot()
+async def arbitrage_snapshot(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    """同 event 跨盘口套利检测 — sum(best_ask) < 1.0 = 套利机会。"""
+    return MarketMiscAggregator(runtime=runtime).arbitrage_snapshot()
 
 
 @router.get("/runtime/soccer-injuries")
-async def soccer_injuries(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
+async def soccer_injuries(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
     """Soccer 全部联赛伤病列表（lazy fetch + 1h cache）。"""
-    d = await service.soccer_injuries_snapshot()
-    if d is None: raise HTTPException(status_code=404, detail="goalserve lazy client not active")
+    d = await SportsQueryAggregator(runtime=runtime).soccer_injuries_snapshot()
+    if d is None:
+        raise HTTPException(status_code=404, detail="goalserve lazy client not active")
     return d
 
 
@@ -406,53 +391,42 @@ async def live_attention(runtime: Any = Depends(get_runtime)) -> dict[str, objec
 async def h2h(
     team1_id: str = Query(...),
     team2_id: str = Query(...),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
     """两队历史对决（lazy fetch + 1h cache）。"""
-    d = await service.h2h_snapshot(team1_id, team2_id)
-    if d is None: raise HTTPException(status_code=404, detail="goalserve lazy client not active")
+    d = await SportsQueryAggregator(runtime=runtime).h2h_snapshot(
+        team1_id=team1_id, team2_id=team2_id,
+    )
+    if d is None:
+        raise HTTPException(status_code=404, detail="goalserve lazy client not active")
     return d
 
 
-@router.get("/runtime/nba-playbyplay")
-async def nba_playbyplay_snapshot(
-    game_id: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
-) -> dict[str, object]:
-    """NBA 逐事件流（实时，仅观测）。paper 模式启用。"""
-    snapshot = service.nba_playbyplay_snapshot(game_id=game_id)
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail="NBA play-by-play not active")
-    return snapshot
+# /runtime/nba-playbyplay 端点已删除：admin_service.nba_playbyplay_snapshot
+# 在重构前已被删，对应 NBA PBP 客户端基础设施不存在；保留路由是 §15 反例
+# （死代码 + 长期同义命名）。重新做 NBA PBP 需要先实装数据源，再加 route。
 
 
 @router.get("/runtime/win-rate")
 async def win_rate_breakdown(
     window_hours: int = Query(default=168, ge=1, le=720),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """历史 BUY+SELL 配对胜率分组（per 价位区间）。
-
-    基于 audit_events.fill_recorded 配对计算 realized PnL，按入场价位分组：
-    - trade_count / win_count / winrate / avg_pnl / total_pnl / profit_factor
-    - 自动决策核心数据：哪个价位区间真实有 edge / 哪个价位是亏损区
-    - 长期窗口（默认 7 天）覆盖大多数比赛开赛-结算周期
-    """
-    return await service.win_rate_breakdown(window_hours=window_hours)
+    """历史 BUY+SELL 配对胜率分组（per 价位区间 / sport / market_type）。"""
+    return await AnalyticsAggregator(
+        session_factory=runtime.db_session_factory,
+    ).win_rate_breakdown(window_hours=window_hours)
 
 
 @router.get("/runtime/guard-stats")
 async def guard_stats(
     window_minutes: int = Query(default=60, ge=1, le=1440),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """每个 reject reason 在过去 N 分钟触发次数（防御性入场守卫的实战效果度量）。
-
-    与 /candidates reason 聚合区别：本接口跨 4 个 event_title 聚合
-    （order_rejected + risk_rejection_recorded + allocation_decision_recorded + market_filtered_out），
-    一次拿全所有"被拦截"路径，按频次降序。
-    """
-    return await service.guard_stats_snapshot(window_minutes=window_minutes)
+    """每个 reject reason 在过去 N 分钟触发次数（防御性入场守卫的实战效果度量）。"""
+    return await AnalyticsAggregator(
+        session_factory=runtime.db_session_factory,
+    ).guard_stats_snapshot(window_minutes=window_minutes)
 
 
 @router.get("/runtime/paper-metrics")
