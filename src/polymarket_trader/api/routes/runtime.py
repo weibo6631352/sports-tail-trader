@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from polymarket_trader.api.aggregators import (
     AnalyticsAggregator,
+    PaperTradingAggregator,
     ReconcileDecisionsAggregator,
     RuntimeAggregator,
 )
@@ -45,29 +46,18 @@ async def risk_metrics(runtime: Any = Depends(get_runtime)) -> dict[str, object]
 @router.get("/runtime/anomalies")
 async def anomalies(
     window_minutes: int = Query(default=5, ge=1, le=60),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """异常检测（reject reason 突变 / 死仓识别 / 集中度告警）。
-
-    检查项：
-    - reject_reason_spike: 某 reason N min 内触发 >=5 且对比前一窗口 >=3×
-    - dead_position: 持仓时长 > 6h 且 best_bid=None
-    - concentration_warning: 单 sport > 60% 仓位
-    """
-    return await service.anomalies_snapshot(window_minutes=window_minutes)
+    """异常检测（reject reason 突变 / 死仓识别 / 集中度告警 / DB 慢 / outbox 积压）。"""
+    return await PaperTradingAggregator(runtime=runtime).anomalies_snapshot(
+        window_minutes=window_minutes,
+    )
 
 
 @router.get("/runtime/equity-curve")
-async def equity_curve_snapshot(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """资金曲线时序（per minute, 最多 24h）—— 画图 + max drawdown 计算。
-
-    每 60s recorder 写一条 {at, available, equity, positions_count, fees}。
-    派生:
-    - peak_equity / current_drawdown / max_drawdown
-    - return_pct（首末点对比）
-    - volatility_60min（最近 60 点 stdev）
-    """
-    snapshot = service.equity_curve_snapshot()
+async def equity_curve_snapshot(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    """资金曲线时序 + max drawdown / volatility / return 派生。"""
+    snapshot = PaperTradingAggregator(runtime=runtime).equity_curve_snapshot()
     if snapshot is None:
         raise HTTPException(status_code=404, detail="paper_trading_mode not enabled")
     return snapshot
@@ -89,18 +79,9 @@ async def trade_tape_snapshot(
 
 
 @router.get("/runtime/clv")
-async def clv_snapshot(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """CLV (Closing Line Value) — 体育博彩黄金 KPI。
-
-    入场后价格漂移分析：CLV > 0 = 入场抢到了先手（market 后续涨向我方）。
-    long-term avg CLV > fee = 策略真正 +EV，不必等结算才知道好坏。
-
-    数据:
-    - open_positions_clv: 当前每个 open 仓位的 1m/5m/15m/30m CLV
-    - closed_trades_clv: 已平仓的价格走势统计
-    - summary.avg_current_clv_usdc: 平均当前 CLV
-    """
-    snapshot = service.clv_snapshot()
+async def clv_snapshot(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    """CLV (Closing Line Value) — 体育博彩黄金 KPI。入场后价格漂移。"""
+    snapshot = PaperTradingAggregator(runtime=runtime).clv_snapshot()
     if snapshot is None:
         raise HTTPException(status_code=404, detail="paper_trading_mode not enabled")
     return snapshot
@@ -491,13 +472,9 @@ async def guard_stats(
 
 
 @router.get("/runtime/paper-metrics")
-async def paper_metrics_snapshot(service: AdminService = Depends(get_admin_service)) -> dict[str, object]:
-    """Paper trading 综合量化指标——一次拿全 PnL/胜率/守卫/撮合/盘口/进度。
-
-    比 /runtime/paper-ledger 全：含 simulations 成功率分布、ws 订阅状态、
-    goal 进度（initial $100 → target $1000，progress_pct）、每仓 unrealized_pnl。
-    """
-    snapshot = service.paper_metrics_snapshot()
+async def paper_metrics_snapshot(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
+    """Paper trading 综合量化指标——PnL / 持仓 / 撮合 / 集中度 一次拿全。"""
+    snapshot = PaperTradingAggregator(runtime=runtime).paper_metrics_snapshot()
     if snapshot is None:
         raise HTTPException(status_code=404, detail="paper_trading_mode not enabled")
     return snapshot
@@ -506,14 +483,10 @@ async def paper_metrics_snapshot(service: AdminService = Depends(get_admin_servi
 @router.get("/runtime/paper-orders")
 async def paper_orders_snapshot(
     limit: int = Query(default=50, ge=1, le=500),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """Paper trading 最近 N 条订单请求 + 撮合详情（含 unfilled / fee / consumed_levels）。
-
-    用于复盘"为什么这单成/不成":撮合 unfilled_amount_usdc > 0 = 卖盘没货,
-    unfilled_size_shares > 0 = SELL 买盘没接,fee_usdc 异常 = fee 配置问题。
-    """
-    snapshot = service.paper_orders_snapshot(limit=limit)
+    """Paper trading 最近 N 条订单 request + simulation 撮合详情。"""
+    snapshot = PaperTradingAggregator(runtime=runtime).paper_orders_snapshot(limit=limit)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="paper_trading_mode not enabled")
     return snapshot

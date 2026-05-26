@@ -49,6 +49,7 @@ from .candidate_aggregator import CandidateAggregator
 from .market_detail_aggregator import MarketDetailAggregator
 from .market_misc_aggregator import MarketMiscAggregator
 from .outbox_aggregator import OutboxAggregator
+from .paper_trading_aggregator import PaperTradingAggregator
 from .portfolio_aggregator import PortfolioAggregator, PortfolioExposureView
 from .position_aggregator import PositionAggregator
 from .reconcile_decisions_aggregator import ReconcileDecisionsAggregator
@@ -65,6 +66,7 @@ __all__ = [
     "MarketDetailAggregator",
     "MarketMiscAggregator",
     "OutboxAggregator",
+    "PaperTradingAggregator",
     "PortfolioAggregator",
     "PortfolioExposureView",
     "PositionAggregator",
