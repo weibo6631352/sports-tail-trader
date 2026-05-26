@@ -1067,7 +1067,7 @@ def main() -> None:
 
 
 def _register_runtime_workers(runtime: RuntimeComponents) -> None:
-    runtime.supervisor.register_worker("admin_api", priority="P3", state=WorkerLifecycleState.RUNNING)
+    runtime.supervisor.register_worker("operator_api", priority="P3", state=WorkerLifecycleState.RUNNING)
     runtime.supervisor.register_worker("market_discovery", priority="P2")
     runtime.supervisor.register_worker("market_ws", priority="P0", state=WorkerLifecycleState.PAUSED)
     runtime.supervisor.register_worker("user_ws", priority="P0", state=WorkerLifecycleState.PAUSED)

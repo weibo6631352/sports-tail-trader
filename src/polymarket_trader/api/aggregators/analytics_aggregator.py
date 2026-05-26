@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from polymarket_trader.api.serialization import AdminSerializer
+from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
@@ -45,10 +45,10 @@ class AnalyticsAggregator:
         self,
         *,
         session_factory: "async_sessionmaker[AsyncSession] | None",
-        serializer: AdminSerializer | None = None,
+        serializer: ApiSerializer | None = None,
     ) -> None:
         self._session_factory = session_factory
-        self._serializer = serializer or AdminSerializer.from_runtime(None)
+        self._serializer = serializer or ApiSerializer.from_runtime(None)
         self._timeline = TimelineAggregator(
             session_factory=session_factory, serializer=self._serializer
         )

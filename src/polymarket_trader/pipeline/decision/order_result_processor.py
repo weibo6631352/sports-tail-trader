@@ -7,7 +7,7 @@ from polymarket_trader.app.order_projection import (
     has_unexpected_resting_order,
     released_budget,
 )
-from polymarket_trader.pipeline.decision.decision_context_builder import EntryPlan, DecisionContextBuilder
+from polymarket_trader.pipeline.decision.decision_context_builder import TradePlan, DecisionContextBuilder
 from polymarket_trader.pipeline.execution.order_gateway import OrderGatewayReview, OrderGateway
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
@@ -91,7 +91,7 @@ class TradingOrderResultProcessor:
         order_result: OrderResult | None,
         snapshot: AccountSnapshot | None,
         execution: OrderGatewayReview | None = None,
-        plan: EntryPlan | None = None,
+        plan: TradePlan | None = None,
     ) -> MarketTickWorkerResult:
         if order_result is None:
             order_result = coerce_order_result_from_event(source_event)

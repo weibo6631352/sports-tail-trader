@@ -40,14 +40,14 @@ def _normalize_token_id_strings(value: Any) -> Any:
 
 
 @dataclass(frozen=True, slots=True)
-class AdminSerializer:
+class ApiSerializer:
     account_snapshot_provider: Callable[[], AccountSnapshot]
     registry_snapshot_provider: Callable[[], MarketRegistrySnapshot]
     market_ws_snapshot: Callable[[str], OrderbookSnapshot | None]
 
     @classmethod
-    def from_runtime(cls, runtime: Any) -> "AdminSerializer":
-        """从 runtime 一站式构造 AdminSerializer。
+    def from_runtime(cls, runtime: Any) -> "ApiSerializer":
+        """从 runtime 一站式构造 ApiSerializer。
 
         把 account / registry / WS snapshot provider 都从 runtime 接出来，
         避免每个 aggregator 重复 `_build_serializer` 模板。

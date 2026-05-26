@@ -10,9 +10,9 @@
 
 # 设计
 
-- 候选生成是 CPU 密集（1500 markets × 2 outcome = 3000 次 build_entry_plan），
+- 候选生成是 CPU 密集（1500 markets × 2 outcome = 3000 次 build_trade_plan），
   3s TTL 缓存避免多客户端并发把 event loop 卡死。
-- 入口 build_entry_plan 走 `runtime.decision_context_builder`；helpers 全部
+- 入口 build_trade_plan 走 `runtime.decision_context_builder`；helpers 全部
   从 runtime 拿（不依赖 OperatorService 实例）。
 """
 
@@ -181,7 +181,7 @@ class CandidateAggregator:
     ):
         settings = self._runtime.settings
         strategy_config = self._runtime.workflow.config
-        return self._runtime.decision_context_builder.build_entry_plan(
+        return self._runtime.decision_context_builder.build_trade_plan(
             market=market,
             orderbook=orderbook,
             account_snapshot=None,

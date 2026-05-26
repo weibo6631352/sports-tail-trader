@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from polymarket_trader.api.serialization import AdminSerializer
+from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.config import Settings
 from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.market import Market
@@ -166,11 +166,11 @@ class SportsQueryAggregator:
         self,
         *,
         runtime: Any,
-        serializer: AdminSerializer | None = None,
+        serializer: ApiSerializer | None = None,
     ) -> None:
         self._runtime = runtime
         self._session_factory = getattr(runtime, "db_session_factory", None) if runtime else None
-        self._serializer = serializer or AdminSerializer.from_runtime(None)
+        self._serializer = serializer or ApiSerializer.from_runtime(None)
         self._timeline = TimelineAggregator(
             session_factory=self._session_factory,
             runtime=runtime,

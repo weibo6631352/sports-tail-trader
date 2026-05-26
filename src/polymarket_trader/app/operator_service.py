@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 from polymarket_trader.app.operator_order_control import OperatorOrderController
 from polymarket_trader.serialization import decimal_text, jsonable
-from polymarket_trader.api.serialization import AdminSerializer
+from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.app.order_projection import AccountStateProjector, normalize_order_id
 from polymarket_trader.pipeline.decision.decision_context_builder import DecisionContextBuilder
 from polymarket_trader.pipeline.execution.order_gateway import OrderGateway
@@ -107,8 +107,8 @@ class OperatorService:
             items.append(signals)
         return {"items": items, "total": len(items)}
 
-    def _serializer(self) -> AdminSerializer:
-        return AdminSerializer(
+    def _serializer(self) -> ApiSerializer:
+        return ApiSerializer(
             account_snapshot_provider=self._account_snapshot,
             registry_snapshot_provider=self._registry_snapshot,
             market_ws_snapshot=self._market_ws_snapshot,
@@ -124,7 +124,7 @@ class OperatorService:
             find_open_order=self._find_open_order,
         )
 
-    def _build_entry_plan_for_admin(
+    def _build_trade_plan_for_operator(
         self,
         *,
         market: Market,
@@ -140,7 +140,7 @@ class OperatorService:
         # 策略配置是 kelly_* 的唯一真相来源，不再走框架 Settings。
         settings = self.runtime.settings
         strategy_config = self.runtime.workflow.config
-        return self._decision_builder().build_entry_plan(
+        return self._decision_builder().build_trade_plan(
             market=market,
             orderbook=orderbook,
             # 候选投影和人工确认属于受控操作入口，不使用自动入场开关截断候选生成；
@@ -351,7 +351,7 @@ class OperatorService:
                 token_id=plan.intent.token_id,
                 reason="risk_decision_unavailable" if review.risk_decision is None else review.risk_decision.reason,
                 payload={
-                    "origin": "admin_candidate_confirm",
+                    "origin": "operator_candidate_confirm",
                     "entry_origin": TRADING_DECISION_WORKER_ORIGIN,
                     "operator": jsonable(plan.summary.confirmed_by if plan.summary is not None else ""),
                     "confirm_reason": jsonable(plan.summary.confirm_reason if plan.summary is not None else ""),
@@ -587,7 +587,7 @@ class OperatorService:
 
         account = self._account_snapshot()
         metadata = self._entry_metadata_for_market(market)
-        candidate_plan = self._build_entry_plan_for_admin(
+        candidate_plan = self._build_trade_plan_for_operator(
             market=market,
             token_id=token_id,
             orderbook=orderbook,
@@ -609,7 +609,7 @@ class OperatorService:
             reason=note or "manual_confirm",
             confirmed_at=datetime.now(timezone.utc),
         )
-        plan = self._build_entry_plan_for_admin(
+        plan = self._build_trade_plan_for_operator(
             market=market,
             token_id=token_id,
             orderbook=orderbook,

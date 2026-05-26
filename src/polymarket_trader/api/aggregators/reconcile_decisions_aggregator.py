@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from polymarket_trader.serialization import page_payload
-from polymarket_trader.api.serialization import AdminSerializer
+from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.domain.decisions import DecisionRecord
 from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.time_filters import TimeRange
@@ -36,10 +36,10 @@ class ReconcileDecisionsAggregator:
         self,
         *,
         session_factory: "async_sessionmaker[AsyncSession] | None",
-        serializer: AdminSerializer | None = None,
+        serializer: ApiSerializer | None = None,
     ) -> None:
         self._session_factory = session_factory
-        self._serializer = serializer or AdminSerializer.from_runtime(None)
+        self._serializer = serializer or ApiSerializer.from_runtime(None)
 
     async def list_reconcile_diffs(
         self,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from polymarket_trader.pipeline.decision.decision_context_builder import EntryPlan
+from polymarket_trader.pipeline.decision.decision_context_builder import TradePlan
 from polymarket_trader.pipeline.execution.order_gateway import OrderGatewayReview
 from polymarket_trader.domain.events import DomainEvent
 from polymarket_trader.domain.order import ManagedOrderIntent
@@ -12,7 +12,7 @@ from polymarket_trader.domain.state_machine import MarketLifecycle
 @dataclass(frozen=True, slots=True)
 class MarketTickWorkerResult:
     entry_event: DomainEvent
-    plan: EntryPlan | None
+    plan: TradePlan | None
     review: OrderGatewayReview | None
     emitted_event: DomainEvent | None
     emitted_events: tuple[DomainEvent, ...] = ()

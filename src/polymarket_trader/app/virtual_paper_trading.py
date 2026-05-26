@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from uuid import uuid4
 
 from polymarket_trader.app.paper import PaperSubmitOnlyOrderClient, PaperVirtualLedger
-from polymarket_trader.pipeline.decision.decision_context_builder import EntryPlan, DecisionContextBuilder
+from polymarket_trader.pipeline.decision.decision_context_builder import TradePlan, DecisionContextBuilder
 from polymarket_trader.pipeline.execution.order_gateway import OrderGateway
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
@@ -158,7 +158,7 @@ class _CandidateSelection:
         token_id: str,
         account: AccountSnapshot,
         metadata: Mapping[str, Any],
-        plan: EntryPlan | None,
+        plan: TradePlan | None,
         reason: str,
         rejections: tuple[dict[str, Any], ...] = (),
         opportunity_funnel: Mapping[str, Any] | None = None,
@@ -335,8 +335,8 @@ def _build_plan(
     orderbook: Any,
     account: AccountSnapshot,
     metadata: Mapping[str, Any],
-) -> EntryPlan:
-    return _decision_builder(runtime).build_entry_plan(
+) -> TradePlan:
+    return _decision_builder(runtime).build_trade_plan(
         market=market,
         orderbook=orderbook,
         token_id=token_id,
@@ -539,7 +539,7 @@ def _rejection(
     *,
     reason: str,
     stage: str,
-    plan: EntryPlan | None = None,
+    plan: TradePlan | None = None,
 ) -> dict[str, Any]:
     summary = None if plan is None else plan.summary
     extras = dict(summary.extras) if summary is not None else {}
@@ -613,7 +613,7 @@ def _empty_opportunity_funnel(
     }
 
 
-def _record_plan(opportunity_funnel: dict[str, Any], plan: EntryPlan) -> None:
+def _record_plan(opportunity_funnel: dict[str, Any], plan: TradePlan) -> None:
     summary = plan.summary
     extras = dict(summary.extras) if summary is not None else {}
     action = "" if summary is None else str(summary.action or "")

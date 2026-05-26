@@ -39,7 +39,7 @@ from uuid import uuid4
 
 from typing import Literal
 
-from polymarket_trader.api.serialization import AdminSerializer
+from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
@@ -312,7 +312,7 @@ class MarketMiscAggregator:
         *,
         runtime: Any,
         session_factory: "async_sessionmaker[AsyncSession] | None" = None,
-        serializer: AdminSerializer | None = None,
+        serializer: ApiSerializer | None = None,
     ) -> None:
         self._runtime = runtime
         self._session_factory = (
@@ -320,7 +320,7 @@ class MarketMiscAggregator:
             if session_factory is not None
             else (getattr(runtime, "db_session_factory", None) if runtime else None)
         )
-        self._serializer = serializer or AdminSerializer.from_runtime(runtime)
+        self._serializer = serializer or ApiSerializer.from_runtime(runtime)
 
     # ---------- shared helpers ----------
     def _account_snapshot(self) -> AccountSnapshot:

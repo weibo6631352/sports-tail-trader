@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 from polymarket_trader.serialization import decimal_text, jsonable
-from polymarket_trader.api.serialization import AdminSerializer
+from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.domain.decisions import DecisionRecord
 from polymarket_trader.domain.events import AuditEvent, Fill, OutboxEvent
 from polymarket_trader.domain.order import Order
@@ -39,7 +39,7 @@ def build_trade_timeline(
     condition_id: str,
     token_id: str | None,
     inputs: TradeTimelineInputs,
-    serializer: AdminSerializer,
+    serializer: ApiSerializer,
     limit: int = 1000,
 ) -> dict[str, Any]:
     """合并 timeline 事件，按 ``timestamp`` 升序返回。
@@ -127,7 +127,7 @@ def _decision_event(record: DecisionRecord) -> dict[str, Any]:
     }
 
 
-def _order_event(order: Order, serializer: AdminSerializer) -> dict[str, Any]:
+def _order_event(order: Order, serializer: ApiSerializer) -> dict[str, Any]:
     return {
         "kind": "order",
         "timestamp": jsonable(order.updated_at or order.created_at),
@@ -147,7 +147,7 @@ def _order_event(order: Order, serializer: AdminSerializer) -> dict[str, Any]:
     }
 
 
-def _fill_event(fill: Fill, serializer: AdminSerializer) -> dict[str, Any]:
+def _fill_event(fill: Fill, serializer: ApiSerializer) -> dict[str, Any]:
     timestamp = fill.confirmed_at or fill.created_at
     return {
         "kind": "fill",
@@ -165,7 +165,7 @@ def _fill_event(fill: Fill, serializer: AdminSerializer) -> dict[str, Any]:
     }
 
 
-def _audit_event(event: AuditEvent, serializer: AdminSerializer) -> dict[str, Any]:
+def _audit_event(event: AuditEvent, serializer: ApiSerializer) -> dict[str, Any]:
     return {
         "kind": "audit",
         "timestamp": jsonable(event.created_at),
@@ -178,7 +178,7 @@ def _audit_event(event: AuditEvent, serializer: AdminSerializer) -> dict[str, An
     }
 
 
-def _outbox_event(event: OutboxEvent, serializer: AdminSerializer) -> dict[str, Any]:
+def _outbox_event(event: OutboxEvent, serializer: ApiSerializer) -> dict[str, Any]:
     return {
         "kind": "outbox",
         "timestamp": jsonable(event.created_at),

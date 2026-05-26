@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 from polymarket_trader.serialization import decimal_text
-from polymarket_trader.api.serialization import AdminSerializer
+from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.domain.events import AuditEvent, Fill
 from polymarket_trader.domain.market import Market, TradingStatus
 from polymarket_trader.domain.order import Order
@@ -37,7 +37,7 @@ def build_trade_replay_records(
     fills: Sequence[Fill],
     positions: Sequence[Position],
     audit_events: Sequence[AuditEvent],
-    serializer: AdminSerializer,
+    serializer: ApiSerializer,
     filters: TradeReplayFilters | None = None,
 ) -> tuple[dict[str, Any], ...]:
     """按 ``condition_id/token_id`` 聚合真实成交后的复盘记录。"""
@@ -77,7 +77,7 @@ def _build_record(
     fills: Sequence[Fill],
     positions: Sequence[Position],
     audit_events: Sequence[AuditEvent],
-    serializer: AdminSerializer,
+    serializer: ApiSerializer,
 ) -> dict[str, Any]:
     condition_id, token_id = key
     market = markets_by_condition.get(condition_id)

@@ -18,7 +18,7 @@ from polymarket_trader.app.intent_builder import (
     decision_to_managed_intent,
     decision_to_trade_intent,
 )
-from polymarket_trader.app.entry_plan import EntryPlan
+from polymarket_trader.domain.trade_plan import TradePlan
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.allocation import AllocationPlan
 from polymarket_trader.domain.market import Market
@@ -74,7 +74,7 @@ class DecisionContextBuilder:
         self._graph = data_graph
         self._decision_recorder = decision_recorder
 
-    def build_entry_plan(
+    def build_trade_plan(
         self,
         *,
         market: Market | None = None,
@@ -95,7 +95,7 @@ class DecisionContextBuilder:
         open_orders: Iterable[Order] = (),
         metadata: Mapping[str, Any] | None = None,
         manual_confirmation: ManualConfirmation | None = None,
-    ) -> EntryPlan:
+    ) -> TradePlan:
         trace_id = trace_id or ensure_trace_id()
         base_metadata = dict(metadata or {})
         available_usdc, positions, open_orders = _entry_account_inputs(
@@ -175,7 +175,7 @@ class DecisionContextBuilder:
         )
         # 单一决策调用——所有逻辑（candidate 过滤 / Kelly sizing / 价格判断 /
         # capital efficiency / position_plan metadata）全部由 QuantDecider class 内部完成。
-        # 这层只负责 ① 拼上下文 ② 包装 QuantDecision 回 EntryPlan 形状给 worker / admin。
+        # 这层只负责 ① 拼上下文 ② 包装 QuantDecision 回 TradePlan 形状给 worker / admin。
         quant_context = self._quant_context(
             trace_id=trace_id,
             market=resolved_market,
@@ -244,7 +244,7 @@ class DecisionContextBuilder:
             total_budget_usdc=portfolio_budget_usdc,
             reason=reason or "",
         )
-        return EntryPlan(
+        return TradePlan(
             trace_id=trace_id,
             market=resolved_market,
             orderbook=resolved_orderbook,
@@ -522,9 +522,9 @@ def _unavailable_entry_plan(
     reason: str,
     metadata: Mapping[str, Any] | None = None,
     sizing_extras: Mapping[str, Any] | None = None,
-) -> EntryPlan:
+) -> TradePlan:
     summary = _build_unavailable_summary(reason=reason, sizing_extras=sizing_extras)
-    return EntryPlan(
+    return TradePlan(
         trace_id=trace_id,
         market=market,
         orderbook=orderbook,

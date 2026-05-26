@@ -12,7 +12,7 @@
 # 设计
 
 aggregator 持 `session_factory` + `runtime`（用于无 DB 时降级到内存快照）+
-`serializer`（`api/serialization/admin.py:AdminSerializer`，多 aggregator
+`serializer`（`api/serialization/admin.py:ApiSerializer`，多 aggregator
 共享同一份 wire-format 实现）。
 
 `session_factory=None` 时 → 返回空 page（前端友好降级，不抛 500）。
@@ -24,7 +24,7 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from polymarket_trader.serialization import jsonable, page_payload
-from polymarket_trader.api.serialization import AdminSerializer
+from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.domain.analytics.trade_replay import TradeReplayFilters, build_trade_replay_records
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
@@ -44,11 +44,11 @@ class TimelineAggregator:
         *,
         session_factory: "async_sessionmaker[AsyncSession] | None",
         runtime: Any = None,
-        serializer: AdminSerializer | None = None,
+        serializer: ApiSerializer | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._runtime = runtime
-        self._serializer = serializer or AdminSerializer.from_runtime(runtime)
+        self._serializer = serializer or ApiSerializer.from_runtime(runtime)
 
     async def list_audit_events(
         self,

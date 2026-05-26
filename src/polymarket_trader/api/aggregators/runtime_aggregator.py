@@ -18,7 +18,7 @@ from statistics import mean, stdev
 from typing import TYPE_CHECKING, Any, Mapping
 
 from polymarket_trader.serialization import decimal_text, jsonable
-from polymarket_trader.api.serialization import AdminSerializer
+from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.config import Settings
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
@@ -617,8 +617,8 @@ class RuntimeAggregator:
             )
             return None
 
-    def _serializer(self) -> AdminSerializer:
-        return AdminSerializer(
+    def _serializer(self) -> ApiSerializer:
+        return ApiSerializer(
             account_snapshot_provider=self._account_snapshot,
             registry_snapshot_provider=self._registry_snapshot,
             market_ws_snapshot=self._market_ws_snapshot,

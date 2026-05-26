@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from polymarket_trader.serialization import page_payload
-from polymarket_trader.api.serialization import AdminSerializer
+from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.time_filters import TimeRange
@@ -45,7 +45,7 @@ class TradingQueryAggregator:
         *,
         runtime: Any = None,
         session_factory: "async_sessionmaker[AsyncSession] | None" = None,
-        serializer: AdminSerializer | None = None,
+        serializer: ApiSerializer | None = None,
     ) -> None:
         self._runtime = runtime
         self._session_factory = (
@@ -53,7 +53,7 @@ class TradingQueryAggregator:
             if session_factory is not None
             else (getattr(runtime, "db_session_factory", None) if runtime else None)
         )
-        self._serializer = serializer or AdminSerializer.from_runtime(runtime)
+        self._serializer = serializer or ApiSerializer.from_runtime(runtime)
         self._timeline = TimelineAggregator(
             session_factory=self._session_factory,
             runtime=runtime,

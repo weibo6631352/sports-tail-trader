@@ -22,7 +22,7 @@ from polymarket_trader.domain.position import Position
 from polymarket_trader.serialization import jsonable
 
 if TYPE_CHECKING:
-    from polymarket_trader.pipeline.decision.decision_context_builder import EntryPlan
+    from polymarket_trader.pipeline.decision.decision_context_builder import TradePlan
     from polymarket_trader.pipeline.execution.order_gateway import OrderGatewayReview
 
 TRADING_DECISION_WORKER_ORIGIN = "market_tick_worker"
@@ -107,7 +107,7 @@ def serialize_snapshot(snapshot: AccountSnapshot | None) -> dict[str, object] | 
     }
 
 
-def serialize_allocation_plan(plan: EntryPlan) -> dict[str, object]:
+def serialize_allocation_plan(plan: TradePlan) -> dict[str, object]:
     return {
         "trace_id": plan.allocation_plan.trace_id,
         "total_budget_usdc": str(plan.allocation_plan.total_budget_usdc),
@@ -118,7 +118,7 @@ def serialize_allocation_plan(plan: EntryPlan) -> dict[str, object]:
     }
 
 
-def serialize_allocation(plan: EntryPlan) -> dict[str, object] | None:
+def serialize_allocation(plan: TradePlan) -> dict[str, object] | None:
     if plan.allocation is None:
         return None
     a = plan.allocation
@@ -146,7 +146,7 @@ def serialize_allocation(plan: EntryPlan) -> dict[str, object] | None:
     return payload
 
 
-def serialize_plan_metadata(plan: EntryPlan) -> dict[str, object]:
+def serialize_plan_metadata(plan: TradePlan) -> dict[str, object]:
     payload: dict[str, object] = {
         "decision_kind": None if plan.decision_kind is None else plan.decision_kind.value,
         "intent_tags": tuple(sorted(plan.intent.intent_tags)) if plan.intent is not None else (),

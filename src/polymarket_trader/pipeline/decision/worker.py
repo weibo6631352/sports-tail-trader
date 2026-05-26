@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from polymarket_trader.observability.cpu_track import cpu_track
 
-from polymarket_trader.pipeline.decision.decision_context_builder import EntryPlan, DecisionContextBuilder
+from polymarket_trader.pipeline.decision.decision_context_builder import TradePlan, DecisionContextBuilder
 from polymarket_trader.pipeline.execution.order_gateway import OrderGatewayReview, OrderGateway
 from polymarket_trader.app.order_projection import AccountStateProjector
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
@@ -534,7 +534,7 @@ class MarketTickWorker:
 
         if _entry_gate_closed_for_event(snapshot, event):
             return None
-        plan = self._decision_builder.build_entry_plan(
+        plan = self._decision_builder.build_trade_plan(
             trace_id=event.trace_id,
             condition_id=event.condition_id,
             token_id=event.token_id,
@@ -605,7 +605,7 @@ class MarketTickWorker:
         *,
         event: DomainEvent,
         snapshot: AccountSnapshot | None,
-        plan: EntryPlan,
+        plan: TradePlan,
     ) -> "MarketTickWorkerResult":
         positions = snapshot.positions if snapshot is not None else tuple(self._positions_provider())
         if snapshot is not None and not snapshot.allow_new_entries:
@@ -690,7 +690,7 @@ class MarketTickWorker:
         order_result: OrderResult | None,
         snapshot: AccountSnapshot | None,
         execution: OrderGatewayReview | None = None,
-        plan: EntryPlan | None = None,
+        plan: TradePlan | None = None,
     ) -> "MarketTickWorkerResult":
         return await self._order_result_processor.handle(
             source_event=source_event,
@@ -890,7 +890,7 @@ class MarketTickWorker:
         self,
         *,
         event: DomainEvent,
-        plan: EntryPlan,
+        plan: TradePlan,
         trace_id: str,
         reason: str,
         lifecycle: MarketLifecycle,
@@ -941,7 +941,7 @@ class MarketTickWorker:
         self,
         *,
         event: DomainEvent,
-        plan: EntryPlan,
+        plan: TradePlan,
     ) -> None:
         """投递 ALLOCATION_DECISION_RECORDED 事件。失败静默，不阻塞主链路。
 
@@ -1453,7 +1453,7 @@ def _match_position(
     return None
 
 
-def _plan_allows_position_increase(plan: EntryPlan) -> bool:
+def _plan_allows_position_increase(plan: TradePlan) -> bool:
     """判断计划是否是策略显式标记的受控加仓。
 
     依据策略在决策对象上声明的 intent_tags（含 ``"scale_in"``）+ intent
@@ -1467,13 +1467,13 @@ def _plan_allows_position_increase(plan: EntryPlan) -> bool:
     return "scale_in" in tags
 
 
-def _state_allows_position_increase(state: MarketLifecycle, plan: EntryPlan) -> bool:
+def _state_allows_position_increase(state: MarketLifecycle, plan: TradePlan) -> bool:
     """只有持仓相关生命周期允许策略受控加仓继续走主链路。"""
 
     return state in POSITION_INCREASE_LIFECYCLES and _plan_allows_position_increase(plan)
 
 
-def _state_allows_entry_attempt(state: MarketLifecycle, plan: EntryPlan) -> bool:
+def _state_allows_entry_attempt(state: MarketLifecycle, plan: TradePlan) -> bool:
     """是否允许新的入场信号进入主链路。
 
     简化后只保留两条硬规则：
