@@ -11,7 +11,6 @@ from polymarket_trader.domain.sports_live import LiveEvent
 from polymarket_trader.domain.decisions import DecisionContext, QuantDecision, TradingDecision
 
 from polymarket_trader.workflow.config import TradingWorkflowConfig
-from polymarket_trader.workflow.position_plan import build_position_plan_metadata
 from polymarket_trader.workflow.outcomes import describe_sports_market, SportsMarketFamily, tail_token_targets
 from polymarket_trader.workflow.tail import LiveGameStatus, live_game_state_from_metadata
 
@@ -257,12 +256,9 @@ def _recovery_metadata(
     }
     if abnormal_pause_reason is not None:
         metadata["recovery_pause_reason"] = abnormal_pause_reason
-        metadata.update(
-            build_position_plan_metadata(
-                config,
-                context,
-                token_id=context.token_id,
-                source_reason=abnormal_pause_reason,
-            )
-        )
+        if context.market is not None:
+            metadata["condition_id"] = context.market.condition_id
+            metadata["market_slug"] = context.market.market_slug
+        if context.token_id:
+            metadata["token_id"] = context.token_id
     return metadata

@@ -19,10 +19,7 @@ from polymarket_trader.workflow.outcomes import describe_sports_market, is_prima
 from polymarket_trader.sports import SportsMarketFamily
 from polymarket_trader.sports.parsing import live_game_state_from_metadata
 
-from .gates import (
-    _ask_depth_notional,
-    _has_open_order,
-)
+from polymarket_trader.workflow.allocation import _ask_depth_notional, _has_open_order
 
 
 def _empty_sizing_plan(context: DecisionContext, reason: str) -> AllocationPlan:

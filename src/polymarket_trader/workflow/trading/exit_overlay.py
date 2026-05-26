@@ -12,7 +12,7 @@ from polymarket_trader.domain.sports_live import BaseballGameState, TennisGameSt
 from polymarket_trader.domain.decisions import DecisionContext
 
 from polymarket_trader.workflow.config import TradingWorkflowConfig
-from polymarket_trader.workflow.position_plan import cap_price_to_clob_limit
+from polymarket_trader.workflow.trading.helpers import cap_price_to_clob_limit
 from polymarket_trader.workflow.outcomes import target_for_token
 from polymarket_trader.workflow.tail import SportsMarketSide
 
@@ -1301,25 +1301,3 @@ def _decimal_metadata_text(value: Decimal) -> str:
     return str(value.quantize(Decimal("0.000000000000000001")))
 
 
-def _apply_profit_take_position_plan(metadata: dict[str, object]) -> None:
-    """把需要主动止盈的订单退出计划改写为买入后挂 profit-take SELL。"""
-
-    if not _has_profit_take_follow_up(metadata):
-        return
-    target_price = metadata.get("profit_take_target_price")
-    metadata["exit_target_price"] = target_price
-    plan = metadata.get("position_plan")
-    if not isinstance(plan, dict):
-        return
-    plan["target_exit_price"] = target_price
-    plan["primary_action"] = "place_profit_take_gtc_sell_after_buy_fill"
-    plan["settlement_rule"] = "keep_profit_take_order_until_fill_or_authoritative_resolution"
-    plan["recovery_rule"] = "cancel_open_entry_orders_and_cover_profit_take_positions"
-
-
-def _has_profit_take_follow_up(metadata: Mapping[str, object]) -> bool:
-    """判断 BUY 成交后是否需要立刻挂一档 profit-take SELL。"""
-
-    return metadata.get("exit_mode") == "profit_take" or bool(
-        metadata.get("profit_take_overlay_enabled")
-    )

@@ -29,7 +29,6 @@ from polymarket_trader.workflow.allocation import (
     kelly_plan,
 )
 from polymarket_trader.workflow.config import TradingWorkflowConfig
-from polymarket_trader.workflow.position_plan import build_position_plan_metadata
 from polymarket_trader.workflow.trading.allocation import (
     _allocation_skip_reason,
     _candidate_snapshots,
@@ -42,12 +41,15 @@ from polymarket_trader.workflow.trading.allocation import (
     _market_skip_metadata,
 )
 from polymarket_trader.workflow.trading.exit_overlay import (
-    _apply_profit_take_position_plan,
     _capital_efficiency_gate,
     evaluate_dynamic_exit,
 )
-from polymarket_trader.workflow.trading.gates import _ask_depth_notional
-from polymarket_trader.workflow.trading.helpers import _metadata_text
+from polymarket_trader.workflow.allocation import _ask_depth_notional
+from polymarket_trader.workflow.trading.helpers import (
+    _metadata_text,
+    align_price_to_tick,
+    effective_tick_size,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -412,16 +414,9 @@ def decide_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Tra
     decision_metadata.update(efficiency_metadata)
     if not efficiency_allowed:
         return TradingDecision.skip(reason=efficiency_reason, metadata=decision_metadata)
-    decision_metadata.update(
-        build_position_plan_metadata(
-            config,
-            context,
-            token_id=token_id,
-            source_reason="strategy_entry",
-            entry_price=entry_price,
-        )
+    decision_metadata["exit_target_price"] = str(
+        align_price_to_tick(config.exit_no_price, tick_size=effective_tick_size(context))
     )
-    _apply_profit_take_position_plan(decision_metadata)
     from polymarket_trader.domain.decisions import StrategySummary
     from polymarket_trader.workflow.outcomes import describe_sports_market
     descriptor = describe_sports_market(context.market)
@@ -570,7 +565,6 @@ class QuantDecider:
         return decide_entry(self._config, focus_context)
 
     def _decide_position_action(self, context: DecisionContext) -> TradingDecision:
-        from polymarket_trader.workflow.position_plan import exit_price_for_context
 
         config = self._config
 
@@ -623,16 +617,15 @@ class QuantDecider:
             or _metadata_text(context, "token_id")
         )
         entry_price = _position_entry_price(context)
-        decision_metadata = build_position_plan_metadata(
-            config,
-            context,
-            token_id=token_id,
-            source_reason="quant_exit",
-            target_size_shares=uncovered_shares,
-            entry_price=entry_price,
-        )
+        tick_size = effective_tick_size(context)
+        exit_price = align_price_to_tick(config.exit_no_price, tick_size=tick_size)
+        decision_metadata: dict[str, object] = {
+            "source_reason": "quant_exit",
+            "exit_target_price": str(exit_price),
+        }
+        if uncovered_shares is not None:
+            decision_metadata["target_size_shares"] = str(uncovered_shares)
 
-        exit_price = exit_price_for_context(config, context, entry_price=entry_price)
         exit_reason = "quant_exit"
         if entry_price is not None:
             dynamic = evaluate_dynamic_exit(
@@ -652,9 +645,6 @@ class QuantDecider:
                 exit_price = dynamic.exit_price
                 exit_reason = dynamic.reason
                 decision_metadata["exit_target_price"] = str(exit_price)
-                plan = decision_metadata.get("position_plan")
-                if isinstance(plan, dict):
-                    plan["target_exit_price"] = str(exit_price)
 
         if exit_price is not None and context.orderbook is not None:
             tick = context.orderbook.tick_size or Decimal("0.01")
