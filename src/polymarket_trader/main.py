@@ -95,7 +95,7 @@ from polymarket_trader.pipeline.ingest.market_discovery.discovery_runner import 
 from polymarket_trader.app.decision_recorder import DecisionEventRecorder
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
-from polymarket_trader.runtime.lifecycle_registry import LifecycleRegistry
+from polymarket_trader.runtime.lifecycle_registry import LifecycleRegistry, MarketScopedStore
 from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics as _sync_runtime_metrics
 from polymarket_trader.runtime.orderbook_delta import OrderbookDeltaStore
 from polymarket_trader.runtime.orderbook_derived_publisher import OrderbookDerivedPublisher
@@ -460,17 +460,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         history_buffer=orderbook_history_buffer,
         delta_store=orderbook_delta_store,
     )
-    # market 销毁时同步清 derived cache, 跟随 market lifecycle.
-    lifecycle_registry.register_prune_listener(
-        "orderbook_derived_store",
-        orderbook_derived_store.evict_market,
-    )
-    # market prune 时同步清 gamma snapshot store——市场被回收后没人会查它的
-    # gamma 元数据，留在 store 里只是内存浪费。
-    lifecycle_registry.register_prune_listener(
-        "gamma_snapshot_store",
-        lambda cid, _tokens: gamma_snapshot_store.prune(cid),
-    )
     market_ws_worker = MarketWsWorker(
         event_bus=event_bus,
         registry=registry,
@@ -565,17 +554,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         entry_metadata_provider=entry_metadata_for_market,
         orderbook_reader=decision_context_builder.lookup_orderbook,
     )
-    # 注册 market_tick_worker prune listener:market prune 时同步清 worker
-    # 内部 4 个 cid/token 索引 dict(_market_lifecycle / _token_*) 防内存泄漏.
-    lifecycle_registry.register_prune_listener(
-        "market_tick_worker",
-        market_tick_worker.evict_market,
-    )
-    # market_metadata_store 已有 remove API,适配成 listener signature 注册:
-    lifecycle_registry.register_prune_listener(
-        "market_metadata_store",
-        lambda cid, _tokens: market_metadata_store.remove(condition_id=cid),
-    )
     reconcile_worker = ReconcileWorker(
         event_bus=event_bus,
         reconcile_service=reconcile_service,
@@ -595,11 +573,6 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         # 用户态拉取已经交给独立 UserAccountPoller，reconcile 主循环不再内联 fetch
         # → 避免 data API / clob balance 网络抖动牵连 market 元数据刷新链路。
         refresh_account_inline=False,
-    )
-    # 注册 authority_refresher prune listener:market prune 时清 _condition_failure_counts.
-    lifecycle_registry.register_prune_listener(
-        "reconcile_authority_refresher",
-        reconcile_worker._authority_refresher.evict_market,
     )
     market_discovery_worker = MarketDiscoveryWorker(
         market_ingest_service=market_ingest_service,
@@ -626,12 +599,23 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # prune 时立即 unsubscribe_all。reconcile_subscriptions 仍由 scheduler 2s
     # + discovery 完成 hook 周期触发作自愈兜底。
     live_source_lifecycle_binder.bind_to_lifecycle_registry(lifecycle_registry)
-    lifecycle_registry.register_prune_listener("user_ws_worker", user_ws_worker.evict_market)
-    # account_state 的 _fills 也按 market lifecycle 清(fills 已写 DB,内存不必常驻 dead market).
-    lifecycle_registry.register_prune_listener(
-        "account_state_store",
-        account_state_store.evict_market,
-    )
+    # === market lifecycle 收口注册 ===
+    # 所有按 condition_id/token_id 索引的 store/worker 实现 MarketScopedStore Protocol
+    # （evict_market(cid, tokens)），在此声明式批量挂到 lifecycle_registry——
+    # 新增 store 只需实现协议 + 加一行到此列表，杜绝散落注册导致的漏挂 / 重复挂
+    # （历史教训：4366fa7 commit 在不同位置加了两遍同一对 listener）。
+    # 顺序与 fan-out 顺序一致，但各 store evict 互相独立，对顺序无依赖。
+    market_scoped_stores: list[tuple[str, MarketScopedStore]] = [
+        ("orderbook_derived_store", orderbook_derived_store),
+        ("gamma_snapshot_store", gamma_snapshot_store),
+        ("market_tick_worker", market_tick_worker),
+        ("market_metadata_store", market_metadata_store),
+        ("reconcile_authority_refresher", reconcile_worker._authority_refresher),
+        ("user_ws_worker", user_ws_worker),
+        ("account_state_store", account_state_store),
+    ]
+    for name, store in market_scoped_stores:
+        lifecycle_registry.register_market_scoped_store(name, store)
     pregame_worker, pregame_client = _build_pregame_worker(
         settings,
         registry=registry,

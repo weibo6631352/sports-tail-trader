@@ -102,11 +102,12 @@ class GammaMarketSnapshotStore:
             return None
         return entry.dto
 
-    def prune(self, condition_id: str) -> None:
-        """market lifecycle 结束时清理（registry prune callback 触发）。
+    def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
+        """``MarketScopedStore`` 协议：market lifecycle 结束时清理。
 
-        无对应条目时是 no-op；幂等。
+        本 store 按 condition_id 索引，``token_ids`` 忽略。无对应条目时 no-op；幂等。
         """
+        del token_ids  # 协议形参，本 store 不需要
         with self._commit_lock:
             if condition_id not in self._entries:
                 return

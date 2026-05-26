@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from threading import Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from polymarket_trader.domain.market import Market
@@ -43,6 +43,18 @@ _logger = logging.getLogger(__name__)
 
 PruneListener = Callable[[str, tuple[str, ...]], None]
 AddedListener = Callable[["Market"], None]
+
+
+@runtime_checkable
+class MarketScopedStore(Protocol):
+    """按 market lifecycle 清理的 store 统一接口。
+
+    实现者在 market 退出 universe 时被 `LifecycleRegistry` 调用一次。
+    `token_ids` 即将销毁的 outcome token 列表；按 condition_id 索引的 store
+    只用 cid 即可，按 token 索引的 store 用 tokens 直接 evict 多桶。
+    """
+
+    def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None: ...
 
 
 class LifecycleRegistry:
@@ -62,6 +74,16 @@ class LifecycleRegistry:
 
         with self._lock:
             self._prune_listeners.append((name, listener))
+
+    def register_market_scoped_store(self, name: str, store: MarketScopedStore) -> None:
+        """声明式注册：实现了 ``MarketScopedStore`` 协议的 store 直接接入。
+
+        替代 7 处散落的 ``register_prune_listener(name, lambda cid, _: store.xxx(cid))``——
+        Protocol 强约束消除接口不一致和 lambda 适配层，新加 store 实现协议即接入，
+        漏注册或重复注册（如 4366fa7 那次）在调用侧物理上不可能。
+        """
+
+        self.register_prune_listener(name, store.evict_market)
 
     def register_added_listener(self, name: str, listener: AddedListener) -> None:
         """注册 market 新进 universe 时的联动回调（订阅直播源 / odds 等）。"""

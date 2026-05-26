@@ -96,6 +96,15 @@ class MarketMetadataStore:
                 self._remove_aliases_for_primary(primary_key)
             return removed
 
+    def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
+        """``MarketScopedStore`` 协议：按 condition_id 删除（``token_ids`` 忽略）。
+
+        ``remove`` 同时支持 market_slug / event_slug 多 key 删除，本协议路径只走
+        condition_id——operator/其他路径仍可直接调 ``remove`` 用其他 key。
+        """
+        del token_ids
+        self.remove(condition_id=condition_id)
+
     def records(self) -> tuple[EntryMetadataRecord, ...]:
         with self._lock:
             return tuple(self._records.values())
