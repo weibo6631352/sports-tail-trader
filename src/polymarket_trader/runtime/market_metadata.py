@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Any, Mapping
 
 from polymarket_trader.domain.events import DomainEvent
 from polymarket_trader.domain.market import Market
-from polymarket_trader.serialization import jsonable
+from polymarket_trader.domain.market_metadata import EntryMetadataRecord
 
 
 def _utc_now() -> datetime:
@@ -29,46 +28,12 @@ def _identity(
     raise ValueError("condition_id, market_slug, or event_slug is required")
 
 
-@dataclass(frozen=True, slots=True)
-class EntryMetadataRecord:
-    """入场判断前可补充的运行时 metadata 快照。
-
-    ``metadata`` 仍然是策略可透传的自由 dict（admin 详情透传用）；framework 决策
-    只读强类型 ``live_state_*`` 字段，避免再依赖策略私有 metadata key。
-    """
-
-    condition_id: str | None = None
-    market_slug: str | None = None
-    event_slug: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-    source: str = "manual"
-    updated_at: datetime = field(default_factory=_utc_now)
-    live_state_signal_allowed: bool | None = None
-    live_state_signal_reason: str = ""
-    live_state_phase: str = ""
-    live_state_payload: Mapping[str, Any] = field(default_factory=dict)
-
-    @property
-    def key(self) -> str:
-        return _identity(
-            condition_id=self.condition_id,
-            market_slug=self.market_slug,
-            event_slug=self.event_slug,
-        )
-
-    def as_payload(self) -> dict[str, Any]:
-        return {
-            "condition_id": self.condition_id,
-            "market_slug": self.market_slug,
-            "event_slug": self.event_slug,
-            "metadata": jsonable(self.metadata),
-            "source": self.source,
-            "updated_at": self.updated_at.isoformat(),
-            "live_state_signal_allowed": self.live_state_signal_allowed,
-            "live_state_signal_reason": self.live_state_signal_reason,
-            "live_state_phase": self.live_state_phase,
-            "live_state_payload": jsonable(self.live_state_payload),
-        }
+def _record_key(record: EntryMetadataRecord) -> str:
+    return _identity(
+        condition_id=record.condition_id,
+        market_slug=record.market_slug,
+        event_slug=record.event_slug,
+    )
 
 
 class MarketMetadataStore:
@@ -110,10 +75,10 @@ class MarketMetadataStore:
         )
         aliases = _record_identity_keys(record)
         with self._lock:
-            self._records[record.key] = record
-            self._remove_aliases_for_primary(record.key)
+            self._records[_record_key(record)] = record
+            self._remove_aliases_for_primary(_record_key(record))
             for alias in aliases:
-                self._aliases[alias] = record.key
+                self._aliases[alias] = _record_key(record)
         return record
 
     def remove(

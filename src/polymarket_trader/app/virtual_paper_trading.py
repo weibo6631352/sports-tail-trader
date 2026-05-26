@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 from uuid import uuid4
 
 from polymarket_trader.app.paper import PaperSubmitOnlyOrderClient, PaperVirtualLedger
-from polymarket_trader.app.decision_context_builder import EntryPlan, DecisionContextBuilder
-from polymarket_trader.app.order_gateway import OrderGateway
+from polymarket_trader.pipeline.decision.decision_context_builder import EntryPlan, DecisionContextBuilder
+from polymarket_trader.pipeline.execution.order_gateway import OrderGateway
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType
 from polymarket_trader.domain.market import Market
@@ -32,8 +32,8 @@ from polymarket_trader.infra.polymarket.order_executor import (
 )
 from polymarket_trader.runtime.account_state import AccountStateStore
 from polymarket_trader.serialization import jsonable
-from polymarket_trader.workers.market_tick import MarketTickWorker
-from polymarket_trader.workers.market_tick import MarketTickWorkerResult
+from polymarket_trader.pipeline.decision import MarketTickWorker
+from polymarket_trader.pipeline.decision import MarketTickWorkerResult
 
 @runtime_checkable
 class _OrderbookFallbackClient(Protocol):
@@ -113,7 +113,7 @@ async def run_virtual_paper_trade(
     account_store = _clone_account_store(selection.account)
     try:
         worker = MarketTickWorker(
-            decision_context_builder=_trading_decision_service(runtime),
+            decision_context_builder=_decision_builder(runtime),
             order_gateway=OrderGateway(executor=executor),
             account_state_store=account_store,
             portfolio_budget_usdc=_settings_decimal(runtime, "portfolio_budget_usdc"),
@@ -336,7 +336,7 @@ def _build_plan(
     account: AccountSnapshot,
     metadata: Mapping[str, Any],
 ) -> EntryPlan:
-    return _trading_decision_service(runtime).build_entry_plan(
+    return _decision_builder(runtime).build_entry_plan(
         market=market,
         orderbook=orderbook,
         token_id=token_id,
@@ -984,7 +984,7 @@ def _entry_metadata_record_for_market(runtime: RuntimeComponents, market: Market
     )
 
 
-def _trading_decision_service(runtime: RuntimeComponents) -> DecisionContextBuilder:
+def _decision_builder(runtime: RuntimeComponents) -> DecisionContextBuilder:
     service = runtime.decision_context_builder
     if service is None:
         raise RuntimeError("decision_context_builder unavailable")

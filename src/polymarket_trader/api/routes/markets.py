@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.deps import build_time_range, get_admin_service
+from polymarket_trader.api.aggregators import MarketDetailAggregator
+from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.api.rate_limit import rate_limit
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.infra.polymarket import PolymarketClientError
@@ -30,21 +31,40 @@ class ResumeMarketRequest(BaseModel):
 
 @router.get("/detail")
 async def get_market_detail(
-    market_slug: str | None = Query(default=None),
     condition_id: str | None = Query(default=None),
     token_id: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
+    level: Literal["summary", "detail"] = Query("detail"),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    if not any((market_slug, condition_id, token_id)):
-        raise HTTPException(status_code=422, detail="market_slug, condition_id, or token_id is required")
-    payload = await service.get_market(
-        market_slug=market_slug,
-        condition_id=condition_id,
-        token_id=token_id,
-    )
+    """单 market 详情（基于 DataGraph MarketView，零 DB / 零外部 API 调用）。
+
+    支持按 condition_id 或 token_id 查询。`level` 控制返回字段量。market_slug
+    查询路径已不再支持（按 §12.6 不为前端兼容保留旧形态——前端按 cid/tid 查）。
+    """
+    if not (condition_id or token_id):
+        raise HTTPException(status_code=422, detail="condition_id or token_id is required")
+    aggregator = MarketDetailAggregator(data_graph=runtime.data_graph)
+    if condition_id:
+        payload = aggregator.detail(condition_id, level=level)
+    else:
+        # token_id → market_view_for_token
+        view = runtime.data_graph.market_view_for_token(token_id)
+        payload = None if view is None else aggregator.detail(view.condition_id, level=level)
     if payload is None:
         raise HTTPException(status_code=404, detail="market not found")
     return payload
+
+
+@router.post("/batch")
+async def get_markets_batch(
+    condition_ids: list[str],
+    level: Literal["summary", "detail"] = Query("summary"),
+    runtime: Any = Depends(get_runtime),
+) -> dict[str, object]:
+    """批量 market 详情——避免 N 次单调（docs/新架构方案.md §12.3 ⑤）。"""
+    aggregator = MarketDetailAggregator(data_graph=runtime.data_graph)
+    items = aggregator.batch_detail(tuple(condition_ids), level=level)
+    return {"markets": list(items), "count": len(items)}
 
 
 @router.get("/orderbook")

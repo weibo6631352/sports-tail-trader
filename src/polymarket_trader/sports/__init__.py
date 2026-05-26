@@ -7,7 +7,7 @@
 - Market slug 通用解析（结算范围识别）
 
 扫尾策略专属语义（TailPolicy / TailEvaluation / profit-take 阈值 / TailRejectReason 等）
-不在本包，留在 ``polymarket_trader.quant.tail``；本包不反向依赖任何具体策略包。
+不在本包，留在 ``polymarket_trader.workflow.tail``；本包不反向依赖任何具体策略包。
 """
 
 from __future__ import annotations

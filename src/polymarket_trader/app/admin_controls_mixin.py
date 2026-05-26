@@ -6,7 +6,7 @@ OrderExecutor 的主链路，不绕过统一服务。
 
 宿主 AdminService 提供 ``runtime``、``_order_controller``、``_entry_metadata_store``、
 ``_serializer``、``_resolve_market``、``_market_ws_snapshot``、``_account_snapshot``、
-``_build_entry_plan_for_admin``、``_trading_service``、``_trading_decision_service``、
+``_build_entry_plan_for_admin``、``_order_gateway``、``_decision_builder``、
 ``_project_manual_entry_result``、``_publish_candidate_confirmation_review``、
 ``_settings_value`` 等私有 helper。
 """
@@ -42,7 +42,7 @@ from polymarket_trader.app.decision_serialization import (
     snapshot_allowance,
     snapshot_available_usdc,
 )
-from polymarket_trader.quant.config import TradingWorkflowConfig
+from polymarket_trader.workflow.config import TradingWorkflowConfig
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +247,7 @@ class AdminControlsMixin:
             }
 
         _kelly = self.runtime.workflow.config if self.runtime else TradingWorkflowConfig()
-        review = await self._trading_service().review_intent(
+        review = await self._order_gateway().review_intent(
             plan.intent,
             market=market,
             orderbook=orderbook,
@@ -506,7 +506,7 @@ class AdminControlsMixin:
             }
 
         try:
-            order_gateway = self._trading_service()
+            order_gateway = self._order_gateway()
         except RuntimeError as exc:
             return {
                 "status": "failed",
@@ -696,7 +696,7 @@ class AdminControlsMixin:
             }
 
         try:
-            order_gateway = self._trading_service()
+            order_gateway = self._order_gateway()
         except RuntimeError as exc:
             return {"status": "failed", "trace_id": trace_id, "reason": str(exc)}
 

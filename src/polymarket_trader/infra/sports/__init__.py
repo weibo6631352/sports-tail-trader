@@ -1,6 +1,5 @@
 """外部体育数据源适配器。"""
 
-from polymarket_trader.infra.sports.aggregate_client import SportsLiveAggregateClient
 from polymarket_trader.infra.sports.common import (
     SportsDataClientError,
     SportsDataRateLimitError,
@@ -47,7 +46,6 @@ __all__ = [
     "SportsDataResponseError",
     "SportsDataTimeoutError",
     "SportsDataTransportError",
-    "SportsLiveAggregateClient",
     "parse_goalserve_inplay",
     "parse_theoddsapi_outrights_payload",
 ]

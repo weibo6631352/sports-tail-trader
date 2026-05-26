@@ -74,6 +74,9 @@ class MarketRegistry:
         # market prune callback(condition_id, token_ids) - workers 自己注册清自己的
         # cid/token 索引 dict;避免散落各处忘记 prune 联动.
         self._prune_callbacks: list[Callable[[str, tuple[str, ...]], None]] = []
+        # market 首次进入 universe 时调用的 added callback(market). 用于"新 market
+        # 进入立即订阅直播源 / odds 等"事件驱动联动 (LifecycleRegistry 的 added 通路).
+        self._added_callbacks: list[Callable[[Market], None]] = []
         self._snapshot = MarketRegistrySnapshot(tuple())
         self._shard_locks: dict[str, Lock] = {}
         self._locks_lock = Lock()
@@ -84,8 +87,24 @@ class MarketRegistry:
 
         signature: cb(condition_id: str, token_ids: tuple[str, ...]).
         market 被 remove_market 时同步调用所有 cb,worker 自己清自己的 dict.
+
+        生产路径建议改为通过 LifecycleRegistry 统一接入（main.py 只把
+        lifecycle_registry.emit_pruned 注册到本 callback，9+ 处散落注册收敛
+        到 LifecycleRegistry.register_prune_listener）。
         """
         self._prune_callbacks.append(cb)
+
+    def register_added_callback(self, cb: "Callable[[Market], None]") -> None:
+        """market 首次进入 universe 时触发的 callback.
+
+        signature: cb(market: Market).
+        only triggered on first appearance of condition_id (subsequent upsert
+        of same cid 不触发——避免 reconcile 周期性 upsert 重复 fan-out).
+
+        生产路径建议改为通过 LifecycleRegistry 统一接入：main.py 只把
+        lifecycle_registry.emit_added 注册到本 callback。
+        """
+        self._added_callbacks.append(cb)
 
     def first_tracked_at_mono(self, condition_id: str) -> float | None:
         """首次 tracked 的 monotonic 时间戳, 用于算 tracked_for_seconds."""
@@ -297,6 +316,7 @@ class MarketRegistry:
         )
 
     def _upsert_locked(self, market: Market) -> Market | None:
+        is_new = False
         with self._commit_lock:
             markets_by_condition_id = dict(self._markets_by_condition_id)
             condition_id_by_token_id = dict(self._condition_id_by_token_id)
@@ -320,10 +340,12 @@ class MarketRegistry:
                 condition_id_by_event_slug.setdefault(market.event_slug, market.condition_id)
 
             # 首次出现 cid 时创建 companion(已存在则保留旧 state,避免 reconnect/upsert
-            # 触发 audit 重发)
+            # 触发 audit 重发)。is_new 是 added callback 的触发条件——只在新 cid
+            # 首次入 universe 时 fan-out，后续 upsert 同 cid 不重复触发。
             if market.condition_id not in self._companions:
                 self._companions[market.condition_id] = self._companion_cls()
                 self._first_tracked_at_mono[market.condition_id] = time.monotonic()
+                is_new = True
 
             self._publish_state(
                 markets_by_condition_id,
@@ -331,7 +353,15 @@ class MarketRegistry:
                 condition_id_by_slug,
                 condition_id_by_event_slug,
             )
-            return market
+        # commit_lock 已释放,在 lock 外触发 added callbacks（避免 cb 阻塞索引锁;
+        # 捕获异常防一个 cb 挂掉影响其他）
+        if is_new:
+            for cb in self._added_callbacks:
+                try:
+                    cb(market)
+                except Exception as exc:
+                    logger.warning("added_callback failed: %s", exc)
+        return market
 
     def _update_market_locked(
         self,

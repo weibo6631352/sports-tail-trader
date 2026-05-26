@@ -8,7 +8,10 @@ import httpx
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.deps import get_admin_service
+from typing import Literal
+
+from polymarket_trader.api.aggregators import PositionAggregator
+from polymarket_trader.api.deps import get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
 router = APIRouter(prefix="/positions", tags=["positions"])
@@ -74,18 +77,35 @@ class ForceExitRequest(BaseModel):
 
 @router.get("")
 async def list_positions(
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    condition_id: str | None = Query(default=None),
-    token_id: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
+    level: Literal["summary", "detail"] = Query("summary"),
+    only_with_shares: bool = Query(True),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    return await service.list_positions(
-        limit=limit,
-        offset=offset,
-        condition_id=condition_id,
-        token_id=token_id,
-    )
+    """持仓列表（基于 DataGraph，按 position_usdc 降序，§17 不丢机会原则）。
+
+    `level=summary` 仅核心字段；`detail` 含完整 PnL / 挂单 / 确认状态。
+    `only_with_shares=False` 包含 settled_zero_value 等已结算仓位。
+    """
+
+    aggregator = PositionAggregator(data_graph=runtime.data_graph)
+    items = aggregator.list_positions(level=level, only_with_shares=only_with_shares)
+    return {"positions": list(items), "count": len(items)}
+
+
+@router.get("/{condition_id}/{token_id}")
+async def get_position_detail(
+    condition_id: str,
+    token_id: str,
+    runtime: Any = Depends(get_runtime),
+) -> dict[str, object]:
+    """单 outcome 持仓完整详情（含 PnL / 挂单状态 / market metadata）。"""
+
+    aggregator = PositionAggregator(data_graph=runtime.data_graph)
+    payload = aggregator.position_detail(condition_id, token_id, level="detail")
+    if payload is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="position_not_found")
+    return payload
 
 
 @router.post("/force-exit")

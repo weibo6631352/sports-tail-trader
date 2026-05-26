@@ -22,11 +22,6 @@ from .orderbook_matcher import (
     match_taker_buy,
     match_taker_sell,
 )
-from .shadow_runner import (
-    ShadowDecisionFrame,
-    ShadowSessionReport,
-    run_shadow_session,
-)
 from .state import PaperVirtualLedger
 from .virtual_clock import EventTimestampClock, FrozenClock, RealClock, VirtualClock
 
@@ -40,9 +35,7 @@ __all__ = [
     "PaperVirtualLedger",
     "RealClock",
     "RecordedEventStream",
-    "ShadowDecisionFrame",
     "ShadowEvent",
-    "ShadowSessionReport",
     "SimulationOutcome",
     "SyntheticEventStream",
     "VirtualClock",
@@ -50,6 +43,5 @@ __all__ = [
     "load_shadow_events_from_jsonl",
     "match_taker_buy",
     "match_taker_sell",
-    "run_shadow_session",
     "simulate_fill",
 ]

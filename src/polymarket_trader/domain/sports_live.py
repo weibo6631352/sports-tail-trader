@@ -475,29 +475,9 @@ class SportsLiveSnapshot:
     source_statuses: tuple[SportsLiveSourceStatus, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
-class SportsLiveSyncStatus:
-    """外部直播状态同步器的可观测快照。"""
-
-    enabled: bool
-    source: str
-    running: bool = False
-    last_started_at: datetime | None = None
-    last_completed_at: datetime | None = None
-    last_success_at: datetime | None = None
-    last_error: str | None = None
-    consecutive_failures: int = 0
-    last_events_seen: int = 0
-    last_markets_seen: int = 0
-    last_matches: int = 0
-    last_records_written: int = 0
-    last_unmatched_markets: int = 0
-    last_entry_signals_published: int = 0
-    leagues: tuple[str, ...] = ()
-    source_statuses: tuple[SportsLiveSourceStatus, ...] = ()
-
-    def as_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+# SportsLiveSyncStatus 已删（孤儿）—— 旧 SportsLiveStateWorker 用过，新架构
+# 由 SportsLiveAggregator + HealthReporter 直接读 LiveStateStore.all_buckets +
+# LiveSourceRegistry.summary，无需中间 DTO。按 §10 fresh-start 不留兼容。
 
 
 # ===== from former contracts/live_state.py =====

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from polymarket_trader.app.paper import PaperVirtualLedger
     from polymarket_trader.runtime.account_state import AccountStateStore
     from polymarket_trader.runtime.registry import MarketRegistry
-    from polymarket_trader.workers.market_ws import MarketWsWorker
+    from polymarket_trader.pipeline.ingest.orderbook_ws import MarketWsWorker
 
 
 logger = logging.getLogger(__name__)

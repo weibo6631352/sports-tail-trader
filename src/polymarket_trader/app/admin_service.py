@@ -15,8 +15,8 @@ from polymarket_trader.app.admin_service_helpers import (
     _RepositoryGroup,
 )
 from polymarket_trader.app.order_projection import AccountStateProjector, normalize_order_id
-from polymarket_trader.app.decision_context_builder import DecisionContextBuilder
-from polymarket_trader.app.order_gateway import OrderGateway
+from polymarket_trader.pipeline.decision.decision_context_builder import DecisionContextBuilder
+from polymarket_trader.pipeline.execution.order_gateway import OrderGateway
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
@@ -590,7 +590,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         - position_quality_score: per 持仓 holding + drawdown + price_trend 综合
         - signal_consensus: orderbook_direction + odds_drift + game_progress 一致性
         """
-        from polymarket_trader.workers.market_tick.worker import get_odds_drift_store
+        from polymarket_trader.pipeline.decision.worker import get_odds_drift_store
         from decimal import Decimal
         from statistics import mean, stdev
         store = get_odds_drift_store()
@@ -1283,7 +1283,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         - vig_pct_current: 当前 ML overround
         - vig_change_5min: vig 变化（庄家收紧 / 放松信号）
         """
-        from polymarket_trader.workers.market_tick.worker import get_odds_drift_store
+        from polymarket_trader.pipeline.decision.worker import get_odds_drift_store
         store = get_odds_drift_store()
         if market_slug:
             samples = list(store.get(market_slug, []))[-limit:]
@@ -1931,7 +1931,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             serializer=self._serializer(),
             account_snapshot=self._account_snapshot,
             resolve_market=self._resolve_market,
-            order_gateway=self._trading_service,
+            order_gateway=self._order_gateway,
             find_open_order=self._find_open_order,
         )
 
@@ -1951,7 +1951,7 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
         # 策略配置是 kelly_* 的唯一真相来源，不再走框架 Settings。
         settings = self.runtime.settings
         strategy_config = self.runtime.workflow.config
-        return self._trading_decision_service().build_entry_plan(
+        return self._decision_builder().build_entry_plan(
             market=market,
             orderbook=orderbook,
             # 候选投影和人工确认属于受控操作入口，不使用自动入场开关截断候选生成；
@@ -2195,12 +2195,12 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             raise RuntimeError("clob_client unavailable")
         return self.runtime.clob_client
 
-    def _trading_service(self) -> OrderGateway:
+    def _order_gateway(self) -> OrderGateway:
         if self.runtime is None:
             raise RuntimeError("order_gateway unavailable")
         return self.runtime.order_gateway
 
-    def _trading_decision_service(self) -> DecisionContextBuilder:
+    def _decision_builder(self) -> DecisionContextBuilder:
         if self.runtime is None:
             raise RuntimeError("decision_context_builder unavailable")
         return self.runtime.decision_context_builder

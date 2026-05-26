@@ -26,7 +26,7 @@ from polymarket_trader.runtime.paper_background_tasks import start_paper_backgro
 from polymarket_trader.runtime.registry import MarketRegistry
 
 if TYPE_CHECKING:
-    from polymarket_trader.workers.market_ws import MarketWsWorker
+    from polymarket_trader.pipeline.ingest.orderbook_ws import MarketWsWorker
 
 
 logger = logging.getLogger(__name__)

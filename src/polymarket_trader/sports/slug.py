@@ -2,7 +2,7 @@
 
 只承载"任何体育策略都需要"的通用解析。具体盘口类型（如 tennis set winner /
 tennis set games total）的细节解析仍可在策略私有包内扩展，参见
-``polymarket_trader.quant.tail.slug``。
+``polymarket_trader.workflow.tail.slug``。
 """
 
 from __future__ import annotations

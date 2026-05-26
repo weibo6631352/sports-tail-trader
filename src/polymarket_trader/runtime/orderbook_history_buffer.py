@@ -62,6 +62,15 @@ class OrderbookHistoryBuffer:
         while len(self._buffers) > self._max_tokens:
             self._buffers.popitem(last=False)
 
+    def latest(self, token_id: str) -> OrderbookSnapshot | None:
+        """返回 ``token_id`` 最近一次记录的 snapshot（无则 None）。
+
+        O(1) 末尾访问。供 `DataGraph.outcome_view` 等聚合路径在 P0 上拿当前盘口。
+        """
+
+        buf = self._buffers.get(token_id)
+        return buf[-1].snapshot if buf else None
+
     def snapshot_at(self, token_id: str, *, ago_s: float) -> OrderbookSnapshot | None:
         """返回 ``ago_s`` 秒前最接近的 snapshot(找不到返回 None)。
 

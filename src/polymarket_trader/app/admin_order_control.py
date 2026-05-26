@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 from polymarket_trader.app.admin_operations import market_status_allowed_for_manual_order
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text
 from polymarket_trader.app.order_projection import AccountStateProjector, normalize_order_id, order_open_shares
-from polymarket_trader.app.order_gateway import OrderGateway
+from polymarket_trader.pipeline.execution.order_gateway import OrderGateway
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
@@ -55,7 +55,7 @@ class AdminOrderController:
         self._serializer = serializer
         self._account_snapshot = account_snapshot
         self._resolve_market = resolve_market
-        self._trading_service = order_gateway
+        self._order_gateway = order_gateway
         self._find_open_order = find_open_order
 
     async def replace_order(
@@ -114,7 +114,7 @@ class AdminOrderController:
             )
 
         try:
-            order_gateway = self._trading_service()
+            order_gateway = self._order_gateway()
         except RuntimeError as exc:
             return self._failed_with_order(
                 trace_id=trace_id,

@@ -7,14 +7,12 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents
-    from polymarket_trader.workers.market_ws.worker import MarketWsWorker
-    from polymarket_trader.workers.sports_live_state_worker import SportsLiveStateWorker
+    from polymarket_trader.pipeline.ingest.orderbook_ws.worker import MarketWsWorker
 
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
 from polymarket_trader.config import Settings
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.domain.sports_live import SportsLiveSyncStatus
 from polymarket_trader.infra.polymarket.clob_client import ClobClient
 from polymarket_trader.infra.polymarket.data_client import DataClient
 from polymarket_trader.infra.polymarket.gamma_client import GammaClient
@@ -23,13 +21,11 @@ from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.runtime.status import RuntimeSnapshot
 from polymarket_trader.runtime.supervisor import Supervisor
 from polymarket_trader.serialization import utc_now
-from polymarket_trader.quant.config import TradingWorkflowConfig
+from polymarket_trader.workflow.config import TradingWorkflowConfig
 
 logger = logging.getLogger(__name__)
 _RUNTIME_MARKET_SAMPLE_LIMIT = 20
 _LOW_ENTRY_FUNDS_WARNING = "available_usdc_below_configured_order_size"
-# admin runtime view 暴露 sports_live_sync.recent_match_sources 的限额；超过则 truncated=True。
-_SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT = 50
 
 
 def _text_or_none(value: Any) -> str | None:
@@ -490,47 +486,46 @@ class AdminRuntimeView:
         }
 
     def _sports_live_sync_snapshot(self) -> dict[str, Any]:
-        worker: SportsLiveStateWorker | None = self.runtime.sports_live_state_worker if self.runtime else None
-        if worker is not None:
-            status = worker.status_snapshot()
-            # 生产路径返回 SportsLiveSyncStatus dataclass；test stub 走 jsonable 兜底。
-            if isinstance(status, SportsLiveSyncStatus):
-                snapshot = status.as_dict()
-            else:
-                payload = jsonable(status)
-                snapshot = dict(payload) if isinstance(payload, Mapping) else {"value": payload}
-            recent_sources = list(worker.recent_match_sources(limit=_SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT))
-            # 后端持续暴露 truncated 标记，便于前端展示"还有更早匹配未展示"。
-            full_count = len(worker.recent_match_sources(limit=None))
-            snapshot["recent_match_sources"] = recent_sources
-            snapshot["recent_match_sources_limit"] = _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT
-            snapshot["recent_match_sources_truncated"] = full_count > _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT
-            # Per-sport WS / HTTP 连接状态（WS 连接是否稳定、每个 sport HTTP 轮询是否健康）。
-            client = self.runtime.sports_live_state_client if self.runtime else None
-            snapshot["source_detail"] = client.source_detail_status() if client is not None else []
-            return snapshot
+        """读 LiveStateStore + LiveSourceRegistry 暴露给 admin 的直播源状态快照。
+
+        旧 SportsLiveStateWorker.status_snapshot() 返回 SportsLiveSyncStatus；
+        新 pipeline/ingest/live_source/ 把状态分散到 store（per-source bucket
+        health/observed_at/events）和 registry（订阅集 / subscriber count），
+        这里聚合成 admin 友好 dict。
+
+        前端按新形态对齐（CLAUDE.md §12.6）：不再返回 last_matches /
+        recent_match_sources / sports_live_aggregate 命名。新字段：buckets[] +
+        subscriptions{}。
+        """
+
         settings = self._settings()
         live_enabled = settings.sports_live_state_enabled if isinstance(settings, Settings) else False
+        if self.runtime is None:
+            return {
+                "enabled": live_enabled,
+                "buckets": [],
+                "subscriptions": {},
+            }
+        store = self.runtime.live_state_store
+        registry = self.runtime.live_source_registry
+        buckets = []
+        for bucket in store.all_buckets():
+            buckets.append(
+                {
+                    "source": bucket.source.as_label(),
+                    "provider": bucket.source.provider.value,
+                    "sport": bucket.source.sport,
+                    "events_count": len(bucket.events),
+                    "observed_at": bucket.observed_at.isoformat(),
+                    "health": bucket.health.value,
+                    "last_error": bucket.last_error,
+                    "subscriber_count": len(registry.subscribers_for(bucket.source)),
+                }
+            )
         return {
             "enabled": live_enabled,
-            "source": "sports_live_aggregate",
-            "running": False,
-            "last_started_at": None,
-            "last_completed_at": None,
-            "last_success_at": None,
-            "last_error": "sports_live_state_worker_unavailable" if live_enabled else None,
-            "consecutive_failures": 0,
-            "last_events_seen": 0,
-            "last_markets_seen": 0,
-            "last_matches": 0,
-            "last_records_written": 0,
-            "last_unmatched_markets": 0,
-            "last_entry_signals_published": 0,
-            "leagues": list(settings.sports_live_state_league_codes if isinstance(settings, Settings) else ()),
-            "source_statuses": [],
-            "recent_match_sources": [],
-            "recent_match_sources_limit": _SPORTS_LIVE_RECENT_MATCH_SOURCE_LIMIT,
-            "recent_match_sources_truncated": False,
+            "buckets": buckets,
+            "subscriptions": registry.summary(),
         }
 
     def _market_ws_snapshot(self, token_id: str) -> OrderbookSnapshot | None:

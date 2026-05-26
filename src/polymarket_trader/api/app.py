@@ -158,8 +158,22 @@ def create_app(
         )
 
     # === HTTP 性能监控 middleware（统一记录所有 endpoint latency / error）===
+    # 双写：SystemPerfMonitor（admin 内部分析）+ MetricsRegistry（§11.2 标准 metric output）
     from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
     _perf_monitor = SystemPerfMonitor.get()
+
+    # === trace_id middleware（CLAUDE.md §17 复盘可追溯）===
+    # 每个 admin 请求生成 trace_id（或继承 client 传入的 X-Trace-Id），response
+    # header 回传——运维 / agent 看到响应能直接 grep audit_events 找完整链路。
+    from polymarket_trader.observability.trace import bind_trace_id, ensure_trace_id
+
+    @app.middleware("http")
+    async def _trace_id_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        incoming = request.headers.get("x-trace-id")
+        trace_id = bind_trace_id(incoming) if incoming else ensure_trace_id()
+        response = await call_next(request)
+        response.headers["X-Trace-Id"] = trace_id
+        return response
 
     @app.middleware("http")
     async def _perf_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -167,6 +181,7 @@ def create_app(
 
         - handler_ms: middleware 测的 = handler 执行 + 响应序列化（不含网络传输）
         - response_bytes: 响应体大小 → 客户端总等待 ≈ handler_ms + transmit
+        - metrics 写入用 route template（含 {cid} 占位）避免高基数 label 爆炸（§11.5）
         """
         import time as _time
         start = _time.time()
@@ -189,14 +204,32 @@ def create_app(
             error = True
             raise
         finally:
+            elapsed_ms = (_time.time() - start) * 1000
             try:
                 _perf_monitor.record_http(
                     endpoint=f"{request.method} {request.url.path}",
-                    handler_ms=(_time.time() - start) * 1000,
+                    handler_ms=elapsed_ms,
                     response_bytes=response_bytes,
                     error=error,
                 )
                 _perf_monitor.http_request_exit()
+            except Exception:
+                pass
+            # MetricsRegistry 写入（§11.2 api_endpoint_*）
+            try:
+                runtime_obj = getattr(app.state, "runtime", None)
+                if runtime_obj is not None and runtime_obj.metrics is not None:
+                    route = request.scope.get("route")
+                    route_path = getattr(route, "path", request.url.path) if route else request.url.path
+                    status_code = response.status_code if response is not None else 500
+                    labels = {"route": route_path, "method": request.method, "status": str(status_code)}
+                    runtime_obj.metrics.observe_latency("api_endpoint_latency_ms", elapsed_ms, labels=labels)
+                    runtime_obj.metrics.inc_counter("api_endpoint_requests_total", labels=labels)
+                    if error:
+                        runtime_obj.metrics.inc_counter(
+                            "api_endpoint_errors_total",
+                            labels={"route": route_path, "method": request.method},
+                        )
             except Exception:
                 pass
 

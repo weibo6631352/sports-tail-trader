@@ -19,7 +19,7 @@ from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.allocation import current_exposure_usdc
 
 if TYPE_CHECKING:
-    from polymarket_trader.quant.workflow import TradingWorkflow
+    from polymarket_trader.workflow.workflow import TradingWorkflow
     from polymarket_trader.runtime.market_metadata import MarketMetadataStore
     from polymarket_trader.runtime.registry import MarketRegistry
 

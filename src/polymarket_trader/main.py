@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 import hashlib
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -24,12 +24,12 @@ from polymarket_trader.app.entry_metadata_providers import (
     build_entry_metadata_for_event_provider,
     build_entry_metadata_for_market_provider,
 )
-from polymarket_trader.app.market_ingest_service import MarketIngestService
+from polymarket_trader.pipeline.ingest.market_discovery.ingest_service import MarketIngestService
 from polymarket_trader.app.ports import bind_runtime_season_state, build_runtime_ports
-from polymarket_trader.app.reconcile_service import ReconcileService
-from polymarket_trader.app.settlement_scanner import SettlementScannerService
-from polymarket_trader.app.decision_context_builder import DecisionContextBuilder
-from polymarket_trader.app.order_gateway import OrderGateway
+from polymarket_trader.recovery.reconcile_service import ReconcileService
+from polymarket_trader.recovery.settlement_scanner import SettlementScannerService
+from polymarket_trader.pipeline.decision.decision_context_builder import DecisionContextBuilder
+from polymarket_trader.pipeline.execution.order_gateway import OrderGateway
 from polymarket_trader.config import ConfigLoadError, Settings, StartupReadiness, load_settings
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
@@ -61,9 +61,21 @@ from polymarket_trader.infra.sports import (
     GoalserveLivescoreClient,
     GoalservePregameOddsClient,
     SeasonOddsClient,
-    SportsLiveAggregateClient,
     TheOddsApiClient,
 )
+from polymarket_trader.pipeline.ingest.live_source import (
+    LiveSourceCalibrator,
+    LiveSourceFeeder,
+    LiveSourceLifecycleBinder,
+    LiveSourceMatcher,
+    LiveSourceProvider,
+    LiveSourceRegistry,
+    LiveStateMatchService,
+    LiveStateStore,
+    SportsSubscriptionPolicy,
+    is_market_live_active,
+)
+from polymarket_trader.workflow.live_state import _market_sport_codes
 from polymarket_trader.storage.season_state_store import SeasonStateStore
 from polymarket_trader.logging import LoggingRuntime, configure_logging
 from polymarket_trader.observability.metrics import MetricsRegistry
@@ -75,8 +87,9 @@ from polymarket_trader.runtime import (
     trading_gate_reason,
 )
 from polymarket_trader.runtime.account_state import AccountStateStore
+from polymarket_trader.runtime.data_graph import DataGraph
 from polymarket_trader.runtime.market_metadata import MarketMetadataStore
-from polymarket_trader.runtime.discovery_runner import (
+from polymarket_trader.pipeline.ingest.market_discovery.discovery_runner import (
     FullMarketDiscoveryState,
     MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS,
     MARKET_DISCOVERY_TICK_SECONDS,
@@ -86,6 +99,7 @@ from polymarket_trader.app.decision_recorder import DecisionEventRecorder
 from polymarket_trader.app.parameter_store import ParameterStore
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.lifecycle_bus import InProcessLifecycleBus
+from polymarket_trader.runtime.lifecycle_registry import LifecycleRegistry
 from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics as _sync_runtime_metrics
 from polymarket_trader.runtime.orderbook_delta import OrderbookDeltaStore
 from polymarket_trader.runtime.orderbook_derived_publisher import OrderbookDerivedPublisher
@@ -98,27 +112,24 @@ from polymarket_trader.runtime.ws_loops import (
     run_market_ws as _run_market_ws,
     run_user_ws as _run_user_ws,
 )
-from polymarket_trader.workers.market_discovery_worker import MarketDiscoveryWorker
-from polymarket_trader.workers.market_ws import MarketWsWorker
-from polymarket_trader.workers.persistence import PersistenceWorker
-from polymarket_trader.workers.reconcile import ReconcileWorker, ReconcileWorkerResult
-from polymarket_trader.workers.sports_live_state_worker import SportsLiveStateWorker
-from polymarket_trader.workers.sports_season_odds_worker import SportsSeasonOddsWorker
-from polymarket_trader.workers.game_odds_worker import GameOddsWorker
-from polymarket_trader.workers.goalserve_pregame_worker import GoalservePregameWorker
-from polymarket_trader.workers.market_tick import MarketTickWorker
-from polymarket_trader.quant.config import load_workflow_config
-from polymarket_trader.quant.workflow import TradingWorkflow
-from polymarket_trader.workers.user_ws import UserWsWorker
+from polymarket_trader.pipeline.ingest.market_discovery.discovery_worker import MarketDiscoveryWorker
+from polymarket_trader.pipeline.ingest.orderbook_ws import MarketWsWorker
+from polymarket_trader.app.audit import AuditDeduper, GarbageFilter, PersistenceWorker
+from polymarket_trader.api.ws_admin import AdminWsPublisher
+from polymarket_trader.runtime.observability_bridge import ObservabilityBridge
+from polymarket_trader.recovery import ReconcileWorker, ReconcileWorkerResult
+from polymarket_trader.pipeline.ingest.odds.sports_season_odds_worker import SportsSeasonOddsWorker
+from polymarket_trader.pipeline.ingest.odds.game_odds_worker import GameOddsWorker
+from polymarket_trader.pipeline.ingest.odds.goalserve_pregame_worker import GoalservePregameWorker
+from polymarket_trader.pipeline.decision import MarketTickWorker
+from polymarket_trader.workflow.config import load_workflow_config
+from polymarket_trader.workflow.workflow import TradingWorkflow
+from polymarket_trader.pipeline.feedback.user_ws import UserWsWorker
 from polymarket_trader.infra.sports.game_odds_client import (
     GameOddsClient,
     TheOddsApiGameOddsClient,
 )
 from polymarket_trader.runtime.paper_runtime import build_paper_runtime
-from polymarket_trader.runtime.sports_polling_demand import (
-    build_inplay_active_sports_provider,
-    build_livescore_active_sports_provider,
-)
 from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
 
 logger = logging.getLogger(__name__)
@@ -147,26 +158,37 @@ class RuntimeComponents:
     polymarket_ws_client: PolymarketWebSocketClient
     event_bus: EventBus
     registry: MarketRegistry
+    lifecycle_registry: LifecycleRegistry
     gamma_snapshot_store: GammaMarketSnapshotStore
     outbox: LocalOutbox
     db_engine: AsyncEngine
     db_session_factory: async_sessionmaker[AsyncSession]
     persistence_repository: DatabasePersistenceRepository
     persistence_worker: PersistenceWorker
+    audit_garbage_filter: GarbageFilter
+    audit_deduper: AuditDeduper
+    observability_bridge: ObservabilityBridge
+    admin_ws_publisher: AdminWsPublisher
     account_state_store: AccountStateStore
     market_metadata_store: MarketMetadataStore
     order_executor: PolymarketOrderExecutor
     market_ws_worker: MarketWsWorker
     orderbook_delta_store: OrderbookDeltaStore
     orderbook_history_buffer: OrderbookHistoryBuffer
+    data_graph: DataGraph
     orderbook_derived_store: OrderbookDerivedStore
     orderbook_derived_publisher: OrderbookDerivedPublisher
     user_ws_worker: UserWsWorker
     market_ingest_service: MarketIngestService
     market_discovery_worker: MarketDiscoveryWorker
     market_discovery_scan: FullMarketDiscoveryState
-    sports_live_state_client: SportsLiveAggregateClient | None
-    sports_live_state_worker: SportsLiveStateWorker | None
+    live_state_store: LiveStateStore
+    live_source_registry: LiveSourceRegistry
+    live_source_match_service: LiveStateMatchService
+    live_source_lifecycle_binder: LiveSourceLifecycleBinder
+    live_source_feeders: tuple[LiveSourceFeeder, ...]
+    # goalserve client aclose 列表（shutdown 时 await 调用，feeder 自身用 stop()）
+    live_source_closers: tuple[Any, ...]
     decision_context_builder: DecisionContextBuilder
     order_gateway: OrderGateway
     market_tick_worker: MarketTickWorker
@@ -197,64 +219,122 @@ class RuntimeComponents:
     goalserve_lazy_client: "GoalserveLazyClient | None" = None
 
 
-def _build_sports_live_state_client(
+def _build_live_source_components(
     settings: Settings,
     *,
-    league_source_priority: Mapping[str, Sequence[str]] | None = None,
-    trusted_sources: Sequence[str] | None = None,
-    livescore_active_sports_provider: Callable[[], frozenset[str]] | None = None,
-    inplay_active_sports_provider: Callable[[], frozenset[str]] | None = None,
-) -> SportsLiveAggregateClient:
-    """构建 Goalserve 直播状态聚合客户端。
+    registry: MarketRegistry,
+    market_metadata_store: MarketMetadataStore,
+    event_bus: EventBus,
+    workflow: TradingWorkflow,
+) -> tuple[
+    LiveStateStore,
+    LiveSourceRegistry,
+    LiveStateMatchService,
+    LiveSourceLifecycleBinder,
+    tuple[LiveSourceFeeder, ...],
+    tuple[Any, ...],
+]:
+    """构造直播源 7 件套 + feeder × N + goalserve client × N。
 
-    inplay GZIP feed：keyless（IP 白名单），每 sport ~1s 刷新，demand-driven 轮询，
-      覆盖 soccer/basket/tennis/volleyball/amfootball/esports/hockey/baseball。
-    livescore getfeed：API key 认证，5 秒刷新，覆盖
-      cricket/handball/rugby/boxing/mma/golf/horse_racing/f1/motogp。
-    proxy 仅在开发环境配置（GOALSERVE_PROXY=http://127.0.0.1:7890），生产留空直连。
+    返回 (store, registry, service, binder, feeders, closers)。closers 用于
+    shutdown 时调 goalserve client.aclose（feeder 自身用 stop()）。
 
-    *_active_sports_provider：传入时启用 demand-driven 轮询，只抓取有
-      live/即将开赛 Polymarket 市场的运动 feed；None 则全量轮询。
+    `sports_live_state_enabled=False` 时返回空 feeders/closers，但仍构造 store /
+    registry / service / binder——它们是无状态依赖，admin/discovery 读取也安全。
     """
-    api_key_secret = settings.goalserve_api_key
-    api_key = api_key_secret.get_secret_value() if api_key_secret is not None else None
 
-    inplay = GoalserveInplayClient(
-        proxy=settings.goalserve_proxy,
-        active_sports_provider=inplay_active_sports_provider,
+    live_state_store = LiveStateStore()
+    live_source_registry = LiveSourceRegistry()
+
+    def _primary_sport(market: Market) -> str | None:
+        codes = _market_sport_codes(market)
+        return next(iter(sorted(codes)), None)
+
+    subscription_policy = SportsSubscriptionPolicy(
+        sport_resolver=_primary_sport,
+        active_predicate=is_market_live_active,
     )
-    providers: list[tuple[str, Any]] = [("goalserve_inplay", inplay.list_events)]
-    closers: list[Any] = [inplay.aclose]
-    status_providers: list[tuple[str, Any]] = [
-        ("goalserve_inplay", inplay.inplay_per_sport_status)
-    ]
+    lifecycle_binder = LiveSourceLifecycleBinder(
+        market_registry=registry,
+        live_source_registry=live_source_registry,
+        subscription_policy=subscription_policy,
+    )
+    matcher = LiveSourceMatcher(match_hook=workflow.match_live_state)
+    calibrator = LiveSourceCalibrator()
+    match_service = LiveStateMatchService(
+        store=live_state_store,
+        registry=live_source_registry,
+        market_registry=registry,
+        market_metadata_store=market_metadata_store,
+        matcher=matcher,
+        calibrator=calibrator,
+        event_bus=event_bus,
+    )
 
-    if settings.goalserve_livescore_enabled and api_key:
-        livescore = GoalserveLivescoreClient(
-            api_key=api_key,
+    feeders: list[LiveSourceFeeder] = []
+    closers: list[Any] = []
+
+    if not settings.sports_live_state_enabled:
+        return (
+            live_state_store,
+            live_source_registry,
+            match_service,
+            lifecycle_binder,
+            (),
+            (),
+        )
+
+    # inplay (keyless, 8 sports，覆盖足球/篮球/网球/排球/美式足球/电竞/冰球/棒球)
+    inplay_client = GoalserveInplayClient(
+        proxy=settings.goalserve_proxy,
+        active_sports_provider=lifecycle_binder.active_sports_provider(
+            LiveSourceProvider.GOALSERVE_INPLAY
+        ),
+    )
+    closers.append(inplay_client.aclose)
+    feeders.append(
+        LiveSourceFeeder(
+            provider=LiveSourceProvider.GOALSERVE_INPLAY,
+            snapshot_fetcher=inplay_client.list_events,
+            expected_sports_provider=lambda: live_source_registry.active_sports_for(
+                LiveSourceProvider.GOALSERVE_INPLAY
+            ),
+            store=live_state_store,
+        )
+    )
+
+    # livescore (API key, 覆盖 inplay 不支持的运动: cricket/golf/horse_racing/f1/motogp/...)
+    api_key_secret = settings.goalserve_api_key
+    if settings.goalserve_livescore_enabled and api_key_secret is not None:
+        livescore_client = GoalserveLivescoreClient(
+            api_key=api_key_secret.get_secret_value(),
             base_url=settings.goalserve_livescore_base_url,
             timeout_s=settings.goalserve_livescore_timeout_s,
             poll_interval_s=float(settings.sports_live_state_interval_seconds),
             proxy=settings.goalserve_proxy,
-            active_sports_provider=livescore_active_sports_provider,
+            active_sports_provider=lifecycle_binder.active_sports_provider(
+                LiveSourceProvider.GOALSERVE_LIVESCORE
+            ),
         )
-        providers.append(("goalserve_livescore", livescore.list_events))
-        closers.append(livescore.aclose)
-        status_providers.append(("goalserve_livescore", livescore.livescore_per_sport_status))
+        closers.append(livescore_client.aclose)
+        feeders.append(
+            LiveSourceFeeder(
+                provider=LiveSourceProvider.GOALSERVE_LIVESCORE,
+                snapshot_fetcher=livescore_client.list_events,
+                expected_sports_provider=lambda: live_source_registry.active_sports_for(
+                    LiveSourceProvider.GOALSERVE_LIVESCORE
+                ),
+                store=live_state_store,
+            )
+        )
 
-    provider_timeout_s = max(
-        settings.sports_live_state_timeout_s * _PROVIDER_TIMEOUT_MULTIPLIER,
-        _PROVIDER_TIMEOUT_FLOOR_S,
-    )
-    return SportsLiveAggregateClient(
-        providers=providers,
-        closers=closers,
-        status_providers=status_providers,
-        provider_timeout_s=provider_timeout_s,
-        cooldown_base_s=settings.sports_live_state_health_cooldown_base_s,
-        eviction_s=settings.sports_live_state_health_eviction_s,
-        league_source_priority=league_source_priority,
-        trusted_sources=trusted_sources,
+    return (
+        live_state_store,
+        live_source_registry,
+        match_service,
+        lifecycle_binder,
+        tuple(feeders),
+        tuple(closers),
     )
 
 
@@ -428,6 +508,12 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         persistence_capacity=settings.persistence_event_queue_max_size,
     )
     registry = MarketRegistry()
+    # LifecycleRegistry 把 9+ 处散落的 market prune/added 回调收敛到统一 fan-out
+    # 中枢。registry 只把 emit_pruned/added 注册一次到 prune/added callback，所有
+    # 业务 listener 通过 lifecycle_registry.register_*_listener("name", cb) 注册。
+    lifecycle_registry = LifecycleRegistry()
+    registry.register_prune_callback(lifecycle_registry.emit_pruned)
+    registry.register_added_callback(lifecycle_registry.emit_added)
     gamma_snapshot_store = GammaMarketSnapshotStore()
     market_metadata_store = MarketMetadataStore()
     outbox = LocalOutbox(max_size=settings.persistence_event_queue_max_size)
@@ -455,9 +541,16 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     if workflow_issues:
         raise ConfigLoadError(list(workflow_issues))
     parameter_store.bind_settings(settings)
+    # §13.3 写入侧 dedupe + garbage filter——PersistenceWorker 入口同步过滤后
+    # 才走 _persist_batch，避免高频重复 / synthetic heartbeat / debug 事件污染
+    # audit_events 表（CLAUDE.md §0 + §13.7 payload <2KB 限制）
+    audit_garbage_filter = GarbageFilter()
+    audit_deduper = AuditDeduper()
     persistence_worker = PersistenceWorker(
         outbox=outbox,
         repository=persistence_repository,
+        garbage_filter=audit_garbage_filter,
+        deduper=audit_deduper,
     )
     async def load_market_rest_snapshot(token_id: str):
         orderbook = await clob_client.get_orderbook(token_id)
@@ -467,6 +560,15 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # 纯时间窗 15s(覆盖 2/3/5/10s + 余量),无 maxlen 兜底.
     # max_tokens=2000 LRU evict 防极端 token 爆.
     orderbook_history_buffer = OrderbookHistoryBuffer(max_age_s=15.0, max_tokens=2000)
+    # DataGraph 是 4 个扁平 store 的层次化视图入口（docs/新架构方案.md §3.1）。
+    # DecisionContextBuilder / API aggregators / 未来其他决策路径都从这里读，
+    # 避免散落跨 store 拼接。snapshot-and-release 策略，P0 路径无长锁。
+    data_graph = DataGraph(
+        market_registry=registry,
+        orderbook_history_buffer=orderbook_history_buffer,
+        account_state_store=account_state_store,
+        market_metadata_store=market_metadata_store,
+    )
     # 派生指标 store + publisher: ws 推送时同步算派生指标 (microprice / depth_imbalance
     # / 滑点表 / 15s 波动 / windows delta / whale / 流动性评级), 同步写入 store.
     # P0 量化决策接到 ORDERBOOK_SNAPSHOT_UPDATED 事件时 derived 已对齐 snapshot 新鲜度;
@@ -478,11 +580,15 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         delta_store=orderbook_delta_store,
     )
     # market 销毁时同步清 derived cache, 跟随 market lifecycle.
-    registry.register_prune_callback(orderbook_derived_store.evict_market)
+    lifecycle_registry.register_prune_listener(
+        "orderbook_derived_store",
+        orderbook_derived_store.evict_market,
+    )
     # market prune 时同步清 gamma snapshot store——市场被回收后没人会查它的
     # gamma 元数据，留在 store 里只是内存浪费。
-    registry.register_prune_callback(
-        lambda cid, _tokens: gamma_snapshot_store.prune(cid)
+    lifecycle_registry.register_prune_listener(
+        "gamma_snapshot_store",
+        lambda cid, _tokens: gamma_snapshot_store.prune(cid),
     )
     market_ws_worker = MarketWsWorker(
         event_bus=event_bus,
@@ -537,8 +643,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     decision_recorder = DecisionEventRecorder(outbox=outbox)
     decision_context_builder = DecisionContextBuilder(
         workflow=workflow,
-        registry=registry,
-        orderbook_reader=market_ws_worker.snapshot,
+        data_graph=data_graph,
         decision_recorder=decision_recorder,
     )
     order_gateway = OrderGateway(
@@ -581,12 +686,16 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         entry_metadata_provider=entry_metadata_for_market,
         orderbook_reader=decision_context_builder.lookup_orderbook,
     )
-    # 注册 market_tick_worker prune callback:market prune 时同步清 worker
+    # 注册 market_tick_worker prune listener:market prune 时同步清 worker
     # 内部 4 个 cid/token 索引 dict(_market_lifecycle / _token_*) 防内存泄漏.
-    registry.register_prune_callback(market_tick_worker.evict_market)
-    # market_metadata_store 已有 remove API,适配成 callback signature 注册:
-    registry.register_prune_callback(
-        lambda cid, _tokens: market_metadata_store.remove(condition_id=cid)
+    lifecycle_registry.register_prune_listener(
+        "market_tick_worker",
+        market_tick_worker.evict_market,
+    )
+    # market_metadata_store 已有 remove API,适配成 listener signature 注册:
+    lifecycle_registry.register_prune_listener(
+        "market_metadata_store",
+        lambda cid, _tokens: market_metadata_store.remove(condition_id=cid),
     )
     reconcile_worker = ReconcileWorker(
         event_bus=event_bus,
@@ -608,42 +717,36 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         # → 避免 data API / clob balance 网络抖动牵连 market 元数据刷新链路。
         refresh_account_inline=False,
     )
-    # 注册 authority_refresher prune callback:market prune 时清 _condition_failure_counts.
-    registry.register_prune_callback(reconcile_worker._authority_refresher.evict_market)
+    # 注册 authority_refresher prune listener:market prune 时清 _condition_failure_counts.
+    lifecycle_registry.register_prune_listener(
+        "reconcile_authority_refresher",
+        reconcile_worker._authority_refresher.evict_market,
+    )
     market_discovery_worker = MarketDiscoveryWorker(
         market_ingest_service=market_ingest_service,
         event_bus=event_bus,
         retry_delay_seconds=MARKET_DISCOVERY_RETRY_BACKOFF_SECONDS,
     )
     market_discovery_scan = FullMarketDiscoveryState()
-    sports_live_state_client: SportsLiveAggregateClient | None = None
-    sports_live_state_worker: SportsLiveStateWorker | None = None
-    if settings.sports_live_state_enabled:
-        sports_live_state_client = _build_sports_live_state_client(
-            settings,
-            league_source_priority=workflow.league_source_affinity,
-            trusted_sources=None,  # 默认走 aggregate 内置 _DEFAULT_OFFICIAL_SOURCES
-            livescore_active_sports_provider=build_livescore_active_sports_provider(registry),
-            inplay_active_sports_provider=build_inplay_active_sports_provider(registry),
-        )
-        sports_live_state_worker = SportsLiveStateWorker(
-            snapshot_provider=sports_live_state_client.list_events,
-            match_live_state=workflow.match_live_state,
-            registry=registry,
-            market_metadata_store=market_metadata_store,
-            event_bus=event_bus,
-            market_tracker=market_ws_worker.track_market,
-            lifecycle_bus=lifecycle_bus,
-            market_pauser=account_state_store,
-            enabled=True,
-            source="sports_live_aggregate",
-            leagues=settings.sports_live_state_league_codes,
-            publish_entry_signals=settings.sports_live_state_publish_entry_signals,
-            # 60s audit 节流:state_hash dedupe 因 live_game 嵌套时间字段
-            # (seconds_remaining 等)每 5s 都变而失效.60s 颗粒度对复盘足够,
-            # P0 决策走内存不依赖 audit.30s→60s 省 50% sports_live_state audit.
-            audit_min_interval_s=60.0,
-        )
+    (
+        live_state_store,
+        live_source_registry,
+        live_source_match_service,
+        live_source_lifecycle_binder,
+        live_source_feeders,
+        live_source_closers,
+    ) = _build_live_source_components(
+        settings,
+        registry=registry,
+        market_metadata_store=market_metadata_store,
+        event_bus=event_bus,
+        workflow=workflow,
+    )
+    live_source_match_service.attach()
+    # 接入 LifecycleRegistry：market added 时立即 subscribe（C 模式事件驱动），
+    # prune 时立即 unsubscribe_all。reconcile_subscriptions 仍由 scheduler 2s
+    # + discovery 完成 hook 周期触发作自愈兜底。
+    live_source_lifecycle_binder.bind_to_lifecycle_registry(lifecycle_registry)
     season_state_store = SeasonStateStore()
     bind_runtime_season_state(runtime_ports, season_state_store)
     # 注：ESPN-based season-state + series-state worker 已经删除（只服务传统
@@ -663,14 +766,23 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         workflow=workflow,
         event_bus=event_bus,
     )
-    # 注册 odds workers + user_ws 的 prune callbacks
+    # odds workers + user_ws 的 prune listeners
     if season_odds_worker is not None:
-        registry.register_prune_callback(season_odds_worker.evict_market)
+        lifecycle_registry.register_prune_listener(
+            "season_odds_worker",
+            season_odds_worker.evict_market,
+        )
     if game_odds_worker is not None:
-        registry.register_prune_callback(game_odds_worker.evict_market)
-    registry.register_prune_callback(user_ws_worker.evict_market)
+        lifecycle_registry.register_prune_listener(
+            "game_odds_worker",
+            game_odds_worker.evict_market,
+        )
+    lifecycle_registry.register_prune_listener("user_ws_worker", user_ws_worker.evict_market)
     # account_state 的 _fills 也按 market lifecycle 清(fills 已写 DB,内存不必常驻 dead market).
-    registry.register_prune_callback(account_state_store.evict_market)
+    lifecycle_registry.register_prune_listener(
+        "account_state_store",
+        account_state_store.evict_market,
+    )
     pregame_worker, pregame_client = _build_pregame_worker(
         settings,
         registry=registry,
@@ -698,6 +810,19 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     market_tick_worker.bind_heartbeat(
         lambda **kwargs: supervisor.heartbeat_worker("trading_decision", **kwargs)
     )
+    # ObservabilityBridge——周期把组件 stats 投影到 MetricsRegistry gauge。
+    # 13 个 gauge 一次性 wire（audit dedupe / garbage / live source / account）。
+    observability_bridge = ObservabilityBridge(
+        metrics=metrics,
+        audit_deduper=audit_deduper,
+        garbage_filter=audit_garbage_filter,
+        live_state_store=live_state_store,
+        live_source_registry=live_source_registry,
+        account_state_store=account_state_store,
+    )
+    # AdminWsPublisher——event_bus 增量推送骨架。startup 时 .start() 启动 drain
+    # task；shutdown 时 await .stop()。endpoint 接入待 stream.py 改造。
+    admin_ws_publisher = AdminWsPublisher(event_bus=event_bus)
     return RuntimeComponents(
         settings=settings,
         readiness=readiness,
@@ -711,26 +836,36 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         polymarket_ws_client=polymarket_ws_client,
         event_bus=event_bus,
         registry=registry,
+        lifecycle_registry=lifecycle_registry,
         gamma_snapshot_store=gamma_snapshot_store,
         outbox=outbox,
         db_engine=db_engine,
         db_session_factory=db_session_factory,
         persistence_repository=persistence_repository,
         persistence_worker=persistence_worker,
+        audit_garbage_filter=audit_garbage_filter,
+        audit_deduper=audit_deduper,
+        observability_bridge=observability_bridge,
+        admin_ws_publisher=admin_ws_publisher,
         account_state_store=account_state_store,
         market_metadata_store=market_metadata_store,
         order_executor=order_executor,
         market_ws_worker=market_ws_worker,
         orderbook_delta_store=orderbook_delta_store,
         orderbook_history_buffer=orderbook_history_buffer,
+        data_graph=data_graph,
         orderbook_derived_store=orderbook_derived_store,
         orderbook_derived_publisher=orderbook_derived_publisher,
         user_ws_worker=user_ws_worker,
         market_ingest_service=market_ingest_service,
         market_discovery_worker=market_discovery_worker,
         market_discovery_scan=market_discovery_scan,
-        sports_live_state_client=sports_live_state_client,
-        sports_live_state_worker=sports_live_state_worker,
+        live_state_store=live_state_store,
+        live_source_registry=live_source_registry,
+        live_source_match_service=live_source_match_service,
+        live_source_lifecycle_binder=live_source_lifecycle_binder,
+        live_source_feeders=live_source_feeders,
+        live_source_closers=live_source_closers,
         season_state_store=season_state_store,
         season_odds_worker=season_odds_worker,
         season_odds_client=season_odds_client,
@@ -887,6 +1022,9 @@ async def shutdown_runtime(runtime: RuntimeComponents) -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
     runtime.background_tasks.clear()
 
+    # AdminWsPublisher —— 取消 drain task + unregister event_bus listener
+    with suppress(Exception):
+        await runtime.admin_ws_publisher.stop()
     with suppress(Exception):
         await runtime.order_gateway.aclose()
     with suppress(Exception):
@@ -894,9 +1032,14 @@ async def shutdown_runtime(runtime: RuntimeComponents) -> None:
     for client in (runtime.gamma_client, runtime.clob_client, runtime.data_client):
         with suppress(Exception):
             await client.aclose()
-    if runtime.sports_live_state_client is not None:
+    # 停 live_source feeders 自身的 wrapper task（client 内部 per-sport task 由
+    # 下面的 live_source_closers 单独清理）
+    for feeder in runtime.live_source_feeders:
         with suppress(Exception):
-            await runtime.sports_live_state_client.aclose()
+            await feeder.stop()
+    for closer in runtime.live_source_closers:
+        with suppress(Exception):
+            await closer()
     if runtime.season_odds_client is not None:
         with suppress(Exception):
             await runtime.season_odds_client.aclose()
@@ -930,8 +1073,11 @@ def _register_runtime_workers(runtime: RuntimeComponents) -> None:
     runtime.supervisor.register_worker("user_ws", priority="P0", state=WorkerLifecycleState.PAUSED)
     runtime.supervisor.register_worker("trading_decision", priority="P0")
     runtime.supervisor.register_worker("reconcile", priority="P2")
-    if runtime.sports_live_state_worker is not None:
-        runtime.supervisor.register_worker("sports_live_state_sync", priority="P2")
+    for feeder in runtime.live_source_feeders:
+        # feeder.name 格式 "live-source-feeder:goalserve_inplay"，转 supervisor key
+        worker_name = feeder.name.replace("live-source-feeder:", "live_source_feeder_")
+        runtime.supervisor.register_worker(worker_name, priority="P2")
+    runtime.supervisor.register_worker("live_source_reconcile", priority="P2", state=WorkerLifecycleState.RUNNING, detail="scheduler-driven; first run after interval")
     if runtime.season_odds_worker is not None:
         runtime.supervisor.register_worker("sports_season_odds_sync", priority="P2")
     if runtime.game_odds_worker is not None:
@@ -1049,6 +1195,15 @@ def _start_background_tasks(runtime: RuntimeComponents) -> None:
         ),
         name="trader:persistence",
     )
+    # AdminWsPublisher —— 启动 drain task + 注册 event_bus listener；
+    # endpoint 接入待 stream.py 改造，目前订阅集为空 → drain 内 push 为空操作
+    runtime.admin_ws_publisher.start()
+    # live_source feeder × N（每 provider 一个）：feeder 内部 create_task 自管，
+    # 这里只 start。stop 在 shutdown_runtime 中调 feeder.stop() 与 goalserve
+    # client.aclose 配套清理。supervisor heartbeat 由 feeder 自身打？暂无——
+    # 健康可观测靠 LiveStateStore.health/last_observed_at（Step 7 横切层接 metric）。
+    for feeder in runtime.live_source_feeders:
+        feeder.start()
 
 
 def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
@@ -1078,24 +1233,38 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
     # 长期不更新但比赛/赔率/math_lock 仍在变）。复用 _handle_orderbook_snapshot_updated
     # 路径包括 MTM 刷新 + 多信号投票止损/止盈 reprice。
     runtime.scheduler.register_job(
-        "position_exit_evaluator",
-        lambda: _publish_position_exit_evaluator_tick(runtime),
+        "position_heartbeat",
+        lambda: _publish_position_heartbeat_tick(runtime),
         priority="P1",
         interval_seconds=5.0,
         tags=("position", "exit"),
         start=True,
         run_immediately=False,
     )
-    if runtime.sports_live_state_worker is not None:
-        runtime.scheduler.register_job(
-            "sports_live_state_sync",
-            lambda: _run_sports_live_state_sync(runtime),
-            priority="P2",
-            interval_seconds=float(runtime.settings.sports_live_state_interval_seconds),
-            tags=("sports_live_state",),
-            start=True,
-            run_immediately=True,
-        )
+    # live_source reconcile（demand-driven 订阅校准）：discovery_runner 完成一轮
+    # 会立即调一次 binder.reconcile_subscriptions() 作为主触发；此 scheduler job
+    # 作为周期兜底，处理"市场状态变化（如 game_start_time 到 → active_predicate
+    # 翻转）但没新 market 进入"的场景。2s 与 discovery cadence 同步。
+    runtime.scheduler.register_job(
+        "live_source_reconcile",
+        lambda: _run_live_source_reconcile(runtime),
+        priority="P2",
+        interval_seconds=2.0,
+        tags=("live_source", "reconcile"),
+        start=True,
+        run_immediately=True,
+    )
+    # ObservabilityBridge —— 5s 周期把组件 stats 投到 metrics gauge（§11.2 表的批量
+    # 落地路径，无需改业务路径）
+    runtime.scheduler.register_job(
+        "observability_bridge_sync",
+        runtime.observability_bridge.sync,
+        priority="P3",
+        interval_seconds=5.0,
+        tags=("observability", "bridge"),
+        start=True,
+        run_immediately=False,
+    )
     if runtime.season_odds_worker is not None:
         runtime.scheduler.register_job(
             "sports_season_odds_sync",
@@ -1225,7 +1394,7 @@ async def _run_market_discovery_scan(runtime: RuntimeComponents) -> None:
     await run_market_discovery_scan(runtime, sync_runtime_metrics=_sync_runtime_metrics)
 
 
-async def _publish_position_exit_evaluator_tick(runtime: RuntimeComponents) -> None:
+async def _publish_position_heartbeat_tick(runtime: RuntimeComponents) -> None:
     """周期性合成 ORDERBOOK_SNAPSHOT_UPDATED 事件 trigger 持仓评估。
 
     薄盘场景：orderbook 可能数十秒没新 push（无人挂单），订阅触发的 reprice
@@ -1250,8 +1419,8 @@ async def _publish_position_exit_evaluator_tick(runtime: RuntimeComponents) -> N
                 event_id=uuid4().hex,
                 condition_id=position.condition_id,
                 token_id=position.token_id,
-                reason="position_exit_evaluator_tick",
-                payload={"source": "position_exit_evaluator", "synthetic": True},
+                reason="position_heartbeat_tick",
+                payload={"source": "position_heartbeat", "synthetic": True},
             ),
         )
 
@@ -1401,35 +1570,24 @@ async def _run_reconcile_once(
     return result
 
 
-async def _run_sports_live_state_sync(runtime: RuntimeComponents) -> None:
-    worker = runtime.sports_live_state_worker
-    if worker is None:
-        return
-    runtime.supervisor.heartbeat_worker("sports_live_state_sync", detail="syncing")
+async def _run_live_source_reconcile(runtime: RuntimeComponents) -> None:
+    """周期性 reconcile_subscriptions 兜底——补 discovery 主路径漏触发的订阅变化。"""
+
+    runtime.supervisor.heartbeat_worker("live_source_reconcile", detail="syncing")
     try:
-        result = await worker.sync_once()
+        result = runtime.live_source_lifecycle_binder.reconcile_subscriptions()
     except Exception as exc:
         runtime.supervisor.mark_worker_error(
-            "sports_live_state_sync",
-            detail="sync_failed",
+            "live_source_reconcile",
+            detail="reconcile_failed",
             last_error=str(exc),
         )
         _sync_runtime_metrics(runtime)
         raise
-    if result is None:
-        runtime.supervisor.heartbeat_worker(
-            "sports_live_state_sync",
-            state=WorkerLifecycleState.PAUSED,
-            detail="disabled",
-        )
-    else:
-        runtime.supervisor.heartbeat_worker(
-            "sports_live_state_sync",
-            detail=(
-                f"events={result.events_seen} matches={result.matches} "
-                f"signals={result.entry_signals_published}"
-            ),
-        )
+    runtime.supervisor.heartbeat_worker(
+        "live_source_reconcile",
+        detail=f"added={result['added']} removed={result['removed']} errors={result['errors']}",
+    )
     _sync_runtime_metrics(runtime)
 
 
@@ -1547,17 +1705,38 @@ async def _run_audit_retention_purge(runtime: RuntimeComponents) -> None:
     P3 后台任务——所有 DB 异常都在 purge_audit_events_once 内部 catch + 日志。
     """
 
+    # §13.5 分层 retention：trade 30d / 拒绝 7d / heartbeat 1d / fills 永久。
+    # 旧 settings.audit_retention_days 仍可用作 fallback_days（覆盖未列入 tier
+    # 的 event_title），但分层 tier 用 DEFAULT_AUDIT_RETENTION_POLICY 集中管理。
+    from polymarket_trader.infra.db.retention_policy import (
+        DEFAULT_AUDIT_RETENTION_POLICY,
+        AuditRetentionPolicy,
+    )
+    fallback_days = runtime.settings.audit_retention_days
+    if fallback_days <= 0:
+        # 配置为 0 或负 → 完全禁用 purge（保持旧行为）
+        runtime.supervisor.heartbeat_worker(
+            "audit_retention_purge",
+            detail="disabled (audit_retention_days <= 0)",
+        )
+        return
+    policy = AuditRetentionPolicy(
+        tiers=DEFAULT_AUDIT_RETENTION_POLICY.tiers,
+        fallback_days=fallback_days,
+    )
     summary = await purge_audit_events_once(
         runtime.db_session_factory,
-        retention_days=runtime.settings.audit_retention_days,
         batch_size=runtime.settings.audit_retention_purge_batch_size,
+        policy=policy,
+    )
+    tier_breakdown = ",".join(
+        f"{t['days']}d:{t['deleted_rows']}" for t in summary.get("tiers", ())
     )
     runtime.supervisor.heartbeat_worker(
         "audit_retention_purge",
         detail=(
             f"deleted={summary['deleted_rows']} batches={summary['batches']} "
-            f"cutoff={summary.get('cutoff') or '-'} "
-            f"skipped={summary['skipped']} err={'!' if summary['error'] else '-'}"
+            f"tiers=[{tier_breakdown}] err={'!' if summary['error'] else '-'}"
         ),
     )
 

@@ -4,9 +4,12 @@ import asyncio
 import logging
 from uuid import uuid4
 
+from typing import Any, Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from polymarket_trader.api.deps import get_admin_service
+from polymarket_trader.api.aggregators import PortfolioAggregator
+from polymarket_trader.api.deps import get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.app.portfolio_history_service import (
     DEFAULT_INTERVAL_MS,
@@ -45,15 +48,18 @@ async def get_portfolio(service: AdminService = Depends(get_admin_service)) -> d
 
 @router.get("/exposure")
 async def get_portfolio_exposure(
-    service: AdminService = Depends(get_admin_service),
+    level: Literal["summary", "detail"] = Query("summary"),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """每市场未平仓名义暴露（纯内存快照，零 DB，零 P0 影响）。
+    """每市场未平仓名义暴露（基于 DataGraph，零 DB，零 P0 影响）。
 
-    返回所有持仓按市场分解的：名义市值、浮动盈亏、平均入场价、
-    当前价、挂单预留资金、暂停状态。是操盘者"我的风险在哪里"的全局视图。
+    `level=summary` 仅总览（10 字段）；`level=detail` 含 per-market outcomes /
+    metadata / pause 完整数据。docs/新架构方案.md §12.3 ②字段选择。
     """
 
-    return await service.portfolio_exposure()
+    aggregator = PortfolioAggregator(data_graph=runtime.data_graph)
+    view = aggregator.exposure(level=level)
+    return {"summary": view.summary, "markets": list(view.markets)}
 
 
 @router.get("/equity-curve")
