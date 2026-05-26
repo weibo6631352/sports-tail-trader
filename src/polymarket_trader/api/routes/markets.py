@@ -191,7 +191,7 @@ async def list_markets(
     sort_direction: Literal["asc", "desc"] = Query(default="desc"),
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    return await MarketMiscAggregator(runtime=runtime).list_markets(
+    return MarketMiscAggregator(runtime=runtime).list_markets(
         limit=limit,
         offset=offset,
         trading_status=trading_status,

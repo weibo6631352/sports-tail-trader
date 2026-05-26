@@ -381,7 +381,7 @@ class MarketMiscAggregator:
             pass
 
     # ---------- list_markets ----------
-    async def list_markets(
+    def list_markets(
         self,
         *,
         limit: int = 100,
@@ -397,60 +397,33 @@ class MarketMiscAggregator:
         sort_by: MarketFeeSortField | None = None,
         sort_direction: SortDirection = "desc",
     ) -> dict[str, Any]:
+        """市场列表——纯内存(registry snapshot),零 DB。
+
+        启动期 registry 空时返回空 page,由 readiness gate 兜底——
+        CLAUDE.md §3 "不允许任何 DB 预热,空白窗口由 reconcile_fresh 兜住"。
+        """
         registry = self._registry_snapshot()
-        if registry.markets or self._session_factory is None:
-            account = self._account_snapshot()
-            markets = sort_markets(
-                tuple(
-                    market
-                    for market in registry.markets
-                    if (trading_status is None or market.trading_status.value == trading_status)
-                    and _market_matches_fee_filters(
-                        market,
-                        fees_enabled=fees_enabled,
-                        fee_rate_bps_min=fee_rate_bps_min,
-                        fee_rate_bps_max=fee_rate_bps_max,
-                        maker_base_fee_bps_min=maker_base_fee_bps_min,
-                        maker_base_fee_bps_max=maker_base_fee_bps_max,
-                        taker_base_fee_bps_min=taker_base_fee_bps_min,
-                        taker_base_fee_bps_max=taker_base_fee_bps_max,
-                    )
-                ),
-                sort_by=sort_by,
-                sort_direction=sort_direction,
-            )
-            page = slice_sequence(markets, limit=limit, offset=offset)
-            items = [
-                self._serializer.market_view(
-                    market,
-                    account_snapshot=account,
-                    registry_snapshot=registry,
-                )
-                for market in page.items
-            ]
-            return page_payload(
-                RepositoryPage(items=tuple(items), total=len(markets), limit=page.limit, offset=page.offset),
-                serializer=lambda item: item,
-            )
-
-        async def _query(repos: RepositoryGroup) -> RepositoryPage[Any]:
-            return await repos.market.list_markets_snapshot(
-                limit=limit,
-                offset=offset,
-                trading_status=trading_status,
-                fees_enabled=fees_enabled,
-                fee_rate_bps_min=fee_rate_bps_min,
-                fee_rate_bps_max=fee_rate_bps_max,
-                maker_base_fee_bps_min=maker_base_fee_bps_min,
-                maker_base_fee_bps_max=maker_base_fee_bps_max,
-                taker_base_fee_bps_min=taker_base_fee_bps_min,
-                taker_base_fee_bps_max=taker_base_fee_bps_max,
-                sort_by=sort_by,
-                sort_direction=sort_direction,
-            )
-
-        page = await with_repositories(self._session_factory, _query)
         account = self._account_snapshot()
+        markets = sort_markets(
+            tuple(
+                market
+                for market in registry.markets
+                if (trading_status is None or market.trading_status.value == trading_status)
+                and _market_matches_fee_filters(
+                    market,
+                    fees_enabled=fees_enabled,
+                    fee_rate_bps_min=fee_rate_bps_min,
+                    fee_rate_bps_max=fee_rate_bps_max,
+                    maker_base_fee_bps_min=maker_base_fee_bps_min,
+                    maker_base_fee_bps_max=maker_base_fee_bps_max,
+                    taker_base_fee_bps_min=taker_base_fee_bps_min,
+                    taker_base_fee_bps_max=taker_base_fee_bps_max,
+                )
+            ),
+            sort_by=sort_by,
+            sort_direction=sort_direction,
+        )
+        page = slice_sequence(markets, limit=limit, offset=offset)
         items = [
             self._serializer.market_view(
                 market,
@@ -460,7 +433,7 @@ class MarketMiscAggregator:
             for market in page.items
         ]
         return page_payload(
-            RepositoryPage(items=tuple(items), total=page.total, limit=page.limit, offset=page.offset),
+            RepositoryPage(items=tuple(items), total=len(markets), limit=page.limit, offset=page.offset),
             serializer=lambda item: item,
         )
 
