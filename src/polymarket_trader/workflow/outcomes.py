@@ -66,12 +66,6 @@ def primary_token_id(market: Market) -> str:
     return descriptor.targets[0].token_id
 
 
-def is_primary_token(market: Market, token_id: str | None) -> bool:
-    if token_id is None:
-        return False
-    return token_id in describe_sports_market(market).target_token_ids
-
-
 def sports_token_targets(market: Market) -> tuple[SportsTokenTarget, ...]:
     """返回量化可管理的 token 方向。"""
 

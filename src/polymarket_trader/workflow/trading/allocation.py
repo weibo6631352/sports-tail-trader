@@ -10,16 +10,15 @@ from polymarket_trader.domain.allocation import (
     current_exposure_usdc,
 )
 from polymarket_trader.domain.market import TradingStatus
-from polymarket_trader.domain.order import OrderSide
 from polymarket_trader.domain.decisions import DecisionContext, EntryCandidate
 
 from polymarket_trader.workflow.allocation import AllocationMarketSnapshot
 from polymarket_trader.workflow.config import TradingWorkflowConfig
-from polymarket_trader.workflow.outcomes import describe_sports_market, is_primary_token
+from polymarket_trader.workflow.outcomes import describe_sports_market
 from polymarket_trader.sports import SportsMarketFamily
 from polymarket_trader.sports.parsing import live_game_state_from_metadata
 
-from polymarket_trader.workflow.allocation import _ask_depth_notional, _has_open_order
+from polymarket_trader.workflow.allocation import _ask_depth_notional
 
 
 def _empty_sizing_plan(context: DecisionContext, reason: str) -> AllocationPlan:
@@ -114,21 +113,17 @@ def _allocation_skip_reason(
     *,
     buyable_liquidity_usdc: Decimal,
 ) -> str:
-    if _has_open_order(snapshot, OrderSide.BUY):
-        return "open_entry_detected"
-    has_open_exit = _has_open_order(snapshot, OrderSide.SELL) or (
-        snapshot.position is not None and snapshot.position.open_sell_shares > Decimal("0")
-    )
-    if has_open_exit:
-        return "open_exit_detected"
-    if snapshot.position is not None and snapshot.position.shares > Decimal("0"):
-        return "position_already_open"
+    # 已删 4 条上层门禁——回归 "trust Kelly + RiskManager"：
+    # - open_entry_detected: OrderExecutor 自带 idempotency_key 防重提;Kelly bankroll
+    #   扣减 + RiskManager bankroll_total_gate 防超额(§17 trust_kelly_no_extra_caps)
+    # - open_exit_detected: 同 event 多盘口/多 outcome 是独立 edge,SELL 在飞不应
+    #   阻挡其他 BUY(feedback_event_multi_condition_entry)
+    # - position_already_open: 加仓由 Kelly + current_exposure_usdc 自然处理,
+    #   focus 路径已被 _decide_market_tick 的 has_position 分支拦走
+    # - unsupported_outcome: outside-model token 没真 prob_p → Kelly 自动以
+    #   no_math_prob_signal 拒,不需要前置拦截
     # ws_eligible 已删——市场的 universe / 时间窗口判断由 discovery + market_ingest_service
     # 一次写入 registry，trading_status != ELIGIBLE 才是真正的"不可交易"信号。
-    # 走到 allocation 这一步说明 worker 已收到 entry_signal_published（live_state
-    # 工作者明确 signal_allowed=True），无需在workflow 层二次门控。
-    if not is_primary_token(snapshot.market, snapshot.token_id):
-        return "unsupported_outcome"
     # 直播源状态审查：没直播源 / 直播源未适配 → 拒绝入场。
     # 决策必须基于活的直播状态（数学概率 / 末段守卫 / 概率视图都依赖 LiveGameState）；
     # 缺直播源等于盲下，缺解析适配等于"看得到数据但读不懂"，两种都视作高风险，宁可错过。

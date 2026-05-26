@@ -12,7 +12,7 @@ from polymarket_trader.domain.allocation import (
 )
 from polymarket_trader.domain.kelly import KellyStake, kelly_stake
 from polymarket_trader.domain.market import Market
-from polymarket_trader.domain.order import Order, OrderSide
+from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.position import Position
 
@@ -316,12 +316,6 @@ def _reject_allocation(
         capped_by=kelly.capped_by if kelly is not None else None,
         is_round_up_overbet=kelly.is_round_up_overbet if kelly is not None else False,
     )
-
-
-def _has_open_order(snapshot: AllocationMarketSnapshot, side: OrderSide) -> bool:
-    """判断当前 token 是否已有同方向开放订单，避免入场路径重复占仓。"""
-
-    return any(order.side == side and order.open for order in snapshot.open_orders)
 
 
 def _market_liquidity_usdc(
