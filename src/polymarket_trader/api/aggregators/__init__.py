@@ -27,7 +27,7 @@
 - `candidate_aggregator` —— 候选投影（含 3s TTL 缓存）
 - `market_misc_aggregator` / `market_detail_aggregator` —— 盘口 / 流动性 /
   数据健康 / 历史快照
-- `sports_query_aggregator` / `sports_live_aggregator` —— 直播状态 + 覆盖缺口
+- `sports_query_aggregator` —— 直播状态 + 覆盖缺口
 - `trading_query_aggregator` —— orders / fills / positions / allocations 列表
 
 审计查询（DB session_factory）：
@@ -55,7 +55,6 @@ from .position_aggregator import PositionAggregator
 from .reconcile_decisions_aggregator import ReconcileDecisionsAggregator
 from .runtime_aggregator import RuntimeAggregator
 from .settlement_aggregator import SettlementAggregator
-from .sports_live_aggregator import SportsLiveAggregator
 from .sports_query_aggregator import SportsQueryAggregator
 from .timeline_aggregator import TimelineAggregator
 from .trading_query_aggregator import TradingQueryAggregator
@@ -73,7 +72,6 @@ __all__ = [
     "ReconcileDecisionsAggregator",
     "RuntimeAggregator",
     "SettlementAggregator",
-    "SportsLiveAggregator",
     "SportsQueryAggregator",
     "TimelineAggregator",
     "TradingQueryAggregator",

@@ -1,16 +1,11 @@
-"""SportsQueryAggregator —— 体育直播状态相关只读查询（含 outright resolution
-+ Goalserve lazy 代理 soccer_injuries / h2h）。
+"""SportsQueryAggregator —— 体育直播状态相关只读查询。
 
 按 原架构方案 §12.2：
 - list_sports_live_events_history → DB audit 查询
 - list_sports_live_states / list_sports_live_source_gaps → 内存运营查询
   （基于 market_metadata_store + registry）
-- outright_team_resolution → workflow 内部诊断
-- soccer_injuries_snapshot / h2h_snapshot → goalserve_lazy_client 代理
 
-姊妹 `SportsLiveAggregator` 走新 LiveStateStore / LiveSourceRegistry 架构，
-适用于 V2 per-source bucket 视角；本 aggregator 仍以 market_metadata_store
-为真相源，覆盖前端原 operator sports 路由的完整契约。
+以 market_metadata_store 为真相源，覆盖前端 operator sports 路由的完整契约。
 """
 
 from __future__ import annotations

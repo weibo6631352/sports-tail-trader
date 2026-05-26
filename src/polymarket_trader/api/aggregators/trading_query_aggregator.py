@@ -168,26 +168,6 @@ class TradingQueryAggregator:
         page = await with_repositories(self._session_factory, _query)
         return page_payload(page, serializer=self._serializer.fill)
 
-    async def list_positions(
-        self,
-        *,
-        limit: int = 100,
-        offset: int = 0,
-        condition_id: str | None = None,
-        token_id: str | None = None,
-    ) -> dict[str, Any]:
-        """内存快照（启动竞态窗口返回空）。新版优先用 PositionAggregator。"""
-
-        snapshot = self._account_snapshot()
-        positions = [
-            position
-            for position in snapshot.positions
-            if (condition_id is None or position.condition_id == condition_id)
-            and (token_id is None or position.token_id == token_id)
-        ]
-        page = slice_sequence(positions, limit=limit, offset=offset)
-        return page_payload(page, serializer=self._serializer.position)
-
     async def list_allocations(
         self,
         *,

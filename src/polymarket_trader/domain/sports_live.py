@@ -496,8 +496,8 @@ class SportsLiveSnapshot:
 
 
 # SportsLiveSyncStatus 已删（孤儿）—— 旧 SportsLiveStateWorker 用过，新架构
-# 由 SportsLiveAggregator + HealthReporter 直接读 LiveStateStore.all_buckets +
-# LiveSourceRegistry.summary，无需中间 DTO。按 §10 fresh-start 不留兼容。
+# 由 HealthReporter 直接读 LiveStateStore.all_buckets + LiveSourceRegistry.summary，
+# 无需中间 DTO。按 §10 fresh-start 不留兼容。
 
 
 # ===== from former contracts/live_state.py =====
