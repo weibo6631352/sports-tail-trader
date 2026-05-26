@@ -17,9 +17,13 @@ router = APIRouter(tags=["decision-context"])
 async def get_decision_context(
     condition_id: str,
     token_id: str | None = Query(default=None, min_length=1),
+    include_audit: bool = Query(
+        default=False,
+        description="是否附加 recent_audit_events——默认 False 零 DB 给前端高频刷,复盘场景显式 true 走 1 次 DB",
+    ),
     audit_channels: str | None = Query(
         default=None,
-        description="逗号分隔 event_title 列表，缺省 = 复盘默认 7 类",
+        description="仅 include_audit=true 生效——逗号分隔 event_title 列表,缺省 = 复盘默认 7 类",
     ),
     audit_per_channel_limit: int = Query(default=20, ge=1, le=200),
     since: int | None = Query(default=None, ge=0),
@@ -29,10 +33,10 @@ async def get_decision_context(
     """单 condition 完整决策上下文一次拉齐。
 
     返回 market(详情) + positions(全 outcomes 或单指定) + live_state(goalserve
-    inplay/livescore) + recent_audit_events(by_channel + chronological)。
+    inplay/livescore)。默认纯内存零 DB,适合前端高频刷新。
 
-    替代 agent 复盘连发 5+ 次 /markets/detail + /positions/{cid}/{tid} +
-    /sports/live-states + /audit-events?event_title=...×N 的串行链路。
+    ``?include_audit=true`` 时附加 recent_audit_events(by_channel
+    + chronological)走 1 次 DB——复盘场景使用。
     """
 
     if audit_channels:
@@ -48,6 +52,7 @@ async def get_decision_context(
     payload = await aggregator.get_context(
         condition_id=condition_id,
         token_id=token_id,
+        include_audit=include_audit,
         audit_channels=ch_tuple,
         audit_per_channel_limit=audit_per_channel_limit,
         time_range=build_time_range(since=since, until=until),

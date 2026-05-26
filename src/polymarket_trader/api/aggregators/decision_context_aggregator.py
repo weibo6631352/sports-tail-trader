@@ -6,14 +6,18 @@ agent 复盘 / 决策审查 / 前端复盘页 / quant_decider 审查共用同一
 
 # 设计
 
-- 5 个 in-memory 视图全部从 ``data_graph`` + ``market_ws_worker`` + ``market_metadata_store`` 即时聚合（零外部 IO，零 DB）
-- 1 次 DB 查询取 recent audit events（命中 ``ix_audit_events_condition_id``
-  + ``ix_audit_events_event_title``）
+- 默认 **纯内存,零 DB**：market + positions + live_state 全部从
+  ``data_graph`` + ``market_ws_worker`` + ``market_metadata_store`` 即时聚合
+- ``include_audit=True`` 才走 1 次 DB query 取 recent audit events
+  （命中 ``ix_audit_events_condition_id`` + ``ix_audit_events_event_title``）
+
+前端高频刷新决策上下文默认 opt-out audit；复盘场景显式 opt-in。
 
 # 输出形态
 
 ``GET /decision-context/{condition_id}`` 默认返回所有 outcomes 的视图；
-``?token_id=`` 时仅返回该 outcome（其余字段相同）。
+``?token_id=`` 时仅返回该 outcome（其余字段相同）；
+``?include_audit=true`` 附加 ``recent_audit_events`` 字段。
 """
 
 from __future__ import annotations
@@ -57,6 +61,7 @@ class DecisionContextAggregator:
         *,
         condition_id: str,
         token_id: str | None = None,
+        include_audit: bool = False,
         audit_channels: tuple[str, ...] = DEFAULT_AUDIT_CHANNELS,
         audit_per_channel_limit: int = 20,
         time_range: TimeRange | None = None,
@@ -101,25 +106,27 @@ class DecisionContextAggregator:
                 }
                 break
 
-        # ---------- recent audit events（DB,1 次查询多 channel）----------
-        timeline_agg = TimelineAggregator(
-            session_factory=self._session_factory, runtime=runtime
-        )
-        audit = await timeline_agg.get_audit_events_by_condition(
-            condition_id=condition_id,
-            channels=audit_channels,
-            time_range=time_range,
-            per_channel_limit=audit_per_channel_limit,
-        )
-
-        return {
+        result: dict[str, Any] = {
             "condition_id": condition_id,
             "token_id": token_id,
             "market": market_payload,
             "positions": position_items,
             "live_state": live_state,
-            "recent_audit_events": audit,
         }
+
+        # ---------- recent audit events（仅 include_audit=True 才走 1 次 DB）----------
+        if include_audit:
+            timeline_agg = TimelineAggregator(
+                session_factory=self._session_factory, runtime=runtime
+            )
+            result["recent_audit_events"] = await timeline_agg.get_audit_events_by_condition(
+                condition_id=condition_id,
+                channels=audit_channels,
+                time_range=time_range,
+                per_channel_limit=audit_per_channel_limit,
+            )
+
+        return result
 
 
 __all__ = ["DecisionContextAggregator", "DEFAULT_AUDIT_CHANNELS"]

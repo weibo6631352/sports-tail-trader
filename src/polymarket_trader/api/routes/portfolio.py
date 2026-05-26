@@ -46,8 +46,13 @@ def _runtime_error_detail(exc: RuntimeError) -> str:
 
 @router.get("")
 async def get_portfolio(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
-    aggregator = RuntimeAggregator(runtime=runtime, session_factory=runtime.db_session_factory)
-    return await aggregator.portfolio_snapshot()
+    """组合快照——纯内存（余额 / 持仓 PnL / 暴露聚合）,零 DB。
+
+    前端首屏高频刷新,不能拖 DB。需要近期 allocation 历史走
+    ``GET /allocations?limit=N``。
+    """
+    aggregator = RuntimeAggregator(runtime=runtime)
+    return aggregator.portfolio_snapshot()
 
 
 @router.get("/exposure")

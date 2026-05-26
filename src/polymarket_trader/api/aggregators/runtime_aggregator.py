@@ -18,7 +18,6 @@ from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.config import Settings
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.infra.db import RepositoryPage
 from polymarket_trader.infra.polymarket.clob_client import ClobClient
 from polymarket_trader.infra.polymarket.data_client import DataClient
 from polymarket_trader.infra.polymarket.gamma_client import GammaClient
@@ -29,7 +28,6 @@ from polymarket_trader.runtime.supervisor import Supervisor
 from polymarket_trader.serialization import utc_now
 from polymarket_trader.workflow.config import TradingWorkflowConfig
 
-from ._db import RepositoryGroup, with_repositories
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -192,23 +190,14 @@ class RuntimeAggregator:
         }
 
     # ---------- portfolio snapshot ----------
-    async def portfolio_snapshot(self) -> dict[str, Any]:
+    def portfolio_snapshot(self) -> dict[str, Any]:
+        """账户聚合（余额 / 持仓 PnL / 暴露）——纯内存,零 DB。
+
+        recent_allocations 字段已删——前端高频刷新场景不能拖 DB。需要近期
+        allocation 列表显式走 ``GET /allocations?limit=50``,单一职责更清晰。
+        """
         account = self._account_snapshot()
-        base = self._portfolio_pnl_aggregates(account)
-
-        if self._session_factory is None:
-            return {**base, "recent_allocations": []}
-
-        async def _query(repos: RepositoryGroup) -> RepositoryPage[Any]:
-            return await repos.allocation.list_allocations_snapshot(limit=50, offset=0)
-
-        allocations = await with_repositories(self._session_factory, _query)
-        return {
-            **base,
-            "recent_allocations": [
-                self._serializer().allocation(allocation) for allocation in allocations.items
-            ],
-        }
+        return self._portfolio_pnl_aggregates(account)
 
     def _portfolio_pnl_aggregates(self, account: Any) -> dict[str, Any]:
         positions = account.positions
