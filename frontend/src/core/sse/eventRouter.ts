@@ -77,9 +77,25 @@ export const DEFAULT_EVENT_ROUTES: EventRoute[] = [
     match: eventTypeMatch('trading_paused_for_market'),
     invalidate: [qkRoots.markets, qkRoots.ready, qkRoots.auditEvents],
   },
+  // ---- 全局暂停 / 恢复（operator manual pause/resume） ----
+  {
+    match: eventTypeMatch('trading_paused', 'trading_resumed'),
+    invalidate: [
+      qkRoots.ready,
+      qkRoots.runtime,
+      qkRoots.workers,
+      qkRoots.markets,
+      qkRoots.candidates,
+    ],
+  },
   // ---- 体育实时事件 ----
   {
     match: eventTypeMatch('sports_live_state_recorded'),
+    invalidate: [qkRoots.candidates, qkRoots.sports, qkRoots.auditEvents],
+  },
+  // ---- 直播源校准 gap（新 gap / gap 消失都刷 source-gaps / live-states 看板） ----
+  {
+    match: eventTypeMatch('sports_live_match_gap_recorded'),
     invalidate: [qkRoots.candidates, qkRoots.sports, qkRoots.auditEvents],
   },
   // ---- AllocationPlan 决策过程 ----
@@ -96,6 +112,23 @@ export const DEFAULT_EVENT_ROUTES: EventRoute[] = [
   {
     match: eventTypeMatch('parameter_override_applied'),
     invalidate: [qkRoots.parameters, qkRoots.auditEvents],
+  },
+  // ---- Readiness / 全局降级状态翻转（Supervisor 边沿触发） ----
+  // phase / ready_to_trade / blocking_reasons / manual_pause_reason / degraded_reason
+  // 任一翻转即推送一次,前端 banner / Workers / runtime 视图立即对齐。
+  {
+    match: eventTypeMatch('readiness_changed'),
+    invalidate: [qkRoots.ready, qkRoots.runtime, qkRoots.workers],
+  },
+  // ---- 单个 worker healthy / state / last_error 翻转 ----
+  {
+    match: eventTypeMatch('worker_health_changed'),
+    invalidate: [qkRoots.workers, qkRoots.runtime],
+  },
+  // ---- Outbox 队列压力翻转 / 新增 dead letter ----
+  {
+    match: eventTypeMatch('outbox_backpressure_changed'),
+    invalidate: [qkRoots.outbox, qkRoots.operations],
   },
   // ---- Reconcile ----
   // reconcile_diff_detected = 实际持仓/订单有变化，需刷新 positions/orders/portfolio。

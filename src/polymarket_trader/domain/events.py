@@ -89,6 +89,12 @@ class DomainEventType(StrEnum):
     # 操盘读 OrderbookDeltaStore.direction_signal 时落审计,记录窗口内 best bid/ask
     # delta + direction_score。供事后复盘"为什么这一刻判断买/卖压 → 决定加仓/退场"。
     ORDERBOOK_DIRECTION_QUERIED = "orderbook_direction_queried"
+    # 边沿触发(Supervisor.refresh 内)——readiness phase / ready_to_trade /
+    # blocking_reasons 翻转,worker healthy/state 翻转,outbox 跨水位/失败累计。
+    # 前端 SSE invalidate 用,审计可选。
+    READINESS_CHANGED = "readiness_changed"
+    WORKER_HEALTH_CHANGED = "worker_health_changed"
+    OUTBOX_BACKPRESSURE_CHANGED = "outbox_backpressure_changed"
     RETRY = "retry"
     SKIPPED = "skipped"
     ERROR = "error"

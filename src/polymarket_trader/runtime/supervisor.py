@@ -3,7 +3,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import is_dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 
+from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.runtime.event_bus import EventBus
 from polymarket_trader.runtime.status import (
     ReadinessSnapshot,
@@ -122,6 +124,12 @@ class Supervisor:
         # 通常 200-400ms。单次超阈值就 pause 等于把毛刺当 backpressure,死循环根因。
         self._latency_breach_count = 0
         self._latency_breach_threshold = 3
+        # 边沿触发 SSE event 用 —— Supervisor.refresh 每周期对比这几个 signature,
+        # 翻转才 publish。冷启动 None 不算翻转(首次 refresh 不无中生有发事件)。
+        self._last_readiness_signature: tuple[Any, ...] | None = None
+        self._last_worker_signatures: dict[str, tuple[Any, ...]] = {}
+        self._last_outbox_pressure: bool | None = None
+        self._last_outbox_dead_letter_depth: int = 0
 
     def register_worker(
         self,
@@ -229,7 +237,123 @@ class Supervisor:
         if readiness is not None and readiness.ready and self._manual_pause_reason is None:
             self._phase = RuntimePhase.TRADING_ENABLED
             snapshot = self._snapshot_with(queue_depths=queue_depths, metrics=metrics)
+        # 边沿触发 SSE 广播——只有翻转才推,常态稳定 0 事件;前端 staleTime=Infinity
+        # 必须靠 invalidate 才会 refetch。
+        self._emit_readiness_change(snapshot)
+        self._emit_worker_health_changes(snapshot.worker_health)
+        self._emit_outbox_backpressure(snapshot)
         return snapshot
+
+    # ---------- 边沿触发 SSE 广播 ----------
+
+    def _publish_change(self, event_type: DomainEventType, payload: dict[str, Any]) -> None:
+        """Supervisor 内部观测事件统一走 P2 publish_nowait——
+        非交易主链路,失败不阻塞;前端 SSE 拿到立即 invalidate。
+        """
+        try:
+            self._event_bus.publish_nowait(
+                OutboxPriority.P2,
+                DomainEvent(
+                    trace_id=uuid4().hex,
+                    event_type=event_type,
+                    event_id=uuid4().hex,
+                    payload=payload,
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            # Supervisor 自身错误绝不反向阻塞 refresh 主循环。
+            pass
+
+    def _emit_readiness_change(self, snapshot: RuntimeSnapshot) -> None:
+        readiness = snapshot.readiness
+        signature = (
+            snapshot.phase.value,
+            snapshot.automatic_trading_enabled,
+            bool(readiness.ready) if readiness is not None else False,
+            tuple(readiness.blocking_reasons) if readiness is not None else (),
+            snapshot.manual_pause_reason,
+            snapshot.degraded_reason,
+        )
+        previous = self._last_readiness_signature
+        self._last_readiness_signature = signature
+        if previous is None or previous == signature:
+            return
+        self._publish_change(
+            DomainEventType.READINESS_CHANGED,
+            {
+                "phase": signature[0],
+                "automatic_trading_enabled": signature[1],
+                "ready_to_trade": signature[2],
+                "blocking_reasons": list(signature[3]),
+                "manual_pause_reason": signature[4],
+                "degraded_reason": signature[5],
+                "previous": {
+                    "phase": previous[0],
+                    "ready_to_trade": previous[2],
+                    "blocking_reasons": list(previous[3]),
+                },
+            },
+        )
+
+    def _emit_worker_health_changes(self, workers: tuple[WorkerHealth, ...]) -> None:
+        seen: set[str] = set()
+        for worker in workers:
+            seen.add(worker.name)
+            signature = (
+                worker.state.value if hasattr(worker.state, "value") else str(worker.state),
+                bool(worker.healthy),
+                worker.last_error,
+            )
+            previous = self._last_worker_signatures.get(worker.name)
+            self._last_worker_signatures[worker.name] = signature
+            if previous is None or previous == signature:
+                continue
+            self._publish_change(
+                DomainEventType.WORKER_HEALTH_CHANGED,
+                {
+                    "worker": worker.name,
+                    "priority": worker.priority,
+                    "state": signature[0],
+                    "healthy": signature[1],
+                    "last_error": signature[2],
+                    "previous": {
+                        "state": previous[0],
+                        "healthy": previous[1],
+                        "last_error": previous[2],
+                    },
+                },
+            )
+        # 注销的 worker 从 signature dict 移除,避免无限累积;不发"removed" 事件——
+        # worker 注销目前只在 shutdown 路径触发,前端不需要单独感知。
+        for name in tuple(self._last_worker_signatures.keys()):
+            if name not in seen:
+                self._last_worker_signatures.pop(name, None)
+
+    def _emit_outbox_backpressure(self, snapshot: RuntimeSnapshot) -> None:
+        persistence = _as_mapping(snapshot.persistence)
+        outbox_depth = _int(persistence, "outbox_depth")
+        dead_letter_depth = _int(persistence, "outbox_dead_letter_depth")
+        under_pressure = outbox_depth >= self._outbox_depth_warn
+        new_dead_letters = max(0, dead_letter_depth - self._last_outbox_dead_letter_depth)
+        pressure_flipped = (
+            self._last_outbox_pressure is not None
+            and self._last_outbox_pressure != under_pressure
+        )
+        # 冷启动 (_last_outbox_pressure is None) 不发；只在翻转或新增 dead letter 时发。
+        self._last_outbox_pressure = under_pressure
+        self._last_outbox_dead_letter_depth = dead_letter_depth
+        if not pressure_flipped and new_dead_letters <= 0:
+            return
+        self._publish_change(
+            DomainEventType.OUTBOX_BACKPRESSURE_CHANGED,
+            {
+                "under_pressure": under_pressure,
+                "outbox_depth": outbox_depth,
+                "outbox_depth_warn": self._outbox_depth_warn,
+                "outbox_dead_letter_depth": dead_letter_depth,
+                "new_dead_letters": new_dead_letters,
+            },
+        )
 
     def snapshot(self) -> RuntimeSnapshot:
         return self._snapshot_with()

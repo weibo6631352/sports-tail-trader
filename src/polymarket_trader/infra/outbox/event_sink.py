@@ -59,6 +59,14 @@ _PERSISTABLE_EVENT_TYPES = {
     # ORDERBOOK_DIRECTION_QUERIED — operator 读路径,无需 audit
 }
 
+# 刻意不入库的纯前端 SSE 观测事件——Supervisor 边沿触发,只为前端 invalidate,
+# 入库无价值还会撑大 audit_events 表。和"未知 event_type"区分开,避免一次性 warn。
+_INTENTIONALLY_SKIPPED_EVENT_TYPES = {
+    DomainEventType.READINESS_CHANGED.value,
+    DomainEventType.WORKER_HEALTH_CHANGED.value,
+    DomainEventType.OUTBOX_BACKPRESSURE_CHANGED.value,
+}
+
 
 
 class OutboxSink(Protocol):
@@ -84,7 +92,11 @@ def _to_outbox_event(priority: int, event: Any) -> OutboxEvent | None:
     if event_type_text not in _PERSISTABLE_EVENT_TYPES:
         # 上游新增 event_type 但忘改 _PERSISTABLE_EVENT_TYPES 会导致事件静默丢失，
         # 上线后只能事后才发现「audit 漏了」。这里记一次 warning（按 type 去重避免刷屏）。
-        if event_type_text not in _unknown_event_types_warned:
+        # 但刻意不入库的纯前端 SSE 观测事件不报 warn——已显式登记在白名单。
+        if (
+            event_type_text not in _unknown_event_types_warned
+            and event_type_text not in _INTENTIONALLY_SKIPPED_EVENT_TYPES
+        ):
             _unknown_event_types_warned.add(event_type_text)
             logger.warning(
                 "outbox_sink: dropping non-persistable event_type=%s (add to _PERSISTABLE_EVENT_TYPES if audit needed)",
