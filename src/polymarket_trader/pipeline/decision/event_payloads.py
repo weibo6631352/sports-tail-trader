@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Mapping
 
-from polymarket_trader.app.decision_serialization import (
+from polymarket_trader.pipeline.decision.serialization import (
     TRADING_DECISION_WORKER_ORIGIN as TRADING_DECISION_WORKER_ORIGIN,
     serialize_allocation as serialize_allocation,
     serialize_allocation_plan as serialize_allocation_plan,

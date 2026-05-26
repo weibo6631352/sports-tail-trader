@@ -38,7 +38,7 @@ from polymarket_trader.domain.order import (
     SellOrderIntent,
 )
 from polymarket_trader.domain.decisions import ManualConfirmation
-from polymarket_trader.app.decision_serialization import (
+from polymarket_trader.pipeline.decision.serialization import (
     snapshot_allowance,
     snapshot_available_usdc,
 )

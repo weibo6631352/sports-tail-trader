@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 from polymarket_trader.serialization import decimal_text
-from polymarket_trader.app.admin_serialization import AdminSerializer
+from polymarket_trader.api.serialization import AdminSerializer
 from polymarket_trader.domain.events import AuditEvent, Fill
 from polymarket_trader.domain.market import Market, TradingStatus
 from polymarket_trader.domain.order import Order

@@ -62,7 +62,7 @@ def _candidate_matches_filters(
     if confirmable is not None and bool(candidate.get("confirmable")) is not confirmable:
         return False
     return True
-from polymarket_trader.app.decision_serialization import serialize_intent
+from polymarket_trader.pipeline.decision.serialization import serialize_intent
 from polymarket_trader.app.market_tracking_policy import market_outside_trade_window
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.market import Market

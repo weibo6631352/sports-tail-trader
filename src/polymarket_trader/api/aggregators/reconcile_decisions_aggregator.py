@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from polymarket_trader.serialization import page_payload
-from polymarket_trader.app.admin_serialization import AdminSerializer
+from polymarket_trader.api.serialization import AdminSerializer
 from polymarket_trader.domain.decisions import DecisionRecord
 from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.time_filters import TimeRange

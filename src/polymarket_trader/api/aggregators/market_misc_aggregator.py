@@ -39,7 +39,7 @@ from uuid import uuid4
 
 from typing import Literal
 
-from polymarket_trader.app.admin_serialization import AdminSerializer
+from polymarket_trader.api.serialization import AdminSerializer
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market

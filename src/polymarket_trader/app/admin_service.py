@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 from polymarket_trader.app.admin_order_control import AdminOrderController
 from polymarket_trader.serialization import decimal_text, jsonable
-from polymarket_trader.app.admin_serialization import AdminSerializer
+from polymarket_trader.api.serialization import AdminSerializer
 from polymarket_trader.app.order_projection import AccountStateProjector, normalize_order_id
 from polymarket_trader.pipeline.decision.decision_context_builder import DecisionContextBuilder
 from polymarket_trader.pipeline.execution.order_gateway import OrderGateway
@@ -19,7 +19,7 @@ from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import Order
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.decisions import ManualConfirmation
-from polymarket_trader.app.decision_serialization import (
+from polymarket_trader.pipeline.decision.serialization import (
     TRADING_DECISION_WORKER_ORIGIN,
     serialize_allocation,
     serialize_allocation_plan,

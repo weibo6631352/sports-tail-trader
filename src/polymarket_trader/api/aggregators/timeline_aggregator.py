@@ -24,7 +24,7 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from polymarket_trader.serialization import jsonable, page_payload
-from polymarket_trader.app.admin_serialization import AdminSerializer
+from polymarket_trader.api.serialization import AdminSerializer
 from polymarket_trader.domain.analytics.trade_replay import TradeReplayFilters, build_trade_replay_records
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
