@@ -131,11 +131,15 @@ async def export_resource(
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, description="max rows; capped at 100000"),
     _rate: None = Depends(rate_limit(endpoint="export_resource", qps=0.2, burst=1)),
 ) -> StreamingResponse:
-    if resource not in _ALLOWED_RESOURCES:
+    # URL 一律 hyphen 形式(/audit-events/...), 但 DB 表名是 underscore
+    # (audit_events). 接受两种写法, 内部统一到 DB 表名.
+    canonical_resource = resource.replace("-", "_")
+    if canonical_resource not in _ALLOWED_RESOURCES:
         raise HTTPException(
             status_code=404,
             detail=f"unknown_resource: {resource}; allowed={list(_ALLOWED_RESOURCES)}",
         )
+    resource = canonical_resource
     if format not in _ALLOWED_FORMATS:
         raise HTTPException(
             status_code=400,
