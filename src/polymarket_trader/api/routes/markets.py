@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from polymarket_trader.api.aggregators import (
     MarketDetailAggregator,
-    MarketMiscAggregator,  # noqa: F401 — wired in following commit (markets route switch)
+    MarketMiscAggregator,
     SettlementAggregator,
 )
 from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
@@ -165,64 +165,50 @@ async def get_orderbook_direction(
 async def get_orderbook_depth(
     token_id: str = Query(min_length=1),
     windows: str = Query(default="2,3,5,10", description="逗号分隔的窗口秒数"),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """完整盘口资金分布 + 我方 resting/持仓 + 多窗口波动。
-
-    返回字段:
-    - bid/ask 双侧:total_size/usdc, top20 levels, 中位价(累积 size 50%), 地板/天花板集中量
-    - ours:position_shares/cost, resting BUY/SELL size/usdc
-    - windows:每个窗口秒数对应的 bid/ask total size/usdc delta + best price delta + mid delta
-
-    内存 ring buffer 由 market_ws 每次 snapshot 更新自动喂入,15s 时间窗.
-    """
+    """完整盘口资金分布 + 我方 resting/持仓 + 多窗口波动。"""
     try:
         windows_s = tuple(float(w.strip()) for w in windows.split(",") if w.strip())
     except ValueError:
         raise HTTPException(status_code=422, detail="windows must be comma-separated floats")
     if not windows_s:
         windows_s = (2.0, 3.0, 5.0, 10.0)
-    return service.orderbook_depth_snapshot(token_id=token_id, windows_s=windows_s)
+    return MarketMiscAggregator(runtime=runtime).orderbook_depth_snapshot(
+        token_id=token_id, windows_s=windows_s,
+    )
 
 
 @router.get("/liquidity-summary")
 async def get_liquidity_summary(
     top_n: int = Query(default=20, ge=1, le=100),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """全市场盘口资金聚合 + 双边比例 + whale 大单 + by_classification 分组 + top N 深度.
-
-    回答"当前 Polymarket 我们追踪的所有市场总流动性多少,双边压力如何,哪类
-    盘口资金最多".
-    """
-    return service.liquidity_summary_snapshot(top_n=top_n)
+    """全市场盘口资金聚合 + 双边比例 + whale 大单 + by_classification + top N 深度。"""
+    return MarketMiscAggregator(runtime=runtime).liquidity_summary_snapshot(top_n=top_n)
 
 
 @router.get("/event-bundle")
 async def get_event_bundle(
     event_slug: str = Query(min_length=1),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """一个 event 下所有 condition_id 的市场聚合视图(ML/Totals/Spreads/分节 prop 一次拿).
-
-    每市场带 classification + 各 token 的 best bid/ask + bid/ask usdc + 双边比例.
-    """
-    return service.event_bundle_snapshot(event_slug=event_slug)
+    """一个 event 下所有 condition_id 的市场聚合视图（ML/Totals/Spreads/分节 prop 一次拿）。"""
+    return MarketMiscAggregator(runtime=runtime).event_bundle_snapshot(event_slug=event_slug)
 
 
 @router.get("/data-health")
 async def get_market_data_health(
     condition_id: str | None = Query(default=None),
     token_id: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """单市场所有数据源连接状态 + 新鲜度。
-
-    覆盖:market_ws / live_state / inplay / pregame.回答"这个市场各路数据现在是否新鲜".
-    """
+    """单市场所有数据源连接状态 + 新鲜度。"""
     if condition_id is None and token_id is None:
         raise HTTPException(status_code=422, detail="condition_id or token_id required")
-    return service.market_data_health_snapshot(condition_id=condition_id, token_id=token_id)
+    return MarketMiscAggregator(runtime=runtime).market_data_health_snapshot(
+        condition_id=condition_id, token_id=token_id,
+    )
 
 
 @router.get("/orderbook-history")
@@ -233,17 +219,12 @@ async def list_orderbook_history(
     condition_id: str | None = Query(default=None, min_length=1),
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """历史盘口快照查询，按 ``received_at`` 倒序。
-
-    ``orderbook_snapshots`` 表已经在落，本接口只暴露 GET。复盘"入场那一秒
-    的盘口"用——按 token_id / condition_id + 时间窗过滤。
-    """
-
+    """历史盘口快照查询，按 ``received_at`` 倒序。"""
     if token_id is None and condition_id is None:
         raise HTTPException(status_code=422, detail="token_id_or_condition_id_required")
-    return await service.list_orderbook_history(
+    return await MarketMiscAggregator(runtime=runtime).list_orderbook_history(
         limit=limit,
         offset=offset,
         token_id=token_id,
@@ -259,7 +240,7 @@ async def get_market_prices_history(
     end_ts: int | None = Query(default=None, ge=0),
     interval: Literal["max", "all", "1m", "1w", "1d", "6h", "1h"] | None = Query(default=None),
     fidelity: int | None = Query(default=None, ge=1),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
     _rate: None = Depends(rate_limit(endpoint="prices_history", qps=2.0, burst=5)),
 ) -> dict[str, object]:
     if interval is None and start_ts is None:
@@ -270,7 +251,7 @@ async def get_market_prices_history(
     if start_ts is not None and end_ts is not None and start_ts > end_ts:
         raise HTTPException(status_code=422, detail="start_ts must be <= end_ts")
     try:
-        return await service.get_market_prices_history(
+        return await MarketMiscAggregator(runtime=runtime).get_market_prices_history(
             token_id=token_id,
             start_ts=start_ts,
             end_ts=end_ts,
@@ -306,9 +287,9 @@ async def list_markets(
     ]
     | None = Query(default=None),
     sort_direction: Literal["asc", "desc"] = Query(default="desc"),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    return await service.list_markets(
+    return await MarketMiscAggregator(runtime=runtime).list_markets(
         limit=limit,
         offset=offset,
         trading_status=trading_status,
@@ -399,15 +380,10 @@ async def get_market_liquidity(
     condition_id: str | None = Query(default=None),
     market_slug: str | None = Query(default=None),
     depth_ticks: int = Query(default=5, ge=1, le=20),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """盘口流动性快照（纯 WS 热缓存，零 DB，零 P0 影响）。
-
-    返回：VWAP 中间价、有效买卖价差（bps）、bid/ask 各档累计深度、
-    盘口快照新鲜度（snapshot_age_ms）。
-    """
-
-    payload = service.get_market_liquidity(
+    """盘口流动性快照（纯 WS 热缓存，零 DB，零 P0 影响）。"""
+    payload = MarketMiscAggregator(runtime=runtime).get_market_liquidity(
         token_id=token_id,
         condition_id=condition_id,
         market_slug=market_slug,
@@ -424,15 +400,10 @@ async def get_market_impact(
     size_usdc: float = Query(gt=0, le=100_000, description="目标买入 USDC 金额"),
     condition_id: str | None = Query(default=None),
     market_slug: str | None = Query(default=None),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """下单前冲击成本估算（纯 WS 热缓存，零 DB，零 P0 影响）。
-
-    给定目标买入 USDC，逐档遍历 ask 侧，估算预计成交均价、预计份额、
-    价格冲击（bps）、可填满比例。下单前快速判断流动性是否充足。
-    """
-
-    payload = service.get_market_impact(
+    """下单前冲击成本估算（纯 WS 热缓存，零 DB，零 P0 影响）。"""
+    payload = MarketMiscAggregator(runtime=runtime).get_market_impact(
         token_id=token_id,
         size_usdc=Decimal(str(size_usdc)),
         condition_id=condition_id,
