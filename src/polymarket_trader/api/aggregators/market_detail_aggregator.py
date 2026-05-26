@@ -34,21 +34,6 @@ class MarketDetailAggregator:
             return None
         return self._serialize(view, level=level)
 
-    def batch_detail(
-        self,
-        condition_ids: tuple[str, ...],
-        *,
-        level: Level = "summary",
-    ) -> tuple[dict[str, Any], ...]:
-        """一次返回 N 个 market 详情，避免 agent 多次 single-detail 调用。"""
-
-        results = []
-        for cid in condition_ids:
-            payload = self.detail(cid, level=level)
-            if payload is not None:
-                results.append(payload)
-        return tuple(results)
-
     def orderbook(self, token_id: str) -> dict[str, Any] | None:
         outcome = self._graph.outcome_view(token_id)
         if outcome is None or outcome.orderbook is None:

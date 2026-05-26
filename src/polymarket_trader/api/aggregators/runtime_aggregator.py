@@ -1,11 +1,8 @@
 """RuntimeAggregator —— runtime/health/readiness/workers/metrics + portfolio
-snapshot + paper ledger + risk metrics + data freshness + outbox queue depth。
+snapshot + data freshness + outbox queue depth。
 
 原架构方案 §12.2 ① 运营查询类（走 runtime 内存快照 + 短 TTL 缓存）。
-
-paper trading 量化诊断 / 异常检测 / CLV 等专题在 `PaperTradingAggregator`；
-系统性能 / 内存 / 数据源健康在 `SystemObservabilityAggregator`——本 aggregator
-只负责 operator 主仪表盘的高频核心视图。
+operator 主仪表盘的高频核心视图。
 """
 
 from __future__ import annotations
@@ -14,7 +11,6 @@ import logging
 import time as _time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from statistics import mean, stdev
 from typing import TYPE_CHECKING, Any, Mapping
 
 from polymarket_trader.serialization import decimal_text, jsonable
@@ -307,95 +303,6 @@ class RuntimeAggregator:
             })
         items.sort(key=lambda x: x["staleness_ms"] if x["staleness_ms"] is not None else -1, reverse=True)
         return {"available": True, "item_count": len(items), "items": items}
-
-    # ---------- paper ledger ----------
-    def paper_ledger_snapshot(self) -> dict[str, object] | None:
-        if self._runtime is None or self._runtime.paper_ledger is None:
-            return None
-        ledger = self._runtime.paper_ledger
-        ws = self._runtime.market_ws_worker
-        positions = {tok: str(shares) for tok, shares in ledger.positions.items()}
-        avg_prices: dict[str, str] = {}
-        unrealized_value = Decimal("0")
-        total_cost = Decimal("0")
-        for tok, shares in ledger.positions.items():
-            cost = ledger.cost_basis_usdc.get(tok, Decimal("0"))
-            if shares > Decimal("0"):
-                avg_prices[tok] = str((cost / shares).quantize(Decimal("0.0001")))
-            total_cost += cost
-            if ws is not None:
-                ob = ws.snapshot(tok)
-                if ob is not None and ob.best_bid is not None and ob.sell_actionable:
-                    unrealized_value += shares * ob.best_bid
-        return {
-            "paper_trading_mode": True,
-            "available_usdc": str(ledger.available_usdc),
-            "fees_accrued_usdc": str(ledger.fees_accrued_usdc),
-            "positions": positions,
-            "cost_basis_usdc": {tok: str(v) for tok, v in ledger.cost_basis_usdc.items()},
-            "avg_prices": avg_prices,
-            "total_cost_usdc": str(total_cost),
-            "unrealized_value_usdc": str(unrealized_value),
-            "unrealized_pnl_usdc": str(unrealized_value - total_cost),
-            "total_equity_usdc": str(ledger.available_usdc + unrealized_value),
-        }
-
-    # ---------- risk metrics (Sharpe / Sortino / Calmar / VaR) ----------
-    def risk_metrics_snapshot(self) -> dict[str, object] | None:
-        if self._runtime is None or self._runtime.paper_ledger is None:
-            return None
-        curve = getattr(self._runtime.paper_ledger, "equity_curve", [])
-        if len(curve) < 5:
-            return {"error": "需要至少 5 个数据点（每分钟 1 点）", "points_count": len(curve)}
-        equities = [float(p["equity_usdc"]) for p in curve]
-        returns = [
-            (equities[i] - equities[i - 1]) / equities[i - 1]
-            for i in range(1, len(equities))
-            if equities[i - 1] > 0
-        ]
-        if not returns:
-            return {"error": "no valid returns", "points_count": len(curve)}
-        mean_ret = mean(returns)
-        std_ret = stdev(returns) if len(returns) >= 2 else 0
-        periods_per_year = 525600
-        sharpe = (mean_ret / std_ret * (periods_per_year ** 0.5)) if std_ret > 0 else None
-        downside = [r for r in returns if r < 0]
-        downside_std = stdev(downside) if len(downside) >= 2 else 0
-        sortino = (mean_ret / downside_std * (periods_per_year ** 0.5)) if downside_std > 0 else None
-        peak = equities[0]
-        max_dd = 0.0
-        for eq in equities:
-            if eq > peak:
-                peak = eq
-            if peak > 0:
-                dd = (peak - eq) / peak
-                if dd > max_dd:
-                    max_dd = dd
-        total_return = (equities[-1] - equities[0]) / equities[0] if equities[0] > 0 else 0
-        period_minutes = len(curve)
-        annualized_return = total_return * (periods_per_year / period_minutes) if period_minutes > 0 else 0
-        calmar = (annualized_return / max_dd) if max_dd > 0 else None
-        sorted_returns = sorted(returns)
-        var_95 = sorted_returns[int(len(sorted_returns) * 0.05)] if len(sorted_returns) >= 20 else None
-        var_99 = sorted_returns[int(len(sorted_returns) * 0.01)] if len(sorted_returns) >= 100 else None
-        return {
-            "points_count": len(curve),
-            "returns_count": len(returns),
-            "current_equity": equities[-1],
-            "initial_equity": equities[0],
-            "total_return_pct": round(total_return * 100, 2),
-            "annualized_return_pct": round(annualized_return * 100, 2),
-            "mean_return_per_min": round(mean_ret * 100, 4),
-            "std_return_per_min": round(std_ret * 100, 4) if std_ret else 0,
-            "sharpe_ratio": round(sharpe, 3) if sharpe else None,
-            "sortino_ratio": round(sortino, 3) if sortino else None,
-            "max_drawdown_pct": round(max_dd * 100, 2),
-            "calmar_ratio": round(calmar, 3) if calmar else None,
-            "var_95_per_min_pct": round(var_95 * 100, 4) if var_95 else None,
-            "var_99_per_min_pct": round(var_99 * 100, 4) if var_99 else None,
-            "downside_returns_count": len(downside),
-            "downside_pct_of_total": round(len(downside) / len(returns) * 100, 1),
-        }
 
     # ===================== internal helpers =====================
 
