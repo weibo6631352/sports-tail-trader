@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping
 from uuid import uuid4
 
 if TYPE_CHECKING:
@@ -11,9 +11,6 @@ if TYPE_CHECKING:
 from polymarket_trader.app.admin_order_control import AdminOrderController
 from polymarket_trader.serialization import decimal_text, jsonable
 from polymarket_trader.app.admin_serialization import AdminSerializer
-from polymarket_trader.app.admin_service_helpers import (
-    _RepositoryGroup,
-)
 from polymarket_trader.app.order_projection import AccountStateProjector, normalize_order_id
 from polymarket_trader.pipeline.decision.decision_context_builder import DecisionContextBuilder
 from polymarket_trader.pipeline.execution.order_gateway import OrderGateway
@@ -29,18 +26,6 @@ from polymarket_trader.app.decision_serialization import (
     serialize_intent,
     serialize_plan_metadata,
     serialize_review,
-)
-from polymarket_trader.infra.db import (
-    AllocationRepository,
-    AuditEventRepository,
-    DecisionRecordRepository,
-    FillRepository,
-    MarketRepository,
-    OrderRepository,
-    OrderbookSnapshotRepository,
-    OutboxEventRepository,
-    PositionRepository,
-    RepositoryPage,
 )
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
@@ -401,38 +386,6 @@ class AdminService(AdminControlsMixin):
                 if market is not None:
                     return market
         return None
-
-    async def _with_repositories(self, callback: Callable[[_RepositoryGroup], Any]) -> Any:
-        session_factory = self.runtime.db_session_factory if self.runtime else None
-        if session_factory is None:
-            raise RuntimeError("db_session_factory unavailable")
-        async with session_factory() as session:
-            repositories = _RepositoryGroup(
-                audit=AuditEventRepository(session),
-                market=MarketRepository(session),
-                order=OrderRepository(session),
-                fill=FillRepository(session),
-                position=PositionRepository(session),
-                allocation=AllocationRepository(session),
-                decision=DecisionRecordRepository(session),
-                outbox=OutboxEventRepository(session),
-                orderbook=OrderbookSnapshotRepository(session),
-            )
-            return await callback(repositories)
-
-    def _slice_sequence(
-        self,
-        items: Sequence[Any],
-        *,
-        limit: int,
-        offset: int,
-    ) -> RepositoryPage[Any]:
-        if limit <= 0:
-            limit = 100
-        if offset < 0:
-            offset = 0
-        sliced = tuple(items[offset : offset + limit])
-        return RepositoryPage(items=sliced, total=len(items), limit=limit, offset=offset)
 
     def _find_open_order(
         self,

@@ -15,26 +15,147 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from collections.abc import Sequence
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from polymarket_trader.serialization import page_payload
 from polymarket_trader.app.admin_serialization import AdminSerializer
-from polymarket_trader.app.admin_service_helpers import (
-    _live_source_gap_market_payload,
-    _live_source_gap_outside_diagnostic_window,
-    _live_source_gap_scope_markets,
-    _live_source_gap_urgency,
-    _live_source_gap_urgency_rank,
-    _market_slug_prefix,
-)
 from polymarket_trader.config import Settings
 from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.time_filters import TimeRange
+from polymarket_trader.serialization import page_payload
 
 from ._helpers import slice_sequence
 from .timeline_aggregator import TimelineAggregator
+
+# 直播源缺口诊断窗口：开赛已超过此时长的市场视为陈旧，不再算缺口。
+# 设 6h 覆盖单场赛事全长（足球/篮球/棒球/网球/橄榄球均 < 5h）。
+_LIVE_SOURCE_GAP_PAST_WINDOW = timedelta(hours=6)
+
+
+def _ensure_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _market_slug_prefix(market: Market) -> str:
+    """提取 market slug 首段，用于直播源缺口聚合分组。"""
+    slug = (market.market_slug or market.event_slug or "").strip().lower()
+    if not slug:
+        return "unknown"
+    return slug.split("-", 1)[0] or "unknown"
+
+
+def _runtime_strategy(runtime: Any) -> Any | None:
+    try:
+        return runtime.workflow
+    except (RuntimeError, AttributeError):
+        pass
+    try:
+        return runtime.market_ingest_service.strategy
+    except AttributeError:
+        return None
+
+
+def _live_source_gap_scope_markets(
+    runtime: Any, markets: "Sequence[Market]",
+) -> tuple[Market, ...]:
+    """单场直播源覆盖诊断 = 仅 family == single_game 的市场子集。
+
+    系列赛/冠军/奖项/转会等长期市场不依赖单场直播源，避免缺口噪声污染。
+    """
+    hooks = _runtime_strategy(runtime)
+    if hooks is None:
+        return tuple(markets)
+    scoped: list[Market] = []
+    for market in markets:
+        try:
+            decision = hooks.select_market(market)
+        except Exception:  # noqa: BLE001
+            continue
+        if not decision.selected:
+            continue
+        family = (
+            hooks.market_family_label(market)
+            if hasattr(hooks, "market_family_label") else None
+        )
+        if family is not None and family != "single_game":
+            continue
+        scoped.append(market)
+    return tuple(scoped)
+
+
+def _live_source_gap_urgency(
+    market: Market,
+    *,
+    now: datetime,
+    supported_league_prefixes: frozenset[str] | None = None,
+) -> str:
+    if supported_league_prefixes is not None:
+        prefix = _market_slug_prefix(market)
+        if prefix and prefix != "unknown" and prefix not in supported_league_prefixes:
+            return "unsupported_league"
+    start_time = _ensure_utc(market.game_start_time)
+    if start_time is None:
+        return "unknown_time"
+    if start_time <= now:
+        return "started_or_past_due"
+    if start_time <= now + timedelta(hours=24):
+        return "starts_within_24h"
+    return "future_schedule"
+
+
+def _live_source_gap_outside_diagnostic_window(
+    market: Market, *, now: datetime,
+) -> bool:
+    start_time = _ensure_utc(market.game_start_time)
+    if start_time is None:
+        return False
+    return start_time < now - _LIVE_SOURCE_GAP_PAST_WINDOW
+
+
+def _live_source_gap_urgency_rank(urgency: str) -> int:
+    """直播源缺口优先级排序权重——越小越紧迫。unsupported_league 排最后。"""
+    ranks = {
+        "started_or_past_due": 0,
+        "starts_within_24h": 1,
+        "future_schedule": 2,
+        "unknown_time": 3,
+        "unsupported_league": 98,
+    }
+    return ranks.get(urgency, 99)
+
+
+def _live_source_gap_market_payload(
+    market: Market,
+    *,
+    now: datetime,
+    supported_league_prefixes: frozenset[str] | None = None,
+) -> dict[str, Any]:
+    """把缺少直播状态的 market 转成诊断样本。"""
+    start_time = _ensure_utc(market.game_start_time)
+    end_date = _ensure_utc(market.end_date)
+    return {
+        "condition_id": market.condition_id,
+        "market_slug": market.market_slug,
+        "event_slug": market.event_slug,
+        "slug_prefix": _market_slug_prefix(market),
+        "gap_urgency": _live_source_gap_urgency(
+            market, now=now, supported_league_prefixes=supported_league_prefixes,
+        ),
+        "game_start_time": None if start_time is None else start_time.isoformat(),
+        "end_date": None if end_date is None else end_date.isoformat(),
+        "market_question": market.market_question,
+        "event_title": market.event_title,
+        "category": market.category,
+        "tags": tuple(market.tags),
+        "trading_status": market.trading_status.value,
+        "outcome_count": len(market.outcomes),
+    }
 
 if TYPE_CHECKING:
     pass

@@ -24,7 +24,44 @@ from datetime import datetime, timezone
 from typing import Any
 
 from polymarket_trader.serialization import decimal_text, jsonable, page_payload
-from polymarket_trader.app.admin_service_helpers import _candidate_matches_filters
+from collections.abc import Mapping
+
+
+def _text_filter_matches(value: object, expected: str | None) -> bool:
+    if expected is None or not expected.strip():
+        return True
+    return str(value or "").strip().lower() == expected.strip().lower()
+
+
+def _candidate_matches_filters(
+    candidate: Mapping[str, Any],
+    *,
+    market_type: str | None,
+    game_status: str | None,
+    action: str | None,
+    execution_permission: str | None,
+    accepted: bool | None,
+    confirmable: bool | None,
+    league: str | None,
+) -> bool:
+    """判断候选投影是否满足管理台筛选条件。"""
+    if not _text_filter_matches(candidate.get("market_type"), market_type):
+        return False
+    if not _text_filter_matches(candidate.get("game_status"), game_status):
+        return False
+    if not _text_filter_matches(candidate.get("action"), action):
+        return False
+    if not _text_filter_matches(
+        candidate.get("execution_permission"), execution_permission,
+    ):
+        return False
+    if not _text_filter_matches(candidate.get("league"), league):
+        return False
+    if accepted is not None and bool(candidate.get("accepted")) is not accepted:
+        return False
+    if confirmable is not None and bool(candidate.get("confirmable")) is not confirmable:
+        return False
+    return True
 from polymarket_trader.app.decision_serialization import serialize_intent
 from polymarket_trader.app.market_tracking_policy import market_outside_trade_window
 from polymarket_trader.domain.account import AccountSnapshot

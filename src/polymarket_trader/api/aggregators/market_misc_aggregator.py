@@ -37,22 +37,84 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from typing import Literal
+
 from polymarket_trader.app.admin_serialization import AdminSerializer
-from polymarket_trader.serialization import decimal_text, page_payload
-from polymarket_trader.app.admin_service_helpers import (
-    MarketFeeSortField,
-    SortDirection,
-    _market_matches_fee_filters,
-    _orderbook_has_no_quotes,
-)
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
 from polymarket_trader.domain.market import Market
+from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
 from polymarket_trader.infra.db.repositories.market import sort_markets
 from polymarket_trader.infra.polymarket import PolymarketClientError
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
+from polymarket_trader.serialization import decimal_text, page_payload
+
+
+# 旧的 admin_service_helpers 排序字段——本 aggregator 唯一使用方，下沉至此
+MarketFeeSortField = Literal[
+    "market_slug",
+    "fee_rate_bps",
+    "fee_rate_updated_at",
+    "maker_base_fee_bps",
+    "taker_base_fee_bps",
+]
+SortDirection = Literal["asc", "desc"]
+
+
+def _orderbook_has_no_quotes(snapshot: OrderbookSnapshot) -> bool:
+    """判断热态盘口是否只是空占位（market_ws 先建空快照，查询侧不能误认有效）。"""
+    return (
+        snapshot.best_bid is None
+        and snapshot.best_ask is None
+        and not snapshot.bids
+        and not snapshot.asks
+    )
+
+
+def _market_matches_fee_filters(
+    market: Market,
+    *,
+    fees_enabled: bool | None = None,
+    fee_rate_bps_min: int | None = None,
+    fee_rate_bps_max: int | None = None,
+    maker_base_fee_bps_min: int | None = None,
+    maker_base_fee_bps_max: int | None = None,
+    taker_base_fee_bps_min: int | None = None,
+    taker_base_fee_bps_max: int | None = None,
+) -> bool:
+    if fees_enabled is not None and market.fees_enabled is not fees_enabled:
+        return False
+    if fee_rate_bps_min is not None and (
+        market.fee_rate_bps is None or market.fee_rate_bps < fee_rate_bps_min
+    ):
+        return False
+    if fee_rate_bps_max is not None and (
+        market.fee_rate_bps is None or market.fee_rate_bps > fee_rate_bps_max
+    ):
+        return False
+    if maker_base_fee_bps_min is not None and (
+        market.maker_base_fee_bps is None
+        or market.maker_base_fee_bps < maker_base_fee_bps_min
+    ):
+        return False
+    if maker_base_fee_bps_max is not None and (
+        market.maker_base_fee_bps is None
+        or market.maker_base_fee_bps > maker_base_fee_bps_max
+    ):
+        return False
+    if taker_base_fee_bps_min is not None and (
+        market.taker_base_fee_bps is None
+        or market.taker_base_fee_bps < taker_base_fee_bps_min
+    ):
+        return False
+    if taker_base_fee_bps_max is not None and (
+        market.taker_base_fee_bps is None
+        or market.taker_base_fee_bps > taker_base_fee_bps_max
+    ):
+        return False
+    return True
 
 from ._db import RepositoryGroup, with_repositories
 from ._helpers import slice_sequence
