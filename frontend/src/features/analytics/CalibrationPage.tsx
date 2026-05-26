@@ -27,7 +27,6 @@ import { InlineActionButton } from '@shared/ui/InlineActionButton'
 import { DataTable } from '@shared/tables/DataTable'
 import { TimeWindowPicker } from '@shared/time/TimeWindowPicker'
 import { useTimeWindowStore } from '@core/time/store'
-import { useAnalyticsFiltersStore } from '@core/filters/store'
 import { toDecimal } from '@shared/format'
 
 // Calibration page: reliability diagram + Brier / log-loss.

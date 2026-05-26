@@ -1,795 +1,229 @@
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  SimpleGrid,
-  Stack,
-  Group,
-  Text,
-  Anchor,
-  Alert,
-  Badge,
-  Progress,
-  Box,
-  Divider,
-} from '@mantine/core'
-import { IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react'
+import { Anchor, Group, SimpleGrid, Stack, Text } from '@mantine/core'
 import { useNavigate } from 'react-router-dom'
 import { qk } from '@core/api/keys'
-import {
-  healthApi,
-  portfolioApi,
-  marketsApi,
-  candidatesApi,
-  analyticsApi,
-} from '@core/api/resources'
-import { tradingWorkflowBundle } from '@strategy/registry'
+import { analyticsApi, healthApi } from '@core/api/resources'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { StatusPill } from '@shared/ui/StatusPill'
 import { QueryErrorNotice } from '@shared/ui/QueryErrorNotice'
-import {
-  formatUsdc,
-  pnlTone,
-  formatDecimal,
-  formatPercent,
-  toDecimal,
-} from '@shared/format'
-import type { PortfolioExposure, PortfolioExposureItem } from '@core/api/types'
-import type { UseQueryResult } from '@tanstack/react-query'
+import { formatPercent } from '@shared/format'
+
+// 操盘指挥中心——一站汇总当前 quant 状态.
+// 数据源:
+// - /analytics/quant-summary: 决策计数 + Kelly 内核 + 执行 + portfolio + 信号源覆盖
+// - /health: 4 维度状态
+// 详情下钻走 nav 各专门页面.
+
+const REFRESH_INTERVAL_MS = 5000
+
+function fmtPct(value: number | null | undefined): string {
+  if (value == null) return '—'
+  return `${(value * 100).toFixed(2)}%`
+}
+
+function fmtNum(value: number | null | undefined, digits = 4): string {
+  if (value == null) return '—'
+  return value.toFixed(digits)
+}
+
+function fmtUsdc(value: string | undefined): string {
+  if (!value) return '$—'
+  const n = Number(value)
+  if (!Number.isFinite(n)) return value
+  return `$${n.toFixed(2)}`
+}
 
 export function LiveOverviewPage() {
   const navigate = useNavigate()
-
-  const ready = useQuery({
-    queryKey: qk.ready(),
-    queryFn: ({ signal }) => healthApi.ready(signal),
+  const health = useQuery({
+    queryKey: qk.health(),
+    queryFn: ({ signal }) => healthApi.health(signal),
+    refetchInterval: REFRESH_INTERVAL_MS,
   })
-  const runtime = useQuery({
-    queryKey: qk.runtime(),
-    queryFn: ({ signal }) => healthApi.runtime(signal),
-  })
-  const workers = useQuery({
-    queryKey: qk.workers(),
-    queryFn: ({ signal }) => healthApi.workers(signal),
-  })
-  const portfolio = useQuery({
-    queryKey: qk.portfolio.snapshot(),
-    queryFn: ({ signal }) => portfolioApi.snapshot(signal),
-  })
-  const exposure = useQuery({
-    queryKey: qk.portfolio.exposure(),
-    queryFn: ({ signal }) => portfolioApi.exposure(signal),
-  })
-  const latency = useQuery({
-    queryKey: qk.latency({ window_ms: null, sample_limit: 500 }),
-    queryFn: ({ signal }) => healthApi.latencyPercentiles({ sample_limit: 500 }, signal),
-  })
-  const pausedMarkets = useQuery({
-    queryKey: qk.markets.list({ trading_status: 'paused', limit: 15 }),
-    queryFn: ({ signal }) => marketsApi.list({ trading_status: 'paused', limit: 15 }, signal),
-  })
-  const trackingBreakdown = useQuery({
-    queryKey: qk.markets.trackingBreakdown(),
-    queryFn: ({ signal }) => marketsApi.trackingBreakdown(signal),
-  })
-  const dataFreshness = useQuery({
-    queryKey: qk.candidates.dataFreshness(),
-    queryFn: ({ signal }) => candidatesApi.dataFreshness(signal),
-  })
-  const candidates = useQuery({
-    queryKey: qk.candidates.list({ limit: 1 }),
-    queryFn: ({ signal }) => candidatesApi.list({ limit: 1 }, signal),
-  })
-  const execQuality = useQuery({
-    queryKey: qk.analytics.executionQuality({ window_ms: 3_600_000 }),
-    queryFn: ({ signal }) => analyticsApi.executionQuality({ window_ms: 3_600_000 }, signal),
+  const summary = useQuery({
+    queryKey: ['analytics', 'quant-summary', 86_400_000],
+    queryFn: ({ signal }) => analyticsApi.quantSummary({ window_ms: 86_400_000 }, signal),
+    refetchInterval: REFRESH_INTERVAL_MS,
   })
 
-  const widgets = tradingWorkflowBundle.dashboardWidgets ?? []
-
-  const blockingReasons: string[] = ready.data?.blocking_reasons ?? []
-  const warnings: unknown[] = ready.data?.warnings ?? []
-  const isBlocked = blockingReasons.length > 0
-  const hasWarnings = warnings.length > 0 && !isBlocked
-  const readyToTrade = ready.data?.ready_to_trade ?? false
+  const s = summary.data
+  const h = health.data
 
   return (
     <>
-      <PageHeader
-        title="盯盘总览"
-        subtitle="连接状态 · portfolio · 持仓敞口 · 候选 pipeline · 执行质量"
-      />
+      <PageHeader title="操盘指挥中心" subtitle="量化决策器全景 · 实时刷新 · 详情下钻" />
 
-      {/* 告警 banner */}
-      {isBlocked && (
-        <Alert
-          icon={<IconAlertTriangle size={16} />}
-          color="red"
-          mb="md"
-          title={`交易已阻塞（${blockingReasons.length} 个原因）`}
-        >
-          <Stack gap={2}>
-            {blockingReasons.map((r, i) => (
-              <Text key={i} size="xs" ff="var(--font-mono)">
-                {r}
-              </Text>
-            ))}
-          </Stack>
-        </Alert>
-      )}
-      {hasWarnings && (
-        <Alert
-          icon={<IconAlertTriangle size={16} />}
-          color="yellow"
-          mb="md"
-          title={`${warnings.length} 条警告`}
-        >
-          <Stack gap={2}>
-            {warnings.slice(0, 5).map((w, i) => (
-              <Text key={i} size="xs" ff="var(--font-mono)">
-                {String(w)}
-              </Text>
-            ))}
-          </Stack>
-        </Alert>
-      )}
+      {summary.error ? <QueryErrorNotice error={summary.error} /> : null}
 
-      <SimpleGrid cols={{ base: 1, md: 2, lg: 3 }} spacing="md">
-
-        {/* 连接 / 就绪 */}
-        <SectionCard title="连接 / 就绪">
-          {ready.error ? (
-            <QueryErrorNotice error={ready.error} compact />
-          ) : (
-            <Stack gap={6}>
-              <Row
-                label="ready_to_trade"
-                tone={readyToTrade ? 'success' : 'danger'}
-                value={String(ready.data?.ready_to_trade ?? '—')}
-              />
-              <Row
-                label="market_ws"
-                tone={runtime.data?.readiness?.market_ws_connected ? 'success' : 'warning'}
-                value={String(runtime.data?.readiness?.market_ws_connected ?? '—')}
-              />
-              <Row
-                label="user_ws"
-                tone={
-                  (runtime.data?.readiness?.user_ws_connected ??
-                    ready.data?.runtime?.user_ws_connected)
-                    ? 'success'
-                    : 'warning'
-                }
-                value={String(
-                  runtime.data?.readiness?.user_ws_connected ??
-                    ready.data?.runtime?.user_ws_connected ??
-                    '—',
-                )}
-              />
-              <Row
-                label="trading_client"
-                tone={runtime.data?.readiness?.trading_client_ready ? 'success' : 'warning'}
-                value={String(runtime.data?.readiness?.trading_client_ready ?? '—')}
-              />
-              <Divider mt={4} mb={4} />
-              <Group justify="space-between" gap="xs">
-                <Text size="xs" c="dimmed">
-                  快速操作
-                </Text>
-                <Anchor size="xs" onClick={() => navigate('/live/operations')}>
-                  → 操作面板
-                </Anchor>
-              </Group>
-            </Stack>
-          )}
+      <Stack gap="md">
+        {/* 健康 + 持仓汇总 */}
+        <SectionCard title={`系统 / 持仓 · ${h?.status ?? '—'}`}>
+          <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
+            <Stat label="健康" value={h?.status ?? '—'} tone={healthTone(h?.status)} />
+            <Stat label="balance" value={fmtUsdc(s?.portfolio.balance_usdc)} />
+            <Stat label="net value" value={fmtUsdc(s?.portfolio.net_value_usdc)} />
+            <Stat
+              label="cash pnl"
+              value={fmtUsdc(s?.portfolio.cash_pnl_usdc)}
+              tone={pnlTone(s?.portfolio.cash_pnl_usdc)}
+            />
+            <Stat label="持仓" value={String(s?.portfolio.position_count ?? '—')} />
+            <Stat label="挂单" value={String(s?.portfolio.open_order_count ?? '—')} />
+            <Stat label="paused" value={String(s?.portfolio.paused_market_count ?? 0)} />
+            <Stat label="cost" value={fmtUsdc(s?.portfolio.cost_usdc)} />
+          </SimpleGrid>
+          <Group justify="flex-end" mt="sm">
+            <Anchor size="xs" onClick={() => navigate('/positions')}>持仓详情 →</Anchor>
+            <Anchor size="xs" onClick={() => navigate('/portfolio')}>portfolio →</Anchor>
+            <Anchor size="xs" onClick={() => navigate('/system/health')}>health →</Anchor>
+          </Group>
         </SectionCard>
 
-        {/* Portfolio */}
-        <SectionCard title="Portfolio">
-          {portfolio.error ? (
-            <QueryErrorNotice error={portfolio.error} compact />
-          ) : (
-            <Stack gap={6}>
-              <KV k="净值 net_value" v={formatUsdc(portfolio.data?.net_value_usdc)} />
-              <KV
-                k="名义敞口 notional"
-                v={formatUsdc(portfolio.data?.notional_usdc)}
+        {/* 决策计数 + 拒绝 top */}
+        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+          <SectionCard title="决策计数 (24h)">
+            <SimpleGrid cols={3} spacing="md">
+              <Stat label="总评估" value={String(s?.decision_counts.total ?? '—')} />
+              <Stat
+                label="accepted"
+                value={String(s?.decision_counts.accepted ?? '—')}
+                tone="pos"
               />
-              <KV
-                k="实现 PnL"
-                v={formatUsdc(portfolio.data?.realized_pnl_usdc)}
-                tone={pnlTone(portfolio.data?.realized_pnl_usdc)}
-              />
-              <KV
-                k="未实现 PnL"
-                v={formatUsdc(portfolio.data?.cash_pnl_usdc)}
-                tone={pnlTone(portfolio.data?.cash_pnl_usdc)}
-              />
-              <Divider mt={2} mb={2} />
-              <Group justify="space-between" gap="xs">
-                <Text size="xs" c="dimmed">
-                  持仓 / 开口
-                </Text>
-                <Anchor
-                  size="sm"
-                  fw={500}
-                  onClick={() => navigate('/live/positions')}
-                  style={{ cursor: 'pointer' }}
-                >
-                  {portfolio.data?.position_count ?? '—'} /{' '}
-                  {portfolio.data?.open_position_count ?? '—'}
-                </Anchor>
-              </Group>
-              <Group justify="space-between" gap="xs">
-                <Text size="xs" c="dimmed">
-                  挂单 open_orders
-                </Text>
-                <Anchor
-                  size="sm"
-                  fw={500}
-                  onClick={() => navigate('/live/orders')}
-                  style={{ cursor: 'pointer' }}
-                >
-                  {portfolio.data?.open_order_count ?? '—'}
-                </Anchor>
-              </Group>
-            </Stack>
-          )}
-        </SectionCard>
+              <Stat label="rejected" value={String(s?.decision_counts.rejected ?? '—')} />
+            </SimpleGrid>
+            <Text size="xs" c="dimmed" mt="xs">
+              接受率: {s ? formatPercent(s.decision_counts.accept_rate_pct / 100) : '—'}
+            </Text>
+            <Group justify="flex-end" mt="xs">
+              <Anchor size="xs" onClick={() => navigate('/investigate/decisions')}>决策记录 →</Anchor>
+              <Anchor size="xs" onClick={() => navigate('/analytics/funnel')}>漏斗 →</Anchor>
+            </Group>
+          </SectionCard>
 
-        {/* 资金预算 */}
-        <SectionCard title="资金预算">
-          {exposure.error ? (
-            <QueryErrorNotice error={exposure.error} compact />
-          ) : (
+          <SectionCard title="拒绝原因 top 5">
             <Stack gap={6}>
-              <KV k="余额 balance" v={formatUsdc(exposure.data?.balance_usdc)} />
-              <KV k="可用 available" v={formatUsdc(exposure.data?.available_usdc)} />
-              <KV k="权益 equity" v={formatUsdc(exposure.data?.equity_usdc)} />
-              <KV
-                k="已占名义 notional"
-                v={formatUsdc(exposure.data?.total_notional_usdc)}
-              />
-              <KV
-                k="BUY 预留"
-                v={formatUsdc(exposure.data?.total_open_buy_reserved_usdc)}
-              />
-              {(() => {
-                const balance = toDecimal(exposure.data?.balance_usdc)
-                const available = toDecimal(exposure.data?.available_usdc)
-                if (!balance || !available || balance.isZero()) return null
-                const usedPct = balance.minus(available).div(balance).mul(100).toNumber()
-                return (
-                  <Box mt={4}>
-                    <Group justify="space-between" mb={4}>
-                      <Text size="xs" c="dimmed">
-                        已用 / 总余额
-                      </Text>
-                      <Text size="xs">{usedPct.toFixed(1)}%</Text>
-                    </Group>
-                    <Progress
-                      value={Math.min(usedPct, 100)}
-                      color={usedPct > 80 ? 'red' : usedPct > 60 ? 'yellow' : 'teal'}
-                      size="xs"
-                    />
-                  </Box>
-                )
-              })()}
-            </Stack>
-          )}
-        </SectionCard>
-
-        {/* 候选 Pipeline */}
-        <SectionCard title="候选 Pipeline">
-          {dataFreshness.error ? (
-            <QueryErrorNotice error={dataFreshness.error} compact />
-          ) : (
-            <Stack gap={6}>
-              <KV
-                k="候选扫描数"
-                v={String(dataFreshness.data?.item_count ?? '—')}
-              />
-              {(() => {
-                const items = dataFreshness.data?.items ?? []
-                const signalOn = items.filter((i) => i.signal_allowed === true).length
-                const stale = items.filter(
-                  (i) => i.staleness_ms !== null && i.staleness_ms > 30_000,
-                ).length
-                const total = items.length
-                return (
-                  <>
-                    <KV
-                      k="signal_allowed"
-                      v={total > 0 ? `${signalOn} / ${total}` : '—'}
-                      tone={signalOn > 0 ? 'pos' : 'neutral'}
-                    />
-                    <KV
-                      k="数据过期 (>30s)"
-                      v={total > 0 ? String(stale) : '—'}
-                      tone={stale > 0 ? 'neg' : 'pos'}
-                    />
-                  </>
-                )
-              })()}
-              <KV
-                k="候选总数"
-                v={String(candidates.data?.total ?? candidates.data?.items?.length ?? '—')}
-              />
-              <Group justify="flex-end">
-                <Anchor size="xs" onClick={() => navigate('/live/candidates')}>
-                  → 候选列表
-                </Anchor>
-              </Group>
-            </Stack>
-          )}
-        </SectionCard>
-
-        {/* 执行质量（最近 1h）*/}
-        <SectionCard
-          title="执行质量"
-          description={
-            execQuality.data?.sample_size != null
-              ? `样本 ${execQuality.data.sample_size} 笔`
-              : undefined
-          }
-        >
-          {execQuality.error ? (
-            <QueryErrorNotice error={execQuality.error} compact />
-          ) : (
-            <Stack gap={6}>
-              <Text size="xs" c="dimmed" fw={500}>
-                提交延迟 submit_latency
-              </Text>
-              <Group justify="space-between" gap="xs" pl={8}>
-                <Text size="xs" c="dimmed">
-                  p50
-                </Text>
-                <Text size="xs">
-                  {execQuality.data?.submit_latency_ms?.p50 != null
-                    ? `${execQuality.data.submit_latency_ms.p50.toFixed(0)} ms`
-                    : '—'}
-                </Text>
-              </Group>
-              <Group justify="space-between" gap="xs" pl={8}>
-                <Text size="xs" c="dimmed">
-                  p95
-                </Text>
-                <Text size="xs">
-                  {execQuality.data?.submit_latency_ms?.p95 != null
-                    ? `${execQuality.data.submit_latency_ms.p95.toFixed(0)} ms`
-                    : '—'}
-                </Text>
-              </Group>
-              <Text size="xs" c="dimmed" fw={500} mt={4}>
-                Slippage
-              </Text>
-              <Group justify="space-between" gap="xs" pl={8}>
-                <Text size="xs" c="dimmed">
-                  mean
-                </Text>
-                <Text
-                  size="xs"
-                  c={
-                    execQuality.data?.slippage_bps?.mean != null &&
-                    execQuality.data.slippage_bps.mean > 50
-                      ? 'var(--color-danger)'
-                      : undefined
-                  }
-                >
-                  {execQuality.data?.slippage_bps?.mean != null
-                    ? `${execQuality.data.slippage_bps.mean.toFixed(1)} bps`
-                    : '—'}
-                </Text>
-              </Group>
-              <Group justify="space-between" gap="xs" pl={8}>
-                <Text size="xs" c="dimmed">
-                  p95
-                </Text>
-                <Text size="xs">
-                  {execQuality.data?.slippage_bps?.p95 != null
-                    ? `${execQuality.data.slippage_bps.p95.toFixed(1)} bps`
-                    : '—'}
-                </Text>
-              </Group>
-              <Group justify="flex-end">
-                <Anchor size="xs" onClick={() => navigate('/analytics/execution-quality')}>
-                  → 详细分析
-                </Anchor>
-              </Group>
-            </Stack>
-          )}
-        </SectionCard>
-
-        {/* 暂停市场快览 */}
-        <SectionCard
-          title="暂停市场"
-          description={
-            pausedMarkets.data?.items?.length
-              ? `${pausedMarkets.data.items.length} 个暂停`
-              : undefined
-          }
-        >
-          {pausedMarkets.error ? (
-            <QueryErrorNotice error={pausedMarkets.error} compact />
-          ) : (
-            <Stack gap={4}>
-              {(pausedMarkets.data?.items ?? []).length === 0 ? (
-                <Group gap={6}>
-                  <IconCircleCheck size={14} color="var(--color-success)" />
-                  <Text size="xs" c="dimmed">
-                    无暂停市场
-                  </Text>
-                </Group>
+              {!s?.rejection_top.length ? (
+                <Text size="xs" c="dimmed">无拒绝</Text>
               ) : (
-                (pausedMarkets.data?.items ?? []).slice(0, 8).map((m) => (
-                  <Box key={m.condition_id}>
-                    <Group justify="space-between" gap="xs" wrap="nowrap">
-                      <Text size="xs" ff="var(--font-mono)" style={{ flex: 1 }} truncate>
-                        {m.market_slug ?? m.condition_id.slice(0, 12)}
-                      </Text>
-                      <Badge color="red" size="xs" variant="light">
-                        暂停
-                      </Badge>
+                s.rejection_top.map((r) => (
+                  <Group key={r.reason} justify="space-between">
+                    <Text size="sm">{r.reason}</Text>
+                    <Group gap={6}>
+                      <Text size="sm" fw={600}>{r.count}</Text>
+                      <Text size="xs" c="dimmed">{r.pct.toFixed(1)}%</Text>
                     </Group>
-                    {m.pause_reason && (
-                      <Text size="xs" c="dimmed" pl={0} truncate>
-                        {m.pause_reason}
-                      </Text>
-                    )}
-                  </Box>
+                  </Group>
                 ))
               )}
-              {(pausedMarkets.data?.has_more || (pausedMarkets.data?.total ?? 0) > 8) && (
-                <Anchor size="xs" onClick={() => navigate('/markets')}>
-                  → 查看全部
-                </Anchor>
-              )}
             </Stack>
-          )}
+            <Group justify="flex-end" mt="sm">
+              <Anchor size="xs" onClick={() => navigate('/analytics/rejections')}>拒绝分析 →</Anchor>
+            </Group>
+          </SectionCard>
+        </SimpleGrid>
+
+        {/* Kelly 内核 + 执行 */}
+        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+          <SectionCard title={`Kelly 内核 (n=${s?.kelly_stats.sample_count ?? 0})`}>
+            <SimpleGrid cols={2} spacing="xs">
+              <Stat label="avg prob_p" value={fmtPct(s?.kelly_stats.avg_prob_p)} />
+              <Stat label="avg price_c" value={fmtPct(s?.kelly_stats.avg_price_c)} />
+              <Stat label="avg edge_net" value={fmtPct(s?.kelly_stats.avg_edge_net)} />
+              <Stat label="avg f_star" value={fmtNum(s?.kelly_stats.avg_f_star, 4)} />
+              <Stat label="avg budget" value={fmtUsdc(s?.kelly_stats.avg_buy_budget_usdc?.toFixed(2))} />
+              <Stat
+                label="round-up overbet"
+                value={`${s?.kelly_stats.rounded_up_count ?? 0} (${(s?.kelly_stats.rounded_up_pct ?? 0).toFixed(1)}%)`}
+              />
+            </SimpleGrid>
+          </SectionCard>
+
+          <SectionCard title="执行 (24h)">
+            <SimpleGrid cols={2} spacing="xs">
+              <Stat label="submitted" value={String(s?.execution.orders_submitted ?? '—')} />
+              <Stat label="filled" value={String(s?.execution.orders_filled ?? '—')} />
+              <Stat label="rejected" value={String(s?.execution.orders_rejected ?? '—')} />
+              <Stat label="fill rate" value={fmtPct((s?.execution.fill_rate_pct ?? 0) / 100)} />
+            </SimpleGrid>
+            <Group justify="flex-end" mt="sm">
+              <Anchor size="xs" onClick={() => navigate('/orders')}>订单 →</Anchor>
+              <Anchor size="xs" onClick={() => navigate('/fills')}>成交 →</Anchor>
+              <Anchor size="xs" onClick={() => navigate('/analytics/execution-quality')}>延迟 →</Anchor>
+            </Group>
+          </SectionCard>
+        </SimpleGrid>
+
+        {/* 信号源覆盖 + 健康 */}
+        <SectionCard title="信号源覆盖 + WS">
+          <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
+            <Stat
+              label="registry markets"
+              value={String(s?.market_coverage.registry_total ?? '—')}
+            />
+            <Stat
+              label="有 live state"
+              value={String(s?.market_coverage.with_live_state ?? '—')}
+              tone={s?.market_coverage.with_live_state ? 'pos' : 'neutral'}
+            />
+            <Stat
+              label="signal allowed"
+              value={String(s?.market_coverage.signal_allowed ?? '—')}
+              tone={s?.market_coverage.signal_allowed ? 'pos' : 'neutral'}
+            />
+            <Stat
+              label="WS 订阅"
+              value={String(s?.signal_health.ws_subscribed_tokens ?? '—')}
+            />
+          </SimpleGrid>
+          <Group justify="flex-end" mt="sm">
+            <Anchor size="xs" onClick={() => navigate('/live/goalserve')}>直播看板 →</Anchor>
+            <Anchor size="xs" onClick={() => navigate('/live/candidates')}>候选列表 →</Anchor>
+            <Anchor size="xs" onClick={() => navigate('/investigate/sports-events')}>事件流 →</Anchor>
+          </Group>
         </SectionCard>
 
-        {/* Workers / 队列 */}
-        <SectionCard
-          title="Workers / 队列"
-          description={
-            runtime.data?.readiness?.phase ?? runtime.data?.phase
-              ? `phase: ${runtime.data?.readiness?.phase ?? runtime.data?.phase}`
-              : undefined
-          }
-        >
-          {workers.error ? (
-            <QueryErrorNotice error={workers.error} compact />
-          ) : (
-            <Stack gap={4}>
-              {(workers.data?.workers ?? []).slice(0, 8).map((w) => (
-                <Group key={w.name} justify="space-between" gap="xs">
-                  <Text size="xs" ff="var(--font-mono)">
-                    {w.name}
-                  </Text>
-                  <Group gap={6}>
-                    <StatusPill
-                      tone={
-                        w.healthy
-                          ? 'success'
-                          : w.state === 'paused'
-                            ? 'warning'
-                            : 'danger'
-                      }
-                      size="xs"
-                    >
-                      {w.state ?? (w.healthy ? 'ok' : 'down')}
-                    </StatusPill>
-                    {typeof w.queue_depth === 'number' ? (
-                      <Text
-                        size="xs"
-                        c={w.queue_depth > 50 ? 'var(--color-danger)' : 'dimmed'}
-                      >
-                        q={w.queue_depth}
-                      </Text>
-                    ) : null}
-                  </Group>
-                </Group>
-              ))}
-              {!(workers.data?.workers ?? []).length && (
-                <Text c="dimmed" size="xs">
-                  无 worker 数据
-                </Text>
-              )}
-            </Stack>
-          )}
-        </SectionCard>
-
-        {/* 执行延迟 p95（ms）*/}
-        <SectionCard title="执行延迟 p95（ms）">
-          {latency.error ? (
-            <QueryErrorNotice error={latency.error} compact />
-          ) : (
-            <Stack gap={4}>
-              {(latency.data?.stages ?? []).map((stage) => (
-                <Group key={stage.stage} justify="space-between" gap="xs">
-                  <Text size="xs" ff="var(--font-mono)">
-                    {stage.stage}
-                  </Text>
-                  <Text size="xs">
-                    p50={formatDecimal(stage.p50_ms, { dp: 0 })} · p95=
-                    {formatDecimal(stage.p95_ms, { dp: 0 })} · p99=
-                    {formatDecimal(stage.p99_ms, { dp: 0 })}
-                  </Text>
-                </Group>
-              ))}
-              {!(latency.data?.stages ?? []).length && (
-                <Text c="dimmed" size="xs">
-                  暂无样本
-                </Text>
-              )}
-            </Stack>
-          )}
-        </SectionCard>
-
-        {/* 订阅状态：拆清两条链路 */}
-        <SectionCard
-          title="订阅状态"
-          description="浏览器→后端 SSE 流 与 后端→Polymarket WS 推送 是两条不同的链路"
-        >
-          {workers.error ? (
-            <QueryErrorNotice error={workers.error} compact />
-          ) : (
-            <Stack gap={6}>
-              <Text size="xs" c="dimmed" fw={500}>
-                Polymarket WS（盘口推送）
-              </Text>
-              <KV
-                k="订阅 token 数"
-                v={String(trackingBreakdown.data?.ws_subscribed_token_count ?? '—')}
-                tone={
-                  (trackingBreakdown.data?.ws_subscribed_token_count ?? 0) > 0
-                    ? 'pos'
-                    : 'neutral'
-                }
-              />
-              <KV
-                k="live phase markets"
-                v={String(trackingBreakdown.data?.by_live_phase?.live ?? '—')}
-              />
-              <Divider my={4} />
-              <Text size="xs" c="dimmed" fw={500}>
-                前端 SSE（浏览器订阅本后端推送）
-              </Text>
-              <KV
-                k="活跃浏览器连接"
-                v={String(workers.data?.sse_active_subscribers ?? '—')}
-              />
-              <KV
-                k="丢弃事件"
-                v={String(workers.data?.sse_dropped_events_total ?? '—')}
-                tone={
-                  (workers.data?.sse_dropped_events_total ?? 0) > 0 ? 'neg' : 'neutral'
-                }
-              />
-            </Stack>
-          )}
-        </SectionCard>
-
-        {/* 持仓敞口（全宽）*/}
-        <div style={{ gridColumn: '1 / -1' }}>
-          <ExposureSection
-            exposure={exposure}
-            onNavigate={() => navigate('/live/positions')}
-          />
-        </div>
-
-        {/* 策略私有 widgets */}
-        {widgets.map((widget) => (
-          <div key={widget.id} style={{ gridColumn: '1 / -1' }}>
-            {widget.render()}
-          </div>
-        ))}
-      </SimpleGrid>
+        <Text size="xs" c="dimmed" ta="center">
+          所有数据来自 <code>/analytics/quant-summary</code> + <code>/health</code> · 5s 刷新 ·
+          最后更新 {summary.dataUpdatedAt ? new Date(summary.dataUpdatedAt).toLocaleTimeString() : '—'}
+        </Text>
+      </Stack>
     </>
   )
 }
 
-function ExposureSection({
-  exposure,
-  onNavigate,
-}: {
-  exposure: UseQueryResult<PortfolioExposure, Error>
-  onNavigate: () => void
-}) {
-  // 默认隐藏 settled_zero_value=true 的"归零仓位"——对齐 Polymarket portfolio：
-  // resolved + 输方 token 在官方 UI 不显示，被 redeem 后链上余额归零自然消失。
-  // 我们没自动 redeem 链上 token，但用 settlement_scanner 检测胜负后已经把
-  // cur_price/current_value 标到 0 → 这里前端 UI 层做同样的"价值过滤"。
-  const [showSettled, setShowSettled] = useState(false)
-  const allItems: PortfolioExposureItem[] = exposure.data?.items ?? []
-  const liveItems = showSettled
-    ? allItems
-    : allItems.filter((i) => i.settled_zero_value !== true)
-  const hiddenCount = allItems.length - liveItems.length
-  const totalNotional = liveItems.reduce(
-    (acc, i) => acc + (toDecimal(i.notional_usdc)?.toNumber() ?? 0),
-    0,
-  )
-  const totalCashPnl = liveItems.reduce(
-    (acc, i) => acc + (toDecimal(i.cash_pnl)?.toNumber() ?? 0),
-    0,
-  )
-
-  return (
-    <SectionCard
-      title="持仓敞口"
-      description={
-        exposure.data
-          ? `${liveItems.length} 个持仓 · 总名义 $${totalNotional.toFixed(2)} · 未实现 PnL $${totalCashPnl.toFixed(2)}${hiddenCount > 0 ? ` · ${hiddenCount} 个已归零隐藏` : ''}`
-          : undefined
-      }
-      actions={
-        <Group gap="md">
-          {hiddenCount > 0 && (
-            <Anchor size="xs" onClick={() => setShowSettled((v) => !v)}>
-              {showSettled ? '隐藏归零仓位' : `显示 ${hiddenCount} 个归零仓位`}
-            </Anchor>
-          )}
-          <Anchor size="xs" onClick={onNavigate}>
-            → 持仓管理
-          </Anchor>
-        </Group>
-      }
-    >
-      {exposure.error ? (
-        <QueryErrorNotice error={exposure.error} compact />
-      ) : liveItems.length === 0 ? (
-        <Text c="dimmed" size="xs">
-          {allItems.length === 0
-            ? '无开口持仓'
-            : '所有持仓已归零（点击右上方可查看）'}
-        </Text>
-      ) : (
-        <Stack gap={0}>
-          {/* 表头 */}
-          <Group
-            justify="space-between"
-            gap="xs"
-            px={4}
-            py={4}
-            style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}
-          >
-            {['市场', '仓位(shares)', '均价', '现价', '未实现PnL', '%', '状态'].map(
-              (h) => (
-                <Text key={h} size="xs" c="dimmed" fw={500} style={{ minWidth: 60 }}>
-                  {h}
-                </Text>
-              ),
-            )}
-          </Group>
-          {liveItems
-            .slice()
-            .sort((a, b) => {
-              const na = toDecimal(a.notional_usdc)?.toNumber() ?? 0
-              const nb = toDecimal(b.notional_usdc)?.toNumber() ?? 0
-              return nb - na
-            })
-            .map((item) => (
-              <PositionRow key={item.token_id} item={item} />
-            ))}
-        </Stack>
-      )}
-    </SectionCard>
-  )
+function healthTone(status: string | undefined): 'pos' | 'neg' | 'neutral' {
+  if (status === 'healthy') return 'pos'
+  if (status === 'unhealthy') return 'neg'
+  return 'neutral'
 }
 
-function PositionRow({ item }: { item: PortfolioExposureItem }) {
-  const cashPnlTone = pnlTone(item.cash_pnl)
-  const cashPnlColor =
-    cashPnlTone === 'pos'
-      ? 'var(--color-success)'
-      : cashPnlTone === 'neg'
-        ? 'var(--color-danger)'
-        : undefined
-  const pctPnlTone = pnlTone(item.percent_pnl)
-  const pctColor =
-    pctPnlTone === 'pos'
-      ? 'var(--color-success)'
-      : pctPnlTone === 'neg'
-        ? 'var(--color-danger)'
-        : undefined
-  // 仓位状态四态：归零 / 暂停（仅人工触发）/ 可赎回 / 持有。
-  // item.paused 只反映 MarketPauseSource.MANUAL——后台 reconcile/risk/strategy
-  // 自动 pause 不在仓位行展示，避免把"市场内部控制态"塞进"仓位生命周期"。
-  const statusBadge = item.settled_zero_value ? (
-    <Badge color="gray" size="xs" variant="light">
-      归零
-    </Badge>
-  ) : item.paused ? (
-    <Badge color="red" size="xs" variant="light">
-      暂停
-    </Badge>
-  ) : item.redeemable ? (
-    <Badge color="teal" size="xs" variant="light">
-      可赎回
-    </Badge>
-  ) : (
-    <Badge color="blue" size="xs" variant="light">
-      持有
-    </Badge>
-  )
-
-  return (
-    <Group
-      justify="space-between"
-      gap="xs"
-      px={4}
-      py={6}
-      style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}
-      wrap="nowrap"
-    >
-      <Text size="xs" ff="var(--font-mono)" style={{ minWidth: 60 }} truncate>
-        {item.market_slug ?? item.condition_id.slice(0, 10)}
-      </Text>
-      <Text size="xs" ff="var(--font-mono)" style={{ minWidth: 60 }}>
-        {formatDecimal(item.shares, { dp: 2 })}
-      </Text>
-      <Text size="xs" ff="var(--font-mono)" style={{ minWidth: 60 }}>
-        {formatDecimal(item.avg_price, { dp: 3 })}
-      </Text>
-      <Text size="xs" ff="var(--font-mono)" style={{ minWidth: 60 }}>
-        {formatDecimal(item.cur_price, { dp: 3 })}
-      </Text>
-      <Text size="xs" fw={500} c={cashPnlColor} style={{ minWidth: 60 }}>
-        {formatUsdc(item.cash_pnl)}
-      </Text>
-      <Text size="xs" c={pctColor} style={{ minWidth: 60 }}>
-        {formatPercent(item.percent_pnl, { signed: true })}
-      </Text>
-      <Box style={{ minWidth: 60 }}>{statusBadge}</Box>
-    </Group>
-  )
+function pnlTone(value: string | undefined): 'pos' | 'neg' | 'neutral' {
+  if (!value) return 'neutral'
+  const n = Number(value)
+  if (!Number.isFinite(n) || n === 0) return 'neutral'
+  return n > 0 ? 'pos' : 'neg'
 }
 
-function Row({
+function Stat({
   label,
   value,
-  tone,
+  tone = 'neutral',
 }: {
   label: string
   value: string
-  tone: 'success' | 'warning' | 'danger' | 'neutral'
-}) {
-  return (
-    <Group justify="space-between">
-      <Text size="xs" ff="var(--font-mono)">
-        {label}
-      </Text>
-      <StatusPill tone={tone} size="xs">
-        {value}
-      </StatusPill>
-    </Group>
-  )
-}
-
-function KV({
-  k,
-  v,
-  tone,
-}: {
-  k: string
-  v: string
   tone?: 'pos' | 'neg' | 'neutral'
 }) {
-  const color =
-    tone === 'pos'
-      ? 'var(--color-success)'
-      : tone === 'neg'
-        ? 'var(--color-danger)'
-        : undefined
   return (
-    <Group justify="space-between" gap="xs">
-      <Text size="xs" c="dimmed">
-        {k}
-      </Text>
-      <Text size="sm" fw={500} c={color}>
-        {v}
-      </Text>
-    </Group>
+    <Stack gap={2}>
+      <Text size="xs" c="dimmed">{label}</Text>
+      <Group gap={4} align="baseline">
+        {tone === 'neutral' ? (
+          <Text size="md" fw={600}>{value}</Text>
+        ) : (
+          <StatusPill tone={tone === 'pos' ? 'success' : 'danger'} size="sm">{value}</StatusPill>
+        )}
+      </Group>
+    </Stack>
   )
 }

@@ -26,7 +26,6 @@ import { CopyableId } from '@shared/ui/CopyableId'
 import { TimeWindowPicker } from '@shared/time/TimeWindowPicker'
 import { formatDecimal, toDecimal } from '@shared/format'
 import { useTimeWindowStore } from '@core/time/store'
-import { useAnalyticsFiltersStore } from '@core/filters/store'
 
 export function EdgeRealizationPage() {
   const since = useTimeWindowStore((s) => s.since)

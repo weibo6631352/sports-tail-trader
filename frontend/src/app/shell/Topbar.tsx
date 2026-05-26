@@ -1,4 +1,4 @@
-import { ActionIcon, Group, Text, TextInput, Tooltip } from '@mantine/core'
+import { ActionIcon, Group, TextInput, Tooltip } from '@mantine/core'
 import { IconSearch } from '@tabler/icons-react'
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'

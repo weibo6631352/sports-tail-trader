@@ -17,7 +17,6 @@ import { DataTable } from '@shared/tables/DataTable'
 import { TimeWindowPicker } from '@shared/time/TimeWindowPicker'
 import { formatDecimal, formatIso, formatUsdc, pnlTone, pnlToneColor, toDecimal } from '@shared/format'
 import { useTimeWindowStore } from '@core/time/store'
-import { useAnalyticsFiltersStore } from '@core/filters/store'
 
 // 对 accepted=false 的决策做事后盈利模拟，配合 /analytics/risk-rejections 用——
 // 判断风控阈值是否过严。每笔模拟用 per_decision_usdc 等额入场。

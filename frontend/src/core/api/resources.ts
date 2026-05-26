@@ -557,6 +557,61 @@ export const analyticsApi = {
       params,
       signal,
     }),
+  quantSummary: (
+    params: { window_ms?: number } = {},
+    signal?: AbortSignal,
+  ) =>
+    apiClient.get<QuantSummary>('/analytics/quant-summary', { params, signal }),
+}
+
+export type QuantSummary = {
+  window_ms: number
+  generated_at: string
+  decision_counts: {
+    total: number
+    accepted: number
+    rejected: number
+    accept_rate_pct: number
+  }
+  rejection_top: { reason: string; count: number; pct: number }[]
+  kelly_stats: {
+    sample_count: number
+    avg_prob_p: number | null
+    avg_price_c: number | null
+    avg_edge_net: number | null
+    avg_f_star: number | null
+    avg_buy_budget_usdc: number | null
+    rounded_up_count: number
+    rounded_up_pct: number
+  }
+  execution: {
+    orders_submitted: number
+    orders_filled: number
+    orders_rejected: number
+    fill_rate_pct: number
+  }
+  portfolio: {
+    balance_usdc?: string
+    net_value_usdc?: string
+    cost_usdc?: string
+    cash_pnl_usdc?: string
+    position_count?: number
+    open_order_count?: number
+    paused_market_count?: number
+    error?: string
+  }
+  market_coverage: {
+    registry_total?: number
+    with_live_state?: number
+    signal_allowed?: number
+    error?: string
+  }
+  signal_health: {
+    ws_subscribed_tokens?: number
+    user_ws_connected?: boolean
+    last_reconcile_at?: string | null
+    error?: string
+  }
 }
 
 // ---------- Sports live events 历史 ----------

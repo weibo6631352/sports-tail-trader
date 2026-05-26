@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Anchor,
@@ -75,6 +75,27 @@ type LiveGame = {
 function polymarketUrl(slug?: string | null): string | null {
   if (!slug) return null
   return `https://polymarket.com/event/${slug}`
+}
+
+// 信号 reason 中文化——operator 一眼看懂跳过/允许原因.
+// reason 取自 LiveStateMatch.signal_reason (workflow/live_state.entry_signal_gate).
+const SIGNAL_REASON_LABELS: Record<string, string> = {
+  live: '进行中',
+  ended_not_closed: '已结束·未封盘',
+  paused_passthrough: '局间·已放行',
+  sports_live_state_postponed: '延期',
+  sports_live_state_cancelled: '取消',
+  sports_live_state_retired: '弃赛',
+  sports_live_state_disputed: '争议',
+  sports_live_state_unknown: '状态未知',
+  sports_live_state_stale: '数据陈旧',
+  // 历史 reason(passthrough 之前的语义,保留以兼容旧 audit)
+  sports_live_state_paused: '已暂停',
+}
+
+function localizeSignalReason(reason: string | null | undefined): string {
+  if (!reason) return ''
+  return SIGNAL_REASON_LABELS[reason] ?? reason
 }
 
 function formatEu(eu?: number): string {
@@ -200,7 +221,20 @@ export function GoalserveLivePage() {
 
   const items = query.data?.items ?? []
 
-  const columns: ColumnDef<LiveStateRow, unknown>[] = [
+  // 数据驱动列可见: 让分/大小分 esports 永远 null, 整列折叠避免占空.
+  const { hasAnySpread, hasAnyTotals } = useMemo(() => {
+    let spread = false
+    let totals = false
+    for (const row of items) {
+      const lsp = row.live_state_payload as Record<string, unknown> | null | undefined
+      if (!spread && lsp?.goalserve_spread) spread = true
+      if (!totals && lsp?.goalserve_totals) totals = true
+      if (spread && totals) break
+    }
+    return { hasAnySpread: spread, hasAnyTotals: totals }
+  }, [items])
+
+  const allColumns: ColumnDef<LiveStateRow, unknown>[] = [
     {
       header: '市场',
       cell: ({ row }) => {
@@ -281,6 +315,7 @@ export function GoalserveLivePage() {
       cell: ({ row }) => {
         const allowed = row.original.live_state_signal_allowed
         const reason = row.original.live_state_signal_reason as string | null | undefined
+        const reasonText = localizeSignalReason(reason)
         return (
           <Stack gap={2}>
             {allowed != null ? (
@@ -288,7 +323,7 @@ export function GoalserveLivePage() {
                 {allowed ? '允许' : '跳过'}
               </StatusPill>
             ) : null}
-            {reason ? <Text size="xs" c="dimmed">{reason}</Text> : null}
+            {reasonText ? <Text size="xs" c="dimmed">{reasonText}</Text> : null}
           </Stack>
         )
       },
@@ -328,6 +363,12 @@ export function GoalserveLivePage() {
       },
     },
   ]
+
+  const columns = allColumns.filter((col) => {
+    if (col.header === '让分' && !hasAnySpread) return false
+    if (col.header === '大小分' && !hasAnyTotals) return false
+    return true
+  })
 
   const openRow = items.find((r) => r.condition_id === openConditionId)
 
