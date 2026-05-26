@@ -1,6 +1,6 @@
 """Lightweight per-endpoint token bucket rate limiter.
 
-只服务 admin 进程内的 FastAPI——没引入 Redis / 分布式，所有状态都在 asyncio loop
+只服务 operator 进程内的 FastAPI——没引入 Redis / 分布式，所有状态都在 asyncio loop
 内单进程持有。在多 worker 部署时每 worker 各自计数，不影响安全语义（限的是
 昂贵的单进程 CPU / 外部 API 配额）。
 

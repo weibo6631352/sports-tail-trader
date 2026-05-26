@@ -113,7 +113,7 @@ class OrderbookHistoryBuffer:
         return len(self._buffers)
 
     def memory_footprint_estimate(self) -> dict[str, int]:
-        """容量+实际 token 数+样本总数,admin 观测内存使用."""
+        """容量+实际 token 数+样本总数,operator 观测内存使用."""
         total_samples = sum(len(b) for b in self._buffers.values())
         return {
             "tracked_tokens": len(self._buffers),

@@ -187,7 +187,7 @@ class Market:
 def market_status_allowed_for_manual_order(market: Market) -> bool:
     """市场状态是否允许人工下单（CLOSED/RESOLVED/REJECTED 都禁止）。
 
-    用于 admin 受控操作（manual cancel/replace/force-exit）路径——CLOSED
+    用于 operator 受控操作（manual cancel/replace/force-exit）路径——CLOSED
     意味着 trading 已停，RESOLVED 是已结算，REJECTED 是被风控/discovery 拒。
     """
     return market.trading_status not in {

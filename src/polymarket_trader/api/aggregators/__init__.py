@@ -1,4 +1,4 @@
-"""【api/aggregators】所有 admin/运营/审计查询 endpoint 的统一聚合层。
+"""【api/aggregators】所有 operator/运营/审计查询 endpoint 的统一聚合层。
 
 docs/新架构方案.md §12.2 三类划分 + §12.3 ① 统一聚合：
 - **运营查询类**（runtime / portfolio / candidates / markets / sports 等）

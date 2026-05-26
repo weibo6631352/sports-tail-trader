@@ -98,7 +98,7 @@ async def _equity_curve_recorder(
     """每 30s 追加一行 equity_snapshot 到 paper_ledger.equity_curve。
 
     in-memory 滚动窗口（重启清零），最多保留 ``_EQUITY_CURVE_MAX_POINTS`` 条
-    （30s × 2880 = 24h）。供 admin /runtime/equity-curve 端点画资金曲线。
+    （30s × 2880 = 24h）。供 operator /runtime/equity-curve 端点画资金曲线。
     """
 
     from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor

@@ -45,7 +45,7 @@ def jsonable(value: Any) -> Any:
 def page_payload(
     page: "RepositoryPage[Any]", *, serializer: Callable[[Any], Any]
 ) -> dict[str, Any]:
-    """RepositoryPage → 统一 admin/aggregator 分页响应形态。
+    """RepositoryPage → 统一 operator/aggregator 分页响应形态。
 
     total = -1 是 sentinel：调用方传 with_total=False 跳过 count subquery，
     此时对外返回 None 让前端区分"未计数"vs"0 条"。

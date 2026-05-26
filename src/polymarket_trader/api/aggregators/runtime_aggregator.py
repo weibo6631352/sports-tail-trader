@@ -5,7 +5,7 @@ docs/新架构方案.md §12.2 ① 运营查询类（走 runtime 内存快照 + 
 
 paper trading 量化诊断 / 异常检测 / CLV 等专题在 `PaperTradingAggregator`；
 系统性能 / 内存 / 数据源健康在 `SystemObservabilityAggregator`——本 aggregator
-只负责 admin 主仪表盘的高频核心视图。
+只负责 operator 主仪表盘的高频核心视图。
 """
 
 from __future__ import annotations

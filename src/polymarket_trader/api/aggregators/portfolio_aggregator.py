@@ -37,7 +37,7 @@ Level = Literal["summary", "detail"]
 
 @dataclass(frozen=True, slots=True)
 class PortfolioExposureView:
-    """组合暴露聚合 view（admin-friendly dict 包装）。"""
+    """组合暴露聚合 view（API-friendly dict 包装）。"""
 
     summary: dict[str, Any]
     markets: tuple[dict[str, Any], ...] = field(default_factory=tuple)

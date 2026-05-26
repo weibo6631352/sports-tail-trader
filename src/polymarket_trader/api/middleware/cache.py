@@ -7,7 +7,7 @@ endpoint 禁止用**（前者要看实时历史，后者 must 实际执行）。
 # 设计原则
 
 - **进程内单实例**：用 dict + monotonic 时间戳，无锁（GIL + 小窗口竞争可忽略）
-- **手动失效**：`clear_cache(prefix)` 可按 key 前缀失效（admin 写动作后调）
+- **手动失效**：`clear_cache(prefix)` 可按 key 前缀失效（operator 写动作后调）
 - **TTL 上限 1s**：避免缓存遮蔽真实状态变化；默认 100ms
 
 # 用法
@@ -95,7 +95,7 @@ def cached(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
 def clear_cache(prefix: str | None = None) -> int:
     """失效缓存。`prefix=None` 清空全部；否则按 func_qualname 前缀匹配清。
 
-    返回清掉的条目数。admin 写动作（cancel_order / pause_market 等）后调用
+    返回清掉的条目数。operator 写动作（cancel_order / pause_market 等）后调用
     `clear_cache(prefix="...")` 让下次查询拿到最新状态。
     """
 

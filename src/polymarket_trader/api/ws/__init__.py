@@ -1,4 +1,4 @@
-"""【api/ws_admin】admin 实时数据 WebSocket 增量推送。
+"""【api/ws】operator 实时数据 WebSocket 增量推送。
 
 docs/新架构方案.md §12.3 ④。agent / 前端运营查询从 polling 改 push——订阅
 一次后被动接收 (portfolio / candidates / live_states / health) 增量更新。
@@ -6,17 +6,17 @@ docs/新架构方案.md §12.3 ④。agent / 前端运营查询从 polling 改 p
 # 设计
 
 ```
-client → WS /admin/stream
+client → WS /operator/stream
   send: {topics: ["portfolio", "candidates", "live_states", "health"]}
   recv: {topic, change_set, timestamp}   // 只推增量，不推全量
 ```
 
 订阅时一次性发送当前 snapshot，之后只推 diff。增量来源是已有 `event_bus`，
-通过 `admin_ws_publisher` 桥接。
+通过 `operator_ws_publisher` 桥接。
 
 # 模块
 
-- `publisher` —— `AdminWsPublisher`：订阅 event_bus 关键事件 → 计算 diff →
+- `publisher` —— `OperatorWsPublisher`：订阅 event_bus 关键事件 → 计算 diff →
   推到对应 WS topic。当前接口骨架，等 WS endpoint 实装时接入。
 
 # 现状
@@ -33,6 +33,6 @@ api/routes/stream.py 已有 SSE 推送（不是 WS），可作为 transitional p
 §7.1 操盘和审计统一走后端 API——agent 走 WS 订阅是首选。
 """
 
-from .publisher import AdminWsPublisher
+from .publisher import OperatorWsPublisher
 
-__all__ = ["AdminWsPublisher"]
+__all__ = ["OperatorWsPublisher"]

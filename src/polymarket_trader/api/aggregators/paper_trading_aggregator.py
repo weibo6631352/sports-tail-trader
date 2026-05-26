@@ -545,7 +545,7 @@ class PaperTradingAggregator:
                     anomalies.append({
                         "type": "db_query_p99_critical", "severity": "critical",
                         "p99_ms": db_p99, "max_ms": db_max,
-                        "reason": "DB query p99 ≥1s — P0 链路不受影响(异步)但持久化/admin 严重滞后",
+                        "reason": "DB query p99 ≥1s — P0 链路不受影响(异步)但持久化/operator 严重滞后",
                     })
                 elif db_p99 >= 500:
                     anomalies.append({

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
 # 单次 pnl_breakdown 上限——20000 positions × markets join 在退化数据下可能跑数十秒，
-# 不能让 admin 查询长期占用 DB 连接（§7 不阻塞 P0）。超时改为 504 + 提示降 limit。
+# 不能让 operator 查询长期占用 DB 连接（§7 不阻塞 P0）。超时改为 504 + 提示降 limit。
 _PNL_BREAKDOWN_TIMEOUT_SECONDS = 30.0
 
 

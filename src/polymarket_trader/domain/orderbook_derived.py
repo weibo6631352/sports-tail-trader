@@ -4,7 +4,7 @@
 一次性算出所有可观测派生指标 (microprice / depth_imbalance / 滑点表 / 流动性评级
 / 15s 窗口波动 / 多窗口 delta / whale)，落入 ``OrderbookDerivedStore``。
 
-admin endpoint 永远只读 store，O(1) 不再现场算。
+operator endpoint 永远只读 store，O(1) 不再现场算。
 
 设计:
 - 纯函数 + frozen+slots dataclass: 无 IO/锁/外部依赖,可独立单测.
@@ -101,7 +101,7 @@ class WindowDelta:
 @dataclass(frozen=True, slots=True)
 class DirectionSnapshot:
     """OFI 风向信号的投影 (复用 ``OrderbookDeltaStore.direction_signal()`` 算法,
-    嵌入 DerivedMetrics 让 admin 一站式可观测)。
+    嵌入 DerivedMetrics 让 operator 一站式可观测)。
 
     只保留归一化结果 + 标签 + 置信度; raw deltas/velocity 等细节通过
     ``/markets/orderbook-direction`` 独立 endpoint 仍可访问 (避免 DerivedMetrics
@@ -140,7 +140,7 @@ class DerivedMetrics:
     """单 token 在某一时刻 (computed_at) 的完整派生指标。
 
     所有字段在 ``compute_derived()`` 一次性算出 → 写入 ``OrderbookDerivedStore``;
-    admin endpoint 与策略层后续只读, 不重算。
+    operator endpoint 与策略层后续只读, 不重算。
     """
     computed_at: datetime
     token_id: str
@@ -203,7 +203,7 @@ class DerivedMetrics:
 
     # OFI 风向信号投影 (publisher 从 OrderbookDeltaStore.direction_signal() 拼装),
     # sample 不足 (启动早期 / token 首次推送) 时为 None.
-    # 嵌入此处让 admin /markets/orderbook-depth 一站式拿到所有可观测信号.
+    # 嵌入此处让 operator /markets/orderbook-depth 一站式拿到所有可观测信号.
     direction: DirectionSnapshot | None
 
 

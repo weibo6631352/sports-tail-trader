@@ -14,7 +14,7 @@ docs/新架构方案.md §12.4。route 层薄化的关键支撑——把性能 /
 # endpoint metrics 集成位置
 
 不在本目录——直接在 `api/app.py:_perf_middleware` 内同步双写
-`SystemPerfMonitor`（admin 内部分析）+ `MetricsRegistry`（§11.2 标准 metric
+`SystemPerfMonitor`（operator 内部分析）+ `MetricsRegistry`（§11.2 标准 metric
 output），避免两套 middleware 重复测同一段时间。
 """
 

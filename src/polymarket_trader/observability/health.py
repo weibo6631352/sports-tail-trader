@@ -30,7 +30,7 @@ docs/新架构方案.md §11.4。健康检查**不是诊断工具，是自动告
 # 不阻塞 P0
 
 HealthReporter 只读各组件的 `snapshot()` / 内存状态，无网络 IO，调用成本 ~ms 级。
-即使 admin endpoint 每秒被外部监控拉一次也无负担。
+即使 operator endpoint 每秒被外部监控拉一次也无负担。
 """
 
 from __future__ import annotations

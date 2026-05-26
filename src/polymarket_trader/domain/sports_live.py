@@ -3,7 +3,7 @@
 LiveEvent 统一覆盖 team_match（NBA/网球/电竞，含 home/away）与 race
 （F1/NASCAR/MotoGP，N 个 driver 参与）与 tournament_field（高尔夫等多人锦标赛）。
 赛车不是 home/away，按 ``kind=RACE`` 走 N 个 ``Participant(role="driver")``；
-匹配链路按 ``kind`` 分支，避免在 dedup/audit/admin 三处各写一遍 team/race 双形态。
+匹配链路按 ``kind`` 分支，避免在 dedup/audit/operator 三处各写一遍 team/race 双形态。
 
 聚合融合后，``source`` 记录主源、``contributing_sources`` 记录所有贡献源、
 ``source_conflicts`` 记录被压制的字段（一等字段，不藏在 source_payload 字典里

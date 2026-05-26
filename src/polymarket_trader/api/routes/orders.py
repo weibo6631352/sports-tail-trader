@@ -16,7 +16,7 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 
 # Polymarket condition_id 是 32-byte hash, 0x 前缀 + 64 hex 字符。
 # token_id 是 78-位十进制大整数（uint256）。这两个格式由协议给定，
-# 任何不符合的字符串都不可能是真实市场 ID，应当 422 拦下而不是放进 admin service。
+# 任何不符合的字符串都不可能是真实市场 ID，应当 422 拦下而不是放进 operator service。
 _CONDITION_ID_PATTERN = r"^0x[0-9a-fA-F]{64}$"
 _TOKEN_ID_PATTERN = r"^[0-9]+$"
 
@@ -29,7 +29,7 @@ class ReplaceOrderRequest(BaseModel):
     new_price: Decimal = Field(gt=Decimal("0"), lt=Decimal("1"))
     size_shares: Decimal | None = Field(default=None, gt=Decimal("0"))
     operator: str = Field(default="manual", min_length=1, max_length=64)
-    reason: str = Field(default="admin_replace_order", min_length=1, max_length=200)
+    reason: str = Field(default="operator_replace_order", min_length=1, max_length=200)
     trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
@@ -39,15 +39,15 @@ class CancelOrderRequest(BaseModel):
     condition_id: str | None = Field(default=None, pattern=_CONDITION_ID_PATTERN)
     token_id: str | None = Field(default=None, pattern=_TOKEN_ID_PATTERN, min_length=1, max_length=80)
     operator: str = Field(default="manual", min_length=1, max_length=64)
-    reason: str = Field(default="admin_cancel_order", min_length=1, max_length=200)
+    reason: str = Field(default="operator_cancel_order", min_length=1, max_length=200)
     trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class BulkCancelRequest(BaseModel):
-    # 上限 20 单，防止单次 admin 操作长时间占用交易服务（§7 不阻塞 P0）。
+    # 上限 20 单，防止单次 operator 操作长时间占用交易服务（§7 不阻塞 P0）。
     order_ids: list[str] = Field(min_length=1, max_length=20)
     operator: str = Field(default="manual", min_length=1, max_length=64)
-    reason: str = Field(default="admin_bulk_cancel", min_length=1, max_length=200)
+    reason: str = Field(default="operator_bulk_cancel", min_length=1, max_length=200)
     trace_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 

@@ -115,7 +115,7 @@ from polymarket_trader.runtime.ws_loops import (
 from polymarket_trader.pipeline.ingest.market_discovery.discovery_worker import MarketDiscoveryWorker
 from polymarket_trader.pipeline.ingest.orderbook_ws import MarketWsWorker
 from polymarket_trader.app.audit import AuditDeduper, GarbageFilter, PersistenceWorker
-from polymarket_trader.api.ws_admin import AdminWsPublisher
+from polymarket_trader.api.ws import OperatorWsPublisher
 from polymarket_trader.runtime.observability_bridge import ObservabilityBridge
 from polymarket_trader.recovery import ReconcileWorker, ReconcileWorkerResult
 from polymarket_trader.pipeline.ingest.odds.sports_season_odds_worker import SportsSeasonOddsWorker
@@ -168,7 +168,7 @@ class RuntimeComponents:
     audit_garbage_filter: GarbageFilter
     audit_deduper: AuditDeduper
     observability_bridge: ObservabilityBridge
-    admin_ws_publisher: AdminWsPublisher
+    operator_ws_publisher: OperatorWsPublisher
     account_state_store: AccountStateStore
     market_metadata_store: MarketMetadataStore
     order_executor: PolymarketOrderExecutor
@@ -213,7 +213,7 @@ class RuntimeComponents:
     pregame_client: GoalservePregameOddsClient | None = None
     parameter_store: ParameterStore | None = None
     # paper 模式虚拟账本（paper_trading_mode=true 时注入）。
-    # admin API /runtime/paper-ledger 暴露 ledger.available_usdc / positions /
+    # operator API /runtime/paper-ledger 暴露 ledger.available_usdc / positions /
     # 累计 fee / 已实现 + 浮动 PnL，复盘必查。
     paper_ledger: "PaperVirtualLedger | None" = None
     goalserve_lazy_client: "GoalserveLazyClient | None" = None
@@ -240,7 +240,7 @@ def _build_live_source_components(
     shutdown 时调 goalserve client.aclose（feeder 自身用 stop()）。
 
     `sports_live_state_enabled=False` 时返回空 feeders/closers，但仍构造 store /
-    registry / service / binder——它们是无状态依赖，admin/discovery 读取也安全。
+    registry / service / binder——它们是无状态依赖，operator/discovery 读取也安全。
     """
 
     live_state_store = LiveStateStore()
@@ -572,7 +572,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # 派生指标 store + publisher: ws 推送时同步算派生指标 (microprice / depth_imbalance
     # / 滑点表 / 15s 波动 / windows delta / whale / 流动性评级), 同步写入 store.
     # P0 量化决策接到 ORDERBOOK_SNAPSHOT_UPDATED 事件时 derived 已对齐 snapshot 新鲜度;
-    # admin endpoint O(1) 读 store. 实测 compute_derived ~245μs/次, 推送延迟可忽略.
+    # operator endpoint O(1) 读 store. 实测 compute_derived ~245μs/次, 推送延迟可忽略.
     orderbook_derived_store = OrderbookDerivedStore(max_tokens=2000)
     orderbook_derived_publisher = OrderbookDerivedPublisher(
         store=orderbook_derived_store,
@@ -820,9 +820,9 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         live_source_registry=live_source_registry,
         account_state_store=account_state_store,
     )
-    # AdminWsPublisher——event_bus 增量推送骨架。startup 时 .start() 启动 drain
+    # OperatorWsPublisher——event_bus 增量推送骨架。startup 时 .start() 启动 drain
     # task；shutdown 时 await .stop()。endpoint 接入待 stream.py 改造。
-    admin_ws_publisher = AdminWsPublisher(event_bus=event_bus)
+    operator_ws_publisher = OperatorWsPublisher(event_bus=event_bus)
     return RuntimeComponents(
         settings=settings,
         readiness=readiness,
@@ -846,7 +846,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         audit_garbage_filter=audit_garbage_filter,
         audit_deduper=audit_deduper,
         observability_bridge=observability_bridge,
-        admin_ws_publisher=admin_ws_publisher,
+        operator_ws_publisher=operator_ws_publisher,
         account_state_store=account_state_store,
         market_metadata_store=market_metadata_store,
         order_executor=order_executor,
@@ -1022,9 +1022,9 @@ async def shutdown_runtime(runtime: RuntimeComponents) -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
     runtime.background_tasks.clear()
 
-    # AdminWsPublisher —— 取消 drain task + unregister event_bus listener
+    # OperatorWsPublisher —— 取消 drain task + unregister event_bus listener
     with suppress(Exception):
-        await runtime.admin_ws_publisher.stop()
+        await runtime.operator_ws_publisher.stop()
     with suppress(Exception):
         await runtime.order_gateway.aclose()
     with suppress(Exception):
@@ -1195,9 +1195,9 @@ def _start_background_tasks(runtime: RuntimeComponents) -> None:
         ),
         name="trader:persistence",
     )
-    # AdminWsPublisher —— 启动 drain task + 注册 event_bus listener；
+    # OperatorWsPublisher —— 启动 drain task + 注册 event_bus listener；
     # endpoint 接入待 stream.py 改造，目前订阅集为空 → drain 内 push 为空操作
-    runtime.admin_ws_publisher.start()
+    runtime.operator_ws_publisher.start()
     # live_source feeder × N（每 provider 一个）：feeder 内部 create_task 自管，
     # 这里只 start。stop 在 shutdown_runtime 中调 feeder.stop() 与 goalserve
     # client.aclose 配套清理。supervisor heartbeat 由 feeder 自身打？暂无——

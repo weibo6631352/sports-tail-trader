@@ -1,13 +1,13 @@
-"""WebSocket admin stream endpoint —— 前端订阅 admin_ws_publisher 增量推送。
+"""WebSocket operator stream endpoint —— 前端订阅 operator_ws_publisher 增量推送。
 
-docs/新架构方案.md §12.3 + ws_admin/publisher.py. publisher 早已实装完整：
+docs/新架构方案.md §12.3 + ws_operator/publisher.py. publisher 早已实装完整：
 event_bus broadcast listener → 按 topic 路由 → 推 subscriber。本 endpoint
 是最后一步：接收前端 WebSocket，调 publisher.subscribe/unsubscribe，
 把 `starlette.websockets.WebSocket` 当作 WsSubscriber 协议实例传进去。
 
 # 协议
 
-- 连接 URL: `ws://host/admin/stream?topics=portfolio,candidates,live_states,health`
+- 连接 URL: `ws://host/operator/stream?topics=portfolio,candidates,live_states,health`
 - topics 默认全订阅（缺省时订阅所有 known_topics）
 - 服务端 push 形式：`{topic, event_type, event_id, trace_id, ...}`（publisher
   序列化的 dict）
@@ -17,9 +17,9 @@ event_bus broadcast listener → 按 topic 路由 → 推 subscriber。本 endpo
 
 # 鉴权
 
-跟 SSE /stream/events 保持一致——admin token 通过 query param 或 header 传入。
+跟 SSE /stream/events 保持一致——API token 通过 query param 或 header 传入。
 WebSocket 协议本身不支持 Authorization header 优雅传递；这里采用 query param
-`?token=<admin_token>` 校验。生产环境应配合 TLS 防止 token 明文泄漏。
+`?token=<api_token>` 校验。生产环境应配合 TLS 防止 token 明文泄漏。
 
 # 与 SSE /stream/events 区别
 
@@ -38,14 +38,14 @@ import logging
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
-from polymarket_trader.api.ws_admin.publisher import AdminWsPublisher
+from polymarket_trader.api.ws.publisher import OperatorWsPublisher
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/admin", tags=["ws-admin"])
+router = APIRouter(prefix="/operator", tags=["ws-operator"])
 
 
-def _resolve_publisher(websocket: WebSocket) -> AdminWsPublisher | None:
+def _resolve_publisher(websocket: WebSocket) -> OperatorWsPublisher | None:
     runtime = None
     state = websocket.app.state
     provider = getattr(state, "get_runtime", None)
@@ -53,10 +53,10 @@ def _resolve_publisher(websocket: WebSocket) -> AdminWsPublisher | None:
         runtime = provider()
     if runtime is None:
         return None
-    return getattr(runtime, "admin_ws_publisher", None)
+    return getattr(runtime, "operator_ws_publisher", None)
 
 
-def _resolve_admin_token(websocket: WebSocket) -> str | None:
+def _resolve_api_token(websocket: WebSocket) -> str | None:
     runtime = None
     state = websocket.app.state
     provider = getattr(state, "get_runtime", None)
@@ -78,12 +78,12 @@ def _parse_topics(raw: str | None, known: frozenset[str]) -> tuple[str, ...]:
 
 
 @router.websocket("/stream")
-async def admin_stream(
+async def operator_stream(
     websocket: WebSocket,
     topics: str | None = Query(default=None),
     token: str | None = Query(default=None),
 ) -> None:
-    """admin WebSocket 增量推送 endpoint。
+    """operator WebSocket 增量推送 endpoint。
 
     Query params：
     - `topics`：逗号分隔（如 `portfolio,candidates,live_states,health`）；
@@ -96,9 +96,9 @@ async def admin_stream(
         await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="publisher_unavailable")
         return
 
-    expected_token = _resolve_admin_token(websocket)
+    expected_token = _resolve_api_token(websocket)
     if expected_token is not None and token != expected_token:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="admin_token_invalid")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="api_token_invalid")
         return
 
     known = publisher.known_topics()
@@ -111,7 +111,7 @@ async def admin_stream(
     publisher.subscribe(websocket, initial_topics)
     current_topics: set[str] = set(initial_topics)
     logger.info(
-        "admin_ws.subscribed",
+        "operator_ws.subscribed",
         extra={"topics": list(initial_topics), "remote": str(websocket.client)},
     )
 
@@ -161,7 +161,7 @@ async def admin_stream(
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001
-        logger.exception("admin_ws.unexpected_error")
+        logger.exception("operator_ws.unexpected_error")
     finally:
         publisher.unsubscribe(websocket)
         try:
@@ -169,6 +169,6 @@ async def admin_stream(
         except Exception:  # noqa: BLE001
             pass
         logger.info(
-            "admin_ws.unsubscribed",
+            "operator_ws.unsubscribed",
             extra={"remote": str(websocket.client)},
         )

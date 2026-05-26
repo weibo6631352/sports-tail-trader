@@ -109,7 +109,7 @@ class LifecycleRegistry:
                 )
 
     def listener_summary(self) -> dict[str, tuple[str, ...]]:
-        """供 admin / metric 查询当前注册的 listener 名单。"""
+        """供 operator / metric 查询当前注册的 listener 名单。"""
 
         with self._lock:
             return {

@@ -102,7 +102,7 @@ class LiveMarketMatch:
     @property
     def confidence(self) -> float:
         # 把 score 归一化到 [0, 1] 区间，再按 kind 折扣。score 主要来自 alias 长度，
-        # 不同 sport 之间难以严格统一，但 [0, 1] 化后足够 admin / 校准 harness 比较。
+        # 不同 sport 之间难以严格统一，但 [0, 1] 化后足够 operator / 校准 harness 比较。
         base = min(1.0, max(0.0, self.score / _CONFIDENCE_SCORE_SCALE))
         if self.kind == LiveEventKind.RACE:
             return base * _RACE_CONFIDENCE_DISCOUNT

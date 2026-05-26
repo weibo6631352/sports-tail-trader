@@ -13,7 +13,7 @@ Goalserve 全部走 HTTP（官方 WebSocket 已弃用且对应客户端代码已
 接口与 ``GoalserveLivescoreClient`` 对齐，可直接接入 ``SportsLiveAggregateClient``：
   - ``list_events() -> SportsLiveSnapshot``：返回各 sport 最新缓存的合并快照；
   - ``aclose()``：取消所有后台 Task 并关闭 HTTP client；
-  - ``inplay_per_sport_status()``：per-sport 轮询状态快照，供 admin 观测；
+  - ``inplay_per_sport_status()``：per-sport 轮询状态快照，供 operator 观测；
   - ``active_sports_provider``：demand-driven，仅轮询有需求的 sport。
 """
 

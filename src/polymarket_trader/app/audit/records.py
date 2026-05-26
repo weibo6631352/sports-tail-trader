@@ -80,7 +80,7 @@ class PersistenceRecordBuilder:
             return records
 
         # RECONCILE_STARTED 跳过 audit:supervisor heartbeat 已记 reconcile 调度起点;
-        # outbox_events 仍写,admin /reconcile_decisions?include_started=true 走
+        # outbox_events 仍写,operator /reconcile_decisions?include_started=true 走
         # outbox 查询不受影响.每 20s 1 条 audit_events 表无审计价值.
         if event_type != DomainEventType.RECONCILE_STARTED.value:
             records.append(("audit", self._build_audit_record(event, payload)))

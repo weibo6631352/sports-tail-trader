@@ -121,9 +121,9 @@ class DecisionContextBuilder:
             )
 
         if account_snapshot is not None:
-            # §11 框架不自动 pause,但 admin MANUAL pause 仍是强门禁:
+            # §11 框架不自动 pause,但 operator MANUAL pause 仍是强门禁:
             # - 自动 pause(RECONCILE/RISK/sports_live_state_ended)已全删 → 不会出现在 _market_pauses
-            # - admin pause_market_manual → 写入 _market_pauses(MANUAL source) → 这里 block
+            # - operator pause_market_manual → 写入 _market_pauses(MANUAL source) → 这里 block
             if not account_snapshot.allow_new_entries or account_snapshot.is_market_paused(
                 resolved_market.condition_id
             ):
@@ -175,7 +175,7 @@ class DecisionContextBuilder:
         )
         # 单一决策调用——所有逻辑（candidate 过滤 / Kelly sizing / 价格判断 /
         # capital efficiency / position_plan metadata）全部由 QuantDecider class 内部完成。
-        # 这层只负责 ① 拼上下文 ② 包装 QuantDecision 回 TradePlan 形状给 worker / admin。
+        # 这层只负责 ① 拼上下文 ② 包装 QuantDecision 回 TradePlan 形状给 worker / operator。
         quant_context = self._quant_context(
             trace_id=trace_id,
             market=resolved_market,
@@ -550,7 +550,7 @@ def _build_unavailable_summary(
     """把 framework 已知的早期拒绝上下文投影成最小 StrategySummary。
 
     framework 不解释字段语义——sizing_extras 是策略 size_entry hook 返回的
-    metadata，原样搬到 ``extras``，让 admin / virtual_paper 能展示 / 统计
+    metadata，原样搬到 ``extras``，让 operator / virtual_paper 能展示 / 统计
     非-single_game 早期拒绝的诊断信息。
     """
 

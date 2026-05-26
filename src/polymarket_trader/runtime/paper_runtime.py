@@ -5,7 +5,7 @@
 
 返回的 4 元组：
 - ``execution_client``：``PaperSubmitOnlyOrderClient``，下游 ``OrderExecutor`` 接管
-- ``paper_ledger``：虚拟账本，admin /runtime/paper-ledger 暴露其字段
+- ``paper_ledger``：虚拟账本，operator /runtime/paper-ledger 暴露其字段
 - ``goalserve_lazy_client``：按需 Goalserve schedule/h2h 查询客户端（API key 存在才创建）
 - ``background_tasks``：4 个 paper 模式后台 task，由 build_runtime 透传给
   ``RuntimeComponents.background_tasks``，shutdown 时统一 cancel + gather

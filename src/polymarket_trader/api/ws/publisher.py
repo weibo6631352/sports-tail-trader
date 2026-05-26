@@ -1,4 +1,4 @@
-"""AdminWsPublisher —— admin WebSocket 增量推送桥接（实装版）。
+"""OperatorWsPublisher —— operator WebSocket 增量推送桥接。
 
 订阅 `event_bus` broadcast listener → 按 topic 路由 → 异步推给 WS subscribers。
 
@@ -76,8 +76,8 @@ _KNOWN_TOPICS: frozenset[str] = frozenset(_EVENT_TYPE_TO_TOPIC.values()) | {"hea
 _QUEUE_MAX_SIZE: int = 1000  # 队列满时丢老消息（避免 publisher 内存爆）
 
 
-class AdminWsPublisher:
-    """admin WebSocket 增量推送桥接。"""
+class OperatorWsPublisher:
+    """operator WebSocket 增量推送桥接。"""
 
     def __init__(self, *, event_bus: "EventBus") -> None:
         self._event_bus = event_bus
@@ -93,7 +93,7 @@ class AdminWsPublisher:
     def subscribe(self, websocket: WsSubscriber, topics: tuple[str, ...]) -> None:
         for topic in topics:
             if topic not in _KNOWN_TOPICS:
-                logger.warning("admin_ws.unknown_topic", extra={"topic": topic})
+                logger.warning("operator_ws.unknown_topic", extra={"topic": topic})
                 continue
             self._subscribers.setdefault(topic, set()).add(websocket)
 
@@ -124,7 +124,7 @@ class AdminWsPublisher:
         if not self._listener_registered:
             self._event_bus.add_broadcast_listener(self._on_event)
             self._listener_registered = True
-        self._drain_task = asyncio.create_task(self._drain_loop(), name="admin-ws-publisher")
+        self._drain_task = asyncio.create_task(self._drain_loop(), name="operator-ws-publisher")
 
     async def stop(self) -> None:
         self._running = False
@@ -148,7 +148,7 @@ class AdminWsPublisher:
         try:
             self._queue.put_nowait(event)
         except asyncio.QueueFull:
-            # 队列满 → 丢老消息保新（admin push 是 P3，不影响交易主路径）
+            # 队列满 → 丢老消息保新（operator push 是 P3，不影响交易主路径）
             try:
                 self._queue.get_nowait()
                 self._queue.put_nowait(event)
@@ -168,7 +168,7 @@ class AdminWsPublisher:
                 payload = self._serialize_event(topic, event)
                 await self._push_to_topic(topic, payload)
             except Exception:  # noqa: BLE001
-                logger.exception("admin_ws drain error")
+                logger.exception("operator_ws drain error")
 
     def _route_event(self, event: Any) -> str | None:
         event_type = getattr(event, "event_type", None)

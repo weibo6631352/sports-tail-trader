@@ -127,7 +127,7 @@ def _record_odds_drift(market_slug: str, goalserve_ml: dict | None, goalserve_to
 
 
 def get_odds_drift_store() -> dict[str, deque]:
-    """admin API 读取入口"""
+    """operator API 读取入口"""
     return _ODDS_DRIFT_STORE
 
 
@@ -206,9 +206,9 @@ def _entry_gate_closed_for_event(
 ) -> bool:
     """账户或单市场入场闸门关闭时,不对高频盘口事件构建交易计划。
 
-    §11 框架不自动 pause,但 admin MANUAL pause 仍是强门禁(运维显式说 stop):
+    §11 框架不自动 pause,但 operator MANUAL pause 仍是强门禁(运维显式说 stop):
     - 框架自动检测 not_tradable → 不再 pause,让策略 hook 自己看 context 判断
-    - admin pause_market_manual → 仍写入 _market_pauses,这里 block entry
+    - operator pause_market_manual → 仍写入 _market_pauses,这里 block entry
     """
     if snapshot is None:
         return False
@@ -278,7 +278,7 @@ class MarketTickWorker:
         # 事件处理时检查：该 token 5s 内已有真实 event 就 skip，避免重复评估。
         self._token_last_real_orderbook_at: OrderedDict[str, datetime] = OrderedDict()
         # token_id → 最近一次 decide_exit 决策的完整 metadata 快照。
-        # /positions/signals admin endpoint 从此读取，给 UI/操盘人实时展示
+        # /positions/signals operator endpoint 从此读取，给 UI/操盘人实时展示
         # 5 类投票 + 流动性 tier + math_lock 是否支持 + fair_value 来源。
         # 仅持仓 token 写入，无持仓 token 不会有 entry，自动 LRU 由内存压力管理。
         self._token_position_signals: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -481,7 +481,7 @@ class MarketTickWorker:
             if position is not None and position.shares > Decimal("0"):
                 # 订阅驱动 MTM 刷新：从 hot orderbook 拿 best_bid 即时更新
                 # position.current_value / cash_pnl，不等 reconcile 60s 周期。
-                # 这让 portfolio / admin / 净值显示实时看到当前真实可实现价值。
+                # 这让 portfolio / operator / 净值显示实时看到当前真实可实现价值。
                 # 关键：best_bid=None（冷板凳无买家）→ MTM=$0，强制覆盖
                 # data-api 返回的 stale curPrice，避免虚假浮盈（Kalinina case
                 # 显示 cv=\$59 但实际 best_bid=None 全损 \$6.24 cost）。
@@ -795,7 +795,7 @@ class MarketTickWorker:
             decision = quant_decision.actions[0]
         else:
             decision = TradingDecision.skip(reason=quant_decision.reason or "quant_no_action")
-        # 缓存决策 metadata 供 /positions/signals admin endpoint 暴露。每次
+        # 缓存决策 metadata 供 /positions/signals operator endpoint 暴露。每次
         # decide_exit 后更新当前 token 的 signals 快照，UI/操盘人可实时看到
         # 5 类投票 + 流动性 tier + math_lock 是否支持 + fair_value 来源。
         if position.token_id and decision.metadata:
@@ -1243,7 +1243,7 @@ class MarketTickWorker:
 
     @property
     def suppressed_allocation_emits(self) -> int:
-        """已被 dedup 抑制的 allocation_decision_recorded 事件数，供 observability/admin 观察。"""
+        """已被 dedup 抑制的 allocation_decision_recorded 事件数，供 observability/operator 观察。"""
 
         return self._suppressed_allocation_emits
 
@@ -1328,7 +1328,7 @@ class MarketTickWorker:
                 self._transition_market_by_result(order_result, MarketLifecycle.POSITION_OPEN)
             elif order_result.status == OrderResultStatus.LIVE:
                 # 买单挂单未成交 → 暂停该市场直到 reconciler 处理。与 _pause_market 保持
-                # 同步，确保 AccountStateStore.is_market_paused 返回 True，让 admin 可见。
+                # 同步，确保 AccountStateStore.is_market_paused 返回 True，让 operator 可见。
                 self._pause_market(order_result.condition_id, reason="resting_buy_order")
             elif order_result.status == OrderResultStatus.NO_FILL:
                 self._transition_market_by_result(order_result, MarketLifecycle.ENTRY_READY)
@@ -1346,7 +1346,7 @@ class MarketTickWorker:
     def _pause_market(self, condition_id: str | None, *, reason: str) -> None:
         """§11 框架不自动 pause:仅在 worker 内部 lifecycle 标 PAUSED(影响 worker 决策),
         不再调 account_state.pause_market(避免框架自动写入 _market_pauses).
-        admin 仍可通过 /markets/{cid}/pause 手动 pause.
+        operator 仍可通过 /markets/{cid}/pause 手动 pause.
         """
         if condition_id is None:
             return
@@ -1368,12 +1368,12 @@ class MarketTickWorker:
 
     @property
     def skip_reason_histogram(self) -> dict[tuple[str, str], int]:
-        """P3.5: reason → count。只读快照，admin 查询用。"""
+        """P3.5: reason → count。只读快照，operator 查询用。"""
         return dict(self._skip_reason_histogram)
 
     @property
     def lifecycle_timeline(self) -> dict[str, list[tuple[MarketLifecycle, datetime]]]:
-        """P3.6: condition_id → [(lifecycle, utc_timestamp), …]。只读快照，admin 查询用。"""
+        """P3.6: condition_id → [(lifecycle, utc_timestamp), …]。只读快照，operator 查询用。"""
         return {cid: list(entries) for cid, entries in self._lifecycle_timeline.items()}
 
     def _market_fromsnapshot_position(

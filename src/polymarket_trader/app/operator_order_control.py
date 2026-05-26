@@ -69,7 +69,7 @@ class OperatorOrderController:
         new_price: Decimal,
         size_shares: Decimal | None = None,
         operator: str = "manual",
-        reason: str = "admin_replace_order",
+        reason: str = "operator_replace_order",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         trace_id = trace_id or uuid4().hex
@@ -190,7 +190,7 @@ class OperatorOrderController:
         order_result: Any,
     ) -> None:
         """Admin 触发 replace 必须落 audit。worker 路径的 ORDER_CANCEL_REQUESTED 不覆盖
-        管理面 replace；CLAUDE.md §10「可审计」要求 admin 写动作 + 结果都进 outbox。"""
+        operator replace；CLAUDE.md §10「可审计」要求 operator 写动作 + 结果都进 outbox。"""
 
         event_bus = self._runtime.event_bus if self._runtime is not None else None
         if event_bus is None:

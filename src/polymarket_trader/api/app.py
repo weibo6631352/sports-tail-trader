@@ -34,7 +34,7 @@ from polymarket_trader.api.routes import (
     stream,
     trade_replays,
     trades,
-    ws_admin,
+    ws_operator,
 )
 from polymarket_trader.api.routes import runtime as runtime_route
 from polymarket_trader.main import create_runtime, shutdown_runtime
@@ -121,7 +121,7 @@ def create_app(
     redoc_url = "/redoc" if resolved_settings.expose_openapi_docs else None
     openapi_url = "/openapi.json" if resolved_settings.expose_openapi_docs else None
     app = FastAPI(
-        title="Polymarket Trader Admin API",
+        title="Polymarket Trader Operator API",
         lifespan=lifespan,
         docs_url=docs_url,
         redoc_url=redoc_url,
@@ -138,12 +138,12 @@ def create_app(
     )
 
     # === HTTP 性能监控 middleware（统一记录所有 endpoint latency / error）===
-    # 双写：SystemPerfMonitor（admin 内部分析）+ MetricsRegistry（§11.2 标准 metric output）
+    # 双写：SystemPerfMonitor（operator 内部分析）+ MetricsRegistry（§11.2 标准 metric output）
     from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
     _perf_monitor = SystemPerfMonitor.get()
 
     # === trace_id middleware（CLAUDE.md §17 复盘可追溯）===
-    # 每个 admin 请求生成 trace_id（或继承 client 传入的 X-Trace-Id），response
+    # 每个 operator 请求生成 trace_id（或继承 client 传入的 X-Trace-Id），response
     # header 回传——运维 / agent 看到响应能直接 grep audit_events 找完整链路。
     from polymarket_trader.observability.trace import bind_trace_id, ensure_trace_id
 
@@ -241,5 +241,5 @@ def create_app(
     app.include_router(analytics.router)
     app.include_router(exports.router)
     app.include_router(stream.router)
-    app.include_router(ws_admin.router)
+    app.include_router(ws_operator.router)
     return app

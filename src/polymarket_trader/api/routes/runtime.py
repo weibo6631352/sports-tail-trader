@@ -472,7 +472,7 @@ async def metrics_latency_percentiles(
     )
 
 
-@router.get("/admin/decisions/dump")
+@router.get("/operator/decisions/dump")
 async def dump_decision_records(
     limit: int = Query(default=_DECISIONS_DUMP_DEFAULT_LIMIT, ge=1, le=_DECISIONS_DUMP_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),

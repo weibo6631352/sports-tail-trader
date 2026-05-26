@@ -45,7 +45,7 @@ from polymarket_trader.infra.db import (
 
 @dataclass(frozen=True, slots=True)
 class RepositoryGroup:
-    """所有 admin 查询用 repository 的一站式访问。
+    """所有 operator 查询用 repository 的一站式访问。
 
     每次 `with_repositories` 调用都创建新 session + 包装新 group——repo 对象
     持 session 引用，不能跨 session 复用。

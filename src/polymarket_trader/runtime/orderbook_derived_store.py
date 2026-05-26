@@ -1,4 +1,4 @@
-"""派生指标内存 store——由 ``derived publisher`` 写入, admin endpoint 只读。
+"""派生指标内存 store——由 ``derived publisher`` 写入, operator endpoint 只读。
 
 每 token_id 缓存一份 ``DerivedMetrics``: 由 market_ws 推送时通过 publisher 重算
 并替换 (cover-write, 无 delta merge)。lifecycle 跟随 market_registry: 注册
@@ -9,7 +9,7 @@
   market < 500, 极端 churn 也不会过 2000.
 - 超 cap → OrderedDict LRU 踢最久未访问 token (set 时 move_to_end).
 
-P0 零依赖: 纯 dict + 一把 Lock (短临界区), admin 读不阻塞 ws 推送写。
+P0 零依赖: 纯 dict + 一把 Lock (短临界区), operator 读不阻塞 ws 推送写。
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ class OrderbookDerivedStore:
                 self._cache.popitem(last=False)
 
     def get(self, token_id: str) -> DerivedMetrics | None:
-        """读取不更新 LRU 顺序: admin 读不应影响 publisher 的 evict 优先级。"""
+        """读取不更新 LRU 顺序: operator 读不应影响 publisher 的 evict 优先级。"""
         return self._cache.get(token_id)
 
     def evict_market(self, condition_id: str, token_ids: tuple[str, ...]) -> None:
@@ -54,7 +54,7 @@ class OrderbookDerivedStore:
         return len(self._cache)
 
     def memory_footprint_estimate(self) -> dict[str, int]:
-        """容量+实际 token 数, admin /runtime/memory-components 用。"""
+        """容量+实际 token 数, operator /runtime/memory-components 用。"""
         return {
             "tracked_tokens": len(self._cache),
             "max_tokens": self._max_tokens,

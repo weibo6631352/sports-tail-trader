@@ -9,7 +9,7 @@ from polymarket_trader.domain.events import DomainEventType, EventEnvelope, Outb
 logger = logging.getLogger(__name__)
 
 # 已经 warn 过的未知 event_type（按 type 去重防刷屏）。多 worker 共用 sink，
-# 第一次遇到时统一提醒；后续可在 admin 中查看实际丢弃量。
+# 第一次遇到时统一提醒；后续可在 operator 中查看实际丢弃量。
 _unknown_event_types_warned: set[str] = set()
 
 # 进库白名单:只持久化"产生订单 / 资金动作 / 人工干预"事件,其他全砍.
@@ -46,7 +46,7 @@ _PERSISTABLE_EVENT_TYPES = {
     DomainEventType.REPLACE_ORDER_SUBMITTED.value,
     # === 单市场暂停(reconcile prune 链路 + 终态 audit endpoint 依赖)===
     DomainEventType.TRADING_PAUSED_FOR_MARKET.value,
-    # === reconcile 真实差异/修复(admin /reconcile_diffs endpoint 依赖)===
+    # === reconcile 真实差异/修复(operator /reconcile_diffs endpoint 依赖)===
     # 注意:RECONCILE_STARTED 是心跳已在 worker 层 throttle + persistence 层跳过,
     # 这里不收;DIFF_DETECTED/APPLIED 是真实修复记录必须留.
     DomainEventType.RECONCILE_DIFF_DETECTED.value,
@@ -57,7 +57,7 @@ _PERSISTABLE_EVENT_TYPES = {
     # RECONCILE_STARTED — supervisor heartbeat 已记
     # MARKET_DISCOVERED / MARKET_UPDATED — 元数据流水
     # MARKET_FILTERED_IN / MARKET_FILTERED_OUT — 过滤流水
-    # ORDERBOOK_DIRECTION_QUERIED — admin 读路径,无需 audit
+    # ORDERBOOK_DIRECTION_QUERIED — operator 读路径,无需 audit
 }
 
 

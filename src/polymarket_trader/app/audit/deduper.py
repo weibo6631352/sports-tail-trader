@@ -12,7 +12,7 @@ payload_hash) 短窗口内只入库 1 次，命中重复时丢掉（不阻塞主
   - record-only 评估：300s
   - 其他（默认）：10s
 - **PR3 不阻塞**：本类只内存操作，无 IO；PersistenceWorker 入口同步过滤后再走 _persist_batch
-- **统计可观测**：`stats()` 返回 kept / dropped / total 等供 admin / metric 查
+- **统计可观测**：`stats()` 返回 kept / dropped / total 等供 operator / metric 查
 
 # 用法
 

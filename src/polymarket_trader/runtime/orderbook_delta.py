@@ -94,7 +94,7 @@ class OrderbookDirectionSignal:
         """序列化成 dict 注入 DecisionContext.metadata['orderbook_direction']。
 
         策略只消费归一化复合信号 + label + confidence；不暴露 raw deltas
-        （留给 admin 审计 endpoint）。Decimal 转 str 以保证 JSON 安全。
+        （留给 operator 审计 endpoint）。Decimal 转 str 以保证 JSON 安全。
         """
         return {
             "window_seconds": float(self.window_seconds),
@@ -128,7 +128,7 @@ class OrderbookDeltaStore:
     - observe(snapshot): P0 路径上由 market_ws worker 在每次 snapshot 更新时
       调用,sync only,无 await/IO/lock(deque append CPython atomic)。
     - direction_signal(token_id, window_seconds): 读窗口内的 first/last sample
-      算 delta + score,供策略 / admin 查询。
+      算 delta + score,供策略 / operator 查询。
     """
 
     def __init__(

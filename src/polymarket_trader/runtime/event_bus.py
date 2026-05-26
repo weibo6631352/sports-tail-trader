@@ -115,7 +115,7 @@ class EventBus:
         self._low_priority_paused = False
         self._wake = asyncio.Event()
         self._persistence_sink: Callable[[int, Any], None] | None = None
-        # 只读旁路：SSE / admin 订阅可以挂这里，单纯做 fan-out，不影响交易主链路。
+        # 只读旁路：SSE / operator 订阅可以挂这里，单纯做 fan-out，不影响交易主链路。
         self._broadcast_callbacks: set[Callable[[Any], None]] = set()
         # outbox mirror 失败计数器——§10 要求降级动作可审计。失败仍然不向上抛
         # 异常以保 §7 主链路不被反向阻塞，但累计计数 + 警告日志能让 observability
@@ -355,7 +355,7 @@ class EventBus:
             )
 
     def mirror_failure_count(self) -> int:
-        """累计的 outbox sink 失败次数；供 supervisor / admin 观测。"""
+        """累计的 outbox sink 失败次数；供 supervisor / operator 观测。"""
 
         return self._mirror_failure_count
 

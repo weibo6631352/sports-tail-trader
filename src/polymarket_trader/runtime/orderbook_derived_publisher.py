@@ -14,7 +14,7 @@ P0 影响审计:
 - 异常被 catch + 记 stats, 不影响后续推送 (单次 compute 失败不阻塞 P0).
 
 组合优化 (#75):
-publisher 拼装 OFI 风向信号嵌入 DerivedMetrics, 让 admin /markets/orderbook-depth
+publisher 拼装 OFI 风向信号嵌入 DerivedMetrics, 让 operator /markets/orderbook-depth
 一站式拿到所有可观测信号 (深度 + 流动性 + 滑点 + 风向). delta_store 仍独立服务
 P0 策略层 (按需 direction_signal 查询), 算法不重复.
 """
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# direction_signal 默认窗口 (与 admin /markets/orderbook-direction 端点一致, 10s).
+# direction_signal 默认窗口 (与 operator /markets/orderbook-direction 端点一致, 10s).
 # 嵌入 DerivedMetrics 用统一窗口, 不参数化, 保持 derived payload 字段稳定.
 _DIRECTION_WINDOW_SECONDS = 10.0
 
@@ -46,7 +46,7 @@ class OrderbookDerivedPublisher:
     """订阅 ws push, 同步算 ``DerivedMetrics`` 写入 store。
 
     组合: 内部调 ``delta_store.direction_signal()`` 拼装 OFI 风向投影一并嵌入,
-    避免 admin 多次 round-trip 同时不重复算法。
+    避免 operator 多次 round-trip 同时不重复算法。
     """
 
     def __init__(
@@ -58,7 +58,7 @@ class OrderbookDerivedPublisher:
     ) -> None:
         self._store = store
         self._history_buffer = history_buffer
-        # delta_store 可选: None 时 derived.direction 永远 None (admin 仍可独立调
+        # delta_store 可选: None 时 derived.direction 永远 None (operator 仍可独立调
         # /markets/orderbook-direction 看 raw signal). 生产环境总会注入.
         self._delta_store = delta_store
         # observability
@@ -95,7 +95,7 @@ class OrderbookDerivedPublisher:
         """从 delta_store 拉 10s 窗口 direction_signal, 投影到 DerivedMetrics 嵌入字段。
 
         sample 不足 / token 首次推送 → None (DerivedMetrics.direction 也是 None,
-        admin 看到 null 表示信号还不可用)。
+        operator 看到 null 表示信号还不可用)。
         """
         if self._delta_store is None:
             return None

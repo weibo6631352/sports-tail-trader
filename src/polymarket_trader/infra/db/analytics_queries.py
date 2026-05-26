@@ -65,7 +65,7 @@ REJECTION_EVENT_TITLES: tuple[str, ...] = (
 
 
 # Kelly / 风控拒绝原因分类——``fetch_rejection_reasons`` 返回 raw reason，下游
-# admin / dashboard 可用此映射做分桶展示（"Kelly 早拒"vs"风控早拒"vs"账户余额"）。
+# operator / dashboard 可用此映射做分桶展示（"Kelly 早拒"vs"风控早拒"vs"账户余额"）。
 # 旧的 single_order_limit_reached / market_limit_reached 等已删除——只保留 Kelly 时代。
 REJECTION_REASON_CATEGORIES: dict[str, str] = {
     # Kelly engine 早拒

@@ -7,7 +7,7 @@ docs/新架构方案.md §12.4。从 api/app.py 抽出来集中维护，路由�
 - `ADMIN_API_TOKEN` 未配置 → 路由裸跑（仅本机开发场景；启动 warning）
 - 配置了 → 非豁免路径必须带 `X-Admin-Token: <匹配值>`，否则 401
 - OPTIONS 请求由 CORSMiddleware 处理，不在本 middleware 校验
-- 豁免路径：健康检查 / OpenAPI docs / SSE / WebSocket admin stream
+- 豁免路径：健康检查 / OpenAPI docs / SSE / WebSocket operator stream
   （SSE 与 WS 浏览器不支持自定义 header，token 走 query param）
 """
 
@@ -31,8 +31,8 @@ DEFAULT_AUTH_EXEMPT_PREFIXES: tuple[str, ...] = (
     "/redoc",
     # SSE / 只读 stream：前端 EventSource 不支持自定义 header，token 走 query param
     "/stream/",
-    # WebSocket admin stream：浏览器 WebSocket 同样不支持自定义 header
-    "/admin/stream",
+    # WebSocket operator stream：浏览器 WebSocket 同样不支持自定义 header
+    "/operator/stream",
 )
 
 
@@ -42,7 +42,7 @@ def install_admin_token_middleware(
     expected_token: str | None,
     exempt_prefixes: tuple[str, ...] = DEFAULT_AUTH_EXEMPT_PREFIXES,
 ) -> None:
-    """注册 admin token middleware 到 FastAPI app。
+    """注册 API token middleware 到 FastAPI app。
 
     `expected_token=None` 时跳过校验（本机开发场景），但会在启动期输出 warning
     提示生产部署必须配置。

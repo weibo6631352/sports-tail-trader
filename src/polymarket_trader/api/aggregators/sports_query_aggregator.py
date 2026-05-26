@@ -10,7 +10,7 @@
 
 姊妹 `SportsLiveAggregator` 走新 LiveStateStore / LiveSourceRegistry 架构，
 适用于 V2 per-source bucket 视角；本 aggregator 仍以 market_metadata_store
-为真相源，覆盖前端原 admin sports 路由的完整契约。
+为真相源，覆盖前端原 operator sports 路由的完整契约。
 """
 
 from __future__ import annotations

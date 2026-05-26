@@ -49,7 +49,7 @@ _LIMIT_CLAMPED_VALUE = "limit_clamped_to_100000"
 def _resolve_session_factory(request: Request) -> async_sessionmaker[AsyncSession]:
     """优先取 app.state 注入的 session_factory；其次回退到 runtime。
 
-    与其他 admin 端点共享 503 语义，session_factory 不存在时不返回半截响应。
+    与其他 operator endpoint共享 503 语义，session_factory 不存在时不返回半截响应。
     """
 
     factory = getattr(request.app.state, "db_session_factory", None)

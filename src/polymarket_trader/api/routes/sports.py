@@ -142,8 +142,8 @@ async def get_pregame_snapshot(
     }
 
 
-@router.get("/admin/outright/team-resolution")
-async def admin_outright_team_resolution(
+@router.get("/operator/outright/team-resolution")
+async def operator_outright_team_resolution(
     condition_id: str | None = Query(default=None, min_length=1),
     market_slug: str | None = Query(default=None, min_length=1),
     runtime: Any = Depends(get_runtime),

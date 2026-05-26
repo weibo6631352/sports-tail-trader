@@ -114,7 +114,7 @@ class LiveSourceRegistry:
             return frozenset(self._market_to_sources.get(market_key, ()))
 
     def summary(self) -> dict[str, dict[str, int]]:
-        """admin / metric 用：每个 source 当前 subscriber 数。"""
+        """operator / metric 用：每个 source 当前 subscriber 数。"""
 
         with self._lock:
             return {

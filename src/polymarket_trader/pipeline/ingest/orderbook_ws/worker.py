@@ -119,7 +119,7 @@ class MarketWsWorker:
         self._registry = registry
         self._rest_snapshot_loader = rest_snapshot_loader
         self._orderbook_delta_store = orderbook_delta_store
-        # 多窗口波动观测 buffer:每次 snapshot 更新写一条,admin /orderbook-depth 读
+        # 多窗口波动观测 buffer:每次 snapshot 更新写一条,operator /orderbook-depth 读
         self._orderbook_history_buffer = orderbook_history_buffer
         # 派生指标 publisher: 推送时 fire-and-forget 派发, compute 在 to_thread 跑,
         # 不占主 loop. None 表示功能未启用 (启动前/测试).
@@ -664,7 +664,7 @@ class MarketWsWorker:
         with step_track("market_ws_push", "delta_observe"):
             if self._orderbook_delta_store is not None:
                 self._orderbook_delta_store.observe(snapshot)
-        # 多窗口波动观测 ring buffer:admin /markets/orderbook-depth 读 2/3/5/10s delta
+        # 多窗口波动观测 ring buffer:operator /markets/orderbook-depth 读 2/3/5/10s delta
         with step_track("market_ws_push", "history_record"):
             if self._orderbook_history_buffer is not None:
                 self._orderbook_history_buffer.record(snapshot)

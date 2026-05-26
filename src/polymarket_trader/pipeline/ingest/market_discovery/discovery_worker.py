@@ -77,7 +77,7 @@ class MarketDiscoveryWorker:
         self._last_failure: DiscoveryFailure | None = None
 
     def cache_sizes(self) -> dict[str, int]:
-        """缓存大小快照——供 supervisor / admin 观测 §6 容量上界。"""
+        """缓存大小快照——供 supervisor / operator 观测 §6 容量上界。"""
 
         return {
             "markets_by_condition_id": len(self._markets_by_condition_id),

@@ -298,8 +298,8 @@ class QuantDecision:
 class StrategySummary:
     """策略主动提供给 framework 的中性展示视图。
 
-    framework 的 admin / UI / audit / 复盘读这里的字段，不读策略私有 metadata。
-    策略可把任何 framework 不解析、但 admin 详情页希望透传给前端的扩展结构放进
+    framework 的 operator / UI / audit / 复盘读这里的字段，不读策略私有 metadata。
+    策略可把任何 framework 不解析、但 operator 详情页希望透传给前端的扩展结构放进
     ``extras``。framework 对 ``extras`` 整体序列化、不按字段名解释。
     """
 
@@ -318,7 +318,7 @@ class StrategySummary:
 
 
 # ----- ManualConfirmation -----
-# admin 触发候选确认时，framework 把这个 DTO 注入 ``DecisionContext.manual_confirmation``。
+# operator 触发候选确认时，framework 把这个 DTO 注入 ``DecisionContext.manual_confirmation``。
 
 @dataclass(frozen=True, slots=True)
 class ManualConfirmation:

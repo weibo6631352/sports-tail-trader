@@ -584,7 +584,7 @@ class MarketMiscAggregator:
         else:
             payload = {"token_id": token_id, **_serialize_direction_signal(signal)}
         self._publish_audit(
-            DomainEventType.ORDERBOOK_DIRECTION_QUERIED, payload, "admin_direction_query",
+            DomainEventType.ORDERBOOK_DIRECTION_QUERIED, payload, "operator_direction_query",
         )
         return payload
 
@@ -622,7 +622,7 @@ class MarketMiscAggregator:
         self._publish_audit(
             DomainEventType.ORDERBOOK_DIRECTION_QUERIED,
             payload,
-            "admin_direction_query_multi",
+            "operator_direction_query_multi",
         )
         return payload
 
@@ -1536,7 +1536,7 @@ class MarketMiscAggregator:
 
     # 挂载到 class
 # ===== module-level cache for trade tape =====
-# 2s cache 防止 admin 反复调爆 Polymarket data-api（无明示限速但避免被 ban）
+# 2s cache 防止 operator 反复调爆 Polymarket data-api（无明示限速但避免被 ban）
 _TRADE_TAPE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 

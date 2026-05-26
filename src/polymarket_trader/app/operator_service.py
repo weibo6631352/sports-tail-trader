@@ -56,7 +56,7 @@ from polymarket_trader.workflow.config import TradingWorkflowConfig
 logger = logging.getLogger(__name__)
 
 
-def _resolve_admin_bankroll(account: AccountSnapshot, portfolio_budget_usdc: Any) -> Decimal:
+def _resolve_operator_bankroll(account: AccountSnapshot, portfolio_budget_usdc: Any) -> Decimal:
     """同 EntryPlanner / worker 一致的 bankroll 口径。Admin/manual 入口同样要走 Kelly。"""
 
     cap = portfolio_budget_usdc if isinstance(portfolio_budget_usdc, Decimal) else Decimal(
@@ -135,7 +135,7 @@ class OperatorService:
         metadata: Mapping[str, Any] | None = None,
         manual_confirmation: "ManualConfirmation | None" = None,
     ):
-        # runtime.settings 是 main.py 启动后绑定的强字段——admin 路径不可能在
+        # runtime.settings 是 main.py 启动后绑定的强字段——operator 路径不可能在
         # settings 缺失时执行。kelly_* 从策略侧 TradingWorkflow.config 读取；
         # 策略配置是 kelly_* 的唯一真相来源，不再走框架 Settings。
         settings = self.runtime.settings
@@ -169,7 +169,7 @@ class OperatorService:
         execution_permission = extras.get("execution_permission") if extras else None
         strategy_action = summary.action if summary is not None else ""
         # 策略想 auto_execute 但 plan 因 framework 风控 / 资金 / 盘口被挡住时，
-        # admin 展示统一标 reject，让运营能区分"策略主动拒绝"vs"被框架挡住"。
+        # operator UI 展示统一标 reject，让运营能区分"策略主动拒绝"vs"被框架挡住"。
         if strategy_action == "auto_execute" and not plan.ready_to_trade:
             action_label = "reject"
             block_reason = ""
@@ -464,7 +464,7 @@ class OperatorService:
             }
         condition_id_filter = normalize_condition_ids(condition_ids)
         logger.warning(
-            "admin reconcile triggered",
+            "operator reconcile triggered",
             extra={
                 "authorized_by": authorized_by,
                 "reason": reason,
@@ -480,7 +480,7 @@ class OperatorService:
                     trace_id=resolved_trace_id,
                     event_type=DomainEventType.RECONCILE_STARTED,
                     event_id=uuid4().hex,
-                    reason=reason or "admin_reconcile",
+                    reason=reason or "operator_reconcile",
                     payload={
                         "authorized_by": authorized_by,
                         "reason": reason,
@@ -505,7 +505,7 @@ class OperatorService:
         new_price: Decimal,
         size_shares: Decimal | None = None,
         operator: str = "manual",
-        reason: str = "admin_replace_order",
+        reason: str = "operator_replace_order",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         return await self._order_controller().replace_order(
@@ -637,10 +637,10 @@ class OperatorService:
             classification_passed=True,
             balance_usdc=snapshot_available_usdc(account),
             allowance_usdc=snapshot_allowance(account),
-            bankroll_usdc=_resolve_admin_bankroll(account, self._settings_value("portfolio_budget_usdc")),
+            bankroll_usdc=_resolve_operator_bankroll(account, self._settings_value("portfolio_budget_usdc")),
             kelly_max_position_fraction=_kelly.kelly_max_position_fraction,
             kelly_round_up_max_overbet_ratio=_kelly.kelly_round_up_max_overbet_ratio,
-            operation="admin_confirm_entry",
+            operation="operator_confirm_entry",
         )
         self._project_manual_entry_result(review, snapshot=account)
         await self._publish_candidate_confirmation_review(market=market, plan=plan, review=review)
@@ -738,7 +738,7 @@ class OperatorService:
         # 要求拒绝、降级、恢复动作可审计；event_bus 不可用时不应静默失败。
         trace_id = trace_id or uuid4().hex
         logger.warning(
-            "admin pause_trading triggered",
+            "operator pause_trading triggered",
             extra={
                 "operator": operator,
                 "authorized_by": authorized_by,
@@ -802,7 +802,7 @@ class OperatorService:
 
         trace_id = trace_id or uuid4().hex
         logger.warning(
-            "admin resume_trading triggered",
+            "operator resume_trading triggered",
             extra={
                 "operator": operator,
                 "authorized_by": authorized_by,
@@ -853,14 +853,14 @@ class OperatorService:
         condition_id: str | None = None,
         token_id: str | None = None,
         operator: str = "manual",
-        reason: str = "admin_cancel_order",
+        reason: str = "operator_cancel_order",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         """人工撤单。走 OrderGateway → OrderExecutor，与策略撤单同一条主链路。"""
 
         trace_id = trace_id or uuid4().hex
         logger.warning(
-            "admin cancel_order triggered",
+            "operator cancel_order triggered",
             extra={
                 "operator": operator,
                 "reason": reason,
@@ -942,11 +942,11 @@ class OperatorService:
         old_size_shares: Decimal | None = None,
         new_size_shares: Decimal | None = None,
     ) -> None:
-        """把 admin 触发的 cancel / replace 落 audit（CLAUDE.md §10 可审计要求）。
+        """把 operator 触发的 cancel / replace 落 audit（CLAUDE.md §10 可审计要求）。
 
-        发两个事件：``_REQUESTED`` / ``_SUBMITTED`` 记 admin 意图；``_CANCELLED`` 记
+        发两个事件：``_REQUESTED`` / ``_SUBMITTED`` 记 operator 意图；``_CANCELLED`` 记
         OrderExecutor 实际返回的结果。两者都必要——worker 路径 (order_result_processor)
-        早已发过同名事件；admin 路径之前是漏的。
+        早已发过同名事件；operator 路径之前是漏的。
         """
 
         from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
@@ -1006,7 +1006,7 @@ class OperatorService:
         condition_id: str,
         token_id: str,
         operator: str = "manual",
-        reason: str = "admin_force_exit",
+        reason: str = "operator_force_exit",
         price: Decimal | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
@@ -1095,7 +1095,7 @@ class OperatorService:
             position=position,
             balance_usdc=snapshot_available_usdc(account),
             allowance_usdc=snapshot_allowance(account),
-            bankroll_usdc=_resolve_admin_bankroll(account, self._settings_value("portfolio_budget_usdc")),
+            bankroll_usdc=_resolve_operator_bankroll(account, self._settings_value("portfolio_budget_usdc")),
         )
         result = review.order_result
         failed = result is None or result.status in {
@@ -1175,18 +1175,18 @@ class OperatorService:
         *,
         order_ids: Sequence[str],
         operator: str = "manual",
-        reason: str = "admin_bulk_cancel",
+        reason: str = "operator_bulk_cancel",
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         """批量撤单：对列表里每个 order_id 依次调用 cancel_order。
 
         每笔撤单独立走 OrderGateway → OrderExecutor，有独立 trace_id。
         失败不影响后续条目——全量跑完后返回汇总结果。
-        上限 20 单，防止一次 admin 操作占用交易服务过久。
+        上限 20 单，防止一次 operator 操作占用交易服务过久。
         """
 
         logger.warning(
-            "admin bulk_cancel_orders triggered",
+            "operator bulk_cancel_orders triggered",
             extra={
                 "operator": operator,
                 "reason": reason,

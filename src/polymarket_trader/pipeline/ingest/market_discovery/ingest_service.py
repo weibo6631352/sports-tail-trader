@@ -294,7 +294,7 @@ class MarketIngestService:
 
     @property
     def suppressed_filter_emits(self) -> int:
-        """已被 dedup 抑制的 MARKET_FILTERED_OUT 事件数，供 admin/observability 观察。"""
+        """已被 dedup 抑制的 MARKET_FILTERED_OUT 事件数，供 operator/observability 观察。"""
 
         return self._suppressed_filter_emits
 

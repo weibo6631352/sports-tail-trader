@@ -25,7 +25,7 @@ from polymarket_trader.workflow._shared.team_normalize import normalize_team_nam
 class TeamResolutionTrace:
     """``resolve_market_team_debug`` 的诊断 trace。
 
-    用于 admin endpoint 让运维快速看到「为什么这个市场被判为 OUTRIGHT_TEAM_NOT_RESOLVED」。
+    用于 operator endpoint 让运维快速看到「为什么这个市场被判为 OUTRIGHT_TEAM_NOT_RESOLVED」。
     不进入 P0 主路径：``resolve_market_team`` 仍走最小开销实现，trace 函数额外
     构造 metadata 仅在诊断查询时调用。
     """
@@ -116,10 +116,10 @@ def _word_boundary_search(needle: str, haystack: str) -> bool:
 def resolve_market_team_debug(
     market: Market, snapshot: SeasonOddsSnapshot
 ) -> TeamResolutionTrace:
-    """同 ``resolve_market_team``，但返回完整的解析 trace，仅用于 admin 诊断。
+    """同 ``resolve_market_team``，但返回完整的解析 trace，仅用于 operator 诊断。
 
     与生产路径区分：``resolve_market_team`` 只关心命中结果，热路径不构造 trace；
-    本函数在 admin endpoint 单点调用，能力换性能（O(N) 球队遍历无影响）。
+    本函数在 operator endpoint 单点调用，能力换性能（O(N) 球队遍历无影响）。
     """
 
     normalized_text = _candidate_text(market)

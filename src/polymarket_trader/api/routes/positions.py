@@ -23,7 +23,7 @@ async def get_position_signals(
     token_id: str | None = Query(default=None, min_length=1, max_length=80),
     service: OperatorService = Depends(get_operator_service),
 ) -> dict[str, object]:
-    """持仓信号 admin 端点：返回最近 decide_exit 决策的完整 5 类投票 +
+    """持仓信号 operator endpoint：返回最近 decide_exit 决策的完整 5 类投票 +
     流动性 tier + math_lock 支持情况 + fair_value 来源等。
 
     命名"持仓信号"反映实际语义：评估每个持仓的市场状态（HOLD vs EXIT）
@@ -71,7 +71,7 @@ class ForceExitRequest(BaseModel):
     token_id: str = Field(min_length=1)
     price: Decimal | None = Field(default=None, gt=Decimal("0"), lt=Decimal("1"))
     operator: str = "manual"
-    reason: str = "admin_force_exit"
+    reason: str = "operator_force_exit"
     trace_id: str | None = None
 
 
