@@ -40,6 +40,16 @@ logger = logging.getLogger(__name__)
 # § 13.7 payload size 上限。超大直接 drop + warn（说明业务路径塞了大 dump）
 _PAYLOAD_SIZE_WARN_BYTES: int = 2048
 
+# 设计上的"胖事件"——payload 必然大于 _PAYLOAD_SIZE_WARN_BYTES,绕过 size 检查。
+# decision_recorded 是 §15 复盘核心:完整 decision_input(market + orderbook +
+# live_state + signals) + decision_output,~9KB/条,删了就没法复盘"为什么这一刻
+# 这么决策"——比限流 audit 表更重要。
+_LARGE_BY_DESIGN_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "decision_recorded",
+    }
+)
+
 # 已知 trivial counter event_type（应用 MetricsRegistry 而非 audit）
 _TRIVIAL_EVENT_TYPES: frozenset[str] = frozenset(
     {
@@ -136,6 +146,9 @@ class GarbageFilter:
             return "trivial_counter"
         if _is_synthetic_heartbeat_skip(event):
             return "synthetic_heartbeat_skip"
+        # 设计上的胖事件直接通过(decision_recorded 等), 不做 size 检查
+        if event.event_type in _LARGE_BY_DESIGN_EVENT_TYPES:
+            return None
         # 大 payload 检查放最后（最贵）
         if event.payload and _payload_size_bytes(event) > _PAYLOAD_SIZE_WARN_BYTES:
             return "payload_too_large"

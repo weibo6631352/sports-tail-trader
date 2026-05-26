@@ -214,10 +214,16 @@ async def fetch_rejection_reasons(
     market_type: str | None = None,
     limit: int = 20,
 ) -> tuple[int, list[Mapping[str, Any]]]:
-    """统计拒绝原因 top N。
+    """统计拒绝原因 top N (UNION audit_events + decision_records).
 
-    覆盖 ``order_rejected``、``risk_check_failed``、``market_filtered_out`` 三类事件，
-    按 ``reason`` 文本去前后空白后分组；空 reason 归到 ``<empty>``。
+    覆盖 4 类拒绝源:
+    - audit_events.order_rejected: gateway/executor 拒单
+    - audit_events.risk_check_failed: 风控门禁拒单
+    - audit_events.market_filtered_out: discovery 过滤
+    - decision_records (accepted=false): quant 决策拒(quant_position_hold /
+      edge_below_min / price_out_of_range / missing_best_ask 等). 量化拒绝是
+      操盘"门禁调参"§15 的核心信号——只看 audit 三类会漏掉 90%+ 数据.
+    按 ``reason`` 文本去前后空白后分组；空 reason 归到 ``<empty>``.
     """
 
     join_clause, where_extra, params = _build_market_filter(
@@ -225,24 +231,46 @@ async def fetch_rejection_reasons(
         league=league,
         market_type=market_type,
     )
+    decision_join, decision_where, decision_params = _build_market_filter(
+        condition_alias="d.condition_id",
+        league=league,
+        market_type=market_type,
+    )
 
+    # UNION ALL: 两路 reason → 同一聚合键. audit 路按 event_title 过滤,
+    # decision 路按 accepted=false (含全部 quant 拒绝 reason).
     sql_top = f"""
-        SELECT COALESCE(NULLIF(BTRIM(a.reason), ''), '<empty>') AS reason_key,
-               COUNT(*) AS reason_count
-        FROM audit_events a{join_clause}
-        WHERE a.created_at >= :window_start
-          AND a.created_at < :window_end
-          AND a.event_title = ANY(:event_titles){where_extra}
+        WITH all_rejections AS (
+            SELECT COALESCE(NULLIF(BTRIM(a.reason), ''), '<empty>') AS reason_key
+            FROM audit_events a{join_clause}
+            WHERE a.created_at >= :window_start
+              AND a.created_at < :window_end
+              AND a.event_title = ANY(:event_titles){where_extra}
+            UNION ALL
+            SELECT COALESCE(NULLIF(BTRIM(d.reason), ''), '<empty>') AS reason_key
+            FROM decision_records d{decision_join}
+            WHERE d.created_at >= :window_start
+              AND d.created_at < :window_end
+              AND d.accepted = false{decision_where}
+        )
+        SELECT reason_key, COUNT(*) AS reason_count
+        FROM all_rejections
         GROUP BY reason_key
         ORDER BY reason_count DESC, reason_key ASC
         LIMIT :limit
     """
     sql_total = f"""
-        SELECT COUNT(*) AS total
-        FROM audit_events a{join_clause}
-        WHERE a.created_at >= :window_start
-          AND a.created_at < :window_end
-          AND a.event_title = ANY(:event_titles){where_extra}
+        SELECT (
+            (SELECT COUNT(*) FROM audit_events a{join_clause}
+             WHERE a.created_at >= :window_start
+               AND a.created_at < :window_end
+               AND a.event_title = ANY(:event_titles){where_extra})
+            +
+            (SELECT COUNT(*) FROM decision_records d{decision_join}
+             WHERE d.created_at >= :window_start
+               AND d.created_at < :window_end
+               AND d.accepted = false{decision_where})
+        ) AS total
     """
     bind = {
         "window_start": window_start,
@@ -250,6 +278,7 @@ async def fetch_rejection_reasons(
         "event_titles": list(REJECTION_EVENT_TITLES),
         "limit": limit,
         **params,
+        **decision_params,
     }
     total_row = (await session.execute(text(sql_total), bind)).one()
     total = int(total_row[0] or 0)
