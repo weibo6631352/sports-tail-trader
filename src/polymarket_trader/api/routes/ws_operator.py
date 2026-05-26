@@ -1,6 +1,6 @@
 """WebSocket operator stream endpoint —— 前端订阅 operator_ws_publisher 增量推送。
 
-docs/新架构方案.md §12.3 + ws_operator/publisher.py. publisher 早已实装完整：
+原架构方案 §12.3 + ws_operator/publisher.py. publisher 早已实装完整：
 event_bus broadcast listener → 按 topic 路由 → 推 subscriber。本 endpoint
 是最后一步：接收前端 WebSocket，调 publisher.subscribe/unsubscribe，
 把 `starlette.websockets.WebSocket` 当作 WsSubscriber 协议实例传进去。

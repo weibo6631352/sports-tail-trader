@@ -1,6 +1,6 @@
 """【横切】api/middleware/ —— endpoint cache / auth / rate_limit。
 
-docs/新架构方案.md §12.4。route 层薄化的关键支撑——把性能 / 鉴权 / 缓存
+原架构方案 §12.4。route 层薄化的关键支撑——把性能 / 鉴权 / 缓存
 共性都放这里，route 自身只做参数校验 + 调 aggregator + 序列化。
 
 # 模块

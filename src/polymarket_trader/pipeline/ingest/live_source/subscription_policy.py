@@ -1,6 +1,6 @@
 """SportsSubscriptionPolicy —— 决定 market 该订哪个 primary live source。
 
-# 规则（docs/新架构方案.md §3.3）
+# 规则（原架构方案 §3.3）
 
 - inplay 覆盖的 sport（参 `source.INPLAY_COVERED_SPORTS`）→ **只订 inplay**（prio 100）
 - inplay 不覆盖的 sport → 只订 livescore（prio 50）

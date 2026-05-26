@@ -1,4 +1,4 @@
-"""Prometheus 文本格式 exporter（docs/新架构方案.md §11.4 `/metrics` endpoint）。
+"""Prometheus 文本格式 exporter（原架构方案 §11.4 `/metrics` endpoint）。
 
 把 MetricsRegistry.snapshot() 转成 Prometheus exposition format text/plain。
 外部 Prometheus / VictoriaMetrics / Grafana Agent 可直接 scrape。

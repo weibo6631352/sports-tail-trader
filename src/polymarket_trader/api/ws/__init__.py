@@ -1,6 +1,6 @@
 """【api/ws】operator 实时数据 WebSocket 增量推送。
 
-docs/新架构方案.md §12.3 ④。agent / 前端运营查询从 polling 改 push——订阅
+原架构方案 §12.3 ④。agent / 前端运营查询从 polling 改 push——订阅
 一次后被动接收 (portfolio / candidates / live_states / health) 增量更新。
 
 # 设计

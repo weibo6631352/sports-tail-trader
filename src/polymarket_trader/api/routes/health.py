@@ -18,7 +18,7 @@ def _reporter(runtime: Any) -> HealthReporter:
 
 @router.get("/health")
 async def health(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
-    """总体健康（docs/新架构方案.md §11.4）—— 5 维度 status 聚合。
+    """总体健康（原架构方案 §11.4）—— 5 维度 status 聚合。
 
     机器可读：status ∈ {healthy, degraded, unhealthy}，detail 列各维度独立 status。
     任一 unhealthy → unhealthy；任一 degraded → degraded。
@@ -64,7 +64,7 @@ async def ready(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
 async def metrics(runtime: Any = Depends(get_runtime)) -> str:
     """Prometheus exposition format —— 外部监控系统直接 scrape 此 endpoint。
 
-    docs/新架构方案.md §11.4。MetricsRegistry.snapshot() 转 text/plain 格式，
+    原架构方案 §11.4。MetricsRegistry.snapshot() 转 text/plain 格式，
     所有 counter / gauge / histogram 自动暴露。ObservabilityBridge 5s 周期写入
     的 13+ 个 gauge（audit dedupe / garbage / live source / account）也在内。
     """

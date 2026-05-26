@@ -560,7 +560,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     # 纯时间窗 15s(覆盖 2/3/5/10s + 余量),无 maxlen 兜底.
     # max_tokens=2000 LRU evict 防极端 token 爆.
     orderbook_history_buffer = OrderbookHistoryBuffer(max_age_s=15.0, max_tokens=2000)
-    # DataGraph 是 4 个扁平 store 的层次化视图入口（docs/新架构方案.md §3.1）。
+    # DataGraph 是 4 个扁平 store 的层次化视图入口（原架构方案 §3.1）。
     # DecisionContextBuilder / API aggregators / 未来其他决策路径都从这里读，
     # 避免散落跨 store 拼接。snapshot-and-release 策略，P0 路径无长锁。
     data_graph = DataGraph(

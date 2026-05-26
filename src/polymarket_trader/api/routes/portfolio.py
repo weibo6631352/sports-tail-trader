@@ -58,7 +58,7 @@ async def get_portfolio_exposure(
     """每市场未平仓名义暴露（基于 DataGraph，零 DB，零 P0 影响）。
 
     `level=summary` 仅总览（10 字段）；`level=detail` 含 per-market outcomes /
-    metadata / pause 完整数据。docs/新架构方案.md §12.3 ②字段选择。
+    metadata / pause 完整数据。原架构方案 §12.3 ②字段选择。
     """
 
     aggregator = PortfolioAggregator(data_graph=runtime.data_graph)

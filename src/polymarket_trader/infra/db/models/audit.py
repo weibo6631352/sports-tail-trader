@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Index, Integer, Numeric, String, Text, text
+from sqlalchemy import DateTime, Index, Integer, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,6 +15,7 @@ from polymarket_trader.infra.db.base import (
     TimestampMixin,
     _json_mapping,
 )
+from polymarket_trader.app.audit.deduper import payload_hash as _payload_hash
 
 
 class AuditEventModel(Base, TimestampMixin):
@@ -50,10 +52,17 @@ class AuditEventModel(Base, TimestampMixin):
         default=dict,
         server_default=text("'{}'::jsonb"),
     )
+    # 原架构方案 §13.4 dedupe 三件套：
+    payload_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    occurrence_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_audit_events_trace_event", "trace_id", "event_title"),
         Index("ix_audit_events_trace_order_trade", "trace_id", "order_id", "trade_id"),
+        Index("ix_audit_events_dedupe_lookup", "event_title", "condition_id", "payload_hash"),
         # 注:created_at 单列索引由 TimestampMixin.index=True 自动创建为
         # ix_audit_events_created_at,不重复显式定义(SQLAlchemy 会冲突).
     )
@@ -87,6 +96,9 @@ class AuditEventModel(Base, TimestampMixin):
             reason=audit_event.reason,
             raw_response=audit_event.raw_response,
             payload=payload,
+            payload_hash=_payload_hash(payload),
+            occurrence_count=1,
+            last_seen_at=audit_event.created_at,
         )
 
     def to_domain(self) -> AuditEvent:

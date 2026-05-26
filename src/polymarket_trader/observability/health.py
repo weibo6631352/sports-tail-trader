@@ -1,6 +1,6 @@
 """HealthReporter —— `/health` 系列端点的数据源。
 
-docs/新架构方案.md §11.4。健康检查**不是诊断工具，是自动告警源**——判断逻辑
+原架构方案 §11.4。健康检查**不是诊断工具，是自动告警源**——判断逻辑
 集中在本模块（如 `live_source last_observed > 60s → status=degraded`），外部监控
 直接读 `status` 字段做告警。
 

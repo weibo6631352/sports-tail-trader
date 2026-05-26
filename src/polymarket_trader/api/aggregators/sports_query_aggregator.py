@@ -1,7 +1,7 @@
 """SportsQueryAggregator —— 体育直播状态相关只读查询（含 outright resolution
 + Goalserve lazy 代理 soccer_injuries / h2h）。
 
-按 docs/新架构方案.md §12.2：
+按 原架构方案 §12.2：
 - list_sports_live_events_history → DB audit 查询
 - list_sports_live_states / list_sports_live_source_gaps → 内存运营查询
   （基于 market_metadata_store + registry）

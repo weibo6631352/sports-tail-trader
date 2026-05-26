@@ -1,6 +1,6 @@
 """【层 4：反馈】pipeline/feedback/ —— 把链上撮合结果回灌 AccountStateStore。
 
-docs/新架构方案.md §2 主工作流图层 4。link 下两类 writer 通过 §19.3 单 writer
+原架构方案 §2 主工作流图层 4。link 下两类 writer 通过 §19.3 单 writer
 原则互斥：
 
 # 单 writer 矩阵

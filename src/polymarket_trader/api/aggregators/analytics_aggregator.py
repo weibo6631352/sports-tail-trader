@@ -1,6 +1,6 @@
 """AnalyticsAggregator —— 报表类分析查询（DB-only，§12.2 审计查询类）。
 
-按 docs/新架构方案.md §12.2。聚合所有基于 audit_events / decision_records /
+按 原架构方案 §12.2。聚合所有基于 audit_events / decision_records /
 positions 的 SQL 报表查询，不读运行时内存（无缓存，每次实时算）。
 
 # Endpoint 对应

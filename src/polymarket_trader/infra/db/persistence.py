@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Mapping, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -80,6 +81,20 @@ class DatabasePersistenceRepository:
             return 0
         return await self._with_repositories(
             lambda repos: repos.audit.save_audit_events(audit_events, raw_payloads=raw_payloads)
+        )
+
+    async def bump_audit_event_occurrences(
+        self,
+        bumps: Sequence[tuple[str, datetime]],
+    ) -> int:
+        """原架构方案 §13.4：dedupe 窗口内重复 → UPDATE 原 audit_events 行
+        occurrence_count + last_seen_at（不新建行）。
+        """
+
+        if not bumps:
+            return 0
+        return await self._with_repositories(
+            lambda repos: repos.audit.bump_occurrences(bumps)
         )
 
     async def save_market_snapshot(self, record: Mapping[str, Any]) -> int:

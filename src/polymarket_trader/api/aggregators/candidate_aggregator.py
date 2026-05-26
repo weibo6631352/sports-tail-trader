@@ -1,6 +1,6 @@
 """CandidateAggregator —— 策略候选投影（运营查询类，DataGraph + 3s TTL 缓存）。
 
-按 docs/新架构方案.md §12.2 ① 运营查询类（走 DataGraph / 内存 + 短 TTL 缓存）。
+按 原架构方案 §12.2 ① 运营查询类（走 DataGraph / 内存 + 短 TTL 缓存）。
 
 # Endpoint 对应
 

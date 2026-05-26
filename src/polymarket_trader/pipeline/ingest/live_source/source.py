@@ -4,7 +4,7 @@
 一个 LiveSourceKey 覆盖该 sport 下所有 inplay 比赛（同 sport 的多场比赛
 共用一个 source bucket，不区分 league）。
 
-# 优先级（docs/新架构方案.md §3.3）
+# 优先级（原架构方案 §3.3）
 
 | Provider | Priority | 含义 |
 |---|---|---|

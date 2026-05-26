@@ -65,7 +65,7 @@ async def get_markets_batch(
     level: Literal["summary", "detail"] = Query("summary"),
     runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """批量 market 详情——避免 N 次单调（docs/新架构方案.md §12.3 ⑤）。"""
+    """批量 market 详情——避免 N 次单调（原架构方案 §12.3 ⑤）。"""
     aggregator = MarketDetailAggregator(data_graph=runtime.data_graph)
     items = aggregator.batch_detail(tuple(condition_ids), level=level)
     return {"markets": list(items), "count": len(items)}

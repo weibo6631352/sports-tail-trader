@@ -1,6 +1,6 @@
 """ReconcileDecisionsAggregator —— reconcile diff 视图 + 决策录制查询。
 
-按 docs/新架构方案.md §12.2 审计查询类（走 DB）。decision_records 是策略
+按 原架构方案 §12.2 审计查询类（走 DB）。decision_records 是策略
 hook 决策的唯一真相（内存 ring buffer 已删），本 aggregator 只暴露 GET，
 落库在 decision_recorder worker。
 

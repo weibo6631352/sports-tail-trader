@@ -4,7 +4,7 @@
 account_state_store / market_metadata_store）按需聚合 `EventView` / `MarketView`
 / `OutcomeView`，供决策层 / aggregator / API 一次性拿到层次化视图。
 
-# 设计约束（见 docs/新架构方案.md §3.1 + §11.3）
+# 设计约束（见 原架构方案 §3.1 + §11.3）
 
 - **snapshot-and-release**：每个 store 短锁拿引用 → 放锁 → 构造 frozen view。
   P0 路径不持长锁。`account_state_store.snapshot()` 已是 lock-free CoW；

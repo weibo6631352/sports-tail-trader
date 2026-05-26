@@ -15,7 +15,7 @@
 service 内的 matcher / calibrator 是 CPU-bound 快速操作（每 market 几 ms），可
 接受。如果未来 subscriber 数变大（>1000）成为瓶颈，可改成 `asyncio.Queue` 解耦。
 
-# 与 docs/新架构方案.md §3 一致
+# 与 原架构方案 §3 一致
 
 ENTRY_SIGNAL_TRIGGERED 是 P1，对应"层 2 决策响应"的触发源之一（与
 ORDERBOOK_SNAPSHOT_UPDATED 并列）。MarketTickWorker 订阅它后跑 quant_decide。

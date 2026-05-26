@@ -1,6 +1,6 @@
 """【层 3：执行】pipeline/execution/ —— OrderGateway 强制门禁。
 
-docs/新架构方案.md §2 主工作流图层 3。OrderGateway.review_intent 是任何下单
+原架构方案 §2 主工作流图层 3。OrderGateway.review_intent 是任何下单
 入口的唯一通道——含 RiskManager 4 道闸（market_state / bankroll_total /
 balance+allowance / buy_order_type，CLAUDE.md §3）。
 

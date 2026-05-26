@@ -1,6 +1,6 @@
 """ObservabilityBridge —— 周期把各组件 stats 投影到 MetricsRegistry。
 
-docs/新架构方案.md §11.2 关键指标表的批量实现路径。各业务组件保持解耦
+原架构方案 §11.2 关键指标表的批量实现路径。各业务组件保持解耦
 （不直接依赖 MetricsRegistry），bridge 在 scheduler 周期 job 内集中读取
 组件 snapshot/stats → 写入 metric gauge。
 
@@ -99,10 +99,11 @@ class ObservabilityBridge:
             return
         stats = self._audit_deduper.stats()
         self._metrics.set_gauge("audit_dedupe_total", float(stats.total))
-        self._metrics.set_gauge("audit_dedupe_dropped", float(stats.dropped))
-        for event_type, count in stats.by_event_type_dropped.items():
+        self._metrics.set_gauge("audit_dedupe_inserted", float(stats.inserted))
+        self._metrics.set_gauge("audit_dedupe_updated", float(stats.updated))
+        for event_type, count in stats.by_event_type_updated.items():
             self._metrics.set_gauge(
-                "audit_dedupe_drop_by_type",
+                "audit_dedupe_update_by_type",
                 float(count),
                 labels={"event_type": event_type},
             )

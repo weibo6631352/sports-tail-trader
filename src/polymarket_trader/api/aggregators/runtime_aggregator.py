@@ -1,7 +1,7 @@
 """RuntimeAggregator —— runtime/health/readiness/workers/metrics + portfolio
 snapshot + paper ledger + risk metrics + data freshness + outbox queue depth。
 
-docs/新架构方案.md §12.2 ① 运营查询类（走 runtime 内存快照 + 短 TTL 缓存）。
+原架构方案 §12.2 ① 运营查询类（走 runtime 内存快照 + 短 TTL 缓存）。
 
 paper trading 量化诊断 / 异常检测 / CLV 等专题在 `PaperTradingAggregator`；
 系统性能 / 内存 / 数据源健康在 `SystemObservabilityAggregator`——本 aggregator

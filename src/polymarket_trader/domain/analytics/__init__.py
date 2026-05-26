@@ -1,6 +1,6 @@
 """【domain/analytics】纯报表算法——纯函数 + DTO，不依赖运行时。
 
-按 docs/新架构方案.md §5 + CLAUDE.md §3：domain 是纯业务规则。
+按 原架构方案 §5 + CLAUDE.md §3：domain 是纯业务规则。
 
 # 模块
 

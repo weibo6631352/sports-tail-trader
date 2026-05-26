@@ -64,7 +64,7 @@ class DecisionContextBuilder:
         旧实现持有 `registry` + `orderbook_reader` callback 两个分散数据源——读
         同一 market 的不同字段要跨多个 store 调用。新版只持 DataGraph，调用方
         看到的是层次化 view（MarketView / OutcomeView），底层 4 store 聚合由
-        DataGraph snapshot-and-release 完成（docs/新架构方案.md §3.1）。
+        DataGraph snapshot-and-release 完成（原架构方案 §3.1）。
 
         `data_graph=None` 是测试 / mock 友好的兼容口子——builder 内部 fallback
         return None；生产路径必传。

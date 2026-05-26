@@ -1,6 +1,6 @@
 """GarbageFilter —— 判定 audit event 是否"垃圾"（绝对不该写入）。
 
-docs/新架构方案.md §13.2。`AuditDeduper` 处理"短窗口内重复"；GarbageFilter
+原架构方案 §13.2。`AuditDeduper` 处理"短窗口内重复"；GarbageFilter
 处理"永远不该写"——两者互补。
 
 # 6 类垃圾（§13.2）

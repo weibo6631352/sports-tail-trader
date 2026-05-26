@@ -1,4 +1,4 @@
-"""audit_events 分层 retention 清理（docs/新架构方案.md §13.5）。
+"""audit_events 分层 retention 清理（原架构方案 §13.5）。
 
 按 event_title 分层 retention：
 - 交易类 / 决策类 30 天

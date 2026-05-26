@@ -1,6 +1,6 @@
 """【兜底工作流】recovery —— 周期权威校准 + 修复动作执行 + 结算扫描。
 
-docs/新架构方案.md §2 主工作流图右半边。20s 周期 ReconcileWorker 跑权威校准，
+原架构方案 §2 主工作流图右半边。20s 周期 ReconcileWorker 跑权威校准，
 发现 drift 时调 ReconcileActionApplier 执行修复（必经 OrderGateway，硬约束
 §3）。SettlementScannerService 5min 扫已结算市场触发 redeem。
 

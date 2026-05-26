@@ -1,11 +1,12 @@
-"""Paper 模式专用的 4 个后台 task。
+"""Paper 模式专用的后台 task。
 
-只在 ``settings.paper_trading_mode=true`` 时由 main.py 启动。每个 task 都对
-``PaperVirtualLedger`` / ``AccountStateStore`` 单向只读或只写它自己的字段，
-互不耦合，可独立崩溃 / 重启。
+只在 ``settings.paper_trading_mode=true`` 时由 main.py 启动。balance + positions
+投影（§5 单 writer）走 [`app/paper/paper_balance_syncer.py`](../app/paper/paper_balance_syncer.py)；
+本文件负责其余 3 个采样/探测 task（equity_curve / system_perf / eventloop_lag）以及
+统一的 task 启动 orchestration。
 
 为什么不放进 ``workers/``：workers 是 P0/P2 主链路上的常驻 service（带
-supervisor heartbeat、event_bus 订阅）；这 4 个只是定时采样与投影任务，
+supervisor heartbeat、event_bus 订阅）；这些只是定时采样与投影任务，
 失败时无后果（顶多丢一帧统计），保持轻量函数式即可。
 """
 
@@ -20,6 +21,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from polymarket_trader.app.paper.paper_balance_syncer import paper_balance_syncer
+
 if TYPE_CHECKING:
     from polymarket_trader.app.paper import PaperVirtualLedger
     from polymarket_trader.runtime.account_state import AccountStateStore
@@ -32,62 +35,6 @@ logger = logging.getLogger(__name__)
 
 # equity_curve 上限：30s/点 × 2880 ≈ 24h
 _EQUITY_CURVE_MAX_POINTS = 2880
-
-
-async def _paper_balance_syncer(
-    *,
-    ledger: "PaperVirtualLedger",
-    account_state_store: "AccountStateStore",
-    portfolio_budget_usdc: Decimal,
-    registry: "MarketRegistry",
-    market_ws_worker: "MarketWsWorker",
-) -> None:
-    """每秒把 paper_ledger 投影回 account_state_store（balance + positions）。
-
-    balance: paper_ledger.available_usdc → account_state_store.balance_usdc
-      （否则 reconcile 写回真链上 $0.x 余额阻塞 Kelly）
-    positions: paper_ledger.positions → account_state_store.positions
-      （否则策略读 stale account_state 持仓反复 reprice 已平仓 token，触发
-      simulate_fill 卖空 ledger 持仓 → available 凭空涨的 bug）
-    """
-
-    from polymarket_trader.domain.position import Position
-    from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
-
-    allowance = portfolio_budget_usdc * Decimal("10")
-    while True:
-        try:
-            account_state_store.update_balances(
-                balance_usdc=ledger.available_usdc,
-                allowance_usdc=allowance,
-            )
-            paper_positions: list[Position] = []
-            for token_id, shares in ledger.positions.items():
-                if shares <= Decimal("0"):
-                    continue
-                market = registry.get_by_token_id(token_id)
-                if market is None:
-                    continue
-                cost = ledger.cost_basis_usdc.get(token_id, Decimal("0"))
-                ob = market_ws_worker.snapshot(token_id)
-                if ob is not None and ob.best_bid is not None and ob.sell_actionable:
-                    ledger.observe_unrealized(token_id, ob.best_bid)
-                paper_positions.append(
-                    Position(
-                        condition_id=market.condition_id,
-                        token_id=token_id,
-                        market_slug=market.market_slug,
-                        shares=shares,
-                        cost_usdc=cost,
-                    )
-                )
-            account_state_store.replace_positions(tuple(paper_positions))
-            SystemPerfMonitor.get().worker_tick(
-                "paper_balance_syncer", expected_interval_s=1.0
-            )
-        except Exception:
-            logger.warning("paper_balance_syncer.tick_failed", exc_info=True)
-        await asyncio.sleep(1)
 
 
 async def _equity_curve_recorder(
@@ -213,7 +160,7 @@ def start_paper_background_tasks(
 
     tasks: dict[str, asyncio.Task] = {
         "paper_balance_syncer": asyncio.create_task(
-            _paper_balance_syncer(
+            paper_balance_syncer(
                 ledger=ledger,
                 account_state_store=account_state_store,
                 portfolio_budget_usdc=portfolio_budget_usdc,

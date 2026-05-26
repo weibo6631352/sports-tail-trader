@@ -1,6 +1,6 @@
 """【横切】observability —— metrics + trace + cpu_track + health。
 
-docs/新架构方案.md §11 横切关注点。本包提供：
+原架构方案 §11 横切关注点。本包提供：
 
 # 模块
 

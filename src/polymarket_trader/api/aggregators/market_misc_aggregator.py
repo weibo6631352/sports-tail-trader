@@ -1,7 +1,7 @@
 """MarketMiscAggregator —— 市场盘口 / 流动性 / 数据健康 / 历史快照 / 派生指标。
 
 market_detail / settlement / portfolio exposure 在各自专门 aggregator；
-本 aggregator 收 market 维度其余查询（约 16 个方法）。按 docs/新架构方案.md
+本 aggregator 收 market 维度其余查询（约 16 个方法）。按 CLAUDE.md
 §12.2 三类划分：
 - list_markets / list_orderbook_history → DB 审计查询
 - get_market_orderbook / midpoint / prices_history → REST + WS 混合

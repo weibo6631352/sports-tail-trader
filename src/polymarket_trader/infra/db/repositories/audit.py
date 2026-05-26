@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, AsyncIterator, Iterable, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from polymarket_trader.domain.events import AuditEvent
 from polymarket_trader.domain.time_filters import TimeRange
@@ -58,9 +59,38 @@ class AuditEventRepository(BaseRepository):
                 "reason",
                 "raw_response",
                 "payload",
+                "payload_hash",
+                "last_seen_at",
                 "updated_at",
             ),
         )
+
+    async def bump_occurrences(
+        self,
+        bumps: Sequence[tuple[str, datetime]],
+    ) -> int:
+        """原架构方案 §13.4：dedupe 窗口内重复事件 → UPDATE 原始行。
+
+        ``bumps`` 是 ``(event_id, last_seen_at)`` 列表；每条让 occurrence_count + 1
+        且更新 last_seen_at。同一 event_id 出现多次时分多次 UPDATE（不在 SQL 里聚合）——
+        每个 OutboxEvent 都代表一次实际触发。
+        """
+
+        if not bumps:
+            return 0
+        affected = 0
+        for event_id, last_seen_at in bumps:
+            stmt = (
+                update(AuditEventModel)
+                .where(AuditEventModel.event_id == event_id)
+                .values(
+                    occurrence_count=AuditEventModel.occurrence_count + 1,
+                    last_seen_at=last_seen_at,
+                )
+            )
+            result = await self._session.execute(stmt)
+            affected += int(result.rowcount or 0)
+        return affected
 
     async def list_audit_events_snapshot(
         self,

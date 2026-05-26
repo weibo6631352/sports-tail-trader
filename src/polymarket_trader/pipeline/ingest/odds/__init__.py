@@ -1,6 +1,6 @@
 """【层 1 ingest】odds —— Goalserve / TheOddsAPI 赛前 + 赛季赔率拉取。
 
-docs/新架构方案.md §2 主工作流图层 1 ④。三个 worker 各自周期拉权威赔率，
+原架构方案 §2 主工作流图层 1 ④。三个 worker 各自周期拉权威赔率，
 写入 `MarketMetadataStore` 的对应字段，策略 / risk / aggregator 后续读取。
 
 # 与直播源 live_source 区别

@@ -1,7 +1,7 @@
 -- 001_audit_events_monthly_partition.sql
 --
 -- 把 audit_events 改成 PostgreSQL RANGE partition by month。
--- docs/新架构方案.md §13.4 + CLAUDE.md §19。
+-- 原架构方案 §13.4 + CLAUDE.md §19。
 --
 -- 为什么：retention purge 删 30 天前的事件——`DROP PARTITION` 1-2 秒删整个分区
 -- 比 `DELETE WHERE created_at < cutoff LIMIT 10000` 循环跑数百次快 100×。

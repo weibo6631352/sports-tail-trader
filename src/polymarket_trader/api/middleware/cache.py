@@ -1,4 +1,4 @@
-"""短 TTL 内存缓存（docs/新架构方案.md §12.3 ③）。
+"""短 TTL 内存缓存（原架构方案 §12.3 ③）。
 
 agent / 前端高频查询（同 endpoint 1s 内多次）的 burst dedupe——100ms 窗口内
 重复请求复用上次 response。运营查询类 endpoint 用，**审计查询 + 操盘动作类

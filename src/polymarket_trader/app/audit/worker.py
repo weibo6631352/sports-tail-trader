@@ -63,6 +63,10 @@ class PersistenceRepository(Protocol):
 
     async def save_audit_events(self, records: Sequence[Mapping[str, Any]]) -> Any: ...
 
+    async def bump_audit_event_occurrences(
+        self, bumps: Sequence[tuple[str, "datetime"]]
+    ) -> Any: ...
+
     async def save_market_snapshot(self, record: Mapping[str, Any]) -> Any: ...
 
     async def save_market_snapshots(self, records: Sequence[Mapping[str, Any]]) -> Any: ...
@@ -176,7 +180,7 @@ class PersistenceWorker:
         garbage_filter: GarbageFilter | None = None,
         deduper: AuditDeduper | None = None,
     ) -> None:
-        """docs/新架构方案.md §13.3 写入侧 dedupe 接入点。
+        """原架构方案 §13.3 写入侧 dedupe 接入点。
 
         `garbage_filter` 先过滤"永不写"（heartbeat SKIP / debug / 超大 payload）；
         `deduper` 再去重短窗口内重复 (event_type, condition_id, payload_hash)。
@@ -228,18 +232,44 @@ class PersistenceWorker:
         effective_batch_size = self._adaptive_batch_size()
         batch = [event]
         batch.extend(await self._drain_batch(effective_batch_size))
-        # §13.3 写入侧过滤：先 GarbageFilter（永不写）→ 再 AuditDeduper（短窗
-        # 口去重）。两者均可选；接入后 _persist_batch 看到的是"值得写"的子集。
+        # §13.3/§13.4 写入侧过滤：先 GarbageFilter（永不写）→ 再 AuditDeduper
+        # 分流（首次 INSERT vs 窗口内重复 → UPDATE occurrence_count）。
         if self._garbage_filter is not None:
             batch = list(self._garbage_filter.filter(batch))
+        bumps: tuple = ()
         if self._deduper is not None:
-            batch = list(self._deduper.filter(batch))
+            plan = self._deduper.classify(batch)
+            batch = list(plan.inserts)
+            bumps = plan.updates
+        if bumps:
+            await self._apply_occurrence_bumps(bumps)
         if not batch:
             return None
         coalesced_batch, merged_events = self._coalesce_low_priority(batch)
         result = await self._persist_batch(coalesced_batch, merged_events=merged_events)
         self._recent_results.append(result)
         return result
+
+    async def _apply_occurrence_bumps(self, bumps) -> None:
+        """§13.4 把 deduper 命中的更新指令打到 audit_events。
+
+        失败不抛——P3 路径失败不能反压主链路；只 log + 累计到 stats.
+        """
+
+        if self._repository is None:
+            return
+        try:
+            payload = [
+                (bump.target_event_id, datetime.fromtimestamp(bump.last_seen_at, tz=timezone.utc))
+                for bump in bumps
+            ]
+            await self._repository.bump_audit_event_occurrences(payload)
+        except Exception:
+            logger.warning(
+                "audit_occurrence_bump_failed",
+                extra={"count": len(bumps)},
+                exc_info=True,
+            )
 
     def snapshot(self) -> PersistenceWorkerSnapshot:
         outbox_depth, retained_depth, dead_letter_depth = self._outbox_depths()

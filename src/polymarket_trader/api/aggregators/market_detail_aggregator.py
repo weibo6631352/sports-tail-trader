@@ -1,6 +1,6 @@
 """MarketDetailAggregator —— 基于 DataGraph 的单 market 详情聚合。
 
-按 docs/新架构方案.md §12.3 ⑤。把跨 store（registry / orderbook / metadata /
+按 原架构方案 §12.3 ⑤。把跨 store（registry / orderbook / metadata /
 account）的拼装统一到 MarketView，路由层只调本 aggregator 不再手拼。
 
 # 三层 endpoint 对应

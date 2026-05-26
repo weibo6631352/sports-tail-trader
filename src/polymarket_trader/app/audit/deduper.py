@@ -1,31 +1,33 @@
-"""AuditDeduper —— 内存 LRU dedupe，过滤短窗口内重复 audit 事件。
+"""AuditDeduper —— 内存 LRU dedupe，过滤/合并短窗口内重复 audit 事件。
 
-docs/新架构方案.md §13.3。写入侧 dedupe：同 (event_type, condition_id,
-payload_hash) 短窗口内只入库 1 次，命中重复时丢掉（不阻塞主路径）。
+原架构方案 §13.3 / §13.4。写入侧 dedupe：同 (event_type, condition_id,
+payload_hash) 短窗口内首次 INSERT，重复触发 UPDATE 原始行的 occurrence_count + last_seen_at。
+完全相同的 payload 已在 LRU 内 + 持久化层是同一行（避免 DB 膨胀），统计不丢。
 
 # 设计
 
 - **进程内单实例**：dict + monotonic 时间戳 + 简易 LRU eviction（容量上限）
-- **分级 TTL 窗口**：按 event_type 分类设 TTL（§13.3 表）
+- **分级 TTL 窗口**：按 event_type 分类设 TTL
   - 拒绝类（`*_failed` / `*_rejection_*`）：60s
-  - heartbeat 类 / SKIP 类：30s
+  - heartbeat / SKIP 类：30s
   - record-only 评估：300s
   - 其他（默认）：10s
-- **PR3 不阻塞**：本类只内存操作，无 IO；PersistenceWorker 入口同步过滤后再走 _persist_batch
-- **统计可观测**：`stats()` 返回 kept / dropped / total 等供 operator / metric 查
+- **P3 不阻塞**：本类只内存操作，无 IO；PersistenceWorker 入口同步分流后再走 _persist_batch / _bump_occurrences
+- **statistics 可观测**：`stats()` 返回 inserted / updated / total
 
 # 用法
 
 ```python
 deduper = AuditDeduper()
-kept_events = deduper.filter(batch_events)  # 返回去重后子集
-# kept_events 走 _persist_batch；被 drop 的仅记入 stats
+plan = deduper.classify(batch_events)
+# plan.inserts → _persist_batch（首次见，常规写入）
+# plan.updates → AuditEventRepository.bump_occurrences（已在 DB 里的行 +1）
 ```
 
 # 与 GarbageFilter 互补
 
 - `GarbageFilter` 判定"绝对不该写"（heartbeat SKIP 永不写）
-- `AuditDeduper` 判定"短窗口内重复"（首次写、后续丢）
+- `AuditDeduper` 判定"短窗口内重复"（首次 insert，后续 update 累计）
 
 PersistenceWorker 入口先 GarbageFilter 再 AuditDeduper。
 """
@@ -66,21 +68,40 @@ _DEFAULT_MAX_ENTRIES: int = 10000
 @dataclass(slots=True)
 class DedupeStats:
     total: int = 0
-    kept: int = 0
-    dropped: int = 0
-    by_event_type_dropped: dict[str, int] = field(default_factory=dict)
+    inserted: int = 0
+    updated: int = 0
+    by_event_type_updated: dict[str, int] = field(default_factory=dict)
 
     def as_payload(self) -> dict[str, int | dict[str, int]]:
         return {
             "total": self.total,
-            "kept": self.kept,
-            "dropped": self.dropped,
-            "by_event_type_dropped": dict(self.by_event_type_dropped),
+            "inserted": self.inserted,
+            "updated": self.updated,
+            "by_event_type_updated": dict(self.by_event_type_updated),
         }
 
 
-def _payload_hash(payload) -> str:
-    """计算 payload 的稳定 hash（按 sorted keys JSON 序列化）。"""
+@dataclass(frozen=True, slots=True)
+class OccurrenceBump:
+    """命中已有行的更新指令——worker 据此发 UPDATE。"""
+
+    target_event_id: str  # 原始首次写入的 event_id（用于 WHERE 定位 audit_events 行）
+    event_type: str       # 仅统计用
+    last_seen_at: float   # unix epoch seconds
+
+
+@dataclass(frozen=True, slots=True)
+class DedupePlan:
+    inserts: tuple = ()
+    updates: tuple[OccurrenceBump, ...] = ()
+
+
+def payload_hash(payload) -> str:
+    """计算 payload 的稳定 hash（按 sorted keys JSON 序列化）。
+
+    blake2b-8 hex (16 char)。供 deduper 内存 LRU + DB audit_events.payload_hash 字段共用，
+    保证内存判定与 DB 写入对同一 payload 用相同 hash。
+    """
 
     if not payload:
         return "0"
@@ -99,6 +120,14 @@ def _ttl_for_event_type(event_type: str) -> float:
     return _DEFAULT_TTL_S
 
 
+@dataclass(slots=True)
+class _SeenEntry:
+    """LRU map 的 value：记录首次事件 event_id + 过期时间。"""
+
+    target_event_id: str  # 首次入库时的 event_id（UPDATE 路径用）
+    expiry_monotonic: float
+
+
 class AuditDeduper:
     def __init__(
         self,
@@ -107,52 +136,60 @@ class AuditDeduper:
     ) -> None:
         self._max_entries = max_entries
         # OrderedDict 保留插入顺序 → 用作简易 LRU（容量满时 popitem(last=False) 踢最旧）
-        self._seen: OrderedDict[tuple[str, str | None, str], float] = OrderedDict()
+        self._seen: OrderedDict[tuple[str, str | None, str], _SeenEntry] = OrderedDict()
         self._stats = DedupeStats()
 
-    def filter(self, events: Iterable[OutboxEvent]) -> tuple[OutboxEvent, ...]:
-        """返回去重后子集；命中重复的事件被 drop（仅记 stats）。"""
+    def classify(self, events: Iterable[OutboxEvent]) -> DedupePlan:
+        """分流批量事件为首次写入 + 累计更新两路。
 
-        kept: list[OutboxEvent] = []
+        - INSERT：dedupe 窗口内首次见 / 已过期 → 走常规 _persist_batch
+        - UPDATE：命中窗口内已有 event_id → 发 SQL UPDATE 原始行 occurrence_count + last_seen_at
+        """
+
+        inserts: list[OutboxEvent] = []
+        updates: list[OccurrenceBump] = []
+        now_mono = time.monotonic()
+        now_epoch = time.time()
         for event in events:
             self._stats.total += 1
-            if self.should_keep(event):
-                self._stats.kept += 1
-                kept.append(event)
-            else:
-                self._stats.dropped += 1
-                self._stats.by_event_type_dropped[event.event_type] = (
-                    self._stats.by_event_type_dropped.get(event.event_type, 0) + 1
+            key = (event.event_type, event.condition_id, payload_hash(event.payload))
+            ttl_s = _ttl_for_event_type(event.event_type)
+            existing = self._seen.get(key)
+            if existing is not None and existing.expiry_monotonic > now_mono:
+                # 窗口内重复 → UPDATE 路径
+                self._seen.move_to_end(key)
+                updates.append(
+                    OccurrenceBump(
+                        target_event_id=existing.target_event_id,
+                        event_type=event.event_type,
+                        last_seen_at=now_epoch,
+                    )
                 )
-        return tuple(kept)
+                self._stats.updated += 1
+                self._stats.by_event_type_updated[event.event_type] = (
+                    self._stats.by_event_type_updated.get(event.event_type, 0) + 1
+                )
+                continue
 
-    def should_keep(self, event: OutboxEvent) -> bool:
-        """单事件检查：True 表示首次见 / 上次入库已超 TTL，应保留。"""
+            # 首次见 / 已过期 → INSERT 路径 + 记录首次 event_id
+            self._seen[key] = _SeenEntry(
+                target_event_id=event.event_id,
+                expiry_monotonic=now_mono + ttl_s,
+            )
+            self._seen.move_to_end(key)
+            while len(self._seen) > self._max_entries:
+                self._seen.popitem(last=False)
+            inserts.append(event)
+            self._stats.inserted += 1
 
-        key = (event.event_type, event.condition_id, _payload_hash(event.payload))
-        now = time.monotonic()
-        ttl_s = _ttl_for_event_type(event.event_type)
-
-        existing = self._seen.get(key)
-        if existing is not None and existing > now:
-            # 仍在 TTL 窗口内 → drop
-            self._seen.move_to_end(key)  # 维护 LRU 顺序
-            return False
-
-        # 首次见 / 已过期 → 标记 + 保留
-        self._seen[key] = now + ttl_s
-        self._seen.move_to_end(key)
-        # 容量上限——踢最旧
-        while len(self._seen) > self._max_entries:
-            self._seen.popitem(last=False)
-        return True
+        return DedupePlan(inserts=tuple(inserts), updates=tuple(updates))
 
     def stats(self) -> DedupeStats:
         return DedupeStats(
             total=self._stats.total,
-            kept=self._stats.kept,
-            dropped=self._stats.dropped,
-            by_event_type_dropped=dict(self._stats.by_event_type_dropped),
+            inserted=self._stats.inserted,
+            updated=self._stats.updated,
+            by_event_type_updated=dict(self._stats.by_event_type_updated),
         )
 
     def reset_stats(self) -> None:

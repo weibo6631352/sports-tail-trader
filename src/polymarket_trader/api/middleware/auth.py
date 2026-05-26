@@ -1,6 +1,6 @@
 """Admin API token 鉴权 middleware。
 
-docs/新架构方案.md §12.4。从 api/app.py 抽出来集中维护，路由层只关心业务。
+原架构方案 §12.4。从 api/app.py 抽出来集中维护，路由层只关心业务。
 
 # 鉴权语义
 

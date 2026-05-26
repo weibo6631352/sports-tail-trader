@@ -1,6 +1,6 @@
 """【app/audit】Persistence worker + 写入侧 dedupe + garbage 过滤。
 
-docs/新架构方案.md §13 数据库与审计落盘优化。
+原架构方案 §13 数据库与审计落盘优化。
 
 # 数据流
 

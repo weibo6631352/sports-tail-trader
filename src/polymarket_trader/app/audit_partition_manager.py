@@ -4,7 +4,7 @@
 - 每月初创建未来 1 个月的分区（提前预留写入位置）
 - 按 retention 删除超过最长 tier（30d）的分区——用 `DROP PARTITION` 替代 batch DELETE
 
-docs/新架构方案.md §13.4。要先跑过 `infra/db/migrations/001_audit_events_monthly_partition.sql`
+原架构方案 §13.4。要先跑过 `infra/db/migrations/001_audit_events_monthly_partition.sql`
 把 audit_events 转成 partitioned 表；本模块仅做日常维护。
 
 # 设计
