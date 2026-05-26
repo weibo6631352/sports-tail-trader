@@ -8,7 +8,8 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from polymarket_trader.api.deps import build_time_range, get_admin_service
+from polymarket_trader.api.aggregators import ReconcileDecisionsAggregator
+from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.api.rate_limit import rate_limit
 from polymarket_trader.app.admin_service import AdminService
 from polymarket_trader.app.virtual_paper_trading import run_virtual_paper_trade
@@ -102,17 +103,12 @@ async def list_reconcile_diffs(
     until: int | None = Query(default=None, ge=0),
     include_started: bool = Query(default=False),
     include_applied: bool = Query(default=True),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """Reconcile diff 结构化视图。
+    """Reconcile diff 结构化视图。"""
 
-    从 outbox_events 中筛 ``reconcile_diff_detected`` / ``reconcile_applied`` /
-    可选 ``reconcile_started``，payload 含 action_type / target_size_shares /
-    target_notional_usdc / pause_reason / metadata，回答"对账在修什么、修了
-    几次、根因分布"。
-    """
-
-    return await service.list_reconcile_diffs(
+    aggregator = ReconcileDecisionsAggregator(session_factory=runtime.db_session_factory)
+    return await aggregator.list_reconcile_diffs(
         limit=limit,
         offset=offset,
         trace_id=trace_id,

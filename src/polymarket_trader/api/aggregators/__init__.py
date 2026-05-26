@@ -39,6 +39,7 @@ from .market_detail_aggregator import MarketDetailAggregator
 from .outbox_aggregator import OutboxAggregator
 from .portfolio_aggregator import PortfolioAggregator, PortfolioExposureView
 from .position_aggregator import PositionAggregator
+from .reconcile_decisions_aggregator import ReconcileDecisionsAggregator
 from .settlement_aggregator import SettlementAggregator
 from .sports_live_aggregator import SportsLiveAggregator
 from .timeline_aggregator import TimelineAggregator
@@ -49,6 +50,7 @@ __all__ = [
     "PortfolioAggregator",
     "PortfolioExposureView",
     "PositionAggregator",
+    "ReconcileDecisionsAggregator",
     "SettlementAggregator",
     "SportsLiveAggregator",
     "TimelineAggregator",

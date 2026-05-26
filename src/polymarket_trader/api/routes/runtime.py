@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from polymarket_trader.api.aggregators import ReconcileDecisionsAggregator
 from polymarket_trader.api.deps import build_time_range, get_admin_service, get_runtime
 from polymarket_trader.app.admin_service import AdminService
 
@@ -565,14 +566,12 @@ async def dump_decision_records(
     accepted: bool | None = Query(default=None),
     since: int | None = Query(default=None, ge=0),
     until: int | None = Query(default=None, ge=0),
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """从 ``decision_records`` 表分页查询历史决策。
+    """从 ``decision_records`` 表分页查询历史决策。"""
 
-    DB 是该接口唯一真相来源；进程内存中不再维护 ring buffer，无 DB 时直接返回空集。
-    """
-
-    return await service.list_decisions(
+    aggregator = ReconcileDecisionsAggregator(session_factory=runtime.db_session_factory)
+    return await aggregator.list_decisions(
         limit=limit,
         offset=offset,
         trace_id=trace_id,
@@ -585,16 +584,12 @@ async def dump_decision_records(
 @router.get("/decisions/{record_id}")
 async def get_decision_record(
     record_id: str,
-    service: AdminService = Depends(get_admin_service),
+    runtime: Any = Depends(get_runtime),
 ) -> dict[str, object]:
-    """按 ``record_id`` 取单条策略决策详情。
+    """按 ``record_id`` 取单条策略决策详情。"""
 
-    返回完整 ``decision_input`` / ``decision_output`` JSONB——含 ``fair_value``、
-    ``entry_price_cap``、``kelly_fraction``、拒绝原因枚举等策略中间量，便于从
-    trade timeline 点开后做根因追查。
-    """
-
-    payload = await service.get_decision_record(record_id)
+    aggregator = ReconcileDecisionsAggregator(session_factory=runtime.db_session_factory)
+    payload = await aggregator.get_decision_record(record_id)
     if payload is None:
         raise HTTPException(status_code=404, detail="decision_record_not_found")
     return payload
