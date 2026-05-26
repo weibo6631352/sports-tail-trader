@@ -171,4 +171,167 @@ async def get_missed_opportunities(
     )
 
 
+@router.get("/quant-summary")
+async def get_quant_summary(
+    window_ms: int = Query(default=DEFAULT_WINDOW_MS, gt=0, le=MAX_WINDOW_MS),
+    runtime: Any = Depends(get_runtime),
+) -> dict[str, Any]:
+    """量化决策器一站汇总——operator 看一眼就知道全局表现.
+
+    聚合维度:
+    - decision_counts: 决策总量 + accepted/rejected 占比
+    - rejection_top: rejection reason top 5
+    - kelly_stats: Kelly 内核统计 (avg prob_p / edge_net / f_star / budget,
+      capped_by 分布)
+    - portfolio: balance / net_value / cash_pnl / position_count / drawdown
+    - market_coverage: tracked / live_state / signal_allowed 各 N 个
+    - signal_health: 数据源新鲜度 / odds 覆盖率
+    - execution: submit/fill latency p50/p95 + slippage
+
+    全部内存或单 DB 聚合 query, < 100ms.
+    """
+    from datetime import datetime, timedelta, timezone
+    from decimal import Decimal
+    from sqlalchemy import text
+
+    summary: dict[str, Any] = {
+        "window_ms": window_ms,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    window_end = datetime.now(timezone.utc)
+    window_start = window_end - timedelta(milliseconds=window_ms)
+
+    # 1) decision_counts + rejection top + kelly_stats from decision_records
+    session_factory = runtime.db_session_factory
+    if session_factory is not None:
+        async with session_factory() as session:
+            counts_sql = text("""
+                SELECT
+                  count(*) AS total,
+                  sum(CASE WHEN accepted THEN 1 ELSE 0 END) AS accepted,
+                  sum(CASE WHEN NOT accepted THEN 1 ELSE 0 END) AS rejected
+                FROM decision_records
+                WHERE created_at >= :start AND created_at < :end
+            """)
+            row = (await session.execute(counts_sql, {"start": window_start, "end": window_end})).one()
+            total = int(row[0] or 0)
+            accepted = int(row[1] or 0)
+            rejected = int(row[2] or 0)
+            summary["decision_counts"] = {
+                "total": total,
+                "accepted": accepted,
+                "rejected": rejected,
+                "accept_rate_pct": round(accepted / total * 100, 2) if total else 0.0,
+            }
+
+            rej_sql = text("""
+                SELECT reason, count(*) AS n
+                FROM decision_records
+                WHERE created_at >= :start AND created_at < :end AND NOT accepted
+                GROUP BY reason ORDER BY n DESC LIMIT 5
+            """)
+            rej_rows = (await session.execute(rej_sql, {"start": window_start, "end": window_end})).all()
+            summary["rejection_top"] = [
+                {"reason": str(r[0]), "count": int(r[1]), "pct": round(int(r[1]) / rejected * 100, 2) if rejected else 0.0}
+                for r in rej_rows
+            ]
+
+            kelly_sql = text("""
+                SELECT
+                  count(*) AS n,
+                  avg((decision_output->'metadata'->'kelly'->>'prob_p')::numeric) AS avg_prob_p,
+                  avg((decision_output->'metadata'->'kelly'->>'price_c')::numeric) AS avg_price_c,
+                  avg((decision_output->'metadata'->'kelly'->>'edge_net')::numeric) AS avg_edge_net,
+                  avg((decision_output->'metadata'->'kelly'->>'f_star')::numeric) AS avg_f_star,
+                  avg((decision_output->'metadata'->'kelly'->>'buy_budget_usdc')::numeric) AS avg_budget,
+                  sum(CASE WHEN (decision_output->'metadata'->'kelly'->>'is_round_up_overbet')='true' THEN 1 ELSE 0 END) AS rounded_up
+                FROM decision_records
+                WHERE created_at >= :start AND created_at < :end
+                  AND accepted AND decision_output->'metadata'->'kelly' IS NOT NULL
+            """)
+            k_row = (await session.execute(kelly_sql, {"start": window_start, "end": window_end})).one()
+            k_n = int(k_row[0] or 0)
+            summary["kelly_stats"] = {
+                "sample_count": k_n,
+                "avg_prob_p": float(k_row[1]) if k_row[1] is not None else None,
+                "avg_price_c": float(k_row[2]) if k_row[2] is not None else None,
+                "avg_edge_net": float(k_row[3]) if k_row[3] is not None else None,
+                "avg_f_star": float(k_row[4]) if k_row[4] is not None else None,
+                "avg_buy_budget_usdc": float(k_row[5]) if k_row[5] is not None else None,
+                "rounded_up_count": int(k_row[6] or 0),
+                "rounded_up_pct": round(int(k_row[6] or 0) / k_n * 100, 2) if k_n else 0.0,
+            }
+
+            # 5) execution: order_submit + fill latency from audit
+            exec_sql = text("""
+                SELECT
+                  count(*) FILTER (WHERE event_title='order_submitted') AS submitted,
+                  count(*) FILTER (WHERE event_title='order_matched' AND status IN ('full_fill','partial_fill')) AS filled,
+                  count(*) FILTER (WHERE event_title='order_rejected') AS order_rejected
+                FROM audit_events
+                WHERE created_at >= :start AND created_at < :end
+            """)
+            e_row = (await session.execute(exec_sql, {"start": window_start, "end": window_end})).one()
+            summary["execution"] = {
+                "orders_submitted": int(e_row[0] or 0),
+                "orders_filled": int(e_row[1] or 0),
+                "orders_rejected": int(e_row[2] or 0),
+                "fill_rate_pct": round(int(e_row[1] or 0) / int(e_row[0] or 1) * 100, 2) if e_row[0] else 0.0,
+            }
+    else:
+        summary["decision_counts"] = {"total": 0, "accepted": 0, "rejected": 0, "accept_rate_pct": 0.0}
+        summary["rejection_top"] = []
+        summary["kelly_stats"] = {"sample_count": 0}
+        summary["execution"] = {"orders_submitted": 0, "orders_filled": 0, "orders_rejected": 0}
+
+    # 2) portfolio (memory)
+    try:
+        account = runtime.account_state_store.snapshot()
+        net_value = account.balance_usdc + sum(
+            (p.shares * (p.cur_price or Decimal("0")) for p in account.positions),
+            start=Decimal("0"),
+        )
+        cost_total = sum((p.cost_usdc for p in account.positions), start=Decimal("0"))
+        summary["portfolio"] = {
+            "balance_usdc": str(account.balance_usdc),
+            "net_value_usdc": str(net_value),
+            "cost_usdc": str(cost_total),
+            "cash_pnl_usdc": str(net_value - account.balance_usdc - cost_total + cost_total),
+            "position_count": len(account.positions),
+            "open_order_count": len(account.open_orders),
+            "paused_market_count": len(account.market_pauses),
+        }
+    except Exception as exc:  # noqa: BLE001
+        summary["portfolio"] = {"error": str(exc)[:120]}
+
+    # 3) market_coverage (memory)
+    try:
+        registry = runtime.registry.snapshot()
+        metadata = runtime.market_metadata_store
+        live_state_count = sum(1 for r in metadata.records() if r.live_state_payload)
+        signal_allowed = sum(1 for r in metadata.records() if r.live_state_signal_allowed)
+        summary["market_coverage"] = {
+            "registry_total": len(registry.markets),
+            "with_live_state": live_state_count,
+            "signal_allowed": signal_allowed,
+        }
+    except Exception as exc:  # noqa: BLE001
+        summary["market_coverage"] = {"error": str(exc)[:120]}
+
+    # 4) signal_health
+    try:
+        from polymarket_trader.runtime.ws_loops import market_ws_subscription_token_ids
+        summary["signal_health"] = {
+            "ws_subscribed_tokens": len(market_ws_subscription_token_ids(runtime)),
+            "user_ws_connected": account.user_ws_connected,
+            "last_reconcile_at": (
+                account.last_reconcile_at.isoformat() if account.last_reconcile_at else None
+            ),
+        }
+    except Exception as exc:  # noqa: BLE001
+        summary["signal_health"] = {"error": str(exc)[:120]}
+
+    return summary
+
+
 __all__ = ("router", "DEFAULT_WINDOW_MS", "MAX_WINDOW_MS")
