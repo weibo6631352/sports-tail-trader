@@ -465,329 +465,442 @@ class AnalyticsAggregator:
         }
 
 
+    async def error_rate_timeseries(
+        self: AnalyticsAggregator,
+        *,
+        window_minutes: int = 15,
+    ) -> dict[str, object]:
+        """错误率时序 — 最近 1/5/15min HTTP errors + audit errors + per-bucket。"""
+        if self._session_factory is None:
+            return {"buckets": [], "summary": {}}
+        from datetime import datetime, timedelta, timezone
+
+        from sqlalchemy import text as sql_text
+
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+        try:
+            async with self._session_factory() as session:
+                rows = (await session.execute(
+                    sql_text("""
+                        SELECT
+                          date_trunc('minute', created_at) as bucket,
+                          event_title,
+                          COUNT(*) FILTER (WHERE status IN ('rejected','failed','error')
+                            OR reason LIKE '%error%' OR reason LIKE '%failed%') as errors,
+                          COUNT(*) as total
+                        FROM audit_events
+                        WHERE created_at > :cutoff
+                          AND event_title IN ('order_rejected','order_state_updated',
+                            'order_submitted','risk_rejection_recorded','fill_recorded')
+                        GROUP BY 1, 2
+                        ORDER BY 1 DESC
+                    """),
+                    {"cutoff": cutoff},
+                )).all()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)}
+        from collections import defaultdict as _defaultdict
+
+        by_bucket: dict[str, dict] = _defaultdict(
+            lambda: {"errors": 0, "total": 0, "by_event": {}}
+        )
+        for r in rows:
+            b = r[0].isoformat()
+            by_bucket[b]["errors"] += int(r[2] or 0)
+            by_bucket[b]["total"] += int(r[3] or 0)
+            by_bucket[b]["by_event"][r[1]] = {
+                "errors": int(r[2] or 0), "total": int(r[3] or 0),
+            }
+        buckets = []
+        for b in sorted(by_bucket.keys(), reverse=True):
+            bk = by_bucket[b]
+            buckets.append({
+                "bucket": b,
+                "errors": bk["errors"],
+                "total": bk["total"],
+                "error_rate_pct": (
+                    round(bk["errors"] / bk["total"] * 100, 2) if bk["total"] else 0
+                ),
+                "by_event": bk["by_event"],
+            })
+        now = datetime.now(timezone.utc)
+        summary: dict[str, dict] = {}
+        for w_min in (1, 5, 15):
+            w_cutoff = now - timedelta(minutes=w_min)
+            w_errors = sum(
+                b["errors"] for b in buckets
+                if datetime.fromisoformat(b["bucket"]) > w_cutoff
+            )
+            w_total = sum(
+                b["total"] for b in buckets
+                if datetime.fromisoformat(b["bucket"]) > w_cutoff
+            )
+            summary[f"last_{w_min}min"] = {
+                "errors": w_errors,
+                "total": w_total,
+                "error_rate_pct": (
+                    round(w_errors / w_total * 100, 2) if w_total else 0
+                ),
+            }
+        return {
+            "window_minutes": window_minutes,
+            "buckets_count": len(buckets),
+            "summary": summary,
+            "buckets": buckets[:30],
+        }
+
+    async def guard_stats_snapshot(
+        self: AnalyticsAggregator,
+        *,
+        window_minutes: int = 60,
+    ) -> dict[str, object]:
+        """守卫触发统计：每个 reject reason 在过去 N 分钟触发的次数。"""
+        if self._session_factory is None:
+            return {"items": [], "window_minutes": window_minutes}
+        from datetime import datetime, timedelta, timezone
+
+        from sqlalchemy import text as sql_text
+
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+        try:
+            async with self._session_factory() as session:
+                result = await session.execute(
+                    sql_text("""
+                        SELECT
+                          COALESCE(payload->>'reason', reason, '?') as r,
+                          event_title,
+                          COUNT(*) as n
+                        FROM audit_events
+                        WHERE created_at > :cutoff
+                          AND event_title IN ('order_rejected','risk_rejection_recorded',
+                                              'allocation_decision_recorded','market_filtered_out')
+                        GROUP BY 1, 2
+                        ORDER BY n DESC
+                        LIMIT 50
+                    """),
+                    {"cutoff": cutoff},
+                )
+                rows = result.all()
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc), "items": [], "window_minutes": window_minutes}
+        items = [{"reason": r[0], "event": r[1], "count": r[2]} for r in rows]
+        return {
+            "window_minutes": window_minutes,
+            "total": sum(i["count"] for i in items),
+            "items": items,
+        }
+
+    async def win_rate_breakdown(
+        self: AnalyticsAggregator,
+        *,
+        window_hours: int = 168,
+    ) -> dict[str, object]:
+        """历史 BUY+SELL 配对胜率分组（per price bucket / sport / market_type）。"""
+        if self._session_factory is None:
+            return {"groups": [], "window_hours": window_hours}
+        from collections import defaultdict as _defaultdict
+        from datetime import datetime, timedelta, timezone
+        from decimal import Decimal as _D
+
+        from sqlalchemy import text as sql_text
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+        try:
+            async with self._session_factory() as session:
+                result = await session.execute(
+                    sql_text("""
+                        SELECT
+                          a.payload->'fill'->>'side' as side,
+                          a.payload->'fill'->>'token_id' as token_id,
+                          (a.payload->'fill'->>'price')::numeric as price,
+                          (a.payload->'fill'->>'size')::numeric as size,
+                          (a.payload->'fill'->>'notional_usdc')::numeric as notional,
+                          m.market_slug,
+                          a.created_at
+                        FROM audit_events a
+                        LEFT JOIN markets m
+                          ON m.condition_id = a.payload->'fill'->>'condition_id'
+                        WHERE a.event_title='fill_recorded'
+                          AND a.created_at > :cutoff
+                          AND a.payload->'fill' IS NOT NULL
+                        ORDER BY a.created_at
+                    """),
+                    {"cutoff": cutoff},
+                )
+                fills = list(result)
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc), "groups": [], "window_hours": window_hours}
+
+        positions: dict[str, list] = _defaultdict(list)
+        closed_trades: list[dict] = []
+        token_to_slug: dict[str, str] = {}
+        for row in fills:
+            side = (row[0] or "").lower()
+            token = row[1] or ""
+            price = _D(str(row[2])) if row[2] is not None else _D("0")
+            size = _D(str(row[3])) if row[3] is not None else _D("0")
+            notional = _D(str(row[4])) if row[4] is not None else _D("0")
+            slug = row[5] or ""
+            if slug:
+                token_to_slug[token] = slug
+            if size <= 0:
+                continue
+            if side == "buy":
+                positions[token].append({"cost": notional, "shares": size, "price": price})
+            elif side == "sell":
+                remaining = size
+                while remaining > 0 and positions[token]:
+                    buy = positions[token][0]
+                    use_shares = min(buy["shares"], remaining)
+                    cost_ratio = use_shares / buy["shares"] if buy["shares"] > 0 else _D("0")
+                    matched_cost = buy["cost"] * cost_ratio
+                    matched_revenue = price * use_shares
+                    pnl = matched_revenue - matched_cost
+                    closed_trades.append({
+                        "token": token,
+                        "market_slug": token_to_slug.get(token, ""),
+                        "buy_price": float(buy["price"]),
+                        "sell_price": float(price),
+                        "cost": float(matched_cost),
+                        "revenue": float(matched_revenue),
+                        "pnl": float(pnl),
+                    })
+                    buy["shares"] -= use_shares
+                    buy["cost"] -= matched_cost
+                    if buy["shares"] <= _D("0.0000001"):
+                        positions[token].pop(0)
+                    remaining -= use_shares
+
+        def _price_bucket(p: float) -> str:
+            if p < 0.2:
+                return "0.0-0.2"
+            if p < 0.4:
+                return "0.2-0.4"
+            if p < 0.6:
+                return "0.4-0.6"
+            if p < 0.8:
+                return "0.6-0.8"
+            return "0.8-1.0"
+
+        def _sport_from_slug(slug: str) -> str:
+            sl = slug.lower()
+            for s in (
+                "kbo", "mlb", "nba", "wnba", "nhl", "nfl", "ncaaf", "ncaab",
+                "atp", "wta", "itf", "mls", "epl", "laliga", "j2100", "j1100",
+                "j3100", "chi", "bra", "arg", "mex",
+            ):
+                if s in sl:
+                    return s
+            return "other"
+
+        def _market_type_from_slug(slug: str) -> str:
+            sl = slug.lower()
+            if "spread" in sl:
+                return "spread"
+            if "total" in sl:
+                return "total"
+            if "halftime" in sl:
+                return "halftime"
+            if "first-set" in sl or "set-winner" in sl:
+                return "set_prop"
+            if "exact-score" in sl or "correct-score" in sl:
+                return "exact_score"
+            if "nrfi" in sl:
+                return "nrfi"
+            if "winner" in sl or sl.count("-") <= 3:
+                return "moneyline"
+            return "prop"
+
+        def _aggregate(pnls: list[float], dim: str, value: str) -> dict:
+            wins = [p for p in pnls if p > 0]
+            losses = [p for p in pnls if p <= 0]
+            total_pnl = sum(pnls)
+            total_loss = sum(losses)
+            return {
+                "dimension": dim,
+                "value": value,
+                "trade_count": len(pnls),
+                "win_count": len(wins),
+                "winrate": round(len(wins) / len(pnls), 3) if pnls else 0,
+                "avg_pnl": round(total_pnl / len(pnls), 4) if pnls else 0,
+                "total_pnl": round(total_pnl, 4),
+                "avg_win": round(sum(wins) / len(wins), 4) if wins else 0,
+                "avg_loss": round(sum(losses) / len(losses), 4) if losses else 0,
+                "profit_factor": (
+                    round(sum(wins) / abs(total_loss), 3) if total_loss < 0 else None
+                ),
+            }
+
+        by_bucket: dict[str, list[float]] = _defaultdict(list)
+        by_sport: dict[str, list[float]] = _defaultdict(list)
+        by_type: dict[str, list[float]] = _defaultdict(list)
+        by_sport_bucket: dict[tuple[str, str], list[float]] = _defaultdict(list)
+        for trade in closed_trades:
+            bucket = _price_bucket(trade["buy_price"])
+            sport = _sport_from_slug(trade["market_slug"])
+            mtype = _market_type_from_slug(trade["market_slug"])
+            by_bucket[bucket].append(trade["pnl"])
+            by_sport[sport].append(trade["pnl"])
+            by_type[mtype].append(trade["pnl"])
+            by_sport_bucket[(sport, bucket)].append(trade["pnl"])
+
+        groups_bucket = [
+            _aggregate(p, "buy_price_bucket", b) for b, p in sorted(by_bucket.items())
+        ]
+        groups_sport = sorted(
+            (_aggregate(p, "sport", s) for s, p in by_sport.items()),
+            key=lambda g: g["total_pnl"], reverse=True,
+        )
+        groups_type = sorted(
+            (_aggregate(p, "market_type", t) for t, p in by_type.items()),
+            key=lambda g: g["total_pnl"], reverse=True,
+        )
+        groups_sport_bucket = sorted(
+            (
+                _aggregate(p, "sport_x_price", f"{s}/{b}")
+                for (s, b), p in by_sport_bucket.items()
+            ),
+            key=lambda g: g["total_pnl"], reverse=True,
+        )
+
+        return {
+            "window_hours": window_hours,
+            "total_fills": len(fills),
+            "closed_trades": len(closed_trades),
+            "open_positions_count": sum(1 for _tok, q in positions.items() if q),
+            "total_realized_pnl": round(sum(t["pnl"] for t in closed_trades), 4),
+            "by_price_bucket": groups_bucket,
+            "by_sport": groups_sport,
+            "by_market_type": groups_type,
+            "by_sport_x_price": groups_sport_bucket[:20],
+            "recent_trades_sample": closed_trades[-10:],
+        }
+
+    async def funnel(
+        self: AnalyticsAggregator,
+        *,
+        window_ms: int,
+        end_ms: int | None = None,
+        league: str | None = None,
+        market_type: str | None = None,
+    ) -> dict[str, Any]:
+        """入场漏斗各阶段计数（discovered → eligible → candidate → accepted → ...）。"""
+        from polymarket_trader.infra.db.analytics_queries import (
+            FUNNEL_STAGES,
+            fetch_funnel_counts,
+        )
+
+        if self._session_factory is None:
+            return {
+                "window_ms": window_ms,
+                "stages": [{"name": name, "count": 0} for name in FUNNEL_STAGES],
+                "filters": {"league": league, "market_type": market_type},
+            }
+        start_dt, end_dt = _resolve_window(window_ms=window_ms, end_ms=end_ms)
+        async with self._session_factory() as session:
+            counts = await fetch_funnel_counts(
+                session,
+                window_start=start_dt, window_end=end_dt,
+                league=league, market_type=market_type,
+            )
+        stages = [
+            {"name": name, "count": int(counts.get(name, 0))} for name in FUNNEL_STAGES
+        ]
+        return {
+            "window_ms": window_ms,
+            "generated_at": end_dt.isoformat(),
+            "stages": stages,
+            "filters": {"league": league, "market_type": market_type},
+        }
+
+    async def rejections(
+        self: AnalyticsAggregator,
+        *,
+        window_ms: int,
+        end_ms: int | None = None,
+        league: str | None = None,
+        market_type: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """拒绝原因 Top N（按 reason 聚合，按出现次数降序）。"""
+        from polymarket_trader.infra.db.analytics_queries import fetch_rejection_reasons
+
+        if self._session_factory is None:
+            return {
+                "window_ms": window_ms,
+                "total": 0,
+                "top": [],
+                "filters": {"league": league, "market_type": market_type},
+            }
+        start_dt, end_dt = _resolve_window(window_ms=window_ms, end_ms=end_ms)
+        async with self._session_factory() as session:
+            total, rows = await fetch_rejection_reasons(
+                session,
+                window_start=start_dt, window_end=end_dt,
+                league=league, market_type=market_type, limit=limit,
+            )
+        top: list[dict[str, Any]] = []
+        for row in rows:
+            count = int(row["count"])
+            pct = (count / total * 100.0) if total > 0 else 0.0
+            top.append({"key": str(row["key"]), "count": count, "pct": round(pct, 4)})
+        return {
+            "window_ms": window_ms,
+            "generated_at": end_dt.isoformat(),
+            "total": total,
+            "top": top,
+            "filters": {"league": league, "market_type": market_type},
+        }
+
+    async def execution_quality(
+        self: AnalyticsAggregator,
+        *,
+        window_ms: int,
+        end_ms: int | None = None,
+        league: str | None = None,
+        market_type: str | None = None,
+    ) -> dict[str, Any]:
+        """订单执行质量（submit / fill latency 分位 + slippage bps）。"""
+        from polymarket_trader.infra.db.analytics_queries import fetch_execution_quality
+
+        if self._session_factory is None:
+            return {
+                "window_ms": window_ms,
+                "submit_latency_ms": {"p50": None, "p95": None},
+                "fill_latency_ms": {"p50": None, "p95": None},
+                "slippage_bps": {"mean": None, "p95": None},
+                "sample_size": 0,
+                "filters": {"league": league, "market_type": market_type},
+            }
+        start_dt, end_dt = _resolve_window(window_ms=window_ms, end_ms=end_ms)
+        async with self._session_factory() as session:
+            data = await fetch_execution_quality(
+                session,
+                window_start=start_dt, window_end=end_dt,
+                league=league, market_type=market_type,
+            )
+        return {
+            "window_ms": window_ms,
+            "generated_at": end_dt.isoformat(),
+            "submit_latency_ms": {
+                "p50": _round_or_none(data.get("submit_p50")),
+                "p95": _round_or_none(data.get("submit_p95")),
+            },
+            "fill_latency_ms": {
+                "p50": _round_or_none(data.get("fill_p50")),
+                "p95": _round_or_none(data.get("fill_p95")),
+            },
+            "slippage_bps": {
+                "mean": _round_or_none(data.get("slip_mean")),
+                "p95": _round_or_none(data.get("slip_p95")),
+            },
+            "sample_size": int(data.get("sample_size") or 0),
+            "filters": {"league": league, "market_type": market_type},
+        }
 # ===== 扩展方法：错误率时序 / 守卫统计 / 历史胜率分组 =====
 # 这 3 个方法都基于 audit_events SQL 聚合，属于审计查询类（§12.2）。
 # 用 monkey-patch 挂到 AnalyticsAggregator 上，与上面 12 个类方法等价；
 # 后续 W6 改造时统一收编到 class body。
-
-
-async def _error_rate_timeseries(
-    self: AnalyticsAggregator,
-    *,
-    window_minutes: int = 15,
-) -> dict[str, object]:
-    """错误率时序 — 最近 1/5/15min HTTP errors + audit errors + per-bucket。"""
-    if self._session_factory is None:
-        return {"buckets": [], "summary": {}}
-    from datetime import datetime, timedelta, timezone
-
-    from sqlalchemy import text as sql_text
-
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
-    try:
-        async with self._session_factory() as session:
-            rows = (await session.execute(
-                sql_text("""
-                    SELECT
-                      date_trunc('minute', created_at) as bucket,
-                      event_title,
-                      COUNT(*) FILTER (WHERE status IN ('rejected','failed','error')
-                        OR reason LIKE '%error%' OR reason LIKE '%failed%') as errors,
-                      COUNT(*) as total
-                    FROM audit_events
-                    WHERE created_at > :cutoff
-                      AND event_title IN ('order_rejected','order_state_updated',
-                        'order_submitted','risk_rejection_recorded','fill_recorded')
-                    GROUP BY 1, 2
-                    ORDER BY 1 DESC
-                """),
-                {"cutoff": cutoff},
-            )).all()
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc)}
-    from collections import defaultdict as _defaultdict
-
-    by_bucket: dict[str, dict] = _defaultdict(
-        lambda: {"errors": 0, "total": 0, "by_event": {}}
-    )
-    for r in rows:
-        b = r[0].isoformat()
-        by_bucket[b]["errors"] += int(r[2] or 0)
-        by_bucket[b]["total"] += int(r[3] or 0)
-        by_bucket[b]["by_event"][r[1]] = {
-            "errors": int(r[2] or 0), "total": int(r[3] or 0),
-        }
-    buckets = []
-    for b in sorted(by_bucket.keys(), reverse=True):
-        bk = by_bucket[b]
-        buckets.append({
-            "bucket": b,
-            "errors": bk["errors"],
-            "total": bk["total"],
-            "error_rate_pct": (
-                round(bk["errors"] / bk["total"] * 100, 2) if bk["total"] else 0
-            ),
-            "by_event": bk["by_event"],
-        })
-    now = datetime.now(timezone.utc)
-    summary: dict[str, dict] = {}
-    for w_min in (1, 5, 15):
-        w_cutoff = now - timedelta(minutes=w_min)
-        w_errors = sum(
-            b["errors"] for b in buckets
-            if datetime.fromisoformat(b["bucket"]) > w_cutoff
-        )
-        w_total = sum(
-            b["total"] for b in buckets
-            if datetime.fromisoformat(b["bucket"]) > w_cutoff
-        )
-        summary[f"last_{w_min}min"] = {
-            "errors": w_errors,
-            "total": w_total,
-            "error_rate_pct": (
-                round(w_errors / w_total * 100, 2) if w_total else 0
-            ),
-        }
-    return {
-        "window_minutes": window_minutes,
-        "buckets_count": len(buckets),
-        "summary": summary,
-        "buckets": buckets[:30],
-    }
-
-
-async def _guard_stats_snapshot(
-    self: AnalyticsAggregator,
-    *,
-    window_minutes: int = 60,
-) -> dict[str, object]:
-    """守卫触发统计：每个 reject reason 在过去 N 分钟触发的次数。"""
-    if self._session_factory is None:
-        return {"items": [], "window_minutes": window_minutes}
-    from datetime import datetime, timedelta, timezone
-
-    from sqlalchemy import text as sql_text
-
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
-    try:
-        async with self._session_factory() as session:
-            result = await session.execute(
-                sql_text("""
-                    SELECT
-                      COALESCE(payload->>'reason', reason, '?') as r,
-                      event_title,
-                      COUNT(*) as n
-                    FROM audit_events
-                    WHERE created_at > :cutoff
-                      AND event_title IN ('order_rejected','risk_rejection_recorded',
-                                          'allocation_decision_recorded','market_filtered_out')
-                    GROUP BY 1, 2
-                    ORDER BY n DESC
-                    LIMIT 50
-                """),
-                {"cutoff": cutoff},
-            )
-            rows = result.all()
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc), "items": [], "window_minutes": window_minutes}
-    items = [{"reason": r[0], "event": r[1], "count": r[2]} for r in rows]
-    return {
-        "window_minutes": window_minutes,
-        "total": sum(i["count"] for i in items),
-        "items": items,
-    }
-
-
-async def _win_rate_breakdown(
-    self: AnalyticsAggregator,
-    *,
-    window_hours: int = 168,
-) -> dict[str, object]:
-    """历史 BUY+SELL 配对胜率分组（per price bucket / sport / market_type）。"""
-    if self._session_factory is None:
-        return {"groups": [], "window_hours": window_hours}
-    from collections import defaultdict as _defaultdict
-    from datetime import datetime, timedelta, timezone
-    from decimal import Decimal as _D
-
-    from sqlalchemy import text as sql_text
-
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
-    try:
-        async with self._session_factory() as session:
-            result = await session.execute(
-                sql_text("""
-                    SELECT
-                      a.payload->'fill'->>'side' as side,
-                      a.payload->'fill'->>'token_id' as token_id,
-                      (a.payload->'fill'->>'price')::numeric as price,
-                      (a.payload->'fill'->>'size')::numeric as size,
-                      (a.payload->'fill'->>'notional_usdc')::numeric as notional,
-                      m.market_slug,
-                      a.created_at
-                    FROM audit_events a
-                    LEFT JOIN markets m
-                      ON m.condition_id = a.payload->'fill'->>'condition_id'
-                    WHERE a.event_title='fill_recorded'
-                      AND a.created_at > :cutoff
-                      AND a.payload->'fill' IS NOT NULL
-                    ORDER BY a.created_at
-                """),
-                {"cutoff": cutoff},
-            )
-            fills = list(result)
-    except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc), "groups": [], "window_hours": window_hours}
-
-    positions: dict[str, list] = _defaultdict(list)
-    closed_trades: list[dict] = []
-    token_to_slug: dict[str, str] = {}
-    for row in fills:
-        side = (row[0] or "").lower()
-        token = row[1] or ""
-        price = _D(str(row[2])) if row[2] is not None else _D("0")
-        size = _D(str(row[3])) if row[3] is not None else _D("0")
-        notional = _D(str(row[4])) if row[4] is not None else _D("0")
-        slug = row[5] or ""
-        if slug:
-            token_to_slug[token] = slug
-        if size <= 0:
-            continue
-        if side == "buy":
-            positions[token].append({"cost": notional, "shares": size, "price": price})
-        elif side == "sell":
-            remaining = size
-            while remaining > 0 and positions[token]:
-                buy = positions[token][0]
-                use_shares = min(buy["shares"], remaining)
-                cost_ratio = use_shares / buy["shares"] if buy["shares"] > 0 else _D("0")
-                matched_cost = buy["cost"] * cost_ratio
-                matched_revenue = price * use_shares
-                pnl = matched_revenue - matched_cost
-                closed_trades.append({
-                    "token": token,
-                    "market_slug": token_to_slug.get(token, ""),
-                    "buy_price": float(buy["price"]),
-                    "sell_price": float(price),
-                    "cost": float(matched_cost),
-                    "revenue": float(matched_revenue),
-                    "pnl": float(pnl),
-                })
-                buy["shares"] -= use_shares
-                buy["cost"] -= matched_cost
-                if buy["shares"] <= _D("0.0000001"):
-                    positions[token].pop(0)
-                remaining -= use_shares
-
-    def _price_bucket(p: float) -> str:
-        if p < 0.2:
-            return "0.0-0.2"
-        if p < 0.4:
-            return "0.2-0.4"
-        if p < 0.6:
-            return "0.4-0.6"
-        if p < 0.8:
-            return "0.6-0.8"
-        return "0.8-1.0"
-
-    def _sport_from_slug(slug: str) -> str:
-        sl = slug.lower()
-        for s in (
-            "kbo", "mlb", "nba", "wnba", "nhl", "nfl", "ncaaf", "ncaab",
-            "atp", "wta", "itf", "mls", "epl", "laliga", "j2100", "j1100",
-            "j3100", "chi", "bra", "arg", "mex",
-        ):
-            if s in sl:
-                return s
-        return "other"
-
-    def _market_type_from_slug(slug: str) -> str:
-        sl = slug.lower()
-        if "spread" in sl:
-            return "spread"
-        if "total" in sl:
-            return "total"
-        if "halftime" in sl:
-            return "halftime"
-        if "first-set" in sl or "set-winner" in sl:
-            return "set_prop"
-        if "exact-score" in sl or "correct-score" in sl:
-            return "exact_score"
-        if "nrfi" in sl:
-            return "nrfi"
-        if "winner" in sl or sl.count("-") <= 3:
-            return "moneyline"
-        return "prop"
-
-    def _aggregate(pnls: list[float], dim: str, value: str) -> dict:
-        wins = [p for p in pnls if p > 0]
-        losses = [p for p in pnls if p <= 0]
-        total_pnl = sum(pnls)
-        total_loss = sum(losses)
-        return {
-            "dimension": dim,
-            "value": value,
-            "trade_count": len(pnls),
-            "win_count": len(wins),
-            "winrate": round(len(wins) / len(pnls), 3) if pnls else 0,
-            "avg_pnl": round(total_pnl / len(pnls), 4) if pnls else 0,
-            "total_pnl": round(total_pnl, 4),
-            "avg_win": round(sum(wins) / len(wins), 4) if wins else 0,
-            "avg_loss": round(sum(losses) / len(losses), 4) if losses else 0,
-            "profit_factor": (
-                round(sum(wins) / abs(total_loss), 3) if total_loss < 0 else None
-            ),
-        }
-
-    by_bucket: dict[str, list[float]] = _defaultdict(list)
-    by_sport: dict[str, list[float]] = _defaultdict(list)
-    by_type: dict[str, list[float]] = _defaultdict(list)
-    by_sport_bucket: dict[tuple[str, str], list[float]] = _defaultdict(list)
-    for trade in closed_trades:
-        bucket = _price_bucket(trade["buy_price"])
-        sport = _sport_from_slug(trade["market_slug"])
-        mtype = _market_type_from_slug(trade["market_slug"])
-        by_bucket[bucket].append(trade["pnl"])
-        by_sport[sport].append(trade["pnl"])
-        by_type[mtype].append(trade["pnl"])
-        by_sport_bucket[(sport, bucket)].append(trade["pnl"])
-
-    groups_bucket = [
-        _aggregate(p, "buy_price_bucket", b) for b, p in sorted(by_bucket.items())
-    ]
-    groups_sport = sorted(
-        (_aggregate(p, "sport", s) for s, p in by_sport.items()),
-        key=lambda g: g["total_pnl"], reverse=True,
-    )
-    groups_type = sorted(
-        (_aggregate(p, "market_type", t) for t, p in by_type.items()),
-        key=lambda g: g["total_pnl"], reverse=True,
-    )
-    groups_sport_bucket = sorted(
-        (
-            _aggregate(p, "sport_x_price", f"{s}/{b}")
-            for (s, b), p in by_sport_bucket.items()
-        ),
-        key=lambda g: g["total_pnl"], reverse=True,
-    )
-
-    return {
-        "window_hours": window_hours,
-        "total_fills": len(fills),
-        "closed_trades": len(closed_trades),
-        "open_positions_count": sum(1 for _tok, q in positions.items() if q),
-        "total_realized_pnl": round(sum(t["pnl"] for t in closed_trades), 4),
-        "by_price_bucket": groups_bucket,
-        "by_sport": groups_sport,
-        "by_market_type": groups_type,
-        "by_sport_x_price": groups_sport_bucket[:20],
-        "recent_trades_sample": closed_trades[-10:],
-    }
-
-
-AnalyticsAggregator.error_rate_timeseries = _error_rate_timeseries  # type: ignore[attr-defined]
-AnalyticsAggregator.guard_stats_snapshot = _guard_stats_snapshot  # type: ignore[attr-defined]
-AnalyticsAggregator.win_rate_breakdown = _win_rate_breakdown  # type: ignore[attr-defined]
 
 
 # ===== 漏斗 / 拒绝原因 top / 执行质量（W5 收口：原 AnalyticsService 三方法） =====
@@ -819,132 +932,3 @@ def _round_or_none(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
 
-
-async def _funnel(
-    self: AnalyticsAggregator,
-    *,
-    window_ms: int,
-    end_ms: int | None = None,
-    league: str | None = None,
-    market_type: str | None = None,
-) -> dict[str, Any]:
-    """入场漏斗各阶段计数（discovered → eligible → candidate → accepted → ...）。"""
-    from polymarket_trader.infra.db.analytics_queries import (
-        FUNNEL_STAGES,
-        fetch_funnel_counts,
-    )
-
-    if self._session_factory is None:
-        return {
-            "window_ms": window_ms,
-            "stages": [{"name": name, "count": 0} for name in FUNNEL_STAGES],
-            "filters": {"league": league, "market_type": market_type},
-        }
-    start_dt, end_dt = _resolve_window(window_ms=window_ms, end_ms=end_ms)
-    async with self._session_factory() as session:
-        counts = await fetch_funnel_counts(
-            session,
-            window_start=start_dt, window_end=end_dt,
-            league=league, market_type=market_type,
-        )
-    stages = [
-        {"name": name, "count": int(counts.get(name, 0))} for name in FUNNEL_STAGES
-    ]
-    return {
-        "window_ms": window_ms,
-        "generated_at": end_dt.isoformat(),
-        "stages": stages,
-        "filters": {"league": league, "market_type": market_type},
-    }
-
-
-async def _rejections(
-    self: AnalyticsAggregator,
-    *,
-    window_ms: int,
-    end_ms: int | None = None,
-    league: str | None = None,
-    market_type: str | None = None,
-    limit: int = 20,
-) -> dict[str, Any]:
-    """拒绝原因 Top N（按 reason 聚合，按出现次数降序）。"""
-    from polymarket_trader.infra.db.analytics_queries import fetch_rejection_reasons
-
-    if self._session_factory is None:
-        return {
-            "window_ms": window_ms,
-            "total": 0,
-            "top": [],
-            "filters": {"league": league, "market_type": market_type},
-        }
-    start_dt, end_dt = _resolve_window(window_ms=window_ms, end_ms=end_ms)
-    async with self._session_factory() as session:
-        total, rows = await fetch_rejection_reasons(
-            session,
-            window_start=start_dt, window_end=end_dt,
-            league=league, market_type=market_type, limit=limit,
-        )
-    top: list[dict[str, Any]] = []
-    for row in rows:
-        count = int(row["count"])
-        pct = (count / total * 100.0) if total > 0 else 0.0
-        top.append({"key": str(row["key"]), "count": count, "pct": round(pct, 4)})
-    return {
-        "window_ms": window_ms,
-        "generated_at": end_dt.isoformat(),
-        "total": total,
-        "top": top,
-        "filters": {"league": league, "market_type": market_type},
-    }
-
-
-async def _execution_quality(
-    self: AnalyticsAggregator,
-    *,
-    window_ms: int,
-    end_ms: int | None = None,
-    league: str | None = None,
-    market_type: str | None = None,
-) -> dict[str, Any]:
-    """订单执行质量（submit / fill latency 分位 + slippage bps）。"""
-    from polymarket_trader.infra.db.analytics_queries import fetch_execution_quality
-
-    if self._session_factory is None:
-        return {
-            "window_ms": window_ms,
-            "submit_latency_ms": {"p50": None, "p95": None},
-            "fill_latency_ms": {"p50": None, "p95": None},
-            "slippage_bps": {"mean": None, "p95": None},
-            "sample_size": 0,
-            "filters": {"league": league, "market_type": market_type},
-        }
-    start_dt, end_dt = _resolve_window(window_ms=window_ms, end_ms=end_ms)
-    async with self._session_factory() as session:
-        data = await fetch_execution_quality(
-            session,
-            window_start=start_dt, window_end=end_dt,
-            league=league, market_type=market_type,
-        )
-    return {
-        "window_ms": window_ms,
-        "generated_at": end_dt.isoformat(),
-        "submit_latency_ms": {
-            "p50": _round_or_none(data.get("submit_p50")),
-            "p95": _round_or_none(data.get("submit_p95")),
-        },
-        "fill_latency_ms": {
-            "p50": _round_or_none(data.get("fill_p50")),
-            "p95": _round_or_none(data.get("fill_p95")),
-        },
-        "slippage_bps": {
-            "mean": _round_or_none(data.get("slip_mean")),
-            "p95": _round_or_none(data.get("slip_p95")),
-        },
-        "sample_size": int(data.get("sample_size") or 0),
-        "filters": {"league": league, "market_type": market_type},
-    }
-
-
-AnalyticsAggregator.funnel = _funnel  # type: ignore[attr-defined]
-AnalyticsAggregator.rejections = _rejections  # type: ignore[attr-defined]
-AnalyticsAggregator.execution_quality = _execution_quality  # type: ignore[attr-defined]

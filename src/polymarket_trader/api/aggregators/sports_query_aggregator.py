@@ -248,32 +248,20 @@ class SportsQueryAggregator:
             return None
         return strategy.resolve_outright_team_debug_payload(market)
 
+    # ===== Goalserve lazy 客户端代理 =====
 
-# ===== Goalserve lazy 客户端代理 =====
+    async def soccer_injuries_snapshot(self) -> dict[str, object] | None:
+        """Soccer 全部联赛伤病列表（lazy fetch + 1h cache）。"""
+        runtime = self._runtime
+        if runtime is None or runtime.goalserve_lazy_client is None:
+            return None
+        return await runtime.goalserve_lazy_client.soccer_injuries()
 
-
-async def _soccer_injuries_snapshot(
-    self: SportsQueryAggregator,
-) -> dict[str, object] | None:
-    """Soccer 全部联赛伤病列表（lazy fetch + 1h cache）。"""
-    runtime = self._runtime
-    if runtime is None or runtime.goalserve_lazy_client is None:
-        return None
-    return await runtime.goalserve_lazy_client.soccer_injuries()
-
-
-async def _h2h_snapshot(
-    self: SportsQueryAggregator,
-    *,
-    team1_id: str,
-    team2_id: str,
-) -> dict[str, object] | None:
-    """两队历史对决（lazy fetch + 1h cache）。"""
-    runtime = self._runtime
-    if runtime is None or runtime.goalserve_lazy_client is None:
-        return None
-    return await runtime.goalserve_lazy_client.h2h(team1_id, team2_id)
-
-
-SportsQueryAggregator.soccer_injuries_snapshot = _soccer_injuries_snapshot  # type: ignore[attr-defined]
-SportsQueryAggregator.h2h_snapshot = _h2h_snapshot  # type: ignore[attr-defined]
+    async def h2h_snapshot(
+        self, *, team1_id: str, team2_id: str,
+    ) -> dict[str, object] | None:
+        """两队历史对决（lazy fetch + 1h cache）。"""
+        runtime = self._runtime
+        if runtime is None or runtime.goalserve_lazy_client is None:
+            return None
+        return await runtime.goalserve_lazy_client.h2h(team1_id, team2_id)
