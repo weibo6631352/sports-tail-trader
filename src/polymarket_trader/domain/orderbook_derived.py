@@ -21,7 +21,7 @@ from typing import Iterable, Sequence
 from polymarket_trader.domain.orderbook import OrderbookSnapshot, PriceLevel
 
 
-# ---------- 公共常量 (与现有 admin_query/market.py 等口径一致) ----------
+# ---------- 公共常量 (与 api/aggregators/market_misc_aggregator.py 口径一致) ----------
 
 # whale 阈值: USDC ≥ $50 视为 informed/鲸鱼大单
 WHALE_THRESHOLD_USDC: Decimal = Decimal("50")

@@ -17,11 +17,10 @@ detail  = agg.exposure(level="detail")      # 完整 per-market 数据
 - detail 含每个 MarketView 的完整 metadata + outcomes 列表
 - 只读 DataGraph，不调外部 API / 不写 store / 不发 audit
 
-# 与 app/admin_query/trading.py 的区别
+# 设计
 
-旧 `AdminTradingQuery.portfolio_exposure` 散落跨 store 拼接（registry +
-account_state + market_metadata 各自读）。新 aggregator 走 DataGraph 统一 view，
-消除重复聚合逻辑——后续 Step 7c 续期把 `app/admin_query/*` 完全迁过来。
+走 DataGraph 统一 view，消除跨 store 拼接（registry + account_state +
+market_metadata）——同一份 MarketView 同时承载 metadata + 仓位 + 盘口快照。
 """
 
 from __future__ import annotations
