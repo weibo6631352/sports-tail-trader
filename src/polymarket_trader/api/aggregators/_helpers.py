@@ -1,7 +1,8 @@
-"""Admin 查询 mixin 共享的纯函数工具。
+"""Aggregator-shared pure-function helpers.
 
-这些 helper 不依赖宿主状态，只做时间戳解析、百分位计算、latency 投影、
-决策记录序列化等纯计算。集中在这里避免子 mixin 互相循环依赖。
+迁自 `app/admin_query/_helpers.py`（admin_query 目录已删除）。
+- decision record 投影
+- latency 分位数计算（用于 AnalyticsAggregator.latency_percentiles_snapshot）
 """
 
 from __future__ import annotations
@@ -39,11 +40,6 @@ def _parse_iso(ts: Any) -> datetime | None:
 
 
 def _percentile(values: list[float], q: float) -> float | None:
-    """线性插值的百分位数；空样本返回 None。
-
-    避免引入 numpy 依赖；纯 Python 实现，按 PostgreSQL ``percentile_cont`` 同义。
-    """
-
     if not values:
         return None
     if q <= 0:
@@ -58,7 +54,7 @@ def _percentile(values: list[float], q: float) -> float | None:
     return values[lower_idx] + frac * (values[lower_idx + 1] - values[lower_idx])
 
 
-def _empty_latency_payload(
+def empty_latency_payload(
     event_types: tuple[str, ...],
     sample_limit: int,
     window_ms: int | None,
@@ -69,14 +65,22 @@ def _empty_latency_payload(
         "event_types": list(event_types),
         "sample_count": 0,
         "stages": [
-            {"stage": stage_name, "sample_count": 0, "p50_ms": None, "p90_ms": None,
-             "p95_ms": None, "p99_ms": None, "min_ms": None, "max_ms": None}
+            {
+                "stage": stage_name,
+                "sample_count": 0,
+                "p50_ms": None,
+                "p90_ms": None,
+                "p95_ms": None,
+                "p99_ms": None,
+                "min_ms": None,
+                "max_ms": None,
+            }
             for stage_name, _, _ in _LATENCY_STAGES
         ],
     }
 
 
-def _compute_latency_payload(
+def compute_latency_payload(
     events: tuple[Any, ...],
     event_types: tuple[str, ...],
     sample_limit: int,
@@ -106,16 +110,18 @@ def _compute_latency_payload(
     for stage_name in stages:
         values = sorted(stages[stage_name])
         pct = {q: _percentile(values, q) for q in _LATENCY_PERCENTILES}
-        stage_list.append({
-            "stage": stage_name,
-            "sample_count": len(values),
-            "p50_ms": pct.get(0.50),
-            "p90_ms": pct.get(0.90),
-            "p95_ms": pct.get(0.95),
-            "p99_ms": pct.get(0.99),
-            "min_ms": values[0] if values else None,
-            "max_ms": values[-1] if values else None,
-        })
+        stage_list.append(
+            {
+                "stage": stage_name,
+                "sample_count": len(values),
+                "p50_ms": pct.get(0.50),
+                "p90_ms": pct.get(0.90),
+                "p95_ms": pct.get(0.95),
+                "p99_ms": pct.get(0.99),
+                "min_ms": values[0] if values else None,
+                "max_ms": values[-1] if values else None,
+            }
+        )
     return {
         "window_ms": window_ms,
         "sample_limit": sample_limit,
@@ -125,9 +131,7 @@ def _compute_latency_payload(
     }
 
 
-def _decision_record_payload(record: DecisionRecord) -> dict[str, Any]:
-    """决策录制行的 admin 视图——保持字段命名与 DB 列对齐。"""
-
+def decision_record_payload(record: DecisionRecord) -> dict[str, Any]:
     return {
         "record_id": record.record_id,
         "trace_id": record.trace_id,

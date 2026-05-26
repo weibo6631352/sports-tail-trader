@@ -28,16 +28,14 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from polymarket_trader.app.admin_query._helpers import (
-    _compute_latency_payload,
-    _empty_latency_payload,
-)
 from polymarket_trader.app.admin_serialization import AdminSerializer
 from polymarket_trader.domain.events import DomainEventType
 from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
 
 from ._db import RepositoryGroup, with_repositories
+from ._helpers import compute_latency_payload as _compute_latency_payload
+from ._helpers import empty_latency_payload as _empty_latency_payload
 from .timeline_aggregator import TimelineAggregator
 
 if TYPE_CHECKING:

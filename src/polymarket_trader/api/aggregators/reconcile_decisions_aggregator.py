@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from polymarket_trader.app.admin_query._helpers import _decision_record_payload
 from polymarket_trader.app.admin_serialization import AdminSerializer, page_payload
 from polymarket_trader.domain.decisions import DecisionRecord
 from polymarket_trader.domain.events import DomainEventType
@@ -25,6 +24,7 @@ from polymarket_trader.domain.time_filters import TimeRange
 from polymarket_trader.infra.db import RepositoryPage
 
 from ._db import RepositoryGroup, with_repositories
+from ._helpers import decision_record_payload as _decision_record_payload
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker

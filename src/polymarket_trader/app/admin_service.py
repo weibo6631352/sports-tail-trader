@@ -9,7 +9,6 @@ if TYPE_CHECKING:
 
 
 from polymarket_trader.app.admin_order_control import AdminOrderController
-from polymarket_trader.app.admin_runtime_view import AdminRuntimeView
 from polymarket_trader.app.admin_serialization import AdminSerializer, decimal_text, jsonable
 from polymarket_trader.app.admin_service_helpers import (
     _RepositoryGroup,
@@ -45,7 +44,6 @@ from polymarket_trader.infra.db import (
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
 from polymarket_trader.app.admin_controls_mixin import AdminControlsMixin
-from polymarket_trader.app.admin_query import AdminQueryMixin
 
 
 # Module-level cache for trade tape（frozen dataclass 不能含 mutable state）
@@ -53,7 +51,7 @@ _TRADE_TAPE_CACHE: dict[str, tuple[float, dict]] = {}
 
 
 @dataclass(frozen=True, slots=True)
-class AdminService(AdminQueryMixin, AdminControlsMixin):
+class AdminService(AdminControlsMixin):
     """Coordinates read-only admin queries and controlled manual operations.
 
     Read methods 来自 ``AdminQueryMixin``；受控操作来自 ``AdminControlsMixin``；
@@ -1921,9 +1919,6 @@ class AdminService(AdminQueryMixin, AdminControlsMixin):
             registry_snapshot_provider=self._registry_snapshot,
             market_ws_snapshot=self._market_ws_snapshot,
         )
-
-    def _runtime_view(self) -> AdminRuntimeView:
-        return AdminRuntimeView(runtime=self.runtime)
 
     def _order_controller(self) -> AdminOrderController:
         return AdminOrderController(
