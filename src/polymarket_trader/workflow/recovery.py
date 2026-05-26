@@ -188,13 +188,18 @@ def _abnormal_live_state_pause_reason(
     config: TradingWorkflowConfig,
     context: DecisionContext,
 ) -> str | None:
-    """根据已接入的直播状态判断是否需要暂停新增交易。"""
+    """根据已接入的直播状态判断是否需要暂停新增交易。
+
+    PAUSED 从异常集中移除——Goalserve <core stopped="1"> 在 CS2 round/buy phase
+    等正常节奏中频繁瞬态触发,把它当 abnormal 会导致 reconcile 反复 pause/resume
+    market,真停赛 / 弃赛 / 改判 走 POSTPONED / CANCELLED / DISPUTED / RETIRED,
+    这些仍 block.
+    """
 
     game = live_game_state_from_metadata(context.metadata)
     if game is None:
         return None
     if game.status in {
-        LiveGameStatus.PAUSED,
         LiveGameStatus.POSTPONED,
         LiveGameStatus.CANCELLED,
         LiveGameStatus.DISPUTED,

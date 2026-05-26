@@ -779,14 +779,21 @@ def entry_signal_gate(
 ) -> tuple[bool, str]:
     """判断直播匹配是否应触发 P0 入场信号。
 
-    ENDED 和 LIVE 市场立即放行；资金效率和时间窗由 _capital_efficiency_gate 处理。
+    LIVE / ENDED / PAUSED 都放行——
+    PAUSED 是 Goalserve <core stopped="1"> 在 CS2 round 间 / buy phase / 击杀重播
+    等正常游戏节奏中频繁触发的瞬态标志,不代表赛事真停; 我们仍在盘口, 应继续
+    Kelly / 信号决策, 不阻断. 真停 / 弃赛 / 重赛 等终态走 POSTPONED / CANCELLED /
+    RETIRED / DISPUTED, 这些仍然 block.
+    资金效率和时间窗由 _capital_efficiency_gate 处理.
     """
 
     if event.status == SportsLiveGameStatus.ENDED:
         return True, "ended_not_closed"
-    if event.status != SportsLiveGameStatus.LIVE:
-        return False, f"sports_live_state_{event.status.value}"
-    return True, "live"
+    if event.status == SportsLiveGameStatus.LIVE:
+        return True, "live"
+    if event.status == SportsLiveGameStatus.PAUSED:
+        return True, "paused_passthrough"
+    return False, f"sports_live_state_{event.status.value}"
 
 
 def _market_text(market: Market) -> str:
