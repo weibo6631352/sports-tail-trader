@@ -133,8 +133,8 @@ class GoalserveInplayClient:
         base_url: str = _BASE_URL,
         proxy: str | None = None,
         timeout_s: float = 12.0,
-        poll_interval_s: float = 1.05,
-        rate_limit_backoff_s: float = 3.0,
+        poll_interval_s: float = 5.0,
+        rate_limit_backoff_s: float = 5.0,
         now_provider: Callable[[], datetime] | None = None,
         active_sports_provider: Callable[[], frozenset[str]] | None = None,
     ) -> None:
@@ -145,7 +145,10 @@ class GoalserveInplayClient:
         self._base_url = base_url.rstrip("/")
         self._now_provider = now_provider
         self._active_sports_provider = active_sports_provider
-        # 同 sport ~1 req/s 是硬限制——poll_interval 默认 1.2s 留安全余量。
+        # 同 sport ~1 req/s 是硬限制. R26 实测 1.05s polling 让 inplay tennis
+        # parser 每秒 alloc 13K dataclass → Python gen2 GC 1-2s 停顿 (event_loop_lag
+        # p99 1.5s, /health hang 10s). 5s polling 减压 5x, lag p99 1.5s → 165ms.
+        # 体育盘口决策对 1-5s 抖动不敏感 (vs RTT 跨洋 200ms 本身已大).
         self._poll_interval_s = max(1.05, float(poll_interval_s))
         # 429 退避：实测同 sport 超速即 429，退避后再试。
         self._rate_limit_backoff_s = max(self._poll_interval_s, float(rate_limit_backoff_s))
@@ -408,7 +411,10 @@ class GoalserveInplayClient:
             return
 
         try:
-            feed = _decode_feed(response.content)
+            # gunzip + json.loads 是 sync CPU (inplay tennis feed 数 MB 解压 + parse
+            # 几百 ms), 放 to_thread 离开主 event loop, 否则每秒 ~5 个 sport feed
+            # 累加占主线程 → endpoint hang + worker drift 数百% (§7 反规则).
+            feed = await asyncio.to_thread(_decode_feed, response.content)
         except Exception as exc:
             st.consecutive_failures += 1
             st.last_error = f"decode error: {exc}"
@@ -416,6 +422,10 @@ class GoalserveInplayClient:
 
         observed_at = utc_now(self._now_provider)
         server_clock_at = _parse_http_date_header(response.headers.get("date"))
+        # parse 每秒 alloc 13K LiveEvent dataclass → gen2 GC 1-2s STW (R26 实测).
+        # to_thread 反更差 (GIL 串行 + 排队); ProcessPool 实测也无效 (unpickle 13K
+        # 回主进程 alloc 抵消子进程 GC 收益). 真根治需 demand-driven parser
+        # (只 parse tracked condition) — 留 R27 独立 session 设计 bootstrap 路径.
         events = parse_goalserve_inplay(
             sport, feed, observed_at=observed_at, server_clock_at=server_clock_at,
         )

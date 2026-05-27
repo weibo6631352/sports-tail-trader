@@ -372,12 +372,14 @@ class GoalserveLivescoreClient:
             url = f"{self._base_url}/{self._api_key}/{path}?json=1"
             response = await self._client.get(url)
             response.raise_for_status()
-            data = response.json()
+            # response.json() sync parse 大 JSON 阻塞 event loop → to_thread (§7)
+            data = await asyncio.to_thread(response.json)
         # HTTP `Date` header → Goalserve server 生成响应时刻；用于延迟测量。
         from polymarket_trader.infra.sports.goalserve_inplay_client import _parse_http_date_header
 
         server_clock_at = _parse_http_date_header(response.headers.get("date"))
         self._server_clock_at_by_sport[sport] = server_clock_at
+        # parse 留主 loop (实测 to_thread 反让 worker drift 增 25%, 见 inplay_client).
         events = parse_goalserve_livescore_sport(
             sport, data, observed_at=observed_at, server_clock_at=server_clock_at,
         )

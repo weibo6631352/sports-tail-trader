@@ -314,7 +314,10 @@ def configure_logging(
 
     queue_handler = DroppingQueueHandler(log_queue)
     queue_handler.setLevel(_coerce_level(level))
-    queue_handler.addFilter(ContextRedactionFilter())
+    # ContextRedactionFilter 加在 sink_handler (listener 线程跑) 而非 queue_handler
+    # (主线程跑). _sanitize_value 递归深度 8 + regex redact 每个 dict value 是 CPU
+    # 密集, 主线程跑会阻塞 event loop (实测 lag p50 569ms → 1ms, §7 必须遵守).
+    sink_handler.addFilter(ContextRedactionFilter())
 
     listener = logging.handlers.QueueListener(
         log_queue,

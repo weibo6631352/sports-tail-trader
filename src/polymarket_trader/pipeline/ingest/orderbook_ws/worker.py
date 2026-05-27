@@ -206,11 +206,11 @@ class MarketWsWorker:
         self._last_message_at = _utc_now()
         try:
             from polymarket_trader.runtime.system_perf_monitor import SystemPerfMonitor
-            import json as _json
-            msg_size = len(_json.dumps(message, default=str)) if isinstance(message, dict) else 0
+            # WS 636 msg/s × json.dumps 整条 payload 仅为算 size = 30-130ms/s sync CPU.
+            # observability 价值远低于代价, size=0 跳过. record_* 内部还有 2 次 RLock,
+            # 主线程跑会让 event loop lag p99 飙到 2s+.
             mon = SystemPerfMonitor.get()
-            mon.record_ws_in("polymarket_market_ws", msg_size)
-            # per-token msg rate:从 message 抠 token_id(asset_id)
+            mon.record_ws_in("polymarket_market_ws", 0)
             tok = (
                 message.get("asset_id") if isinstance(message, Mapping)
                 else None

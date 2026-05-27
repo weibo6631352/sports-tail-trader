@@ -313,7 +313,8 @@ class GoalservePregameOddsClient:
         try:
             response = await self._client.get(url)
             response.raise_for_status()
-            payload = response.json()
+            # response.json() sync parse 大 JSON 阻塞 event loop → to_thread (§7)
+            payload = await asyncio.to_thread(response.json)
             snapshot = _parse_pregame_response(sport, payload, fetched_at)
             _log.debug(
                 "goalserve_pregame: sport=%s matches=%d ts=%s",
