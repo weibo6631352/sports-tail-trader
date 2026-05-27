@@ -1177,6 +1177,19 @@ def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
         start=True,
         run_immediately=True,
     )
+    # R33: 周期 prune ended/expired markets — discovery loop 只 prune 本轮 fetch 到的
+    # markets, ended market 不再被 /events?live=true 返回 → 永远跳过 prune evaluation
+    # → registry 累积无界 (实测 30min 411 → 9135, 22x, RSS 4x). 加 60s 周期遍历
+    # registry, 对每个 market 调 market_unsubscribe_prune_reason 触发 prune.
+    runtime.scheduler.register_job(
+        "registry_prune_stale_markets",
+        lambda: _prune_stale_markets(runtime),
+        priority="P3",
+        interval_seconds=60.0,
+        tags=("registry", "lifecycle"),
+        start=True,
+        run_immediately=False,
+    )
     # 60s 写一次账户净值快照——append-only 时间序列，喂给 equity-curve 审计接口。
     # 任意 DB 异常都不能反向阻塞交易主链路，所以失败只记日志、不抛 supervisor 错。
     runtime.scheduler.register_job(
@@ -1248,6 +1261,36 @@ async def _run_supervised_loop(
 
 async def _run_market_discovery_scan(runtime: RuntimeComponents) -> None:
     await run_market_discovery_scan(runtime, sync_runtime_metrics=_sync_runtime_metrics)
+
+
+async def _prune_stale_markets(runtime: RuntimeComponents) -> None:
+    """R33: 周期遍历 registry, 对 ended/expired/inactive market 触发 prune.
+
+    discovery 只 prune 本轮 fetch 到的 markets, ended market 不再返回 → 永远不被
+    prune evaluate → registry 累积无界. 本 job 兜底: 60s 一次扫全 registry,
+    对每个 market 调 market_unsubscribe_prune_reason (复用 ingest_service 同款规则),
+    返回 reason not None 即 remove_market + 触发 lifecycle prune callback 链.
+    """
+    from datetime import datetime, timezone
+    from polymarket_trader.app.market_tracking_policy import market_unsubscribe_prune_reason
+
+    registry = runtime.registry
+    if registry is None:
+        return
+    account_snapshot = runtime.account_state_store.snapshot()
+    now = datetime.now(timezone.utc)
+    snapshot = registry.snapshot()
+    pruned = 0
+    for market in snapshot.markets:
+        reason = market_unsubscribe_prune_reason(account_snapshot, market, now=now)
+        if reason is not None:
+            registry.remove_market(market.condition_id)
+            pruned += 1
+    if pruned > 0:
+        logger.info(
+            "registry_prune_stale_markets pruned=%d remaining=%d",
+            pruned, len(snapshot.markets) - pruned,
+        )
 
 
 async def _publish_position_heartbeat_tick(runtime: RuntimeComponents) -> None:
