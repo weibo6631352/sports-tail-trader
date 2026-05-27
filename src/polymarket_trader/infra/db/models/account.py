@@ -44,7 +44,7 @@ class AccountSnapshotModel(Base, TimestampMixin):
         server_default=func.now(),
         index=True,
     )
-    trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    trace_id: Mapped[str | None] = mapped_column(String(255), index=True)
     balance_usdc: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False, default=Decimal("0"))
     allowance_usdc: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False, default=Decimal("0"))
     net_value_usdc: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False, default=Decimal("0"))

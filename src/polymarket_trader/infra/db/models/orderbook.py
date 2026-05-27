@@ -31,7 +31,7 @@ class OrderbookSnapshotModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     snapshot_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    trace_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    trace_id: Mapped[str | None] = mapped_column(String(255), index=True)
     source: Mapped[str | None] = mapped_column(String(32), index=True)
     token_id: Mapped[str] = mapped_column(String(128), index=True)
     condition_id: Mapped[str | None] = mapped_column(String(128), index=True)

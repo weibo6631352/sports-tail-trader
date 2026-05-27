@@ -28,7 +28,7 @@ class AuditEventModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     event_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    trace_id: Mapped[str] = mapped_column(String(64), index=True)
+    trace_id: Mapped[str] = mapped_column(String(255), index=True)
     event_title: Mapped[str] = mapped_column(String(128), index=True)
     market_slug: Mapped[str | None] = mapped_column(String(255), index=True)
     event_slug: Mapped[str | None] = mapped_column(String(255), index=True)

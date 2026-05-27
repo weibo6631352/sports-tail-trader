@@ -27,7 +27,7 @@ class DecisionRecordModel(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     record_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    trace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    trace_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     hook_name: Mapped[str | None] = mapped_column(String(64), index=True)
     condition_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     token_id: Mapped[str | None] = mapped_column(String(128), index=True)
