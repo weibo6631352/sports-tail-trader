@@ -37,6 +37,7 @@ from .subscription_policy import SportsSubscriptionPolicy
 if TYPE_CHECKING:
     from polymarket_trader.runtime.lifecycle_registry import LifecycleRegistry
     from polymarket_trader.runtime.registry import MarketRegistry
+    from polymarket_trader.runtime.tracked_event_index import TrackedEventIndex
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +49,12 @@ class LiveSourceLifecycleBinder:
         market_registry: "MarketRegistry",
         live_source_registry: LiveSourceRegistry,
         subscription_policy: SportsSubscriptionPolicy,
+        tracked_event_index: "TrackedEventIndex | None" = None,
     ) -> None:
         self._market_registry = market_registry
         self._registry = live_source_registry
         self._policy = subscription_policy
+        self._tracked_event_index = tracked_event_index
 
     def bind_to_lifecycle_registry(self, lifecycle_registry: "LifecycleRegistry") -> None:
         """注册到 LifecycleRegistry 的 prune + added listener（C 模式）。
@@ -130,6 +133,9 @@ class LiveSourceLifecycleBinder:
         token_ids: tuple[str, ...],  # noqa: ARG002 — 签名要求，本 binder 不关心 token
     ) -> None:
         self._registry.unsubscribe_all(condition_id)
+        # R30: prune 时清除 TrackedEventIndex 让 parser 不再为该 condition hot path.
+        if self._tracked_event_index is not None:
+            self._tracked_event_index.remove_for_market(condition_id)
 
     def _collect_orphans(self, seen: set[str]) -> tuple[str, ...]:
         # LiveSourceRegistry 没暴露全部 market_key 索引；按 active_sources 反查

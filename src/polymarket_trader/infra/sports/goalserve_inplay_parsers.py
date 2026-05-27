@@ -1070,6 +1070,8 @@ def parse_goalserve_inplay(
     observed_at: datetime | None = None,
     *,
     server_clock_at: datetime | None = None,
+    tracked_event_ids: frozenset[str] | None = None,
+    unknown_cap: int = 50,
 ) -> list[LiveEvent]:
     """把一个 inplay GZIP feed dict 解析成 LiveEvent 列表。
 
@@ -1106,10 +1108,18 @@ def parse_goalserve_inplay(
     effective_server_clock = feed_server_clock if feed_server_clock is not None else server_clock_at
 
     results: list[LiveEvent] = []
+    unknown_used = 0
     for match_id, event in events.items():
         if not isinstance(event, dict):
             continue
         event_id = str(match_id)
+        # R30: demand-driven filter. tracked event 100% hot path; 未 tracked event
+        # 受 unknown_cap 限制 (bootstrap 让 matcher 有机会试匹配, 一旦 match 成功
+        # match_service 写入 TrackedEventIndex, 下轮直接走 hot path). 永不死锁.
+        if tracked_event_ids is not None and event_id not in tracked_event_ids:
+            if unknown_used >= unknown_cap:
+                continue
+            unknown_used += 1
         try:
             results.append(parser(event_id, event, ts))
         except Exception:

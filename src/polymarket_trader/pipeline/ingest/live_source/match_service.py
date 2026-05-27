@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from polymarket_trader.runtime.event_bus import EventBus
     from polymarket_trader.runtime.market_metadata import MarketMetadataStore
     from polymarket_trader.runtime.registry import MarketRegistry
+    from polymarket_trader.runtime.tracked_event_index import TrackedEventIndex
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class LiveStateMatchService:
         matcher: LiveSourceMatcher,
         calibrator: LiveSourceCalibrator,
         event_bus: "EventBus",
+        tracked_event_index: "TrackedEventIndex | None" = None,
     ) -> None:
         self._store = store
         self._registry = registry
@@ -64,6 +66,7 @@ class LiveStateMatchService:
         self._matcher = matcher
         self._calibrator = calibrator
         self._event_bus = event_bus
+        self._tracked_event_index = tracked_event_index
 
     def attach(self) -> None:
         """注册到 `LiveStateStore` 的 refresh listener，启动后即开始监听。"""
@@ -121,6 +124,11 @@ class LiveStateMatchService:
             live_state_phase=match.phase,
             live_state_payload=match.payload,
         )
+        # R30: 写 TrackedEventIndex 让 parser 下轮该 event 走 hot path (跳过 unknown_cap).
+        if self._tracked_event_index is not None and match.event.source_event_id:
+            self._tracked_event_index.add(
+                source.sport, match.event.source_event_id, market.condition_id,
+            )
         # SPORTS_LIVE_STATE_RECORDED 每次 _apply_match 都 broadcast,
         # 供 sports_live_history_buffer ring + operator /sports/live-events 复盘。
         # 不持久化到 audit_events(outbox_sink 显式排除),只走内存广播。

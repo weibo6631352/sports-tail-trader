@@ -241,10 +241,15 @@ def _build_live_source_components(
         sport_resolver=lambda market: market.sport or resolve_sport_from_market(market),
         active_predicate=is_market_live_active,
     )
+    # R30: TrackedEventIndex 是 demand-driven parser 的 condition→source_event_id 反向索引.
+    # match_service 写 (match 成功), inplay_client 读 (parse 前 snapshot), binder 删 (prune).
+    from polymarket_trader.runtime.tracked_event_index import TrackedEventIndex
+    tracked_event_index = TrackedEventIndex()
     lifecycle_binder = LiveSourceLifecycleBinder(
         market_registry=registry,
         live_source_registry=live_source_registry,
         subscription_policy=subscription_policy,
+        tracked_event_index=tracked_event_index,
     )
     matcher = LiveSourceMatcher(match_hook=workflow.match_live_state)
     calibrator = LiveSourceCalibrator()
@@ -256,6 +261,7 @@ def _build_live_source_components(
         matcher=matcher,
         calibrator=calibrator,
         event_bus=event_bus,
+        tracked_event_index=tracked_event_index,
     )
 
     feeders: list[LiveSourceFeeder] = []
@@ -277,6 +283,7 @@ def _build_live_source_components(
         active_sports_provider=lifecycle_binder.active_sports_provider(
             LiveSourceProvider.GOALSERVE_INPLAY
         ),
+        tracked_event_index=tracked_event_index,
     )
     closers.append(inplay_client.aclose)
     feeders.append(

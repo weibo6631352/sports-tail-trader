@@ -28,9 +28,12 @@ import orjson
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from polymarket_trader.runtime.tracked_event_index import TrackedEventIndex
 
 from polymarket_trader.domain.sports_live import (
     LiveEvent,
@@ -138,6 +141,7 @@ class GoalserveInplayClient:
         rate_limit_backoff_s: float = 5.0,
         now_provider: Callable[[], datetime] | None = None,
         active_sports_provider: Callable[[], frozenset[str]] | None = None,
+        tracked_event_index: "TrackedEventIndex | None" = None,
     ) -> None:
         # None → 全部 8 个运动；显式 tuple 只保留已知 token。
         self._sports = (
@@ -154,6 +158,7 @@ class GoalserveInplayClient:
         # 429 退避：实测同 sport 超速即 429，退避后再试。
         self._rate_limit_backoff_s = max(self._poll_interval_s, float(rate_limit_backoff_s))
         self._states: dict[str, _SportPollState] = {s: _SportPollState() for s in self._sports}
+        self._tracked_event_index = tracked_event_index
         self._started = False
         # monotonic 计时基准——退避用单调时钟，不受系统时钟跳变影响。
         self._monotonic = time.monotonic
@@ -423,12 +428,17 @@ class GoalserveInplayClient:
 
         observed_at = utc_now(self._now_provider)
         server_clock_at = _parse_http_date_header(response.headers.get("date"))
-        # parse 每秒 alloc 13K LiveEvent dataclass → gen2 GC 1-2s STW (R26 实测).
-        # to_thread 反更差 (GIL 串行 + 排队); ProcessPool 实测也无效 (unpickle 13K
-        # 回主进程 alloc 抵消子进程 GC 收益). 真根治需 demand-driven parser
-        # (只 parse tracked condition) — 留 R27 独立 session 设计 bootstrap 路径.
+        # R30 demand-driven parser: 只解析已 match 到 tracked condition 的 events,
+        # 未知 event 走 unknown_cap=50/sport 兜底让 matcher 有机会试匹配. 一旦 match
+        # 成功 match_service 写 TrackedEventIndex, 下轮该 event 进 hot path. 13K
+        # events → ~150 (tracked + unknown_cap) = 90x 减压. 永不死锁 (bootstrap 兜底).
+        tracked_ids = (
+            self._tracked_event_index.snapshot_for(sport)
+            if self._tracked_event_index is not None else None
+        )
         events = parse_goalserve_inplay(
             sport, feed, observed_at=observed_at, server_clock_at=server_clock_at,
+            tracked_event_ids=tracked_ids,
         )
         st.events = tuple(events)
         raw = feed.get("events")
