@@ -41,6 +41,11 @@ export function LiveOverviewPage() {
     queryFn: ({ signal }) => healthApi.health(signal),
     refetchInterval: REFRESH_INTERVAL_MS,
   })
+  const wsHealth = useQuery({
+    queryKey: ['health', 'ws'],
+    queryFn: ({ signal }) => healthApi.healthWs(signal),
+    refetchInterval: REFRESH_INTERVAL_MS,
+  })
   const summary = useQuery({
     queryKey: ['analytics', 'quant-summary', 86_400_000],
     queryFn: ({ signal }) => analyticsApi.quantSummary({ window_ms: 86_400_000 }, signal),
@@ -49,6 +54,7 @@ export function LiveOverviewPage() {
 
   const s = summary.data
   const h = health.data
+  const ws = wsHealth.data
 
   return (
     <>
@@ -154,8 +160,8 @@ export function LiveOverviewPage() {
           </SectionCard>
         </SimpleGrid>
 
-        {/* 信号源覆盖 + 健康 */}
-        <SectionCard title="信号源覆盖 + WS">
+        {/* 信号源覆盖 */}
+        <SectionCard title="信号源覆盖">
           <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
             <Stat
               label="registry markets"
@@ -172,7 +178,7 @@ export function LiveOverviewPage() {
               tone={s?.market_coverage.signal_allowed ? 'pos' : 'neutral'}
             />
             <Stat
-              label="WS 订阅"
+              label="should_subscribe 通过"
               value={String(s?.signal_health.ws_subscribed_tokens ?? '—')}
             />
           </SimpleGrid>
@@ -181,6 +187,49 @@ export function LiveOverviewPage() {
             <Anchor size="xs" onClick={() => navigate('/live/candidates')}>候选列表 →</Anchor>
             <Anchor size="xs" onClick={() => navigate('/investigate/sports-events')}>事件流 →</Anchor>
           </Group>
+        </SectionCard>
+
+        {/* WS 详情 (market_ws + user_ws 独立查看) */}
+        <SectionCard title={`WS 连接 · ${ws?.status ?? '—'}`}>
+          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+            {(['market_ws', 'user_ws'] as const).map((name) => {
+              const w = ws?.detail?.[name]
+              if (!w) return <Stack key={name} gap={4}><Text size="sm" fw={600}>{name}</Text><Text size="xs" c="dimmed">—</Text></Stack>
+              const note = w.idle_due_to_no_demand
+                ? '0 订阅·idle (demand-driven)'
+                : w.idle_seconds != null
+                ? `idle ${Math.floor(w.idle_seconds)}s`
+                : ''
+              return (
+                <Stack key={name} gap={4}>
+                  <Group gap={8}>
+                    <Text size="sm" fw={600}>{name}</Text>
+                    <StatusPill
+                      tone={
+                        w.status === 'healthy'
+                          ? 'success'
+                          : w.status === 'unhealthy'
+                          ? 'danger'
+                          : 'warning'
+                      }
+                      size="xs"
+                    >
+                      {w.status}
+                    </StatusPill>
+                  </Group>
+                  <Text size="xs" c="dimmed">
+                    connected: {String(w.connected)} · subs: {w.subscription_count}
+                    {note ? ` · ${note}` : ''}
+                  </Text>
+                  {w.last_message_at ? (
+                    <Text size="xs" c="dimmed">
+                      last msg: {new Date(w.last_message_at).toLocaleTimeString()}
+                    </Text>
+                  ) : null}
+                </Stack>
+              )
+            })}
+          </SimpleGrid>
         </SectionCard>
 
         <Text size="xs" c="dimmed" ta="center">

@@ -17,7 +17,6 @@ const GoalserveLivePage = lazyNamed(() => import('@features/live/GoalserveLivePa
 // Investigate
 const TradeTimelinePage = lazyNamed(() => import('@features/investigate/TradeTimelinePage'), 'TradeTimelinePage')
 const DecisionsPage = lazyNamed(() => import('@features/investigate/DecisionsPage'), 'DecisionsPage')
-const OrderbookReplayPage = lazyNamed(() => import('@features/investigate/OrderbookReplayPage'), 'OrderbookReplayPage')
 const SportsEventsPage = lazyNamed(() => import('@features/investigate/SportsEventsPage'), 'SportsEventsPage')
 const AuditPage = lazyNamed(() => import('@features/investigate/AuditPage'), 'AuditPage')
 
@@ -71,7 +70,6 @@ export const routes: RouteObject[] = [
       // 复盘
       { path: 'investigate/timeline', element: <TradeTimelinePage /> },
       { path: 'investigate/decisions', element: <DecisionsPage /> },
-      { path: 'investigate/orderbook-replay', element: <OrderbookReplayPage /> },
       { path: 'investigate/sports-events', element: <SportsEventsPage /> },
       { path: 'investigate/audit', element: <AuditPage /> },
 

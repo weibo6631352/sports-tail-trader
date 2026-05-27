@@ -20,8 +20,6 @@ export const qk = {
     detail: (params: Record<string, unknown>) => ['markets', 'detail', params] as const,
     orderbook: (tokenId: string) => ['markets', 'orderbook', tokenId] as const,
     midpoint: (tokenId: string) => ['markets', 'midpoint', tokenId] as const,
-    orderbookHistory: (params: Record<string, unknown>) =>
-      ['markets', 'orderbook-history', params] as const,
     pricesHistory: (params: Record<string, unknown>) =>
       ['markets', 'prices-history', params] as const,
     settlement: (conditionId: string) => ['markets', 'settlement', conditionId] as const,

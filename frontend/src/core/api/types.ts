@@ -255,19 +255,6 @@ export type Midpoint = {
   fetched_at?: Iso
 }
 
-export type OrderbookSnapshotRow = {
-  snapshot_id: string
-  token_id: string
-  condition_id: string
-  received_at: Iso
-  midpoint?: DecimalStr | null
-  best_bid?: DecimalStr | null
-  best_ask?: DecimalStr | null
-  payload?: Record<string, unknown>
-}
-
-export type OrderbookHistoryPage = Page<OrderbookSnapshotRow>
-
 export type PriceHistoryPoint = {
   t: number
   p: DecimalStr

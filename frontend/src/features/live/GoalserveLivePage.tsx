@@ -182,9 +182,10 @@ function ScoreCell({ game }: { game: LiveGame | null | undefined }) {
     game.home_score != null && game.away_score != null
       ? `${game.home_score} : ${game.away_score}`
       : '—'
-  // 显示归一 status (live/paused/ended/scheduled),不再显示 raw period 文本.
-  // 之前 period="Started" + status="paused" 同时出现让操盘困惑——period 是博彩
-  // 平台用的整场系列标签,不反映当前是否真在打.
+  // 同时显示归一 status pill (live/paused/ended..) + raw period 文本.
+  // - status: 我方归一,反映 <core stopped> flag 解析(交易决策依据)
+  // - period: Goalserve 原始 <info period>,反映系列阶段(Started/Finished 等)
+  // 两个独立信号都有用,前者用于交易,后者用于比赛阶段判读.
   const status = (game.status ?? '').toLowerCase()
   const statusLabel: Record<string, { tone: 'success' | 'warning' | 'neutral' | 'danger'; text: string }> = {
     live: { tone: 'success', text: '进行中' },
@@ -201,9 +202,12 @@ function ScoreCell({ game }: { game: LiveGame | null | undefined }) {
   return (
     <Stack gap={2}>
       <MonoText>{score}</MonoText>
-      {meta ? (
-        <StatusPill tone={meta.tone} size="xs">{meta.text}</StatusPill>
-      ) : null}
+      <Group gap={4} wrap="nowrap">
+        {meta ? (
+          <StatusPill tone={meta.tone} size="xs">{meta.text}</StatusPill>
+        ) : null}
+        {game.period ? <Text size="xs" c="dimmed">{game.period}</Text> : null}
+      </Group>
     </Stack>
   )
 }

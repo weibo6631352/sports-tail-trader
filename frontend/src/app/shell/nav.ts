@@ -44,7 +44,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { path: '/investigate/decisions', label: '决策记录', badge: 'P0' },
       { path: '/investigate/sports-events', label: '体育事件', badge: 'P0' },
       { path: '/investigate/audit', label: '审计' },
-      { path: '/investigate/orderbook-replay', label: '盘口回放', badge: 'P1' },
     ],
   },
   {

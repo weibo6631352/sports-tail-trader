@@ -30,7 +30,6 @@ import type {
   MissedOpportunitiesSnapshot,
   OperatorInterventionsAggregate,
   Orderbook,
-  OrderbookHistoryPage,
   OrdersPage,
   OutboxFailuresPage,
   OutboxPendingPage,
@@ -79,6 +78,8 @@ export const healthApi = {
   ready: (signal?: AbortSignal) => apiClient.get<ReadinessSnapshot>('/ready', { signal }),
   runtime: (signal?: AbortSignal) => apiClient.get<RuntimeSnapshot>('/runtime', { signal }),
   workers: (signal?: AbortSignal) => apiClient.get<WorkersSnapshot>('/workers', { signal }),
+  healthWs: (signal?: AbortSignal) =>
+    apiClient.get<HealthWsSnapshot>('/health/ws', { signal }),
   // `/metrics` 是 Prometheus exposition text/plain。dashboard 想看的
   // sse_active_subscribers / sse_dropped_events_total 已经在 RuntimeSnapshot 上,
   // 直接走 healthApi.runtime;此 endpoint 保留供 Prometheus dump / 调试展示。
@@ -163,21 +164,6 @@ export const marketsApi = {
     params: { market_slug?: string; condition_id?: string; token_id: string },
     signal?: AbortSignal,
   ) => apiClient.get<Midpoint>('/markets/midpoint', { params, signal }),
-  orderbookHistory: (
-    params: {
-      limit?: number
-      offset?: number
-      token_id?: string
-      condition_id?: string
-      since?: number
-      until?: number
-    },
-    signal?: AbortSignal,
-  ) =>
-    apiClient.get<OrderbookHistoryPage>('/markets/orderbook-history', {
-      params,
-      signal,
-    }),
   pricesHistory: (
     params: { token_id: string; fidelity?: number } & (
       | { interval: string; start_ts?: number; end_ts?: number }
@@ -562,6 +548,31 @@ export const analyticsApi = {
     signal?: AbortSignal,
   ) =>
     apiClient.get<QuantSummary>('/analytics/quant-summary', { params, signal }),
+}
+
+export type HealthWsSnapshot = {
+  status: 'healthy' | 'degraded' | 'unhealthy'
+  detail: {
+    idle_threshold_s: number
+    market_ws: {
+      connected: boolean
+      subscription_count: number
+      last_message_at: string | null
+      idle_seconds: number | null
+      idle_checked: boolean
+      idle_due_to_no_demand: boolean
+      status: 'healthy' | 'degraded' | 'unhealthy'
+    }
+    user_ws: {
+      connected: boolean
+      subscription_count: number
+      last_message_at: string | null
+      idle_seconds: number | null
+      idle_checked: boolean
+      idle_due_to_no_demand: boolean
+      status: 'healthy' | 'degraded' | 'unhealthy'
+    }
+  }
 }
 
 export type QuantSummary = {
