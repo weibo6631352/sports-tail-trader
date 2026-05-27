@@ -3,7 +3,14 @@ import { Anchor, Box, Group, SimpleGrid, Stack, Text, Tooltip } from '@mantine/c
 import { useNavigate } from 'react-router-dom'
 import { qk } from '@core/api/keys'
 import { decisionsApi, marketsApi, sportsApi } from '@core/api/resources'
-import type { PositionRow, KellyInternals, OrderbookSnapshot, LiveStateRow } from '@core/api/types'
+import type {
+  PositionRow,
+  KellyInternals,
+  OrderbookSnapshot,
+  LiveStateRow,
+  MarketLiquidity,
+  PricesHistory,
+} from '@core/api/types'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { StatusPill } from '@shared/ui/StatusPill'
 import { CopyableId } from '@shared/ui/CopyableId'
@@ -62,6 +69,31 @@ function edgeTone(v: unknown): 'success' | 'danger' | 'neutral' {
   return n > 0 ? 'success' : 'danger'
 }
 
+// 轻量 SVG sparkline,无外部依赖.
+function Sparkline({ points, width = 200, height = 32 }: { points: number[]; width?: number; height?: number }) {
+  if (points.length < 2) return null
+  const min = Math.min(...points)
+  const max = Math.max(...points)
+  const range = max - min || 1
+  const stepX = width / (points.length - 1)
+  const path = points
+    .map((y, i) => {
+      const px = i * stepX
+      const py = height - ((y - min) / range) * height
+      return `${i === 0 ? 'M' : 'L'} ${px.toFixed(1)} ${py.toFixed(1)}`
+    })
+    .join(' ')
+  // 末值 vs 首值, 决定颜色: 涨绿 / 跌橙 / 平灰
+  const last = points[points.length - 1]
+  const first = points[0]
+  const color = last > first ? '#5cd9c5' : last < first ? '#ff9f5b' : '#97a6c2'
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
+      <path d={path} stroke={color} strokeWidth={1.2} fill="none" />
+    </svg>
+  )
+}
+
 function gameStatusLabel(status?: string | null): { tone: 'success' | 'warning' | 'neutral' | 'danger'; text: string } {
   const s = (status ?? '').toLowerCase()
   if (s === 'live') return { tone: 'success', text: '进行中' }
@@ -82,12 +114,31 @@ export function PositionAnalysisCard({ position, onForceExit }: Props) {
   const navigate = useNavigate()
   const tokenId = position.token_id
 
-  // 实时拉 3 类数据,5s 刷新
+  // 实时拉 5 类数据, 5s 刷新.
+  // orderbook/liquidity 是同一 store 派生, 但 liquidity 含 VWAP+depth_cumulative
+  // 分析字段, orderbook 含 top_5 价格. 两者互补, 都拉.
   const orderbookQuery = useQuery({
     queryKey: qk.markets.orderbook(tokenId),
     queryFn: ({ signal }) => marketsApi.orderbook({ token_id: tokenId }, signal),
     enabled: !!tokenId && !position.redeemable,
     refetchInterval: 5000,
+  })
+
+  const liquidityQuery = useQuery({
+    queryKey: ['markets', 'liquidity', tokenId],
+    queryFn: ({ signal }) => marketsApi.liquidity({ token_id: tokenId }, signal),
+    enabled: !!tokenId && !position.redeemable,
+    refetchInterval: 5000,
+  })
+
+  // 1h 价格历史 sparkline. interval=1h 自动取最近一小时的 minute-level 数据.
+  const priceHistoryQuery = useQuery({
+    queryKey: ['markets', 'prices-history', tokenId, '1h'],
+    queryFn: ({ signal }) =>
+      marketsApi.pricesHistory({ token_id: tokenId, interval: '1h' as const }, signal),
+    enabled: !!tokenId && !position.redeemable,
+    refetchInterval: 30_000,  // 历史变化慢, 30s 一次足够
+    staleTime: 25_000,
   })
 
   const liveStateQuery = useQuery({
@@ -116,6 +167,13 @@ export function PositionAnalysisCard({ position, onForceExit }: Props) {
   })
 
   const ob: OrderbookSnapshot | undefined = orderbookQuery.data?.orderbook
+  const liq: MarketLiquidity | undefined = liquidityQuery.data as MarketLiquidity | undefined
+  const ph: PricesHistory | undefined = priceHistoryQuery.data
+  // bid/ask size 不平衡: > 1 表示买压 > 卖压
+  const bidAskImbalance =
+    liq?.total_bid_size != null && liq?.total_ask_size != null && Number(liq.total_ask_size) > 0
+      ? Number(liq.total_bid_size) / Number(liq.total_ask_size)
+      : null
   const lg = (liveState?.metadata as Record<string, unknown> | undefined)?.live_game as
     | { home_name?: string; away_name?: string; home_score?: number; away_score?: number; status?: string; period?: string; league?: string }
     | undefined
@@ -269,29 +327,84 @@ export function PositionAnalysisCard({ position, onForceExit }: Props) {
             </Text>
           </Stack>
 
-          {/* === 订单簿深度 ====================================== */}
+          {/* === 订单簿深度 + 流动性 ============================== */}
           <Stack gap={4}>
-            <Group gap={4}>
+            <Group gap={6} align="baseline">
               <Text size="xs" fw={600} c="dimmed">订单簿</Text>
-              {ob ? (
+              {ob?.snapshot_age_ms != null ? (
                 <Text size="xs" c="dimmed">
-                  microprice {fmtNum(ob.microprice, 4)} · spread {fmtNum(ob.spread, 3)}
+                  {ob.snapshot_age_ms < 1000 ? `${ob.snapshot_age_ms}ms` : `${(ob.snapshot_age_ms / 1000).toFixed(1)}s`} 前
                 </Text>
               ) : null}
             </Group>
-            <Group gap={4}>
-              <Text size="xs" c="dimmed">买/卖可成交:</Text>
-              <StatusPill tone={ob?.buy_actionable ? 'success' : 'neutral'} size="xs">
-                BUY {ob?.buy_actionable ? '✓' : '×'}
-              </StatusPill>
-              <StatusPill tone={ob?.sell_actionable ? 'success' : 'neutral'} size="xs">
-                SELL {ob?.sell_actionable ? '✓' : '×'}
-              </StatusPill>
+            {/* 行 1: microprice / spread / effective_spread_bps */}
+            <Group gap={10}>
+              <Stack gap={0}>
+                <Text size="xs" c="dimmed">microprice</Text>
+                <Text size="xs" ff="monospace">{fmtNum(ob?.microprice, 4)}</Text>
+              </Stack>
+              <Stack gap={0}>
+                <Text size="xs" c="dimmed">spread</Text>
+                <Text size="xs" ff="monospace">{fmtNum(ob?.spread, 3)}</Text>
+              </Stack>
+              <Stack gap={0}>
+                <Text size="xs" c="dimmed">eff bps</Text>
+                <Text size="xs" ff="monospace">{liq?.effective_spread_bps ? fmtNum(liq.effective_spread_bps, 0) : '—'}</Text>
+              </Stack>
             </Group>
+            {/* 行 2: VWAP mid / 不平衡 / 可成交 */}
+            <Group gap={10} align="baseline">
+              <Stack gap={0}>
+                <Text size="xs" c="dimmed">VWAP mid</Text>
+                <Text size="xs" ff="monospace">{fmtNum(liq?.vwap_mid, 4)}</Text>
+              </Stack>
+              <Tooltip
+                label={`total bids ${liq?.total_bid_size ?? '—'} / asks ${liq?.total_ask_size ?? '—'}`}
+                withArrow
+                disabled={bidAskImbalance == null}
+              >
+                <Stack gap={0}>
+                  <Text size="xs" c="dimmed">imbalance</Text>
+                  <Text
+                    size="xs"
+                    ff="monospace"
+                    style={{
+                      color:
+                        bidAskImbalance == null
+                          ? undefined
+                          : bidAskImbalance > 1.2
+                            ? '#5cd9c5'
+                            : bidAskImbalance < 0.83
+                              ? '#ff9f5b'
+                              : undefined,
+                    }}
+                  >
+                    {bidAskImbalance != null ? `${bidAskImbalance.toFixed(2)}×` : '—'}
+                  </Text>
+                </Stack>
+              </Tooltip>
+              <Group gap={4}>
+                <Tooltip label={`bid: ${ob?.bid_liquidity_state ?? '—'}`} withArrow>
+                  <span>
+                    <StatusPill tone={ob?.buy_actionable ? 'success' : 'neutral'} size="xs">
+                      BUY {ob?.buy_actionable ? '✓' : '×'}
+                    </StatusPill>
+                  </span>
+                </Tooltip>
+                <Tooltip label={`ask: ${ob?.ask_liquidity_state ?? '—'}`} withArrow>
+                  <span>
+                    <StatusPill tone={ob?.sell_actionable ? 'success' : 'neutral'} size="xs">
+                      SELL {ob?.sell_actionable ? '✓' : '×'}
+                    </StatusPill>
+                  </span>
+                </Tooltip>
+              </Group>
+            </Group>
+            {/* 行 3: top 5 bids/asks 价×size */}
             <SimpleGrid cols={2} spacing={4}>
               <Stack gap={2}>
                 <Text size="xs" c="dimmed">bids (top 5)</Text>
-                {(ob?.top_5_bids ?? []).map((b, i) => (
+                {(ob?.top_5_bids ?? []).slice(0, 5).map((b, i) => (
                   <Text key={i} size="xs" ff="monospace" style={{ color: '#5cd9c5' }}>
                     {fmtNum(b.price, 3)} × {fmtNum(b.size, 0)}
                   </Text>
@@ -302,7 +415,7 @@ export function PositionAnalysisCard({ position, onForceExit }: Props) {
               </Stack>
               <Stack gap={2}>
                 <Text size="xs" c="dimmed">asks (top 5)</Text>
-                {(ob?.top_5_asks ?? []).map((a, i) => (
+                {(ob?.top_5_asks ?? []).slice(0, 5).map((a, i) => (
                   <Text key={i} size="xs" ff="monospace" style={{ color: '#ff9f5b' }}>
                     {fmtNum(a.price, 3)} × {fmtNum(a.size, 0)}
                   </Text>
@@ -312,6 +425,18 @@ export function PositionAnalysisCard({ position, onForceExit }: Props) {
                 )}
               </Stack>
             </SimpleGrid>
+            {/* 行 4: 价格 sparkline (1h history) */}
+            {ph?.history && ph.history.length > 1 ? (
+              <Box mt={4}>
+                <Group gap={4} mb={2}>
+                  <Text size="xs" c="dimmed">价格 1h</Text>
+                  <Text size="xs" ff="monospace">
+                    {fmtNum(ph.history[0].price, 3)} → {fmtNum(ph.history[ph.history.length - 1].price, 3)}
+                  </Text>
+                </Group>
+                <Sparkline points={ph.history.map((h) => Number(h.price)).filter((n) => Number.isFinite(n))} />
+              </Box>
+            ) : null}
           </Stack>
 
           {/* === 量化决策 ======================================== */}

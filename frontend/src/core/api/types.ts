@@ -321,20 +321,17 @@ export type Midpoint = {
   fetched_at?: Iso
 }
 
-export type PriceHistoryPoint = {
-  t: number
-  p: DecimalStr
-  o?: DecimalStr
-  h?: DecimalStr
-  l?: DecimalStr
-  c?: DecimalStr
+// 后端 /markets/prices-history 返回 history 字段(时间戳 + price).
+export type PriceHistoryRow = {
+  timestamp: Iso
+  price: DecimalStr
 }
 
 export type PricesHistory = {
   token_id: string
   interval?: string | null
   fidelity?: number | null
-  points: PriceHistoryPoint[]
+  history: PriceHistoryRow[]
 }
 
 // ---------- 订单 / 持仓 / 成交 / 资金分配 ----------
