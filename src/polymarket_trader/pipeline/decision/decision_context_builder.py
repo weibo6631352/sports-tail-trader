@@ -387,10 +387,21 @@ class DecisionContextBuilder:
         OrderGateway/RiskManager。
         """
         import time as _time
+        from polymarket_trader.domain.decisions import TradeAction, TradingDecision
         t0 = _time.perf_counter()
         decision = self._workflow.quant_decide(context)
         self._record_hook_latency("quant_decide", _time.perf_counter() - t0)
-        self._record(hook_name="quant_decide", context=context, decision=decision)
+        # 提取第 1 个 BUY action 或 fallback 到 skip,和 build_decision_context 路径
+        # 用同一 TradingDecision 形态;否则 decision_recorder 两路 fingerprint 字段
+        # 不一致(QuantDecision shape vs TradingDecision shape),dedup 失效每秒重写.
+        first_action = next(
+            (a for a in decision.actions if a.action == TradeAction.BUY),
+            None,
+        )
+        recorded = first_action if first_action is not None else TradingDecision.skip(
+            reason=decision.reason or "quant_no_action",
+        )
+        self._record(hook_name="quant_decide", context=context, decision=recorded)
         return decision
 
     @staticmethod
