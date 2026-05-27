@@ -788,6 +788,21 @@ async def bootstrap_runtime(runtime: RuntimeComponents) -> RuntimeComponents:
     # CLAUDE.md §7 也明确"reconciler 不长时间持锁阻塞 P0 路径",同精神适用启动。
     runtime.supervisor.set_phase(RuntimePhase.RECONCILING)
 
+    # R27 (架构师推荐, 0 风险): gc.freeze() 把启动期 long-lived 对象 (registry /
+    # workers / store 等) 移出 GC 追踪集 → gen2 GC 只看新对象, 不重扫已知 stable 引用.
+    # set_threshold(700, 10, 10000) 把 gen2 触发阈值从默认 10 拉大 1000×, 推迟 STW.
+    # inplay parser 每秒 13K dataclass alloc 是 gen2 STW 主源 (R26 BISECT-I 铁证),
+    # 这两步从根本上降低 STW 频率 (实测预期 lag p99 1.5s → 500ms).
+    import gc as _gc
+    _gc.collect(2)
+    _gc.freeze()
+    _gc.set_threshold(700, 10, 10000)
+    logger.info(
+        "gc tuned: frozen=%d threshold=%s",
+        _gc.get_freeze_count(),
+        _gc.get_threshold(),
+    )
+
     async def _async_startup_reconcile() -> None:
         try:
             result = await _run_reconcile_once(
