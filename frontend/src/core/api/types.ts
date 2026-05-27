@@ -281,14 +281,38 @@ export type MarketsPage = Page<MarketView>
 
 export type OrderbookLevel = { price: DecimalStr; size: DecimalStr }
 
+// 后端 /markets/orderbook 包络: {token_id, condition_id, market_slug, source,
+// orderbook: OrderbookSnapshot}. OrderbookSnapshot 含完整 top_5 + microprice 等.
+export type OrderbookSnapshot = {
+  token_id: string
+  condition_id?: string
+  market_slug?: string | null
+  best_bid?: DecimalStr | null
+  best_ask?: DecimalStr | null
+  best_bid_size?: DecimalStr | null
+  best_ask_size?: DecimalStr | null
+  last_trade_price?: DecimalStr | null
+  tick_size?: DecimalStr | null
+  spread?: DecimalStr | null
+  microprice?: DecimalStr | null
+  bid_liquidity_state?: string | null
+  ask_liquidity_state?: string | null
+  buy_actionable?: boolean | null
+  sell_actionable?: boolean | null
+  received_at?: Iso
+  snapshot_age_ms?: number
+  top_5_bids?: OrderbookLevel[]
+  top_5_asks?: OrderbookLevel[]
+  bids?: OrderbookLevel[]
+  asks?: OrderbookLevel[]
+}
+
 export type Orderbook = {
   token_id: string
-  bids: OrderbookLevel[]
-  asks: OrderbookLevel[]
-  midpoint?: DecimalStr | null
-  spread?: DecimalStr | null
-  fetched_at?: Iso
-  [key: string]: unknown
+  condition_id?: string
+  market_slug?: string | null
+  source?: string
+  orderbook: OrderbookSnapshot
 }
 
 export type Midpoint = {
