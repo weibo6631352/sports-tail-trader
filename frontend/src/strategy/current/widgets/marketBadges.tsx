@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import { Badge } from '@mantine/core'
 import type { MarketView } from '@core/api/types'
-import { toDecimal } from '@shared/format'
 
 // sports_tail 策略在通用市场列表 / 详情上叠加的徽章：持仓 / 已暂停 / 高费率。
 // 仅基于 MarketView 已有字段判断，零额外请求。
@@ -9,11 +8,9 @@ import { toDecimal } from '@shared/format'
 export function marketRowBadges(market: MarketView): ReactNode[] {
   const out: ReactNode[] = []
 
-  const hasPosition = (market.tokens ?? []).some((token) => {
-    const size = toDecimal(token.position_size_shares)
-    return size !== null && !size.isZero()
-  })
-  if (hasPosition) {
+  // has_any_position 是 MarketView 顶层 boolean,后端 has_any_position
+  // 字段已聚合 outcomes[].position 判断,前端不再自己遍历 tokens.
+  if (market.has_any_position) {
     out.push(
       <Badge key="position" size="xs" color="teal" variant="light">
         持仓
@@ -21,9 +18,9 @@ export function marketRowBadges(market: MarketView): ReactNode[] {
     )
   }
 
-  if (market.pause_reason) {
+  if (market.is_paused && market.pause?.reason) {
     out.push(
-      <Badge key="paused" size="xs" color="yellow" variant="light" title={market.pause_reason}>
+      <Badge key="paused" size="xs" color="yellow" variant="light" title={market.pause.reason}>
         已暂停
       </Badge>,
     )

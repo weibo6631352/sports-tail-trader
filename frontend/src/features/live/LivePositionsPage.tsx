@@ -23,10 +23,17 @@ export function LivePositionsPage() {
   const navigate = useNavigate()
   const [page, setPage] = useState(1)
   const [activeOnly, setActiveOnly] = useState(false)
-  const params = { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }
+  // level=detail 拿到 cash_pnl / percent_pnl / realized_pnl / open_buy_shares 等;
+  // 5s 轮询保证持仓页准实时, 行内字段随盘口走 reconcile authority refresh.
+  const params = {
+    level: 'detail' as const,
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+  }
   const query = useQuery({
     queryKey: qk.positions.list(params),
     queryFn: ({ signal }) => positionsApi.list(params, signal),
+    refetchInterval: 5000,
   })
 
   const forceExit = useMutation({
@@ -53,7 +60,7 @@ export function LivePositionsPage() {
   const columns: ColumnDef<PositionRow, unknown>[] = useMemo(
     () => [
       {
-        header: 'market / token',
+        header: 'market / outcome',
         cell: ({ row }) => (
           <div>
             <Anchor
@@ -66,39 +73,42 @@ export function LivePositionsPage() {
             >
               {row.original.market_slug ?? row.original.condition_id}
             </Anchor>
+            <div style={{ fontSize: 11, color: 'var(--mantine-color-dimmed)' }}>
+              {row.original.outcome ?? ''}
+            </div>
             <CopyableId value={row.original.token_id} dense />
           </div>
         ),
       },
       {
-        header: 'size',
-        cell: ({ row }) => formatDecimal(row.original.size_shares, { dp: 2 }),
+        header: 'shares',
+        cell: ({ row }) => formatDecimal(row.original.shares, { dp: 2 }),
       },
       {
         header: 'cost',
         cell: ({ row }) => formatUsdc(row.original.cost_usdc),
       },
       {
-        header: 'entry / current',
+        header: 'cur price',
+        cell: ({ row }) => formatDecimal(row.original.cur_price, { dp: 4 }),
+      },
+      {
+        header: 'bid / ask',
         cell: ({ row }) => (
-          <span>
-            {formatDecimal(row.original.entry_price, { dp: 4 })} → {formatDecimal(row.original.current_price, { dp: 4 })}
+          <span style={{ fontSize: 12 }}>
+            {formatDecimal(row.original.best_bid, { dp: 3 })} / {formatDecimal(row.original.best_ask, { dp: 3 })}
           </span>
         ),
+      },
+      {
+        header: 'mtm value',
+        cell: ({ row }) => formatUsdc(row.original.position_usdc),
       },
       {
         header: 'cash PnL',
         cell: ({ row }) => (
           <span style={{ color: pnlToneColor(pnlTone(row.original.cash_pnl)) }}>
             {formatUsdc(row.original.cash_pnl)}
-          </span>
-        ),
-      },
-      {
-        header: 'realized',
-        cell: ({ row }) => (
-          <span style={{ color: pnlToneColor(pnlTone(row.original.realized_pnl)) }}>
-            {formatUsdc(row.original.realized_pnl)}
           </span>
         ),
       },
@@ -112,11 +122,17 @@ export function LivePositionsPage() {
       },
       {
         header: '状态',
-        cell: ({ row }) => (
-          <StatusPill tone={row.original.redeemable ? 'warning' : 'success'} size="xs">
-            {row.original.redeemable ? 'redeemable' : 'open'}
-          </StatusPill>
-        ),
+        cell: ({ row }) => {
+          // 状态优先级: settled_zero_value(已赎归零) > redeemable(待赎)
+          //   > is_paused(MANUAL pause) > open buy/sell > open
+          const p = row.original
+          if (p.settled_zero_value) return <StatusPill tone="neutral" size="xs">归零</StatusPill>
+          if (p.redeemable) return <StatusPill tone="warning" size="xs">待赎回</StatusPill>
+          if (p.is_paused) return <StatusPill tone="warning" size="xs">人工暂停</StatusPill>
+          if (p.has_open_buy) return <StatusPill tone="info" size="xs">挂买中</StatusPill>
+          if (p.has_open_sell) return <StatusPill tone="info" size="xs">挂卖中</StatusPill>
+          return <StatusPill tone="success" size="xs">持有</StatusPill>
+        },
       },
       {
         header: '操作',
@@ -134,8 +150,8 @@ export function LivePositionsPage() {
                   tone: 'danger',
                   diff: [
                     {
-                      field: 'size_shares',
-                      before: p.size_shares,
+                      field: 'shares',
+                      before: p.shares,
                       after: '0',
                       risk: 'high',
                     },
@@ -161,10 +177,11 @@ export function LivePositionsPage() {
     [forceExit, navigate],
   )
 
-  const allItems = query.data?.items ?? []
+  // 后端 /positions 包络 {positions, count}, 不是 Page<T> 的 {items, total}.
+  const allItems = query.data?.positions ?? []
   const redeemableCount = allItems.filter((p) => p.redeemable).length
   const displayItems = activeOnly ? allItems.filter((p) => !p.redeemable) : allItems
-  const totalPages = Math.max(1, Math.ceil((query.data?.total ?? allItems.length) / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil((query.data?.count ?? allItems.length) / PAGE_SIZE))
 
   return (
     <>

@@ -151,7 +151,7 @@ export function TradeTimelinePage() {
               <Group gap="lg" wrap="wrap">
                 <Stat
                   k="size"
-                  v={formatDecimal(query.data.current_position.size_shares, { dp: 2 })}
+                  v={formatDecimal(query.data.current_position.shares, { dp: 2 })}
                 />
                 <Stat k="cost" v={formatUsdc(query.data.current_position.cost_usdc)} />
                 <Stat

@@ -242,11 +242,13 @@ export const ordersApi = {
 export const positionsApi = {
   list: (
     params: {
+      level?: 'summary' | 'detail'
+      only_with_shares?: boolean
       limit?: number
       offset?: number
       condition_id?: string
       token_id?: string
-    },
+    } = {},
     signal?: AbortSignal,
   ) => apiClient.get<PositionsPage>('/positions', { params, signal }),
   forceExit: (body: {

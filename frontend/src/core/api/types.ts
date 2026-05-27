@@ -190,17 +190,23 @@ export type DecisionsPage = Page<DecisionRecord>
 
 // ---------- 市场 ----------
 
-export type TokenView = {
+// MarketOutcome (后端 /markets/detail outcomes[i]). 嵌套 position 子对象, 不
+// 再用旧 position_size_shares / position_cost_usdc 顶层别名.
+export type MarketOutcome = {
   token_id: string
   outcome?: string | null
-  outcome_index?: number | null
   best_bid?: DecimalStr | null
   best_ask?: DecimalStr | null
-  midpoint?: DecimalStr | null
-  position_size_shares?: DecimalStr | null
-  position_cost_usdc?: DecimalStr | null
-  current_value_usdc?: DecimalStr | null
-  cash_pnl_usdc?: DecimalStr | null
+  shares?: DecimalStr | null
+  has_open_buy?: boolean
+  has_open_sell?: boolean
+  open_orders_count?: number
+  position?: {
+    shares?: DecimalStr | null
+    cost_usdc?: DecimalStr | null
+    cur_price?: DecimalStr | null
+    redeemable?: boolean | null
+  } | null
   [key: string]: unknown
 }
 
@@ -223,15 +229,28 @@ export type MarketView = {
   end_date?: Iso | null
   game_start_time?: Iso | null
   category?: string | null
-  league?: string | null
-  market_type?: string | null
+  market_question?: string | null
+  market_name?: string | null
   trading_status?: string | null
-  description?: string | null
-  outcomes?: string[]
-  tokens?: TokenView[]
+  sports_market_type?: string | null
+  is_paused?: boolean
+  has_any_position?: boolean
+  total_position_usdc?: DecimalStr | null
+  total_shares?: DecimalStr | null
+  outcome_count?: number
+  tick_size?: DecimalStr | null
+  min_order_size?: DecimalStr | null
+  neg_risk?: boolean
+  outcomes?: MarketOutcome[]
+  tags?: string[]
+  matched_keywords?: string[]
   fee_preview?: FeePreview | null
-  pause_reason?: string | null
-  paused_at?: Iso | null
+  pause?: {
+    source?: string
+    reason?: string
+    recoverable?: boolean
+  } | null
+  metadata?: Record<string, unknown> | null
   [key: string]: unknown
 }
 
@@ -300,25 +319,41 @@ export type OrderRow = {
 
 export type OrdersPage = Page<OrderRow>
 
+// 字段名对齐后端 position_aggregator._serialize (level=summary).
+// 后端返回的字段名是真相, 前端不再用旧 size_shares / current_price 等别名.
 export type PositionRow = {
   condition_id: string
   token_id: string
+  outcome?: string | null
   market_slug?: string | null
-  size_shares: DecimalStr
+  event_title?: string | null
+  shares: DecimalStr
   cost_usdc?: DecimalStr | null
-  entry_price?: DecimalStr | null
-  current_price?: DecimalStr | null
-  current_value?: DecimalStr | null
+  cur_price?: DecimalStr | null
+  position_usdc?: DecimalStr | null
+  best_bid?: DecimalStr | null
+  best_ask?: DecimalStr | null
+  has_open_buy?: boolean
+  has_open_sell?: boolean
+  redeemable?: boolean | null
+  settled_zero_value?: boolean | null
+  is_paused?: boolean
+  // level=detail 才有的字段(/positions?level=detail):
   cash_pnl?: DecimalStr | null
   percent_pnl?: DecimalStr | null
   realized_pnl?: DecimalStr | null
-  redeemable?: boolean | null
-  settled_zero_value?: boolean | null
+  open_buy_shares?: DecimalStr | null
+  open_sell_shares?: DecimalStr | null
+  confirmation_status?: string | null
   updated_at?: Iso | null
   [key: string]: unknown
 }
 
-export type PositionsPage = Page<PositionRow>
+// 后端 /positions 包络 {positions, count}, 不是 Page<T>.
+export type PositionsPage = {
+  positions: PositionRow[]
+  count: number
+}
 
 export type FillRow = {
   fill_id: string

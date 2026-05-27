@@ -117,7 +117,7 @@ export function MarketsListPage() {
       (m) =>
         m.market_slug?.toLowerCase().includes(q) ||
         m.condition_id.toLowerCase().includes(q) ||
-        m.league?.toLowerCase().includes(q),
+        m.category?.toLowerCase().includes(q),
     )
   }, [query.data?.items, slugSearch])
 
