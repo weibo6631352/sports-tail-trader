@@ -13,24 +13,19 @@ const StrategyOverviewPage = lazyNamed(
   () => import('./StrategyOverviewPage'),
   'StrategyOverviewPage',
 )
-const StrategyConfigPage = lazyNamed(() => import('./StrategyConfigPage'), 'StrategyConfigPage')
 const StrategyDiagnosticsPage = lazyNamed(
   () => import('./StrategyDiagnosticsPage'),
   'StrategyDiagnosticsPage',
 )
-const ParameterSweepPage = lazyNamed(
-  () => import('./ParameterSweepPage'),
-  'ParameterSweepPage',
-)
+// StrategyConfigPage / ParameterSweepPage 依赖 /parameters + /operations/parameter-sweep
+// 后端端点不存在(已删),前端是僵尸页面 → 已移除.
 
 export const currentStrategyBundle: StrategyBundle = {
   id: 'sports_tail',
   displayName: '量化量化策略 (sports_tail)',
   routes: [
     { index: true, element: <StrategyOverviewPage /> },
-    { path: 'config', element: <StrategyConfigPage /> },
     { path: 'diagnostics', element: <StrategyDiagnosticsPage /> },
-    { path: 'parameter-sweep', element: <ParameterSweepPage /> },
   ],
   dashboardWidgets: [
     {

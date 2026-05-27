@@ -34,15 +34,6 @@ import type {
   OutboxFailuresPage,
   OutboxPendingPage,
   OutboxQueueDepth,
-  ParameterClearRequest,
-  ParameterClearResult,
-  ParameterOverride,
-  ParameterOverridesList,
-  ParameterSetRequest,
-  ParametersRegistry,
-  ParameterSweepRequest,
-  ParameterSweepResponse,
-  SweepParamSpec,
   PnlBreakdown,
   PnlBreakdownGroupBy,
   PortfolioExposure,
@@ -720,10 +711,6 @@ export const operationsApi = {
     apiClient.post<WriteOperationResult>('/operations/pause-trading', { body }),
   resumeTrading: (body: { operator: string; trace_id?: string }) =>
     apiClient.post<WriteOperationResult>('/operations/resume-trading', { body }),
-  parameterSweepParams: (signal?: AbortSignal) =>
-    apiClient.get<SweepParamSpec[]>('/operations/parameter-sweep/params', { signal }),
-  parameterSweep: (body: ParameterSweepRequest) =>
-    apiClient.post<ParameterSweepResponse>('/operations/parameter-sweep', { body }),
 }
 
 // ---------- Trade replays & timeline ----------
@@ -759,26 +746,6 @@ export const tradesApi = {
     }),
 }
 
-// ---------- 实时调参 /parameters ----------
-// 后端是 registry + scope/key 白名单。重启即丢；写入自动落审计。
-
-export const parametersApi = {
-  list: (signal?: AbortSignal) =>
-    apiClient.get<ParametersRegistry>('/parameters', { signal }),
-  overrides: (signal?: AbortSignal) =>
-    apiClient.get<ParameterOverridesList>('/parameters/overrides', { signal }),
-  set: (scope: string, key: string, body: ParameterSetRequest) =>
-    apiClient.put<ParameterOverride>(
-      `/parameters/${encodeURIComponent(scope)}/${encodeURIComponent(key)}`,
-      { body },
-    ),
-  clear: (scope: string, key: string, body: ParameterClearRequest) =>
-    apiClient.del<ParameterClearResult>(
-      `/parameters/${encodeURIComponent(scope)}/${encodeURIComponent(key)}`,
-      { body },
-    ),
-}
-
 // ---------- 总入口 ----------
 
 export const api = {
@@ -798,6 +765,5 @@ export const api = {
   tradeReplays: tradeReplaysApi,
   trades: tradesApi,
   sports: sportsApi,
-  parameters: parametersApi,
 }
 

@@ -31,9 +31,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: '策略 Strategy',
     links: [
       { path: '/strategy', label: '策略概览' },
-      { path: '/strategy/config', label: '参数热调', badge: 'P0' },
       { path: '/strategy/diagnostics', label: '策略诊断' },
-      { path: '/strategy/parameter-sweep', label: '参数扫描', badge: 'P2' },
     ],
   },
   {

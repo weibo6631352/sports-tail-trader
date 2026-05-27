@@ -38,7 +38,6 @@ const SettlementsPage = lazyNamed(() => import('@features/markets/SettlementsPag
 // Ops
 const PortfolioPage = lazyNamed(() => import('@features/ops/PortfolioPage'), 'PortfolioPage')
 const OrdersPage = lazyNamed(() => import('@features/ops/OrdersPage'), 'OrdersPage')
-const PositionsPage = lazyNamed(() => import('@features/ops/PositionsPage'), 'PositionsPage')
 const FillsPage = lazyNamed(() => import('@features/ops/FillsPage'), 'FillsPage')
 const AllocationsPage = lazyNamed(() => import('@features/ops/AllocationsPage'), 'AllocationsPage')
 const AllocationDecisionsPage = lazyNamed(
@@ -91,7 +90,6 @@ export const routes: RouteObject[] = [
       // Portfolio / 订单 / 持仓 / 流水 / 分配 / 导出
       { path: 'portfolio', element: <PortfolioPage /> },
       { path: 'orders', element: <OrdersPage /> },
-      { path: 'positions', element: <PositionsPage /> },
       { path: 'fills', element: <FillsPage /> },
       { path: 'allocations', element: <AllocationsPage /> },
       { path: 'allocations/decisions', element: <AllocationDecisionsPage /> },
