@@ -7,6 +7,7 @@ operator 主仪表盘的高频核心视图。
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time as _time
 from datetime import datetime, timezone
@@ -18,8 +19,6 @@ from polymarket_trader.api.serialization import ApiSerializer
 from polymarket_trader.config import Settings
 from polymarket_trader.domain.account import AccountSnapshot
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
-from polymarket_trader.infra.polymarket.clob_client import ClobClient
-from polymarket_trader.infra.polymarket.data_client import DataClient
 from polymarket_trader.infra.polymarket.gamma_client import GammaClient
 from polymarket_trader.runtime.event_bus import QueueDepthSnapshot
 from polymarket_trader.runtime.registry import MarketRegistrySnapshot
@@ -37,11 +36,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_RUNTIME_MARKET_SAMPLE_LIMIT = 20
 _LOW_ENTRY_FUNDS_WARNING = "available_usdc_below_configured_order_size"
 
-# identity 60s TTL cache（含 gamma public profile HTTP ~700ms）
+# identity 60s TTL cache (gamma public profile fire-and-forget 刷新, endpoint 永不等).
+# _BACKGROUND_TASKS 持 task strong ref 防 GC 提前回收 (Python 官方 warning:
+# create_task 返回值若无 ref, GC 可能在 task await 中途回收 → coroutine dropped).
 _IDENTITY_CACHE: dict[int, tuple[dict[str, Any], float]] = {}
+_IDENTITY_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
 def _text_or_none(value: Any) -> str | None:
@@ -125,22 +126,13 @@ class RuntimeAggregator:
         readiness_view["warnings"] = tuple(self._readiness_warnings(config_readiness, readiness))
         runtime_status = self._runtime_status_snapshot(supervisor, readiness)
         account = self._account_snapshot(); _t("account", t); t = _time.perf_counter()
-        registry = self._registry_snapshot(); _t("registry", t); t = _time.perf_counter()
-        # R16-C (三方协评 Code Q2 + Perf F3 196KB 病根)：原来 market_sample 在
-        # registry.market_sample 和 top-level market_sample 双份序列化（dead field +
-        # MarketView → jsonable 同份数据走两遍 serialize）。前端 grep 0 引用 top-level，
-        # 删 top-level + 内联 jsonable 链路 = payload 直接减半。
-        market_sample_jsonable = [
-            jsonable(self._serializer().market_view(market))
-            for market in registry.markets[:_RUNTIME_MARKET_SAMPLE_LIMIT]
-        ]; _t("market_sample_view", t); t = _time.perf_counter()
-        markets_truncated = len(registry.markets) > _RUNTIME_MARKET_SAMPLE_LIMIT
+        # /runtime 保持轻量 (§17.9 50KB 上限). 持仓详情走 /portfolio, market 详情走 /markets;
+        # account 仅留作 portfolio_snapshot 的输入 (line 137), 不直接输出.
         identity = await self._identity_snapshot(); _t("identity_async", t); t = _time.perf_counter()
         settings_payload = self._settings_snapshot(); _t("settings", t); t = _time.perf_counter()
         bootstrap_summary = jsonable(self._runtime.bootstrap_summary if self._runtime else {}); _t("bootstrap_summary", t); t = _time.perf_counter()
         market_discovery = self._market_discovery_snapshot(); _t("market_discovery", t); t = _time.perf_counter()
         sports_live_sync = self._sports_live_sync_snapshot(); _t("sports_live_sync", t); t = _time.perf_counter()
-        account_serialized = self._serializer().account_snapshot(account); _t("account_serialize", t); t = _time.perf_counter()
         event_bus_payload = jsonable(self._event_bus_snapshot()); _t("event_bus_snapshot", t); t = _time.perf_counter()
         persistence_payload = jsonable(self._persistence_snapshot()); _t("persistence_snapshot", t); t = _time.perf_counter()
         portfolio_payload = self._serializer().portfolio_snapshot(account); _t("portfolio_snapshot", t)
@@ -154,16 +146,8 @@ class RuntimeAggregator:
             "bootstrap_summary": bootstrap_summary,
             "market_discovery": market_discovery,
             "sports_live_sync": sports_live_sync,
-            "registry": {
-                "market_count": len(registry.markets),
-                "market_sample": market_sample_jsonable,
-                "market_sample_limit": _RUNTIME_MARKET_SAMPLE_LIMIT,
-                "markets_truncated": markets_truncated,
-            },
-            "account": account_serialized,
             "event_bus": event_bus_payload,
             "persistence": persistence_payload,
-            # R16-C: 删 top-level "market_sample" (前端 0 引用，registry.market_sample 已含同份数据)
             "portfolio": portfolio_payload,
         }
 
@@ -435,38 +419,66 @@ class RuntimeAggregator:
             return settings.sanitized_dump()
         return jsonable(settings)
 
-    async def _identity_snapshot(self) -> dict[str, Any]:
-        cache_ttl_s = 60.0
-        runtime_key = id(self._runtime) if self._runtime is not None else 0
-        cached_entry = _IDENTITY_CACHE.get(runtime_key)
-        if cached_entry is not None:
-            cached_result, cached_at = cached_entry
-            if (_time.time() - cached_at) < cache_ttl_s:
-                return cached_result
+    def _identity_addresses(self) -> tuple[Settings | object, str | None, str | None, str | None]:
+        """settings + wallet/funder/profile_address 派生 (stub + refill 共用)."""
         settings = self._settings()
         wallet_address: str | None = None
         if self._runtime is not None:
-            clob: ClobClient | None = self._runtime.clob_client
-            data: DataClient | None = self._runtime.data_client
-            for client in (clob, data):
-                if client is not None:
-                    candidate = client.default_wallet_address
-                    if candidate:
-                        wallet_address = str(candidate)
-                        break
+            for client in (self._runtime.clob_client, self._runtime.data_client):
+                if client is not None and client.default_wallet_address:
+                    wallet_address = str(client.default_wallet_address)
+                    break
         funder_address = (
             _text_or_none(settings.polymarket_funder_address)
-            if isinstance(settings, Settings)
-            else None
+            if isinstance(settings, Settings) else None
         )
         profile_address = funder_address or _text_or_none(wallet_address)
+        return settings, wallet_address, funder_address, profile_address
+
+    async def _identity_snapshot(self) -> dict[str, Any]:
+        """identity 60s TTL cache + fire-and-forget 后台刷新.
+
+        cold miss / stale 时立即返 stub-or-stale + 异步触发后台 fetch, 永不在 endpoint
+        热路径上等 gamma get_public_profile (中→US 链路 TCP+TLS handshake 可达 3s,
+        timeout_s=0.3 在 httpx 实际只控 read 阶段, connect 阶段不受约束 → 实测 max 3.7s).
+        装饰性 profile 数据迟一个 cache 周期更新不影响交易决策.
+        """
+        cache_ttl_s = 60.0
+        runtime_key = id(self._runtime) if self._runtime is not None else 0
+        cached_entry = _IDENTITY_CACHE.get(runtime_key)
+        if cached_entry is not None and (_time.time() - cached_entry[1]) < cache_ttl_s:
+            return cached_entry[0]
+        # cold or stale: 触发后台刷新, 本次立即返 stale-or-stub. 必须持 task strong ref
+        # 防 GC 提前回收 (asyncio.create_task 文档级 warning).
+        task = asyncio.create_task(self._refill_identity_cache(runtime_key))
+        _IDENTITY_BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_IDENTITY_BACKGROUND_TASKS.discard)
+        return cached_entry[0] if cached_entry is not None else self._identity_stub()
+
+    def _identity_stub(self) -> dict[str, Any]:
+        """无 profile 数据的最小 identity payload (cold cache miss 返回)."""
+        settings, wallet_address, funder_address, profile_address = self._identity_addresses()
+        return {
+            "wallet_address": wallet_address,
+            "funder_address": funder_address,
+            "signature_type": settings.polymarket_signature_type if isinstance(settings, Settings) else None,
+            "profile_address": profile_address,
+            "profile_name": None, "profile_pseudonym": None, "profile_image": None,
+            "profile_verified": None, "profile_x_username": None,
+        }
+
+    async def _refill_identity_cache(self, runtime_key: int) -> None:
+        """后台 task: 拉 gamma profile + 写 cache. 失败静默 (cache 保持 stale, 下次 stub)."""
+        settings, wallet_address, funder_address, profile_address = self._identity_addresses()
         profile = await self._public_profile(profile_address)
         display_username_public = (
             None if profile is None else getattr(profile, "display_username_public", None)
         )
         profile_name = None
         if display_username_public is not False:
-            profile_name = _text_or_none(None if profile is None else getattr(profile, "name", None))
+            profile_name = _text_or_none(
+                None if profile is None else getattr(profile, "name", None)
+            )
         result = {
             "wallet_address": wallet_address,
             "funder_address": funder_address,
@@ -490,7 +502,6 @@ class RuntimeAggregator:
             ),
         }
         _IDENTITY_CACHE[runtime_key] = (result, _time.time())
-        return result
 
     async def _public_profile(self, address: str | None) -> Any | None:
         if address is None:

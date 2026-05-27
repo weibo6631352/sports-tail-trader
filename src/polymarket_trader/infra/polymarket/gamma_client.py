@@ -61,8 +61,15 @@ class GammaClient(PolymarketRestClientBase):
         headers: Mapping[str, str] | None = None,
         events_path: str = "/events",
         markets_path: str = "/markets",
+        concurrency_limit: int = 20,
     ) -> None:
-        super().__init__(base_url, client=client, timeout_s=timeout_s, headers=headers)
+        # 默认 20 留 80 buffer 给 gamma HTTP/2 100 stream 上限; 多 consumer 共享
+        # (discovery/settlement/authority_refresh/redeemable_enrich) 累加风险高,
+        # 必须 client 层全局守门防 burst.
+        super().__init__(
+            base_url, client=client, timeout_s=timeout_s, headers=headers,
+            concurrency_limit=concurrency_limit,
+        )
         self._events_path = events_path
         self._markets_path = markets_path
         self._public_profiles: dict[str, GammaPublicProfileDTO] = {}

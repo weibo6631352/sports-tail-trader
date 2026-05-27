@@ -205,6 +205,11 @@ def create_app(
                     status_code = response.status_code if response is not None else 500
                     labels = {"route": route_path, "method": request.method, "status": str(status_code)}
                     runtime_obj.metrics.observe_latency("api_endpoint_latency_ms", elapsed_ms, labels=labels)
+                    # payload 体积 histogram 用独立 byte buckets, 供 HealthReporter.endpoints()
+                    # 检测 §17.9 50KB 上限超标.
+                    runtime_obj.metrics.observe_size(
+                        "api_endpoint_response_bytes", response_bytes, labels=labels,
+                    )
                     runtime_obj.metrics.inc_counter("api_endpoint_requests_total", labels=labels)
                     if error:
                         runtime_obj.metrics.inc_counter(

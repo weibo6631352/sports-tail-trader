@@ -809,17 +809,24 @@ class ReconcileAuthorityRefresher:
                 seen_cids.add(cid)
                 unique_cids.append(cid)
 
+        # gamma_client 已有全局 sem(20). enrich 主动让出名额给 discovery/settlement:
+        # 26 redeemable 持仓裸 gather 会一次占满 20 名额, 阻塞 2s cadence 的 discovery.
+        # 局部 sem(5) 让 enrich 最多用 5 名额, 留 15 给其他 consumer. 单轮 enrich 慢
+        # 1-2s 可接受 (redeemable 是已结算资金, 非 P0 决策路径).
+        enrich_gate = asyncio.Semaphore(5)
+
         async def _resolve(cid: str) -> tuple[str, str | None]:
-            candidate = await _await_authority(
-                component="gamma",
-                operation="resolve_by_condition",
-                failures=failures,
-                awaitable=self._gamma_client.get_market_by_condition_id(
-                    cid, timeout_s=self._authority_call_timeout_s
-                ),
-                target=cid,
-                timeout_s=self._authority_call_timeout_s,
-            )
+            async with enrich_gate:
+                candidate = await _await_authority(
+                    component="gamma",
+                    operation="resolve_by_condition",
+                    failures=failures,
+                    awaitable=self._gamma_client.get_market_by_condition_id(
+                        cid, timeout_s=self._authority_call_timeout_s
+                    ),
+                    target=cid,
+                    timeout_s=self._authority_call_timeout_s,
+                )
             if candidate is None:
                 return cid, None
             resolved = _resolve_from_gamma_payload(cid, candidate)

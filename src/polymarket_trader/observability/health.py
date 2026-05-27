@@ -12,7 +12,7 @@
   `last_*_at` + `*_count` 等数值字段，供外部监控系统（Prometheus alertmanager /
   uptime-kuma / pingdom 等）直接告警
 
-# 5 个维度（§11.4 endpoint 对应）
+# 6 个维度（§11.4 endpoint 对应）
 
 | Endpoint | 方法 | 关键检查 |
 |---|---|---|
@@ -21,6 +21,7 @@
 | `/health/ws` | `ws()` | connected=False 或 last_message > 30s → degraded |
 | `/health/decision` | `decision()` | event_bus queue > warn 阈值 → degraded（其他 metric 待 wire） |
 | `/health/account` | `account()` | last_update > 300s → degraded；balance < 0 → unhealthy |
+| `/health/endpoints` | `endpoints()` | last payload > 50KB 或 last latency > 2s → unhealthy (§17.9)；依赖 `_perf_middleware` 埋点 |
 
 # 阈值
 
@@ -55,6 +56,13 @@ _WS_IDLE_S: float = 30.0
 # account_state last_update 超过 → degraded
 _ACCOUNT_STALE_S: float = 300.0
 
+# operator endpoint payload + latency 阈值 (CLAUDE.md §17.9). 50KB / 2000ms 是 §17.9
+# 硬上限超出 → unhealthy; 30KB / 1000ms 是 early warning 留 40% 余量 → degraded.
+_ENDPOINT_PAYLOAD_DEGRADED_BYTES: float = 30_000.0
+_ENDPOINT_PAYLOAD_UNHEALTHY_BYTES: float = 50_000.0
+_ENDPOINT_LATENCY_DEGRADED_MS: float = 1_000.0
+_ENDPOINT_LATENCY_UNHEALTHY_MS: float = 2_000.0
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -86,7 +94,7 @@ def _worst(statuses: list[HealthStatus]) -> HealthStatus:
 
 
 class HealthReporter:
-    """5 维度健康数据聚合。
+    """6 维度健康数据聚合。
 
     构造时只持有 RuntimeComponents 弱引用——本类无状态，每次调用即时读取
     各组件 snapshot。
@@ -100,7 +108,8 @@ class HealthReporter:
         ws = self.ws()
         account = self.account()
         decision = self.decision()
-        overall_status = _worst([live.status, ws.status, account.status, decision.status])
+        endpoints = self.endpoints()
+        overall_status = _worst([live.status, ws.status, account.status, decision.status, endpoints.status])
         return HealthReport(
             status=overall_status,
             detail={
@@ -108,6 +117,61 @@ class HealthReporter:
                 "ws": ws.status,
                 "account": account.status,
                 "decision": decision.status,
+                "endpoints": endpoints.status,
+            },
+        )
+
+    def endpoints(self) -> HealthReport:
+        """operator endpoint payload + latency 健康 (依赖 _perf_middleware 埋点).
+
+        用 last_ms 判定而非 max_ms: max 是 lifetime sticky 一次冷启动 9s 后永久 unhealthy
+        到进程重启 → 自废告警。last_ms = 最近一次 observation, 反映"当前是否在 violation".
+        detail 同时返回 max 供查"历史最坏 case".
+        """
+        try:
+            snapshot = self._runtime.metrics.snapshot()
+        except Exception as exc:  # noqa: BLE001
+            return HealthReport(status="unhealthy", detail={"error": str(exc)})
+        issues: list[dict[str, Any]] = []
+        worst: HealthStatus = "healthy"
+        for h in snapshot.histograms:
+            if h.name == "api_endpoint_response_bytes" and h.last_ms is not None:
+                current = h.last_ms
+                if current > _ENDPOINT_PAYLOAD_UNHEALTHY_BYTES:
+                    status: HealthStatus = "unhealthy"
+                elif current > _ENDPOINT_PAYLOAD_DEGRADED_BYTES:
+                    status = "degraded"
+                else:
+                    continue
+                issues.append({
+                    "metric": "payload_bytes", "route": dict(h.labels),
+                    "last_bytes": current, "max_bytes_lifetime": h.max_ms,
+                    "count": h.count, "status": status,
+                })
+                worst = _worst([worst, status])
+            elif h.name == "api_endpoint_latency_ms" and h.last_ms is not None:
+                current = h.last_ms
+                if current > _ENDPOINT_LATENCY_UNHEALTHY_MS:
+                    status = "unhealthy"
+                elif current > _ENDPOINT_LATENCY_DEGRADED_MS:
+                    status = "degraded"
+                else:
+                    continue
+                issues.append({
+                    "metric": "latency_ms", "route": dict(h.labels),
+                    "last_ms": current, "max_ms_lifetime": h.max_ms,
+                    "count": h.count, "status": status,
+                })
+                worst = _worst([worst, status])
+        return HealthReport(
+            status=worst,
+            detail={
+                "payload_degraded_bytes": _ENDPOINT_PAYLOAD_DEGRADED_BYTES,
+                "payload_unhealthy_bytes": _ENDPOINT_PAYLOAD_UNHEALTHY_BYTES,
+                "latency_degraded_ms": _ENDPOINT_LATENCY_DEGRADED_MS,
+                "latency_unhealthy_ms": _ENDPOINT_LATENCY_UNHEALTHY_MS,
+                "issues": issues,
+                "issues_count": len(issues),
             },
         )
 

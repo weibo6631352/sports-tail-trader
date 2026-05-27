@@ -24,6 +24,19 @@ DEFAULT_LATENCY_BUCKETS_MS: tuple[float, ...] = (
     inf,
 )
 
+# response payload 体积 buckets (bytes); operator endpoint 50KB §17.9 上限附近密集采样.
+DEFAULT_SIZE_BUCKETS_BYTES: tuple[float, ...] = (
+    1_024.0,
+    4_096.0,
+    16_384.0,
+    32_768.0,
+    51_200.0,
+    102_400.0,
+    256_000.0,
+    1_048_576.0,
+    inf,
+)
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -157,8 +170,14 @@ class MetricsSnapshot(JsonSerializable):
 class MetricsRegistry:
     """In-memory metrics registry for hot-path snapshots."""
 
-    def __init__(self, *, latency_buckets_ms: tuple[float, ...] = DEFAULT_LATENCY_BUCKETS_MS) -> None:
+    def __init__(
+        self,
+        *,
+        latency_buckets_ms: tuple[float, ...] = DEFAULT_LATENCY_BUCKETS_MS,
+        size_buckets_bytes: tuple[float, ...] = DEFAULT_SIZE_BUCKETS_BYTES,
+    ) -> None:
         self._latency_buckets_ms = tuple(latency_buckets_ms)
+        self._size_buckets_bytes = tuple(size_buckets_bytes)
         self._lock = RLock()
         self._gauges: dict[tuple[str, tuple[tuple[str, str], ...]], GaugeSnapshot] = {}
         self._counters: dict[tuple[str, tuple[tuple[str, str], ...]], CounterSnapshot] = {}
@@ -234,6 +253,22 @@ class MetricsRegistry:
         with self._lock:
             data = self._histograms.setdefault(key, _empty_histogram_data(key[0], key[1], self._latency_buckets_ms))
             _observe_histogram_data(data, value_ms, updated_at=updated_at)
+            return _histogram_snapshot(data)
+
+    def observe_size(
+        self,
+        name: str,
+        value_bytes: float,
+        *,
+        labels: Mapping[str, Any] | None = None,
+        updated_at: datetime | None = None,
+    ) -> HistogramSnapshot:
+        """payload 体积 histogram, 用 byte buckets. 与 observe_latency 同共享存储, 但
+        bucket 边界不同 (ms vs bytes). 字段名仍叫 _ms 是历史遗留, 调用方按语义读."""
+        key = _metric_key(name, labels)
+        with self._lock:
+            data = self._histograms.setdefault(key, _empty_histogram_data(key[0], key[1], self._size_buckets_bytes))
+            _observe_histogram_data(data, value_bytes, updated_at=updated_at)
             return _histogram_snapshot(data)
 
     def set_queue_depth(

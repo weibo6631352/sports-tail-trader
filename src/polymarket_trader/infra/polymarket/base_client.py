@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 from collections.abc import Mapping
@@ -242,6 +243,7 @@ class PolymarketRestClientBase:
         client: httpx.AsyncClient | None = None,
         timeout_s: float = 10.0,
         headers: Mapping[str, str] | None = None,
+        concurrency_limit: int | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._owns_client = client is None
@@ -259,6 +261,12 @@ class PolymarketRestClientBase:
         if proxy is not None:
             client_kwargs["proxy"] = proxy
         self._client = client or httpx.AsyncClient(**client_kwargs)
+        # HTTP/2 SETTINGS_MAX_CONCURRENT_STREAMS 单连接上限 (Polymarket 服务端 100).
+        # 多 consumer 共享同一 httpx client 会累加打爆 → 子类 opt-in concurrency_limit
+        # 让 instance Semaphore 守门;None=不限 (clob/data 流量低无需).
+        self._stream_gate: asyncio.Semaphore | None = (
+            asyncio.Semaphore(concurrency_limit) if concurrency_limit is not None else None
+        )
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -287,15 +295,17 @@ class PolymarketRestClientBase:
         unwrap: bool = True,
     ) -> Any:
         url = path if path.startswith("http") else f"{self._base_url}{path}"
+        gate_ctx = self._stream_gate if self._stream_gate is not None else contextlib.nullcontext()
         try:
-            response = await self._client.request(
-                method=method,
-                url=path,
-                params=params,
-                json=json_body,
-                headers=dict(headers or {}),
-                timeout=timeout_s,
-            )
+            async with gate_ctx:
+                response = await self._client.request(
+                    method=method,
+                    url=path,
+                    params=params,
+                    json=json_body,
+                    headers=dict(headers or {}),
+                    timeout=timeout_s,
+                )
             response.raise_for_status()
         except Exception as exc:
             raise _normalize_client_error(exc, operation=operation or f"{method} {path}", url=url) from exc

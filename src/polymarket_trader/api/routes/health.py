@@ -59,6 +59,13 @@ async def health_account(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
     return {"status": report.status, "detail": report.detail}
 
 
+@router.get("/health/endpoints")
+async def health_endpoints(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
+    """endpoint 健康——last payload > 50KB 或 last latency > 2s → unhealthy (§17.9)."""
+    report = _reporter(runtime).endpoints()
+    return {"status": report.status, "detail": report.detail}
+
+
 @router.get("/ready")
 async def ready(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
     return RuntimeAggregator(runtime=runtime).readiness_snapshot()
