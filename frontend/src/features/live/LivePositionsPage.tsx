@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { Alert, Anchor, Checkbox, Group, Text } from '@mantine/core'
+import { Alert, Anchor, Box, Checkbox, Group, Text, Tooltip } from '@mantine/core'
 import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { qk, qkRoots } from '@core/api/keys'
@@ -61,24 +61,45 @@ export function LivePositionsPage() {
     () => [
       {
         header: 'market / outcome',
-        cell: ({ row }) => (
-          <div>
-            <Anchor
-              size="xs"
-              onClick={(e) => {
-                e.stopPropagation()
-                navigate(`/investigate/timeline?condition_id=${encodeURIComponent(row.original.condition_id)}`)
-              }}
-              style={{ cursor: 'pointer', fontSize: 12 }}
-            >
-              {row.original.market_slug ?? row.original.condition_id}
-            </Anchor>
-            <div style={{ fontSize: 11, color: 'var(--mantine-color-dimmed)' }}>
-              {row.original.outcome ?? ''}
+        cell: ({ row }) => {
+          // 已入场且非待赎回 = WS 订阅 + 决策器实时分析中.
+          // 视觉脉动绿点反映"正在评估"状态(每 1.5s 一次 ping 节奏).
+          const p = row.original
+          const isAnalyzing = !p.redeemable && !p.settled_zero_value
+          return (
+            <div>
+              <Group gap={4} align="center" wrap="nowrap">
+                {isAnalyzing ? (
+                  <Tooltip label="WS 订阅活跃 · market_tick 触发 quant_decide 实时评估" withArrow>
+                    <Box
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: '#5cd9c5',
+                        boxShadow: '0 0 6px #5cd9c5',
+                      }}
+                    />
+                  </Tooltip>
+                ) : null}
+                <Anchor
+                  size="xs"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    navigate(`/investigate/timeline?condition_id=${encodeURIComponent(p.condition_id)}`)
+                  }}
+                  style={{ cursor: 'pointer', fontSize: 12 }}
+                >
+                  {p.market_slug ?? p.condition_id}
+                </Anchor>
+              </Group>
+              <div style={{ fontSize: 11, color: 'var(--mantine-color-dimmed)' }}>
+                {p.outcome ?? ''}
+              </div>
+              <CopyableId value={p.token_id} dense />
             </div>
-            <CopyableId value={row.original.token_id} dense />
-          </div>
-        ),
+          )
+        },
       },
       {
         header: 'shares',
@@ -135,6 +156,26 @@ export function LivePositionsPage() {
         },
       },
       {
+        header: '决策',
+        cell: ({ row }) => {
+          const p = row.original
+          // 钻到 DecisionsPage 过滤该 cid+token, 看决策器对此持仓的 quant_decide
+          // 时序: 每秒级 reason / Kelly 内核 / accepted 演化.
+          return (
+            <InlineActionButton
+              variant="link"
+              onClick={(e) => {
+                e.stopPropagation()
+                const tokenQ = p.token_id ? `&token_id=${encodeURIComponent(p.token_id)}` : ''
+                navigate(`/investigate/decisions?condition_id=${encodeURIComponent(p.condition_id)}${tokenQ}`)
+              }}
+            >
+              时序 →
+            </InlineActionButton>
+          )
+        },
+      },
+      {
         header: '操作',
         cell: ({ row }) => {
           const p = row.original
@@ -186,21 +227,21 @@ export function LivePositionsPage() {
   return (
     <>
       <PageHeader
-        title="实时持仓"
-        subtitle="OPEN = 市场进行中；REDEEMABLE = 市场已结算，代币待赎回（价值可能为 $0）· force exit 需二次确认"
+        title="决策器接管的盘口"
+        subtitle="已入场 = WS 订阅活跃 · market_tick 实时驱动 quant_decide · 每秒级评估退出/调仓 · 点'时序'看决策器对该盘口的实时分析流"
       />
       {redeemableCount > 0 && (
         <Alert color="orange" mb="sm" variant="light">
           <Text size="sm">
-            <strong>{redeemableCount} 个持仓已结算（REDEEMABLE）</strong>——市场已结束，你持有的代币需要发起赎回交易才能从账户清除。
-            若押注方向错误，赎回金额为 $0；若押注正确，赎回可拿回对应金额。这些不是"亏损中的活跃持仓"，而是等待链上清算的已结算头寸。
+            <strong>{redeemableCount} 个持仓已结算（待赎回）</strong>——市场已结束，你持有的代币需要发起赎回交易才能从账户清除。
+            若押注方向错误，赎回金额为 $0；若押注正确，赎回可拿回对应金额。这些不是"亏损中的活跃持仓"，而是等待链上清算的已结算头寸，决策器不再评估。
           </Text>
         </Alert>
       )}
       <Group mb="sm">
         <Checkbox
           size="xs"
-          label="只看活跃（OPEN）"
+          label="只看决策器接管中（隐藏已结算待赎回）"
           checked={activeOnly}
           onChange={(e) => { setActiveOnly(e.currentTarget.checked); setPage(1) }}
         />
