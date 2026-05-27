@@ -50,7 +50,11 @@ export function LivePositionsPage() {
 
   const allItems = query.data?.positions ?? []
   const redeemableCount = allItems.filter((p) => p.redeemable).length
-  const displayItems = activeOnly ? allItems.filter((p) => !p.redeemable) : allItems
+  const awaitingCount = allItems.filter((p) => p.awaiting_settlement).length
+  // 决策器接管 = 仍 LIVE 的活仓: 排除 redeemable(已 closed)与 awaiting_settlement(赛事已结等 resolve)
+  const displayItems = activeOnly
+    ? allItems.filter((p) => !p.redeemable && !p.awaiting_settlement)
+    : allItems
 
   return (
     <>
@@ -70,10 +74,19 @@ export function LivePositionsPage() {
         </Alert>
       )}
 
+      {awaitingCount > 0 && (
+        <Alert color="grape" mb="sm" variant="light">
+          <Text size="sm">
+            <strong>{awaitingCount} 个持仓等结算中</strong>——赛事已结束 / Goalserve 停推 &gt; 5min，但 Polymarket 还没 resolve。
+            看快照与等结算列表请到 <a href="/live/awaiting-settlement">等结算盘口</a>。
+          </Text>
+        </Alert>
+      )}
+
       <Group mb="sm" justify="space-between">
         <Checkbox
           size="xs"
-          label="只看决策器接管中（隐藏已结算待赎回）"
+          label="只看决策器接管中（隐藏已结算 / 等结算）"
           checked={activeOnly}
           onChange={(e) => setActiveOnly(e.currentTarget.checked)}
         />

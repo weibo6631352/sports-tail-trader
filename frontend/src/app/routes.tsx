@@ -10,6 +10,7 @@ import { lazyNamed } from '@shared/lazyNamed'
 const LiveOverviewPage = lazyNamed(() => import('@features/live/LiveOverviewPage'), 'LiveOverviewPage')
 const CandidatesPage = lazyNamed(() => import('@features/live/CandidatesPage'), 'CandidatesPage')
 const LivePositionsPage = lazyNamed(() => import('@features/live/LivePositionsPage'), 'LivePositionsPage')
+const AwaitingSettlementPage = lazyNamed(() => import('@features/live/AwaitingSettlementPage'), 'AwaitingSettlementPage')
 const LiveOrdersPage = lazyNamed(() => import('@features/live/LiveOrdersPage'), 'LiveOrdersPage')
 const OperationsPage = lazyNamed(() => import('@features/live/OperationsPage'), 'OperationsPage')
 const GoalserveLivePage = lazyNamed(() => import('@features/live/GoalserveLivePage'), 'GoalserveLivePage')
@@ -62,6 +63,7 @@ export const routes: RouteObject[] = [
       { path: 'live', element: <LiveOverviewPage /> },
       { path: 'live/candidates', element: <CandidatesPage /> },
       { path: 'live/positions', element: <LivePositionsPage /> },
+      { path: 'live/awaiting-settlement', element: <AwaitingSettlementPage /> },
       { path: 'live/orders', element: <LiveOrdersPage /> },
       { path: 'live/operations', element: <OperationsPage /> },
       { path: 'live/goalserve', element: <GoalserveLivePage /> },

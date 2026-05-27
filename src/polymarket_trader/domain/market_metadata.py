@@ -15,6 +15,14 @@ from typing import Any, Mapping
 
 from polymarket_trader.serialization import jsonable
 
+# Goalserve 把已结算事件移出 inplay feed 后,本端 last live_state_payload 冻结;
+# observed_at 超过该秒数 → 判定 stale (≈"等结算窗口")。5min 是经验值:
+# Polymarket 结算窗口 10-30min,5min stale 比 30min 更早提示操盘。
+_AWAITING_SETTLEMENT_STALE_SECONDS = 300
+_AWAITING_SETTLEMENT_TERMINAL_STATUSES = frozenset(
+    {"ended", "cancelled", "retired", "postponed", "disputed", "finished", "ft"}
+)
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -38,6 +46,23 @@ class EntryMetadataRecord:
     live_state_signal_reason: str = ""
     live_state_phase: str = ""
     live_state_payload: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def live_state_status(self) -> str:
+        return str((self.live_state_payload or {}).get("status") or "").lower()
+
+    def is_awaiting_settlement(self, *, now: datetime | None = None) -> bool:
+        """已结算窗口判定: live_state 显式终态 OR Goalserve 停推 >5min。
+
+        排除条件: live_state_payload 完全为空(本就没匹配上直播源)不算 awaiting,
+        让上层走 missing_live_game_state 路径。
+        """
+        if not self.live_state_payload:
+            return False
+        if self.live_state_status in _AWAITING_SETTLEMENT_TERMINAL_STATUSES:
+            return True
+        ref = now or _utc_now()
+        return (ref - self.updated_at).total_seconds() > _AWAITING_SETTLEMENT_STALE_SECONDS
 
     def as_payload(self) -> dict[str, Any]:
         return {

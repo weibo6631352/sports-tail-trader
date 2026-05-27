@@ -94,6 +94,19 @@ class PositionAggregator:
         is_manual_paused = (
             mv.pause is not None and mv.pause.source == MarketPauseSource.MANUAL
         )
+        # 等结算窗口: Goalserve 已推过终态 OR 停推 >5min。redeemable 是 Polymarket 已
+        # closed/resolved 状态(可链上 redeem),awaiting_settlement 是更早的"赛事已结但
+        # Polymarket 还没 resolve",二者互斥——redeemable=True 时不再标 awaiting。
+        meta = mv.metadata
+        awaiting_settlement = (
+            not pos.redeemable
+            and meta is not None
+            and meta.is_awaiting_settlement()
+        )
+        live_state_status = meta.live_state_status if meta is not None else ""
+        live_state_observed_at = (
+            meta.updated_at.isoformat() if meta is not None and meta.live_state_payload else None
+        )
         summary = {
             "condition_id": mv.condition_id,
             "token_id": ov.token_id,
@@ -111,6 +124,9 @@ class PositionAggregator:
             "redeemable": pos.redeemable,
             "settled_zero_value": pos.settled_zero_value,
             "is_paused": is_manual_paused,
+            "awaiting_settlement": awaiting_settlement,
+            "live_state_status": live_state_status or None,
+            "live_state_observed_at": live_state_observed_at,
         }
         if level == "summary":
             return summary

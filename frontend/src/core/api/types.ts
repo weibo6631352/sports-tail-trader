@@ -386,6 +386,11 @@ export type PositionRow = {
   redeemable?: boolean | null
   settled_zero_value?: boolean | null
   is_paused?: boolean
+  // 等结算窗口: 赛事已结/Goalserve 停推 > 5min, 但 Polymarket 未 resolve.
+  // 与 redeemable 互斥(redeemable 已 closed 可链上 redeem).
+  awaiting_settlement?: boolean | null
+  live_state_status?: string | null  // 归一: live/ended/cancelled/...
+  live_state_observed_at?: Iso | null  // Goalserve 最后一次推送时间
   // level=detail 才有的字段(/positions?level=detail):
   cash_pnl?: DecimalStr | null
   percent_pnl?: DecimalStr | null
