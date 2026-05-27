@@ -171,6 +171,30 @@ export type LatencyPercentilesSnapshot = {
 
 // ---------- 决策记录 ----------
 
+// decision_output 嵌套 metadata.kelly 是操盘复盘核心:
+// quant_decide 时点的 prob_p / edge / f_star / buy_budget 等 14 字段全留底.
+export type DecisionOutput = {
+  action?: string | null
+  decision_kind?: string | null
+  reason?: string | null
+  price?: DecimalStr | null
+  amount_usdc?: DecimalStr | null
+  size_shares?: DecimalStr | null
+  order_id?: string | null
+  order_type?: string | null
+  post_only?: boolean
+  token_id?: string | null
+  market_slug?: string | null
+  summary?: Record<string, unknown> | null
+  intent_tags?: string[]
+  metadata?: {
+    kelly?: KellyInternals
+    signal_at?: Iso
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
 export type DecisionRecord = {
   record_id: string
   trace_id: string
@@ -182,8 +206,7 @@ export type DecisionRecord = {
   reason?: string | null
   created_at: Iso
   decision_input?: Record<string, unknown>
-  decision_output?: Record<string, unknown>
-  [key: string]: unknown
+  decision_output?: DecisionOutput
 }
 
 export type DecisionsPage = Page<DecisionRecord>
@@ -292,28 +315,32 @@ export type PricesHistory = {
 
 // ---------- 订单 / 持仓 / 成交 / 资金分配 ----------
 
+// 字段与后端 order_aggregator._serialize 完全对齐.
+// 删 stale: signed_at/ack_at/operator (后端不返回, 走 audit_events 查 lifecycle).
+// 补 backend 真实字段: amount_usdc/event_slug/idempotency_key/outcome/post_only.
 export type OrderRow = {
   order_id: string
   trade_id?: string | null
   trace_id?: string | null
+  idempotency_key?: string | null
   market_slug?: string | null
+  event_slug?: string | null
   condition_id?: string | null
   token_id?: string | null
+  outcome?: string | null
   side: 'BUY' | 'SELL' | string
   order_type?: string
   status: string
   price?: DecimalStr | null
+  amount_usdc?: DecimalStr | null
   size_shares?: DecimalStr | null
   filled_shares?: DecimalStr | null
   remaining_shares?: DecimalStr | null
   notional_usdc?: DecimalStr | null
+  post_only?: boolean
   reason?: string | null
-  operator?: string | null
   created_at: Iso
   updated_at?: Iso | null
-  signed_at?: Iso | null
-  submitted_at?: Iso | null
-  ack_at?: Iso | null
   [key: string]: unknown
 }
 
@@ -586,6 +613,8 @@ export function narrowOutboxEvent(event: OutboxPendingRow): KnownOutboxEvent | n
 
 // ---------- Portfolio ----------
 
+// 字段与后端 portfolio_aggregator.snapshot() 完全对齐
+// (delete legacy aliases equity_usdc / cash_usdc / recent_allocations / positions/ updated_at)
 export type PortfolioSnapshot = {
   balance_usdc?: DecimalStr | null
   allowance_usdc?: DecimalStr | null
@@ -604,14 +633,6 @@ export type PortfolioSnapshot = {
   user_ws_connected?: boolean
   allow_new_entries?: boolean
   last_reconcile_at?: Iso | null
-  recent_allocations?: unknown[]
-  // legacy aliases
-  equity_usdc?: DecimalStr | null
-  cash_usdc?: DecimalStr | null
-  redeemable_position_count?: number
-  positions?: PositionRow[]
-  updated_at?: Iso
-  [key: string]: unknown
 }
 
 export type EquityPoint = { ts: Iso; net_usdc: DecimalStr }

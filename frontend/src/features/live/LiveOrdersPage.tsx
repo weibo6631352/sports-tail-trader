@@ -83,8 +83,8 @@ export function LiveOrdersPage() {
         ),
       },
       {
-        header: 'submitted',
-        cell: ({ row }) => formatIso(row.original.submitted_at ?? row.original.created_at, 'MM-DD HH:mm:ss'),
+        header: 'created',
+        cell: ({ row }) => formatIso(row.original.created_at, 'MM-DD HH:mm:ss'),
       },
       {
         header: '操作',

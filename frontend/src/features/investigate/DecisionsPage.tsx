@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Group, Select, TextInput } from '@mantine/core'
+import { Group, Select, TextInput, Tooltip } from '@mantine/core'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { qk } from '@core/api/keys'
@@ -14,6 +14,34 @@ import { MonoCell, DimMonoCell, MonoText } from '@shared/ui/MonoCell'
 import { DataTable } from '@shared/tables/DataTable'
 import { formatIso } from '@shared/format'
 import { DecisionDetailDrawer } from './DecisionDetailDrawer'
+
+function fmtPp(v: unknown, dp = 2): string {
+  if (v == null) return '—'
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '—'
+  return `${n > 0 ? '+' : ''}${(n * 100).toFixed(dp)}pp`
+}
+
+function fmtPct(v: unknown, dp = 1): string {
+  if (v == null) return '—'
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '—'
+  return `${(n * 100).toFixed(dp)}%`
+}
+
+function fmtUsdc(v: unknown): string {
+  if (v == null) return '—'
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '—'
+  return `$${n.toFixed(2)}`
+}
+
+function edgeTone(v: unknown): 'success' | 'danger' | 'neutral' {
+  if (v == null) return 'neutral'
+  const n = Number(v)
+  if (!Number.isFinite(n) || n === 0) return 'neutral'
+  return n > 0 ? 'success' : 'danger'
+}
 
 const PAGE_SIZE = 100
 
@@ -81,6 +109,54 @@ export function DecisionsPage() {
         cell: ({ row }) => (
           <DimMonoCell>{row.original.reason ?? '—'}</DimMonoCell>
         ),
+      },
+      // === Kelly 内核列(metadata.kelly 在 quant_decide accepted=true 时有值) ===
+      {
+        header: 'prob_p',
+        cell: ({ row }) => {
+          const k = row.original.decision_output?.metadata?.kelly
+          return (
+            <Tooltip label={`fair_prob · confidence=${k?.prob_confidence ?? '—'}`} withArrow disabled={!k?.prob_p}>
+              <MonoText>{fmtPct(k?.prob_p, 2)}</MonoText>
+            </Tooltip>
+          )
+        },
+      },
+      {
+        header: 'edge',
+        cell: ({ row }) => {
+          const k = row.original.decision_output?.metadata?.kelly
+          return (
+            <Tooltip
+              label={`gross=${fmtPp(k?.edge_gross)} · fee=${k?.fee_per_share_usdc ?? '—'}`}
+              withArrow
+              disabled={!k?.edge_net}
+            >
+              <span>
+                <StatusPill tone={edgeTone(k?.edge_net)} size="xs">{fmtPp(k?.edge_net)}</StatusPill>
+              </span>
+            </Tooltip>
+          )
+        },
+      },
+      {
+        header: 'price / size',
+        cell: ({ row }) => {
+          const out = row.original.decision_output
+          const k = out?.metadata?.kelly
+          if (!out?.price && !out?.amount_usdc) return <DimMonoCell>—</DimMonoCell>
+          return (
+            <Tooltip
+              label={k?.capped_by ? `capped_by: ${k.capped_by}` : 'natural Kelly'}
+              withArrow
+              disabled={!k?.capped_by}
+            >
+              <MonoText>
+                {out?.price ?? '—'} / {fmtUsdc(out?.amount_usdc)}
+              </MonoText>
+            </Tooltip>
+          )
+        },
       },
       {
         header: 'trace',

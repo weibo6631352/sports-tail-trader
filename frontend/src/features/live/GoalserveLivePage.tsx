@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import {
   Anchor,
   Badge,
@@ -213,6 +214,7 @@ function ScoreCell({ game }: { game: LiveGame | null | undefined }) {
 }
 
 export function GoalserveLivePage() {
+  const navigate = useNavigate()
   const [limit, setLimit] = useState(100)
   const [openConditionId, setOpenConditionId] = useState<string | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -356,6 +358,16 @@ export function GoalserveLivePage() {
               }}
             >
               {openConditionId === cid ? '收起' : '详情'}
+            </InlineActionButton>
+            <InlineActionButton
+              variant="link"
+              onClick={(e) => {
+                e.stopPropagation()
+                // 跳到 DecisionsPage 看该 cid 的 quant_decide Kelly 内核时序
+                navigate(`/investigate/decisions?condition_id=${encodeURIComponent(cid)}`)
+              }}
+            >
+              Kelly →
             </InlineActionButton>
             {polyUrl ? (
               <Anchor href={polyUrl} target="_blank" rel="noopener noreferrer" size="xs">
