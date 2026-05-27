@@ -17,6 +17,8 @@ dependencies = [
   "httpx>=0.26",
   # HTTP/2 multiplexing 给 httpx；跨洋代理链路下 HPACK + 单连接多 stream 关键。
   "h2>=4.0",
+  # R29: orjson 替代 stdlib json 在 inplay feed parse (~5-10x 速度, 释放 GIL 更快).
+  "orjson>=3.11",
   "pydantic>=2.6",
   "pydantic-settings>=2.2",
   "psutil>=5.9",
