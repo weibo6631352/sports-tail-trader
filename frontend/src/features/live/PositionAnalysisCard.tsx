@@ -350,7 +350,17 @@ export function PositionAnalysisCard({ position, onForceExit }: Props) {
 
   const cashPnl = position.cash_pnl
   const cashPnlTone = pnlTone(cashPnl)
-  const gameMeta = gameStatusLabel(lg?.status)
+
+  // observed_at > 5min 即视为 stale: Goalserve 对已结算赛事停止推送 inplay,
+  // 缓存的 status="live"/score 等是冻结值,不再反映真实状态——必须显式标 stale
+  // 否则 UX 把"3h 前的 live"显示成进行中误导操盘.
+  const observedAgeS = lg?.observed_at
+    ? Math.floor((Date.now() - new Date(lg.observed_at).getTime()) / 1000)
+    : null
+  const isStaleSnapshot = observedAgeS != null && observedAgeS > 300
+  const gameMeta = isStaleSnapshot
+    ? ({ tone: 'neutral' as const, text: 'stale·缓存' })
+    : gameStatusLabel(lg?.status)
 
   let statusLabel: { tone: 'success' | 'warning' | 'neutral' | 'danger'; text: string }
   const isAnalyzing = !position.redeemable && !position.settled_zero_value
@@ -402,6 +412,16 @@ export function PositionAnalysisCard({ position, onForceExit }: Props) {
                 {lg?.home_score ?? '—'} : {lg?.away_score ?? '—'}
               </Text>
               <StatusPill tone={gameMeta.tone} size="xs">{gameMeta.text}</StatusPill>
+              {isStaleSnapshot ? (
+                <Tooltip
+                  label={`Goalserve 已停止推送本事件 ${Math.floor((observedAgeS ?? 0) / 60)} 分钟·缓存数据冻结·真实状态可能已结束`}
+                  withArrow
+                  multiline
+                  w={280}
+                >
+                  <span><StatusPill tone="warning" size="xs">数据陈旧</StatusPill></span>
+                </Tooltip>
+              ) : null}
               {lg?.period && lg.period !== lg.raw_status ? (
                 <Text size="xs" c="dimmed">{lg.period}</Text>
               ) : null}
