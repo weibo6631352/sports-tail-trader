@@ -652,23 +652,92 @@ export type PnlBreakdown = {
 
 // ---------- 候选 / Live state ----------
 
-export type Candidate = {
-  condition_id: string
+// 字段与后端 candidates_aggregator._serialize 完全对齐.
+// intent.metadata.kelly 含 Kelly 内核(prob_p/edge_net/f_star/fee/capped_by/
+// buy_budget),是操盘盯盘行内观测的核心信息——不再 [key:string]:unknown 吞掉.
+
+export type KellyInternals = {
+  prob_p?: DecimalStr | null
+  prob_confidence?: DecimalStr | null
+  price_c?: DecimalStr | null
+  edge_gross?: DecimalStr | null
+  edge_net?: DecimalStr | null
+  fee_per_share_usdc?: DecimalStr | null
+  f_star?: DecimalStr | null
+  effective_kelly_fraction?: DecimalStr | null
+  effective_min_stake_usdc?: DecimalStr | null
+  capped_by?: string | null
+  is_round_up_overbet?: boolean
+  buy_budget_usdc?: DecimalStr | null
+  target_budget_usdc?: DecimalStr | null
+  current_exposure_usdc?: DecimalStr | null
+}
+
+export type CandidateIntent = {
+  trace_id?: string | null
+  condition_id?: string | null
   token_id?: string | null
   market_slug?: string | null
+  side?: 'BUY' | 'SELL' | null
+  order_type?: string | null
+  price?: DecimalStr | null
+  amount_usdc?: DecimalStr | null
+  size_shares?: DecimalStr | null
+  order_id?: string | null
+  reason?: string | null
+  allow_open_exit_overlap?: boolean
+  metadata?: {
+    kelly?: KellyInternals
+    signal_at?: Iso
+    [key: string]: unknown
+  }
+}
+
+export type CandidateAllocation = {
+  buy_budget_usdc?: DecimalStr | null
+  target_budget_usdc?: DecimalStr | null
+  current_exposure_usdc?: DecimalStr | null
+  prob_p?: DecimalStr | null
+  edge_net?: DecimalStr | null
+  kelly_f_star?: DecimalStr | null
+  [key: string]: unknown
+}
+
+export type Candidate = {
+  candidate_id: string
+  trace_id?: string | null
+  condition_id: string
+  token_id?: string | null
+  outcome?: string | null
+  market_slug?: string | null
+  event_slug?: string | null
+  event_title?: string | null
   market_type?: string | null
-  league?: string | null
-  game_status?: string | null
-  action?: string | null
-  execution_permission?: string | null
+  side?: string | null
+  line?: DecimalStr | null
+  best_ask?: DecimalStr | null
+  // 状态
+  ready_to_trade?: boolean
   accepted?: boolean
   confirmable?: boolean
+  manual_confirmed?: boolean
+  confirmed_by?: string | null
+  confirm_reason?: string | null
+  action?: string | null
+  decision_action?: string | null
+  decision_kind?: string | null
+  execution_permission?: string | null
   reason?: string | null
-  fair_value?: DecimalStr | null
-  entry_price?: DecimalStr | null
-  size_shares?: DecimalStr | null
-  badges?: string[]
-  metadata?: Record<string, unknown>
+  label?: string | null
+  // live state
+  signal_allowed?: boolean | null
+  live_state_age_ms?: number | null
+  live_state_source?: string | null
+  // 量化内核
+  allocation?: CandidateAllocation | null
+  intent?: CandidateIntent | null
+  extras?: Record<string, unknown>
+  payload?: Record<string, unknown>
   [key: string]: unknown
 }
 

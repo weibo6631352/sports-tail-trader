@@ -54,7 +54,7 @@ export function CandidatesWidget() {
                 <Text size="sm">{c.market_slug ?? c.condition_id}</Text>
                 <Group gap={6}>
                   <Text size="xs" c="dimmed">
-                    {c.league ?? '—'} · {c.market_type ?? '—'}
+                    {c.outcome ?? '—'} · {c.market_type ?? '—'}
                   </Text>
                   {c.token_id ? <CopyableId value={c.token_id} dense label="tok" /> : null}
                 </Group>

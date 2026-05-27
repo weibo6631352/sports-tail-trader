@@ -46,7 +46,7 @@ export function StrategyOverviewPage() {
                   <Stack gap={0}>
                     <Text size="sm">{c.market_slug ?? c.condition_id}</Text>
                     <Text size="xs" c="dimmed">
-                      {c.league ?? '—'} · {c.market_type ?? '—'} · action={c.action ?? '—'}
+                      {c.market_type ?? '—'} · {c.outcome ?? '—'} · action={c.action ?? '—'}
                     </Text>
                   </Stack>
                   <StatusPill tone={c.accepted ? 'success' : 'danger'} size="xs">
