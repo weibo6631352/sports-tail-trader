@@ -53,7 +53,8 @@ def _resolve_publisher(websocket: WebSocket) -> OperatorWsPublisher | None:
         runtime = provider()
     if runtime is None:
         return None
-    return getattr(runtime, "operator_ws_publisher", None)
+    # R18: RuntimeComponents.operator_ws_publisher 非 Optional 直接访问
+    return runtime.operator_ws_publisher
 
 
 def _resolve_api_token(websocket: WebSocket) -> str | None:
@@ -64,10 +65,8 @@ def _resolve_api_token(websocket: WebSocket) -> str | None:
         runtime = provider()
     if runtime is None:
         return None
-    settings = getattr(runtime, "settings", None)
-    if settings is None:
-        return None
-    return getattr(settings, "admin_api_token", None)
+    # R18: runtime.settings 非 Optional；admin_api_token 是 Settings dynamic env 字段保留 getattr 兜底
+    return getattr(runtime.settings, "admin_api_token", None)
 
 
 def _parse_topics(raw: str | None, known: frozenset[str]) -> tuple[str, ...]:

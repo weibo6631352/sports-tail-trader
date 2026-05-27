@@ -281,6 +281,9 @@ def _compute_kelly(
         liquidity_usdc=_market_liquidity_usdc(snapshot),
         allow_round_up_to_market_min=kelly_allow_round_up_to_market_min,
         round_up_max_overbet_ratio=kelly_round_up_max_overbet_ratio,
+        # 透传市场 tick_size 给 Kelly，让价格端点跟随 0.01 / 0.001 tick 动态调整
+        # (kelly.py 缺省 [0.01, 0.99] 会硬拒 0.001-tick 市场如 NBA props 等)。
+        market_tick_size=snapshot.market.tick_size,
     )
 
 

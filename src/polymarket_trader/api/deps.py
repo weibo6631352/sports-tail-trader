@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, Request
 
 from polymarket_trader.app.operator_service import OperatorService
 from polymarket_trader.domain.time_filters import TimeRange
 
+if TYPE_CHECKING:
+    # R16-D (Code Q1) 强类型化——避免 main → api → main 循环 import，
+    # 用 TYPE_CHECKING + 字符串 hint。运行时 fastapi Depends 仍返回真实
+    # RuntimeComponents 实例，类型层让 IDE / mypy 报错 getattr 兜底误用。
+    from polymarket_trader.main import RuntimeComponents
 
-def get_runtime(request: Request) -> Any:
+
+def get_runtime(request: Request) -> "RuntimeComponents":
     provider = getattr(request.app.state, "get_runtime", None)
     if callable(provider):
         runtime = provider()

@@ -21,10 +21,15 @@ from __future__ import annotations
 import asyncio
 import time as _time
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from polymarket_trader.serialization import decimal_text, jsonable, page_payload
 from collections.abc import Mapping
+
+if TYPE_CHECKING:
+    # R17 (Code Q1): RuntimeComponents 强类型 + TYPE_CHECKING 避免 main→api→main 循环。
+    # 删 getattr duck-typing → IDE 报错让重命名字段时不再静默断裂。
+    from polymarket_trader.main import RuntimeComponents
 
 
 def _text_filter_matches(value: object, expected: str | None) -> bool:
@@ -82,19 +87,21 @@ def reset_candidate_cache() -> None:
 
 
 class CandidateAggregator:
-    def __init__(self, *, runtime: Any) -> None:
+    def __init__(self, *, runtime: "RuntimeComponents | None") -> None:
         self._runtime = runtime
 
     def _account_snapshot(self) -> AccountSnapshot:
-        store = getattr(self._runtime, "account_state_store", None)
-        return store.snapshot() if store is not None else AccountSnapshot()
+        if self._runtime is None:
+            return AccountSnapshot()
+        return self._runtime.account_state_store.snapshot()
 
     def _market_ws_snapshot(self, token_id: str):
-        worker = getattr(self._runtime, "market_ws_worker", None)
-        return worker.snapshot(token_id) if worker is not None else None
+        if self._runtime is None:
+            return None
+        return self._runtime.market_ws_worker.snapshot(token_id)
 
     def _entry_metadata_store(self) -> Any | None:
-        return getattr(self._runtime, "market_metadata_store", None)
+        return self._runtime.market_metadata_store if self._runtime is not None else None
 
     def _resolve_market(
         self,
@@ -103,9 +110,9 @@ class CandidateAggregator:
         condition_id: str | None = None,
         token_id: str | None = None,
     ) -> Market | None:
-        registry = getattr(self._runtime, "registry", None)
-        if registry is None:
+        if self._runtime is None:
             return None
+        registry = self._runtime.registry
         if condition_id is not None:
             m = registry.get_by_condition_id(condition_id)
             if m is not None:
@@ -134,9 +141,9 @@ class CandidateAggregator:
             return () if market is None else (market,)
 
         store = self._entry_metadata_store()
-        registry = getattr(self._runtime, "registry", None)
-        if store is None or registry is None:
+        if store is None or self._runtime is None:
             return ()
+        registry = self._runtime.registry
         now = datetime.now(timezone.utc)
         markets: dict[str, Market] = {}
         for record in store.records():

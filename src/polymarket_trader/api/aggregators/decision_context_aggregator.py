@@ -33,6 +33,9 @@ from polymarket_trader.serialization import jsonable
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    # R17 (Code Q1)
+    from polymarket_trader.main import RuntimeComponents
+
 
 # 复盘默认 channel 集，和 routes/audit_events.py by-condition 保持一致。
 # 只列实际进 audit_events 表的 event_title:
@@ -54,7 +57,7 @@ class DecisionContextAggregator:
     def __init__(
         self,
         *,
-        runtime: Any,
+        runtime: "RuntimeComponents | None",
         session_factory: "async_sessionmaker[AsyncSession] | None",
     ) -> None:
         self._runtime = runtime
@@ -95,9 +98,11 @@ class DecisionContextAggregator:
                     position_items.append(payload)
 
         # ---------- live_state（goalserve inplay / livescore record）----------
+        # R19 (架构师 R8 1.3): market_metadata_store 是 RuntimeComponents 非 Optional，
+        # 删 dead branch `if meta_store is not None`，只留 market_view None check。
         live_state: dict[str, Any] | None = None
-        meta_store = getattr(runtime, "market_metadata_store", None)
-        if meta_store is not None and market_view is not None:
+        meta_store = runtime.market_metadata_store
+        if market_view is not None:
             for rec in meta_store.records():
                 if rec.condition_id != condition_id:
                     continue

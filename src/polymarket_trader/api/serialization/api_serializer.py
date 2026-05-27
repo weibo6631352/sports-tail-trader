@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    # R19-4 (Code R2 A4 严重遗漏 - R17 漏掉的核心工厂): ApiSerializer.from_runtime
+    # 是 8 处 aggregator 共用入口，R17 漏改让"强类型"声明在第一跳就失能。
+    from polymarket_trader.main import RuntimeComponents
 
 from polymarket_trader.recovery.reconcile_service import ReconcileAction, ReconcilePlan
 from polymarket_trader.pipeline.execution.order_gateway import OrderGatewayReview
@@ -46,24 +51,31 @@ class ApiSerializer:
     market_ws_snapshot: Callable[[str], OrderbookSnapshot | None]
 
     @classmethod
-    def from_runtime(cls, runtime: Any) -> "ApiSerializer":
+    def from_runtime(cls, runtime: "RuntimeComponents | None") -> "ApiSerializer":
         """从 runtime 一站式构造 ApiSerializer。
 
         把 account / registry / WS snapshot provider 都从 runtime 接出来，
         避免每个 aggregator 重复 `_build_serializer` 模板。
+
+        R19-4 (Code R2 A4 修复)：R17 漏改此入口让强类型在第一跳失能；
+        强类型 RuntimeComponents + 删 getattr，3 字段都非 Optional 直接访问。
+        runtime is None 时（fixture / 测试构造）返回空 snapshot provider 兜底。
         """
 
         def _account_snapshot() -> AccountSnapshot:
-            store = getattr(runtime, "account_state_store", None) if runtime else None
-            return store.snapshot() if store is not None else AccountSnapshot()
+            if runtime is None:
+                return AccountSnapshot()
+            return runtime.account_state_store.snapshot()
 
         def _registry_snapshot() -> MarketRegistrySnapshot:
-            registry = getattr(runtime, "registry", None) if runtime else None
-            return registry.snapshot() if registry is not None else MarketRegistrySnapshot(tuple())
+            if runtime is None:
+                return MarketRegistrySnapshot(tuple())
+            return runtime.registry.snapshot()
 
         def _market_ws_snapshot(token_id: str) -> OrderbookSnapshot | None:
-            worker = getattr(runtime, "market_ws_worker", None) if runtime else None
-            return worker.snapshot(token_id) if worker is not None else None
+            if runtime is None:
+                return None
+            return runtime.market_ws_worker.snapshot(token_id)
 
         return cls(
             account_snapshot_provider=_account_snapshot,

@@ -289,7 +289,9 @@ async def iter_listener_frames(
 
 
 def _get_registry(runtime: Any) -> SseSubscriptionRegistry:
-    registry = getattr(runtime, "sse_subscription_registry", None)
+    # R18: runtime.sse_subscription_registry 是 Optional (RuntimeComponents 中默认 None)，
+    # 保留 None check 但走属性访问而非 getattr，让 IDE 能查重命名。
+    registry = runtime.sse_subscription_registry if runtime is not None else None
     if not isinstance(registry, SseSubscriptionRegistry):
         raise HTTPException(status_code=503, detail="sse_registry_unavailable")
     return registry

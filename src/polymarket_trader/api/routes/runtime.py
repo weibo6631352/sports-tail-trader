@@ -23,6 +23,85 @@ async def runtime(runtime: Any = Depends(get_runtime)) -> dict[str, object]:
     return await aggregator.runtime_snapshot()
 
 
+@router.get("/runtime/build-signature")
+async def runtime_build_signature(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
+    """R8 (CPO Round 5)：introspect 当前 binary 是否含 R6/R7 关键改动。
+
+    用户重启后调一次即可确认部署生效（背景：用户两次跳过 R5/R6/R7 验证，导致
+    后端可能仍跑旧 binary——这个端点主动暴露"代码已改运行时未更新"的事实，
+    杜绝静默漂移）。
+
+    返回特征：
+    - ``signal_snapshot_module_present``：``domain/signal_snapshot.py`` 能否
+      import（R6 新建文件，旧 binary 没有）
+    - ``live_signal_snapshot_field_count``：``LiveSignalSnapshot`` dataclass
+      字段数（R6 设计 11；其它值 = R6 未完整加载）
+    - ``quant_decider_prob_provider_via_estimate_signal``：R7 改造后
+      ``size_entry`` 闭包 ``_prob_provider`` 走 estimate_signal 单一入口的
+      静态检测（旧 binary 是手写 candidates max）
+    - ``signal_snapshot_store_present``：``RuntimeComponents.signal_snapshot_store``
+      字段是否实例化（R6 wiring）
+
+    任一关键特征缺失 → ``runtime_outdated=True`` + ``advisory`` 列出缺什么。
+    端点本身永远 200 OK；用 ``runtime_outdated`` 字段给 operator 决策依据，
+    不强行 raise 503 避免误伤 healthcheck。
+    """
+    advisory: list[str] = []
+    signature: dict[str, Any] = {}
+
+    # 特征 1: signal_snapshot module
+    try:
+        from polymarket_trader.domain.signal_snapshot import LiveSignalSnapshot
+        import dataclasses as _dc
+        field_count = len(_dc.fields(LiveSignalSnapshot))
+        signature["signal_snapshot_module_present"] = True
+        signature["live_signal_snapshot_field_count"] = field_count
+        # R15 加 account_age_s 字段 → 期望从 11 → 12（R6 11 + R15 1）
+        if field_count != 12:
+            advisory.append(
+                f"LiveSignalSnapshot field_count={field_count} (expected 12) - R6/R15 partial load"
+            )
+    except ImportError:
+        signature["signal_snapshot_module_present"] = False
+        signature["live_signal_snapshot_field_count"] = None
+        advisory.append("domain.signal_snapshot module missing - R6 not deployed")
+
+    # 特征 2: quant_decider 走 estimate_signal 单一入口（R7）
+    try:
+        import inspect as _inspect
+        from polymarket_trader.workflow import quant_decider as _qd
+        size_entry_source = _inspect.getsource(_qd.size_entry)
+        # R7 后 _prob_provider 调 estimate_signal；R7 前调 math_prob+goalserve_prob
+        uses_estimate_signal = "estimate_signal(" in size_entry_source
+        uses_legacy_calls = (
+            "math_prob(context," in size_entry_source
+            or "goalserve_prob(context," in size_entry_source
+        )
+        signature["quant_decider_prob_provider_via_estimate_signal"] = uses_estimate_signal
+        signature["quant_decider_prob_provider_legacy_calls"] = uses_legacy_calls
+        if not uses_estimate_signal or uses_legacy_calls:
+            advisory.append(
+                "quant_decider._prob_provider not on estimate_signal single-entry - R7 not deployed"
+            )
+    except Exception as exc:  # noqa: BLE001
+        signature["quant_decider_prob_provider_via_estimate_signal"] = None
+        advisory.append(f"quant_decider introspect failed: {str(exc)[:80]}")
+
+    # 特征 3: RuntimeComponents.signal_snapshot_store 字段已实例化（R6 wiring）
+    # R18 (Code Q1): RuntimeComponents.signal_snapshot_store 非 Optional，runtime 由
+    # fastapi Depends(get_runtime) 注入也非 None，直接 .signal_snapshot_store 安全。
+    # 但保留 advisory 路径——hasattr token_count 这种 quack 容错给 hot-swap 场景兜底。
+    store = runtime.signal_snapshot_store
+    signature["signal_snapshot_store_present"] = True
+    signature["signal_snapshot_store_token_count"] = (
+        store.token_count() if hasattr(store, "token_count") else None
+    )
+
+    signature["runtime_outdated"] = len(advisory) > 0
+    signature["advisory"] = advisory
+    return signature
+
+
 @router.get("/markets/tracking-breakdown")
 async def markets_tracking_breakdown(
     runtime: Any = Depends(get_runtime),
@@ -48,12 +127,11 @@ async def markets_tracking_breakdown(
     from datetime import datetime, timedelta, timezone
     from collections import Counter
 
-    registry = getattr(runtime, "registry", None)
-    if registry is None:
-        return {"available": False, "reason": "registry_unavailable"}
-
-    ws_worker = getattr(runtime, "market_ws_worker", None)
-    metadata_store = getattr(runtime, "market_metadata_store", None)
+    # R18: RuntimeComponents 强类型直接访问；3 字段都非 Optional，runtime 自身由
+    # Depends(get_runtime) 保证非 None（unavailable 时 get_runtime 已返 503）。
+    registry = runtime.registry
+    ws_worker = runtime.market_ws_worker
+    metadata_store = runtime.market_metadata_store
 
     snapshot = registry.snapshot()
     markets = snapshot.markets
@@ -84,19 +162,10 @@ async def markets_tracking_breakdown(
                 metadata_by_cid[r.condition_id] = r
 
     for market in markets:
-        # by_sport: 按 slug 前缀 (粗略)
-        slug = (market.market_slug or "").lower()
-        sport = "unknown"
-        for s in ("mlb", "nba", "wnba", "nhl", "nfl", "ncaaf", "ncaab", "kbo", "cricket",
-                  "atp", "wta", "itf", "mls", "epl", "laliga", "j1100", "j2100", "j3",
-                  "cs2", "lol", "dota", "val", "sc2", "ow", "esports",
-                  "boxing", "mma", "ufc", "f1", "motogp", "golf", "tennis"):
-            if slug.startswith(s + "-") or slug.startswith(s + "1-") or slug.startswith(s + "2-"):
-                sport = s
-                break
-        if sport == "unknown" and slug:
-            # 取第一段 (xxx-yyy-zzz → xxx)
-            sport = slug.split("-")[0] if "-" in slug else slug[:10]
+        # by_sport：单一 sport_resolver 权威映射（参 sports/slug_resolver.py）；
+        # market.sport 由 adapter 出口回填，此处直接读，避免在健康面板再写一份
+        # 硬编码 slug→sport 列表（R5-C 反冗余收口）。
+        sport = market.sport or "unknown"
         by_sport[sport] += 1
 
         # by_trading_status
@@ -195,7 +264,8 @@ async def system_perf(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
     # 补充 DB pool stats (SystemPerfMonitor 内不持有 engine 引用,只能在路由层取)
     db_pool: dict[str, Any] = {}
     try:
-        factory = getattr(runtime, "db_session_factory", None)
+        # R18: runtime.db_session_factory 非 Optional；factory.kw / .bind 仍 getattr（SqlAlchemy 兼容路径）
+        factory = runtime.db_session_factory
         if factory is not None:
             engine = getattr(factory, "kw", {}).get("bind") or getattr(factory, "bind", None)
             if engine is None:
@@ -215,26 +285,25 @@ async def system_perf(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
         db_pool = {"error": str(exc)[:120]}
     snapshot["db_pool"] = db_pool
     # 内存 store 大小(buffer 容量 / bucket 数 / outbox 状态)
+    # R18: 5 个 store 字段都是 RuntimeComponents 非 Optional，runtime 由 Depends 注入非 None。
+    # try/except 块保留兜底 store 内部方法异常，但属性访问直接 .X（IDE 能查重命名）。
     in_memory_stores: dict[str, Any] = {}
     try:
-        history = getattr(runtime, "sports_live_history_buffer", None)
-        if history is not None:
-            in_memory_stores["sports_live_history_tracked_conditions"] = history.tracked_condition_count()
+        in_memory_stores["sports_live_history_tracked_conditions"] = (
+            runtime.sports_live_history_buffer.tracked_condition_count()
+        )
     except Exception: pass
     try:
-        ob_buf = getattr(runtime, "orderbook_history_buffer", None)
-        if ob_buf is not None:
-            in_memory_stores["orderbook_history_tracked_tokens"] = ob_buf.tracked_token_count() if hasattr(ob_buf, "tracked_token_count") else None
+        ob_buf = runtime.orderbook_history_buffer
+        in_memory_stores["orderbook_history_tracked_tokens"] = (
+            ob_buf.tracked_token_count() if hasattr(ob_buf, "tracked_token_count") else None
+        )
     except Exception: pass
     try:
-        registry = getattr(runtime, "registry", None)
-        if registry is not None:
-            in_memory_stores["registry_markets"] = len(registry.snapshot().markets)
+        in_memory_stores["registry_markets"] = len(runtime.registry.snapshot().markets)
     except Exception: pass
     try:
-        meta = getattr(runtime, "market_metadata_store", None)
-        if meta is not None:
-            in_memory_stores["market_metadata_records"] = len(list(meta.records()))
+        in_memory_stores["market_metadata_records"] = len(list(runtime.market_metadata_store.records()))
     except Exception: pass
     snapshot["in_memory_stores"] = in_memory_stores
     return snapshot

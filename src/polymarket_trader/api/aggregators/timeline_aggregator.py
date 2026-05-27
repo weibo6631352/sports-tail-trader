@@ -37,13 +37,16 @@ from ._helpers import slice_sequence
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    # R17 (Code Q1)
+    from polymarket_trader.main import RuntimeComponents
+
 
 class TimelineAggregator:
     def __init__(
         self,
         *,
         session_factory: "async_sessionmaker[AsyncSession] | None",
-        runtime: Any = None,
+        runtime: "RuntimeComponents | None" = None,
         serializer: ApiSerializer | None = None,
     ) -> None:
         self._session_factory = session_factory
@@ -160,12 +163,12 @@ class TimelineAggregator:
             # 无 DB 降级到内存快照
             account = (
                 self._runtime.account_state_store.snapshot()
-                if (self._runtime is not None and getattr(self._runtime, "account_state_store", None) is not None)
+                if self._runtime is not None
                 else AccountSnapshot()
             )
             registry_snapshot = (
                 self._runtime.registry.snapshot()
-                if (self._runtime is not None and getattr(self._runtime, "registry", None) is not None)
+                if self._runtime is not None
                 else MarketRegistrySnapshot(tuple())
             )
             records = build_trade_replay_records(

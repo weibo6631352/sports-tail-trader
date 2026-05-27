@@ -117,6 +117,8 @@ export const marketsApi = {
       ws_subscribed_token_count?: number
       total_entry_metadata?: number
       by_live_phase?: Record<string, number>
+      by_sport?: Record<string, number>
+      by_trading_status?: Record<string, number>
     }>('/markets/tracking-breakdown', { signal }),
   liquidity: (
     params: { token_id: string; condition_id?: string; market_slug?: string; depth_ticks?: number },
@@ -750,6 +752,73 @@ export const tradesApi = {
 
 // ---------- 总入口 ----------
 
+// R9 (CPO Round 6) 信号融合快照 endpoint。后端落点 api/routes/signals.py。
+// 返回结构：{ snapshot: {...11字段...} } 或 { snapshot: null, reason: "no_signal_yet" }
+// 未重启时 store 为空，前端按 reason 字段降级显示占位文案，不弹错。
+export interface SignalSnapshotResponse {
+  snapshot: {
+    condition_id: string
+    token_id: string
+    pm_best_ask: string | null
+    pm_best_bid: string | null
+    goalserve_fair_prob: string | null
+    math_prob: string | null
+    microprice: string | null
+    final_prob_p: string
+    source_used: string
+    edge_pp: string | null
+    timestamp: string
+  } | null
+  reason?: string
+}
+
+// R10 操盘指挥中心：暴露 top-K 差价候选 + binary 健康（R6/R8 endpoint 已就位）。
+export interface EdgeSignalsResponse {
+  store_token_count: number
+  k: number
+  top_k: Array<{
+    condition_id: string
+    token_id: string
+    pm_best_ask: string | null
+    pm_best_bid: string | null
+    goalserve_fair_prob: string | null
+    math_prob: string | null
+    microprice: string | null
+    final_prob_p: string
+    source_used: string
+    edge_pp: string | null
+    timestamp: string
+  }>
+}
+
+export interface BuildSignatureResponse {
+  signal_snapshot_module_present: boolean
+  live_signal_snapshot_field_count: number | null
+  quant_decider_prob_provider_via_estimate_signal: boolean | null
+  quant_decider_prob_provider_legacy_calls: boolean | null
+  signal_snapshot_store_present: boolean
+  signal_snapshot_store_token_count: number | null
+  runtime_outdated: boolean
+  advisory: string[]
+}
+
+export const signalsApi = {
+  snapshotForToken: (tokenId: string, signal?: AbortSignal) =>
+    apiClient.get<SignalSnapshotResponse>(
+      `/signals/snapshot/${encodeURIComponent(tokenId)}`,
+      { signal },
+    ),
+  // R10: 操盘指挥中心首页消费——R6 ring buffer top-K 差价候选
+  topEdges: (k: number = 5, signal?: AbortSignal) =>
+    apiClient.get<EdgeSignalsResponse>('/analytics/edge-signals', {
+      params: { k },
+      signal,
+    }),
+  // R10: 操盘指挥中心首页消费——R8 binary 含 R5/R6/R7/R8/R9 改动确认
+  buildSignature: (signal?: AbortSignal) =>
+    apiClient.get<BuildSignatureResponse>('/runtime/build-signature', { signal }),
+}
+
 export const api = {
   health: healthApi,
   decisions: decisionsApi,
@@ -767,5 +836,6 @@ export const api = {
   tradeReplays: tradeReplaysApi,
   trades: tradesApi,
   sports: sportsApi,
+  signals: signalsApi,
 }
 

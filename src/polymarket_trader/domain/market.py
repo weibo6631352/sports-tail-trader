@@ -51,6 +51,13 @@ class Market:
     # F1 props、cricket props 等）可靠填充，对常规盘口多为空。workflow 层用它做精确的
     # prop 家族识别，避免泛化兜底拒绝原因（CLAUDE.md §17）。
     sports_market_type: str | None = None
+    # 规范运动码（baseball / basketball / esports / football / ... 与
+    # `INPLAY_COVERED_SPORTS` 对齐）。由 `sports.slug_resolver.resolve_sport_from_market`
+    # 在 gamma payload → Market 转换时回填，下游 SportResolver / 健康面板 / 直播源
+    # 订阅决策都读此字段，单一来源避免 R5 诊断里"mlbb 在 runtime 列表却不在
+    # live_state token 表"那种漂移。None 表示推不出运动（多见于 outright / 非体育
+    # 市场），调用方据此跳过 live source 订阅。
+    sport: str | None = None
     matched_keywords: tuple[str, ...] = field(default_factory=tuple)
     trading_status: TradingStatus = TradingStatus.CANDIDATE
     reject_reason: str | None = None

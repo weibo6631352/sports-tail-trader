@@ -30,6 +30,7 @@ from polymarket_trader.api.routes import (
     outbox,
     portfolio,
     positions,
+    signals,
     sports,
     stream,
     trade_replays,
@@ -234,6 +235,7 @@ def create_app(
     app.include_router(positions.router)
     app.include_router(trade_replays.router)
     app.include_router(trades.router)
+    app.include_router(signals.router)
     app.include_router(sports.router)
     app.include_router(portfolio.router)
     app.include_router(outbox.router)

@@ -59,6 +59,12 @@ HeartbeatCallback = Callable[..., None]
 # 60s 在 N13 观测的"4 分钟无心跳"上下文里足够灵敏，又不会刷屏。
 logger = logging.getLogger(__name__)
 
+# R16-B (Code Q5 + Code 给 Perf 的 challenge 答复) tick_reprice_* 事件名集中常量。
+# 防止未来重命名/扩展（如加 tick_reprice_partial）时漏改某处字面量、防止 silencer
+# 误连带：triggered 是持仓退出审计真相必须 INFO 级，skip 是 P0 噪声只 DEBUG。
+_EVENT_TICK_REPRICE_TRIGGERED = "tick_reprice_triggered"
+_EVENT_TICK_REPRICE_SKIP = "tick_reprice_skip"
+
 _TRADING_DECISION_IDLE_HEARTBEAT_SECONDS = 60.0
 # _lifecycle_timeline LRU 上限：跟踪市场数超过此值时淘汰最久未更新的条目。
 # 每个市场最多保留最近 _LIFECYCLE_HISTORY_PER_MARKET 次转换记录。
@@ -413,8 +419,9 @@ class MarketTickWorker:
                         refreshed = position.with_mark_to_market(Decimal("0"))
                     self._account_state_store.upsert_position(refreshed)
                     position = refreshed
-                logger.info(
-                    "tick_reprice_triggered",
+                # R20: P0 hot path 每持仓每秒触发 1 次,持仓多 → 噪声炸了; 真相走 audit_events
+                logger.debug(
+                    _EVENT_TICK_REPRICE_TRIGGERED,
                     extra={
                         "condition_id": event.condition_id,
                         "token_id": event.token_id,
@@ -429,24 +436,31 @@ class MarketTickWorker:
                     position=position,
                 )
             else:
-                logger.info(
-                    "tick_reprice_skip",
+                # R16-B (三方协评 P0)：lazy DEBUG 守门——Perf F4 实测此处 66% 噪声
+                # (1323/2000 行 backend.log)。无持仓 token 在每 WS tick 后都跑到这分支，
+                # 直接 logger.info + extra dict alloc + JSON 序列化 + 落盘 IO 违反
+                # CLAUDE.md §7 P0 路径必须 lazy。levelcheck 通过才构造 extra dict。
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        _EVENT_TICK_REPRICE_SKIP,
+                        extra={
+                            "reason": "no_position" if position is None else "zero_shares",
+                            "condition_id": event.condition_id,
+                            "token_id": event.token_id,
+                        },
+                    )
+        else:
+            # R16-B 同上 lazy DEBUG。missing_event_fields 也是 P0 路径 silent skip 噪声。
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    _EVENT_TICK_REPRICE_SKIP,
                     extra={
-                        "reason": "no_position" if position is None else "zero_shares",
-                        "condition_id": event.condition_id,
-                        "token_id": event.token_id,
+                        "reason": "missing_event_fields",
+                        "has_snapshot": has_snapshot,
+                        "has_cid": has_cid,
+                        "has_tid": has_tid,
                     },
                 )
-        else:
-            logger.info(
-                "tick_reprice_skip",
-                extra={
-                    "reason": "missing_event_fields",
-                    "has_snapshot": has_snapshot,
-                    "has_cid": has_cid,
-                    "has_tid": has_tid,
-                },
-            )
 
         if _entry_gate_closed_for_event(snapshot, event):
             return None
@@ -474,10 +488,8 @@ class MarketTickWorker:
         # 不选那个"。P3 异步，失败静默；workflow 层不感知。
         await self._publish_allocation_decision(event=event, plan=plan)
         if plan.market is None or plan.orderbook is None or event.token_id != plan.orderbook.token_id:
-            # silent skip 历史上让"candidate ready=True 却无 order_created"难诊断；
-            # 这里 INFO 日志带 plan 是否 ready_to_trade + buy_budget，下次排查时直接 grep
-            # entry_dispatch_skipped condition_id=<...> 就能区分是 plan 缺数据还是 token 不匹配。
-            logger.info(
+            # R20: P0 hot path, 持仓多时每秒数十次, 降 DEBUG; 真相走 audit_events 表
+            logger.debug(
                 "entry_dispatch_skipped",
                 extra={
                     "skip_reason": (
@@ -502,7 +514,7 @@ class MarketTickWorker:
             state,
             plan,
         ):
-            logger.info(
+            logger.debug(
                 "entry_dispatch_skipped",
                 extra={
                     "skip_reason": "lifecycle_not_attemptable",

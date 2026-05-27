@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Anchor, Box, Divider, Group, SimpleGrid, Stack, Text, Tooltip } from '@mantine/core'
 import { useNavigate } from 'react-router-dom'
 import { qk } from '@core/api/keys'
-import { decisionsApi, marketsApi, sportsApi } from '@core/api/resources'
+import { decisionsApi, marketsApi, signalsApi, sportsApi } from '@core/api/resources'
 import type {
   PositionRow,
   KellyInternals,
@@ -277,6 +277,15 @@ export function PositionAnalysisCard({ position, onForceExit }: Props) {
     queryFn: ({ signal }) =>
       decisionsApi.list({ condition_id: position.condition_id, limit: 10 }, signal),
     enabled: !!position.condition_id,
+    refetchInterval: 5000,
+  })
+
+  // R9 (CPO Round 6) signal_snapshot ring buffer——R6 LiveSignalSnapshot 的最新快照。
+  // 未重启时 store 空 → 返 reason:"no_signal_yet"，下方 panel 显示占位文案不弹错。
+  const signalQuery = useQuery({
+    queryKey: ['signals', 'snapshot', tokenId],
+    queryFn: ({ signal }) => signalsApi.snapshotForToken(tokenId, signal),
+    enabled: !!tokenId && !position.redeemable,
     refetchInterval: 5000,
   })
 
@@ -752,6 +761,87 @@ export function PositionAnalysisCard({ position, onForceExit }: Props) {
             </Group>
           </Stack>
         </SimpleGrid>
+
+        <Divider variant="dashed" />
+
+        {/* ═══ Section 4: 信号融合（R6/R7 LiveSignalSnapshot）═══ */}
+        <Stack gap={6}>
+          <Group gap={6} align="baseline">
+            <Text size="xs" fw={600} c="dimmed">🧮 信号融合</Text>
+            <Tooltip
+              label="estimate_signal 三元组：真概率层 max (goalserve fair + math) → 盘口兜底 (microprice/mid/bid)。source_used = 最终被选用的层"
+              withArrow
+              multiline
+              w={320}
+            >
+              <Text size="xs" c="dimmed" style={{ cursor: 'help' }}>?</Text>
+            </Tooltip>
+          </Group>
+          {(() => {
+            const snap = signalQuery.data?.snapshot
+            const reason = signalQuery.data?.reason
+            if (!snap) {
+              return (
+                <Text size="xs" c="dimmed" ff="monospace">
+                  {reason === 'no_signal_yet'
+                    ? '等待首条信号快照（重启后自动产生）'
+                    : reason === 'signal_snapshot_store_not_wired'
+                      ? 'signal_snapshot_store 未装配（R6 wiring 缺失，curl /runtime/build-signature 排查）'
+                      : '—'}
+                </Text>
+              )
+            }
+            return (
+              <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="sm">
+                <Stack gap={0}>
+                  <Text size="xs" c="dimmed">goalserve_fair</Text>
+                  <Text ff="monospace" size="sm">{snap.goalserve_fair_prob ?? '—'}</Text>
+                </Stack>
+                <Stack gap={0}>
+                  <Text size="xs" c="dimmed">math_prob</Text>
+                  <Text ff="monospace" size="sm">{snap.math_prob ?? '—'}</Text>
+                </Stack>
+                <Stack gap={0}>
+                  <Text size="xs" c="dimmed">microprice</Text>
+                  <Text ff="monospace" size="sm">{snap.microprice ?? '—'}</Text>
+                </Stack>
+                <Stack gap={0}>
+                  <Text size="xs" c="dimmed">fused_p</Text>
+                  <Text ff="monospace" size="sm" fw={500}>{snap.final_prob_p}</Text>
+                </Stack>
+                <Stack gap={0}>
+                  <Text size="xs" c="dimmed">source</Text>
+                  <Text ff="monospace" size="sm">{snap.source_used}</Text>
+                </Stack>
+                <Stack gap={0}>
+                  <Text size="xs" c="dimmed">pm_ask</Text>
+                  <Text ff="monospace" size="sm">{snap.pm_best_ask ?? '—'}</Text>
+                </Stack>
+                <Stack gap={0}>
+                  <Text size="xs" c="dimmed">pm_bid</Text>
+                  <Text ff="monospace" size="sm">{snap.pm_best_bid ?? '—'}</Text>
+                </Stack>
+                <Stack gap={0}>
+                  <Tooltip label="goalserve_fair - pm_best_ask；正值 = 市场低估赢方 = 入场 edge 候选" withArrow>
+                    <Text size="xs" c="dimmed" style={{ cursor: 'help' }}>edge_pp</Text>
+                  </Tooltip>
+                  <Text
+                    ff="monospace"
+                    size="sm"
+                    fw={500}
+                    c={snap.edge_pp && parseFloat(snap.edge_pp) > 0 ? 'green' : undefined}
+                  >
+                    {snap.edge_pp ?? '—'}
+                  </Text>
+                </Stack>
+                <Stack gap={0}>
+                  <Text size="xs" c="dimmed">at</Text>
+                  <Text ff="monospace" size="xs">{new Date(snap.timestamp).toLocaleTimeString()}</Text>
+                </Stack>
+              </SimpleGrid>
+            )
+          })()}
+        </Stack>
       </Stack>
     </SectionCard>
   )

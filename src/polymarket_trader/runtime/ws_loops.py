@@ -509,11 +509,22 @@ async def run_market_ws(runtime: Any) -> None:
                             detail=f"subscribing count={len(subscribed_token_ids)}",
                         )
                     else:
+                        # 无可订阅 token → 显式标连接状态为 False（之前 silent skip
+                        # 让 connection_state 维持 initial False 但无 audit；24h 0 message
+                        # 时 operator 看不出是"没订阅"还是"订了但卡住"）。同时打 INFO
+                        # log 让 PAUSED 转换可见（性能分析师 Round 1 D 项 silent skip 修复）。
+                        # 死锁根因（mlbb Market.sport=None → entry_metadata=None →
+                        # should_subscribe_ws 拒）已在 R5-C sport_resolver 修复。
+                        runtime.market_ws_worker.set_connection_state(False)
+                        logger.info(
+                            "market_ws_paused_no_subscribable_markets prev_subscribed=%d",
+                            len(subscribed_token_ids),
+                        )
                         runtime.supervisor.heartbeat_worker(
                             "market_ws",
                             state=WorkerLifecycleState.PAUSED,
                             healthy=True,
-                            detail="no_markets",
+                            detail="no_subscribable_markets",
                         )
                         sync_runtime_metrics(runtime)
                 # delta <= threshold：不重建连接、不预取 REST。新增 token 由 WS
@@ -532,7 +543,11 @@ async def run_market_ws(runtime: Any) -> None:
                 healthy=True,
                 detail=f"subscribed={len(subscribed_token_ids)}",
             )
-            sync_runtime_metrics(runtime)
+            # R14 (架构师 R5 #1): 每条 WS msg 后不再调 sync_runtime_metrics——25 个
+            # metric set_gauge × RLock 在 30-50 msg/s 持续占用 1-2.5ms/sec CPU；
+            # gauge 99.9% 被下一秒覆盖，Prometheus 抓取 15s 远低于 msg 频率。
+            # 改由 main._register_scheduler_jobs 5s 周期统一收集。supervisor heartbeat
+            # 保留（轻量 dict update，watchdog 必需）。
     except asyncio.CancelledError:
         await _cancel_task(stream_task)
         runtime.supervisor.heartbeat_worker(
@@ -637,7 +652,7 @@ async def run_user_ws(runtime: Any) -> None:
                 healthy=True,
                 detail=f"subscribed={len(subscribed_condition_ids)}",
             )
-            sync_runtime_metrics(runtime)
+            # R14：同 market_ws，每条 user_ws msg 不再调 sync_runtime_metrics。
     except asyncio.CancelledError:
         await _cancel_task(stream_task)
         await runtime.user_ws_worker.set_connection_state(

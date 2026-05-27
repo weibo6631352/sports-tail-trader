@@ -44,7 +44,9 @@ def _market_slug_prefix(market: Market) -> str:
     return slug.split("-", 1)[0] or "unknown"
 
 
-def _runtime_workflow(runtime: Any) -> Any | None:
+def _runtime_workflow(runtime: "RuntimeComponents | None") -> Any | None:
+    if runtime is None:
+        return None
     try:
         return runtime.workflow
     except (RuntimeError, AttributeError):
@@ -56,7 +58,7 @@ def _runtime_workflow(runtime: Any) -> Any | None:
 
 
 def _live_source_gap_scope_markets(
-    runtime: Any, markets: "Sequence[Market]",
+    runtime: "RuntimeComponents | None", markets: "Sequence[Market]",
 ) -> tuple[Market, ...]:
     """单场直播源覆盖诊断 = 仅 family == single_game 的市场子集。
 
@@ -152,21 +154,23 @@ def _live_source_gap_market_payload(
     }
 
 if TYPE_CHECKING:
-    pass
+    # R17 (Code Q1): RuntimeComponents 强类型 + TYPE_CHECKING 避免循环 import。
+    from polymarket_trader.main import RuntimeComponents
 
 
 class SportsQueryAggregator:
     def __init__(
         self,
         *,
-        runtime: Any,
+        runtime: "RuntimeComponents | None",
         serializer: ApiSerializer | None = None,
     ) -> None:
         self._runtime = runtime
         self._serializer = serializer or ApiSerializer.from_runtime(None)
 
     def _entry_metadata_store(self) -> Any | None:
-        return getattr(self._runtime, "market_metadata_store", None) if self._runtime else None
+        # R17: 保留运行时 None check（fixture 路径），生产路径直接 .market_metadata_store
+        return self._runtime.market_metadata_store if self._runtime is not None else None
 
     def list_sports_live_events_history(
         self,
@@ -182,9 +186,9 @@ class SportsQueryAggregator:
         每 condition 默认保留 200 条（按 deduper 30s 窗口约 ~100 分钟）;
         远期历史走 ``GET /audit-events/by-condition/{cid}?channels=sports_live_state_recorded``。
         """
-        buffer = getattr(self._runtime, "sports_live_history_buffer", None) if self._runtime else None
-        if buffer is None:
+        if self._runtime is None:
             return {"items": (), "total": 0, "limit": limit, "offset": offset}
+        buffer = self._runtime.sports_live_history_buffer
         since_iso = until_iso = None
         if time_range is not None and not time_range.is_empty:
             since_dt, until_dt = time_range.to_datetime_range()

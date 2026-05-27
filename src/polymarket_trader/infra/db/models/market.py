@@ -169,7 +169,11 @@ class MarketModel(Base, TimestampMixin):
     def to_domain(self) -> Market:
         raw_payload = self.raw_payload if isinstance(self.raw_payload, Mapping) else {}
         schedule_fee_rate_bps = _fee_rate_units_from_payload(raw_payload)
-        return Market(
+        from dataclasses import replace as _replace
+
+        from polymarket_trader.sports.slug_resolver import resolve_sport_from_market
+
+        market_obj = Market(
             condition_id=self.condition_id,
             market_slug=self.market_slug,
             outcomes=tuple(
@@ -224,6 +228,8 @@ class MarketModel(Base, TimestampMixin):
             trading_status=TradingStatus(self.trading_status),
             reject_reason=self.reject_reason,
         )
+        # DB 回放路径与 gamma adapter / payload parser 同口径：单一 resolver 回填。
+        return _replace(market_obj, sport=resolve_sport_from_market(market_obj))
 
 
 __all__ = ["MarketModel"]

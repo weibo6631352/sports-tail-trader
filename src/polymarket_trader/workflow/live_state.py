@@ -267,6 +267,30 @@ def live_event_metadata(event: LiveEvent) -> dict[str, Any]:
     }
 
 
+def _devig_probs(raw: dict[str, float]) -> dict[str, float]:
+    """N-way 比例归一化去 vig (overround)。
+
+    Goalserve `value_eu` → `1/value_eu` 是博彩公司报价含 vig（典型 Σ ≈ 1.04-1.08）。
+    决策需要的是真概率 p，必须把 vig 摊掉：``p_i = raw_i / Σ raw_j``。
+
+    举例（足球 3-way，Pinnacle 典型）：
+      raw = {home:0.5128, draw:0.2857, away:0.2381}   Σ=1.0366 (3.66% vig)
+      fair = {home:0.4948, draw:0.2757, away:0.2295}  Σ=1.0000
+
+    输入：``{outcome_key: raw_implied}``（None / <=0 的 entry 跳过不参与 Σ，但
+    保留为 None 输出，调用方按需丢弃）。返回：同 key 的归一化概率 dict。
+    """
+
+    valid = {k: v for k, v in raw.items() if v is not None and v > 0}
+    total = sum(valid.values())
+    if total <= 0:
+        return {k: None for k in raw}
+    return {
+        k: (round(v / total, 6) if (v is not None and v > 0) else None)
+        for k, v in raw.items()
+    }
+
+
 def _is_moneyline_market_name(name: str) -> bool:
     """匹配 Goalserve Money Line 盘口名称，兼容带空格/不带空格及网球 Match Winner 写法。"""
     n = name.lower()
@@ -333,12 +357,22 @@ def _extract_goalserve_moneyline(event: LiveEvent) -> dict[str, Any] | None:
                 draw_implied = round(1.0 / draw_eu_raw, 6)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
+    # Devig：raw `*_implied_prob` 是博彩公司报价（含 vig，Σ ≈ 1.04-1.08）；
+    # `*_fair_prob` 是按比例归一后的真概率（Σ=1）。决策路径用 fair，
+    # UI/审计仍可读 raw 看博彩报价。3-way（足球 H/D/A）三方一起归一，
+    # 2-way（棒/篮/网/电竞）只 home+away 归一——必须按实际 outcome 数量。
+    raw_for_devig: dict[str, float] = {"home": home_implied, "away": away_implied}
+    if draw_implied is not None:
+        raw_for_devig["draw"] = draw_implied
+    fair = _devig_probs(raw_for_devig)
     payload: dict[str, Any] = {
         "market_name": ml_market.get("name"),
         "home_eu": home_eu,
         "away_eu": away_eu,
         "home_implied_prob": home_implied,
         "away_implied_prob": away_implied,
+        "home_fair_prob": fair["home"],
+        "away_fair_prob": fair["away"],
         "suspended": bool(ml_market.get("suspended")),
         "home_suspended": bool(home_outcome.get("suspended")),
         "away_suspended": bool(away_outcome.get("suspended")),
@@ -346,6 +380,7 @@ def _extract_goalserve_moneyline(event: LiveEvent) -> dict[str, Any] | None:
     if draw_eu is not None and draw_implied is not None:
         payload["draw_eu"] = draw_eu
         payload["draw_implied_prob"] = draw_implied
+        payload["draw_fair_prob"] = fair.get("draw")
         payload["draw_suspended"] = bool(draw_outcome.get("suspended"))
     return payload
 
@@ -455,6 +490,7 @@ def _extract_goalserve_spread(event: LiveEvent) -> dict[str, Any] | None:
         away_implied = round(1.0 / away_eu, 6)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
+    fair = _devig_probs({"home": home_implied, "away": away_implied})
     return {
         "market_name": spread_market.get("name"),
         "home_handicap": home_outcome.get("handicap"),
@@ -463,6 +499,8 @@ def _extract_goalserve_spread(event: LiveEvent) -> dict[str, Any] | None:
         "away_eu": away_eu,
         "home_implied_prob": home_implied,
         "away_implied_prob": away_implied,
+        "home_fair_prob": fair["home"],
+        "away_fair_prob": fair["away"],
         "suspended": bool(spread_market.get("suspended")),
         "home_suspended": bool(home_outcome.get("suspended")),
         "away_suspended": bool(away_outcome.get("suspended")),
@@ -516,6 +554,7 @@ def _extract_goalserve_totals(event: LiveEvent) -> dict[str, Any] | None:
         under_implied = round(1.0 / under_eu, 6)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
+    fair = _devig_probs({"over": over_implied, "under": under_implied})
     return {
         "market_name": totals_market.get("name"),
         "total_line": over_outcome.get("handicap") or under_outcome.get("handicap"),
@@ -523,6 +562,8 @@ def _extract_goalserve_totals(event: LiveEvent) -> dict[str, Any] | None:
         "under_eu": under_eu,
         "over_implied_prob": over_implied,
         "under_implied_prob": under_implied,
+        "over_fair_prob": fair["over"],
+        "under_fair_prob": fair["under"],
         "suspended": bool(totals_market.get("suspended")),
         "over_suspended": bool(over_outcome.get("suspended")),
         "under_suspended": bool(under_outcome.get("suspended")),
@@ -567,12 +608,15 @@ def _extract_goalserve_halftime_odds(event: LiveEvent) -> dict[str, Any] | None:
         away_implied = round(1.0 / away_eu, 6)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
+    fair = _devig_probs({"home": home_implied, "away": away_implied})
     return {
         "market_name": half_market.get("name"),
         "home_eu": home_eu,
         "away_eu": away_eu,
         "home_implied_prob": home_implied,
         "away_implied_prob": away_implied,
+        "home_fair_prob": fair["home"],
+        "away_fair_prob": fair["away"],
         "suspended": bool(half_market.get("suspended")),
         "home_suspended": bool(home_outcome.get("suspended")),
         "away_suspended": bool(away_outcome.get("suspended")),
@@ -1107,63 +1151,14 @@ def _compact_text(value: str) -> str:
 # 运动类型识别 + 候选直播事件过滤
 # ---------------------------------------------------------------------------
 
-def _normalized_market_text_for_sport(market: Market) -> str:
-    """归一化 market 所有文本字段，用于运动类型关键字匹配。"""
-    return " ".join(
-        re.sub(
-            r"[^a-z0-9]+",
-            " ",
-            " ".join(
-                part
-                for part in (
-                    market.market_question,
-                    market.market_name,
-                    market.market_slug,
-                    market.event_title,
-                    market.event_slug,
-                    market.category,
-                    " ".join(market.tags),
-                    " ".join(outcome.outcome for outcome in market.outcomes),
-                )
-                if part
-            ).lower(),
-        ).split()
-    )
-
-
 def _market_sport_codes(market: Market) -> set[str]:
-    text = _normalized_market_text_for_sport(market)
-    mapping = (
-        ("table-tennis", ("table tennis", "table-tennis", "wtt", "world team championships")),
-        ("baseball", ("mlb", "kbo", "baseball")),
-        ("tennis", ("atp", "wta")),
-        ("basketball", ("nba", "wnba", "ncaamb", "ncaawb", "basketball")),
-        ("ice-hockey", ("nhl", "ahl", "hockey", "ice hockey")),
-        ("american-football", ("nfl", "ncaaf", "american football")),
-        ("football", ("soccer", "football", "mls", "nwsl", "epl")),
-        ("volleyball", ("volleyball",)),
-        ("cricket", ("cricket", "ipl", "t20", "test match", "odi")),
-        ("rugby", ("rugby", "six nations", "rugby union", "rugby league")),
-        ("handball", ("handball",)),
-        ("mma", ("mma", "ufc", "bellator", "mixed martial arts")),
-        ("boxing", ("boxing",)),
-        ("golf", ("golf", "pga tour", "masters", "open championship", "ryder cup", "lpga")),
-        ("horse-racing", ("horse racing", "cheltenham", "kentucky derby", "grand national", "horse race")),
-        ("formula1", ("formula 1", "formula1", "f1", "grand prix", "monaco gp")),
-        ("motogp", ("motogp", "moto gp")),
-        # esports：不加运动码会让 CS2/Dota2/LoL/Valorant 市场在运动预过滤里
-        # 失去 sport 约束，被其它运动的低分别名（如足球预备队 "X 2" 的 "2"
-        # 命中 esports slug 里的 "cs2"/"2026"）跨运动错配。
-        (
-            "esports",
-            (
-                "esports", "e sports", "cs2", "csgo", "cs go", "counter strike",
-                "dota2", "dota 2", "dota", "lol", "league of legends",
-                "valorant", "rocket league", "overwatch",
-            ),
-        ),
-    )
-    return {sport for sport, tokens in mapping if any(f" {token} " in f" {text} " for token in tokens)}
+    """R5-C 后变薄：纯代理 `sports.slug_resolver.market_sport_codes`。
+
+    仍保留模块内 alias 是因为 `candidate_live_events_for_market` 用 set 形态做
+    event 过滤（个别 cross-sport 联赛理论命中多码），且 workflow.py 缓存 key 用此名。
+    """
+    from polymarket_trader.sports.slug_resolver import market_sport_codes
+    return set(market_sport_codes(market))
 
 
 def _event_sport_code(event: LiveEvent) -> str | None:

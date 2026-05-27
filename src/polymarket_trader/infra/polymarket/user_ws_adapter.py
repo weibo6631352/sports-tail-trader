@@ -513,6 +513,10 @@ def apply_fill_to_position(position: Position | None, fill: Fill) -> Position | 
     updated = position
 
     if side == "buy":
+        # opened_at setdefault：updated.opened_at None → 用本次 fill 时间 stamp
+        # （首次建仓），否则保留 previous（避免后续 BUY 把首次时间覆盖）。
+        # merge 函数同样兜底，但此处先 stamp 让稀疏 incoming 也带上语义。
+        opened_at = updated.opened_at or fill.confirmed_at or fill.created_at
         return replace(
             updated,
             shares=updated.shares + size,
@@ -526,6 +530,7 @@ def apply_fill_to_position(position: Position | None, fill: Fill) -> Position | 
             last_order_id=fill.order_id or updated.last_order_id,
             last_trade_id=fill.trade_id or updated.last_trade_id,
             updated_at=fill.confirmed_at or fill.created_at,
+            opened_at=opened_at,
         )
 
     if side == "sell":

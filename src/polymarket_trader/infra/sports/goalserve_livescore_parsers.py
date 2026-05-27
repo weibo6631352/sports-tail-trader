@@ -1326,45 +1326,6 @@ def _parse_soccer_with_cats(scores: dict[str, Any], observed_at: datetime) -> li
     return events
 
 
-def _parse_basketball(scores: dict[str, Any], observed_at: datetime) -> list[LiveEvent]:
-    events: list[LiveEvent] = []
-    for match in _iter_matches(scores):
-        event_id = _str_val(match.get("id") or match.get("matchid") or "")
-        if not event_id:
-            continue
-        status_raw = _str_val(match.get("status"))
-        status = _xml_status(status_raw)
-        home_team = match.get("localteam") or {}
-        away_team = match.get("awayteam") or {}
-        home_name = _str_val(home_team.get("name"))
-        away_name = _str_val(away_team.get("name"))
-        home_score = _int_val(home_team.get("totalscore"))
-        away_score = _int_val(away_team.get("totalscore"))
-        cat_name = _str_val(match.get("name") or "")
-        timer_raw = match.get("timer")
-        seconds_remaining = _basketball_seconds_remaining(status_raw, timer_raw) if status == SportsLiveGameStatus.LIVE else None
-        events.append(
-            LiveEvent(
-                source="goalserve_livescore",
-                source_event_id=event_id,
-                kind=LiveEventKind.TEAM_MATCH,
-                league=cat_name,
-                sport="basketball",
-                participants=(
-                    Participant(role="home", name=home_name, score=home_score, external_ids={"goalserve": event_id}),
-                    Participant(role="away", name=away_name, score=away_score, external_ids={"goalserve": event_id}),
-                ),
-                status=status,
-                period=status_raw,
-                seconds_remaining=seconds_remaining,
-                raw_status=status_raw,
-                observed_at=observed_at,
-                external_ids={"goalserve": event_id},
-            )
-        )
-    return events
-
-
 def _basketball_quarter_scores(team: dict[str, Any]) -> tuple[int | None, ...]:
     """从 hometeam/awayteam 的 q1..q4 属性提取各节得分；空字符串 → None。"""
     out: list[int | None] = []

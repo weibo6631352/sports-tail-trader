@@ -121,6 +121,9 @@ from ._helpers import slice_sequence
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    # R17 (Code Q1): RuntimeComponents 强类型 + TYPE_CHECKING 避免循环 import。
+    from polymarket_trader.main import RuntimeComponents
+
 
 def _serialize_side_summary(side: Any) -> dict[str, Any]:
     def _lvl(lv: Any) -> dict[str, str]:
@@ -310,7 +313,7 @@ class MarketMiscAggregator:
     def __init__(
         self,
         *,
-        runtime: Any,
+        runtime: "RuntimeComponents | None",
         session_factory: "async_sessionmaker[AsyncSession] | None" = None,
         serializer: ApiSerializer | None = None,
     ) -> None:
@@ -318,22 +321,25 @@ class MarketMiscAggregator:
         self._session_factory = (
             session_factory
             if session_factory is not None
-            else (getattr(runtime, "db_session_factory", None) if runtime else None)
+            else (runtime.db_session_factory if runtime is not None else None)
         )
         self._serializer = serializer or ApiSerializer.from_runtime(runtime)
 
     # ---------- shared helpers ----------
     def _account_snapshot(self) -> AccountSnapshot:
-        store = getattr(self._runtime, "account_state_store", None) if self._runtime else None
-        return store.snapshot() if store is not None else AccountSnapshot()
+        if self._runtime is None:
+            return AccountSnapshot()
+        return self._runtime.account_state_store.snapshot()
 
     def _registry_snapshot(self) -> MarketRegistrySnapshot:
-        registry = getattr(self._runtime, "registry", None) if self._runtime else None
-        return registry.snapshot() if registry is not None else MarketRegistrySnapshot(tuple())
+        if self._runtime is None:
+            return MarketRegistrySnapshot(tuple())
+        return self._runtime.registry.snapshot()
 
     def _market_ws_snapshot(self, token_id: str) -> Any | None:
-        worker = getattr(self._runtime, "market_ws_worker", None) if self._runtime else None
-        return worker.snapshot(token_id) if worker is not None else None
+        if self._runtime is None:
+            return None
+        return self._runtime.market_ws_worker.snapshot(token_id)
 
     def _clob_client(self) -> Any:
         if self._runtime is None:
@@ -347,9 +353,9 @@ class MarketMiscAggregator:
         condition_id: str | None = None,
         token_id: str | None = None,
     ) -> Market | None:
-        registry = getattr(self._runtime, "registry", None) if self._runtime else None
-        if registry is None:
+        if self._runtime is None:
             return None
+        registry = self._runtime.registry
         if condition_id is not None:
             m = registry.get_by_condition_id(condition_id)
             if m is not None:
@@ -365,9 +371,9 @@ class MarketMiscAggregator:
         return None
 
     def _publish_audit(self, event_type: DomainEventType, payload: dict[str, Any], reason: str) -> None:
-        bus = getattr(self._runtime, "event_bus", None) if self._runtime else None
-        if bus is None:
+        if self._runtime is None:
             return
+        bus = self._runtime.event_bus
         try:
             event = DomainEvent(
                 trace_id=uuid4().hex,

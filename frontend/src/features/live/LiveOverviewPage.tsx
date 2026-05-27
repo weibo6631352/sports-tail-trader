@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { Anchor, Group, SimpleGrid, Stack, Text } from '@mantine/core'
+import { Anchor, Badge, Group, SimpleGrid, Stack, Text, Tooltip } from '@mantine/core'
 import { useNavigate } from 'react-router-dom'
 import { qk } from '@core/api/keys'
-import { analyticsApi, healthApi } from '@core/api/resources'
+import { analyticsApi, healthApi, marketsApi, signalsApi } from '@core/api/resources'
 import { PageHeader } from '@shared/ui/PageHeader'
 import { SectionCard } from '@shared/ui/SectionCard'
 import { StatusPill } from '@shared/ui/StatusPill'
@@ -52,9 +52,30 @@ export function LiveOverviewPage() {
     refetchInterval: REFRESH_INTERVAL_MS,
   })
 
+  // R10 操盘指挥中心新加 3 card 的数据源（R6 / R8 endpoint）
+  const trackingBreakdown = useQuery({
+    queryKey: ['markets', 'tracking-breakdown'],
+    queryFn: ({ signal }) => marketsApi.trackingBreakdown(signal),
+    refetchInterval: REFRESH_INTERVAL_MS,
+  })
+  const topEdges = useQuery({
+    queryKey: ['signals', 'top-edges', 5],
+    queryFn: ({ signal }) => signalsApi.topEdges(5, signal),
+    refetchInterval: REFRESH_INTERVAL_MS,
+  })
+  const buildSig = useQuery({
+    queryKey: ['runtime', 'build-signature'],
+    queryFn: ({ signal }) => signalsApi.buildSignature(signal),
+    // binary signature 是 process-level 不变（除非重启）—— 60s 刷新足够，不浪费
+    refetchInterval: 60_000,
+  })
+
   const s = summary.data
   const h = health.data
   const ws = wsHealth.data
+  const tb = trackingBreakdown.data
+  const edges = topEdges.data
+  const bs = buildSig.data
 
   return (
     <>
@@ -157,6 +178,115 @@ export function LiveOverviewPage() {
               <Anchor size="xs" onClick={() => navigate('/fills')}>成交 →</Anchor>
               <Anchor size="xs" onClick={() => navigate('/analytics/execution-quality')}>延迟 →</Anchor>
             </Group>
+          </SectionCard>
+        </SimpleGrid>
+
+        {/* R10 操盘指挥中心：Binary 健康 + Discovery 覆盖 + Edge Top 5 */}
+        <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
+          {/* Binary 健康 card (R8 /runtime/build-signature) */}
+          <SectionCard title="Binary 部署">
+            {bs ? (
+              <Stack gap={6}>
+                <Group justify="space-between">
+                  <Text size="sm">runtime_outdated</Text>
+                  <StatusPill tone={bs.runtime_outdated ? 'danger' : 'success'} size="sm">
+                    {bs.runtime_outdated ? '过期' : '最新'}
+                  </StatusPill>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="xs" c="dimmed">LiveSignalSnapshot 字段</Text>
+                  <Text size="sm" ff="monospace">{bs.live_signal_snapshot_field_count ?? '—'} / 11</Text>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="xs" c="dimmed">_prob_provider via estimate_signal</Text>
+                  <Text size="sm" ff="monospace">{bs.quant_decider_prob_provider_via_estimate_signal === true ? '✓' : bs.quant_decider_prob_provider_via_estimate_signal === false ? '✗' : '—'}</Text>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="xs" c="dimmed">store token_count</Text>
+                  <Text size="sm" ff="monospace">{bs.signal_snapshot_store_token_count ?? '—'}</Text>
+                </Group>
+                {bs.advisory.length > 0 ? (
+                  <Stack gap={2} mt={4}>
+                    {bs.advisory.map((a, i) => (
+                      <Text key={i} size="xs" c="red">⚠ {a}</Text>
+                    ))}
+                  </Stack>
+                ) : null}
+              </Stack>
+            ) : (
+              <Text size="xs" c="dimmed">加载中…</Text>
+            )}
+          </SectionCard>
+
+          {/* Discovery 覆盖 card (R5 /markets/tracking-breakdown) */}
+          <SectionCard title="Discovery 覆盖">
+            {tb ? (
+              <Stack gap={6}>
+                <Group justify="space-between">
+                  <Text size="sm">registry</Text>
+                  <Text size="sm" fw={600} ff="monospace">{tb.total_registry ?? 0}</Text>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm">entry_metadata</Text>
+                  <Text size="sm" ff="monospace">{tb.total_entry_metadata ?? 0}</Text>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm">ws_subscribed</Text>
+                  <Text size="sm" ff="monospace">{tb.ws_subscribed_token_count ?? 0}</Text>
+                </Group>
+                <Group gap={4} wrap="wrap">
+                  {tb.by_sport && Object.keys(tb.by_sport).length > 0 ? (
+                    Object.entries(tb.by_sport).map(([sport, count]) => (
+                      <Badge key={sport} variant="light" size="sm">{sport}:{count}</Badge>
+                    ))
+                  ) : (
+                    <Text size="xs" c="dimmed">暂无 sport 覆盖（polymarket 真空期或维护中）</Text>
+                  )}
+                </Group>
+              </Stack>
+            ) : (
+              <Text size="xs" c="dimmed">加载中…</Text>
+            )}
+            <Group justify="flex-end" mt="sm">
+              <Anchor size="xs" onClick={() => navigate('/markets/list')}>市场列表 →</Anchor>
+            </Group>
+          </SectionCard>
+
+          {/* Edge Top 5 card (R6 /analytics/edge-signals) */}
+          <SectionCard title="Top 差价候选 (R6)">
+            {edges ? (
+              edges.top_k.length === 0 ? (
+                <Stack gap={4}>
+                  <Text size="xs" c="dimmed">
+                    {edges.store_token_count === 0
+                      ? '等待首条信号快照（重启后 decision 触发自动产生）'
+                      : '当前所有候选 edge ≤ 0'}
+                  </Text>
+                  <Text size="xs" c="dimmed" ff="monospace">store_token_count={edges.store_token_count}</Text>
+                </Stack>
+              ) : (
+                <Stack gap={6}>
+                  {edges.top_k.map((e) => (
+                    <Group key={e.token_id} justify="space-between" gap={6}>
+                      <Tooltip label={`condition: ${e.condition_id}`} withArrow>
+                        <Text size="xs" ff="monospace" style={{ cursor: 'help' }}>
+                          {e.condition_id.slice(0, 10)}…
+                        </Text>
+                      </Tooltip>
+                      <Group gap={6}>
+                        <Text size="xs" c="dimmed">ask</Text>
+                        <Text size="xs" ff="monospace">{e.pm_best_ask ?? '—'}</Text>
+                        <Text size="xs" c="dimmed">fair</Text>
+                        <Text size="xs" ff="monospace">{e.goalserve_fair_prob ?? '—'}</Text>
+                        <Text size="xs" fw={600} c="green" ff="monospace">+{e.edge_pp}</Text>
+                      </Group>
+                    </Group>
+                  ))}
+                </Stack>
+              )
+            ) : (
+              <Text size="xs" c="dimmed">加载中…</Text>
+            )}
           </SectionCard>
         </SimpleGrid>
 

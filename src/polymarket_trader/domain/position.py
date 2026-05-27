@@ -29,6 +29,14 @@ class Position:
     percent_realized_pnl: Decimal | None = None
     cur_price: Decimal | None = None
     redeemable: bool | None = None
+    # 首次成交时间——退场决策时间维度（0.95 早止盈需要 held≥90s 冷却避开抖动；
+    # 反向 edge 后冷却也按 last_sell_attempt 相对此时间）。
+    # **写一次（setdefault 语义）**：merge 函数遇到 incoming.opened_at=None 时
+    # 走 previous 兜底（参 runtime/account_state.py:_merge_position_authority_fields）。
+    # live 路径在 user_ws_adapter.apply_fill_to_position BUY 路径 stamp；
+    # paper 路径从 paper_ledger.first_fill_at[token_id] 投影。
+    # 平仓→Position 整体被 prune，无需独立清理（参 architect Round 2 评估）。
+    opened_at: datetime | None = None
 
     @property
     def settled_zero_value(self) -> bool:

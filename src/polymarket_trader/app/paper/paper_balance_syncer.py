@@ -61,6 +61,9 @@ async def paper_balance_syncer(
                 ob = market_ws_worker.snapshot(token_id)
                 if ob is not None and ob.best_bid is not None and ob.sell_actionable:
                     ledger.observe_unrealized(token_id, ob.best_bid)
+                # paper 路径 opened_at 从 ledger.first_fill_at 取（已存在的 setdefault
+                # 语义 + SELL 对称 pop，状态生命周期完美对齐）。每秒重建 Position
+                # 不丢 opened_at（ledger 一直存活到平仓）。
                 paper_positions.append(
                     Position(
                         condition_id=market.condition_id,
@@ -68,6 +71,7 @@ async def paper_balance_syncer(
                         market_slug=market.market_slug,
                         shares=shares,
                         cost_usdc=cost,
+                        opened_at=ledger.first_fill_at.get(token_id),
                     )
                 )
             account_state_store.replace_positions(tuple(paper_positions))

@@ -32,7 +32,6 @@ from polymarket_trader.pipeline.decision.decision_context_builder import Decisio
 from polymarket_trader.pipeline.execution.order_gateway import OrderGateway
 from polymarket_trader.config import Settings, StartupReadiness, load_settings
 from polymarket_trader.domain.events import DomainEvent, DomainEventType, OutboxPriority
-from polymarket_trader.domain.market import Market
 from polymarket_trader.infra.db import (
     AccountSnapshotRepository,
     DatabasePersistenceRepository,
@@ -73,7 +72,7 @@ from polymarket_trader.pipeline.ingest.live_source import (
     SportsSubscriptionPolicy,
     is_market_live_active,
 )
-from polymarket_trader.workflow.live_state import _market_sport_codes
+from polymarket_trader.sports.slug_resolver import resolve_sport_from_market
 from polymarket_trader.logging import LoggingRuntime, configure_logging
 from polymarket_trader.observability.metrics import MetricsRegistry
 from polymarket_trader.runtime import (
@@ -99,6 +98,7 @@ from polymarket_trader.runtime.lifecycle_registry import LifecycleRegistry, Mark
 from polymarket_trader.runtime.metrics_sync import sync_runtime_metrics as _sync_runtime_metrics
 from polymarket_trader.runtime.orderbook_delta import OrderbookDeltaStore
 from polymarket_trader.runtime.orderbook_derived_publisher import OrderbookDerivedPublisher
+from polymarket_trader.app.signal_snapshot_store import SignalSnapshotStore
 from polymarket_trader.runtime.orderbook_derived_store import OrderbookDerivedStore
 from polymarket_trader.runtime.orderbook_history_buffer import OrderbookHistoryBuffer
 from polymarket_trader.runtime.gamma_snapshot_store import GammaMarketSnapshotStore
@@ -151,6 +151,7 @@ class RuntimeComponents:
     registry: MarketRegistry
     lifecycle_registry: LifecycleRegistry
     gamma_snapshot_store: GammaMarketSnapshotStore
+    signal_snapshot_store: SignalSnapshotStore
     sports_live_history_buffer: SportsLiveHistoryBuffer
     outbox: LocalOutbox
     db_engine: AsyncEngine
@@ -232,12 +233,12 @@ def _build_live_source_components(
     live_state_store = LiveStateStore()
     live_source_registry = LiveSourceRegistry()
 
-    def _primary_sport(market: Market) -> str | None:
-        codes = _market_sport_codes(market)
-        return next(iter(sorted(codes)), None)
-
+    # R5-C 反冗余：subscription_policy 直接读 adapter 已回填的 market.sport，
+    # 不再在这里写"自己一份"的运动推断（旧代码走 _market_sport_codes → 取第一个）。
+    # `resolve_sport_from_market` 作为兜底——历史 Market（DB 回放等路径已加同款
+    # 回填，理论恒命中 sport；fallback 仅防止极端 stub Market 路径漏填）。
     subscription_policy = SportsSubscriptionPolicy(
-        sport_resolver=_primary_sport,
+        sport_resolver=lambda market: market.sport or resolve_sport_from_market(market),
         active_predicate=is_market_live_active,
     )
     lifecycle_binder = LiveSourceLifecycleBinder(
@@ -359,6 +360,10 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     settings = settings or load_settings()
     readiness = settings.validate_startup_readiness()
     logging_runtime = configure_logging()
+    # R20: httpx 库默认 INFO 输出每个 HTTP request, RTT 链路 + 5 sport inplay polling
+    # → ~5 条/s 噪声 + ContextRedactionFilter 主线程负担。WARNING 后只在异常时打印。
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     metrics = MetricsRegistry()
     trading_thread_pool = ThreadPoolExecutor(
         max_workers=settings.trading_worker_threads,
@@ -400,6 +405,10 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     registry.register_prune_callback(lifecycle_registry.emit_pruned)
     registry.register_added_callback(lifecycle_registry.emit_added)
     gamma_snapshot_store = GammaMarketSnapshotStore()
+    # SignalSnapshotStore：R6 observability ring buffer。每 token 最近 300 条
+    # LiveSignalSnapshot，asyncio 单线程内存结构，无 DB 写入。供 /analytics/edge-signals
+    # 暴露 top-K 差价候选。caller 由 estimate_signal 三元组返回，写入由调用方决定。
+    signal_snapshot_store = SignalSnapshotStore()
     market_metadata_store = MarketMetadataStore()
     sports_live_history_buffer = SportsLiveHistoryBuffer()
     outbox = LocalOutbox(max_size=settings.persistence_event_queue_max_size)
@@ -423,7 +432,11 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
     )
     # 直接装配 quant_decider——量化决策器就是这个交易系统本身。
     workflow_config = load_workflow_config()
-    workflow = TradingWorkflow(config=workflow_config, ports=runtime_ports)
+    workflow = TradingWorkflow(
+        config=workflow_config,
+        ports=runtime_ports,
+        signal_snapshot_store=signal_snapshot_store,
+    )
     # 启动期断言：3 个硬条件直接 assert，不走 ConfigIssue 链。
     assert workflow_config.discovery_tag_slugs, "discovery_tag_slugs 为空，远端 discovery 拿不到候选市场"
     assert workflow_config.enabled_market_types, "enabled_market_types 为空，量化入场将永远 SKIP"
@@ -679,6 +692,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         registry=registry,
         lifecycle_registry=lifecycle_registry,
         gamma_snapshot_store=gamma_snapshot_store,
+        signal_snapshot_store=signal_snapshot_store,
         sports_live_history_buffer=sports_live_history_buffer,
         outbox=outbox,
         db_engine=db_engine,
@@ -1034,6 +1048,19 @@ def _start_background_tasks(runtime: RuntimeComponents) -> None:
 
 
 def _register_scheduler_jobs(runtime: RuntimeComponents) -> None:
+    # R14 (架构师 R5 #1 high ROI)：sync_runtime_metrics 从 ws msg 环路移出 → 5s 统一周期。
+    # 每条 WS msg 后调 (~1-2.5ms/sec CPU 浪费 + RLock 争用) 改成 5s 一次集中收集。
+    # gauge 99.9% 被覆盖，Prometheus 抓取默认 15s 远低于 msg 频率——5s 完全够用。
+    # 连接状态变更（connect/disconnect/reconnect/pause）的 hook 仍保留即时调用。
+    runtime.scheduler.register_job(
+        "sync_runtime_metrics",
+        lambda: _sync_runtime_metrics(runtime),
+        priority="P2",
+        interval_seconds=5.0,
+        tags=("metrics",),
+        start=True,
+        run_immediately=True,
+    )
     runtime.scheduler.register_job(
         "market_discovery_scan",
         lambda: _run_market_discovery_scan(runtime),

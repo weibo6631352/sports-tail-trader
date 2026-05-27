@@ -253,4 +253,7 @@ def _merge_position_authority_fields(
         ),
         cur_price=incoming.cur_price if incoming.cur_price is not None else previous.cur_price,
         redeemable=incoming.redeemable if incoming.redeemable is not None else previous.redeemable,
+        # opened_at 写一次（setdefault 语义）—— BUY 路径 stamp 后任何后续稀疏 incoming
+        # 都不应覆盖。previous 已有值 → 保留；previous None → 接受 incoming。
+        opened_at=incoming.opened_at if incoming.opened_at is not None else previous.opened_at,
     )

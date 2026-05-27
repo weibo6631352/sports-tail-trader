@@ -334,4 +334,86 @@ async def get_quant_summary(
     return summary
 
 
+@router.get("/edge-signals")
+async def get_edge_signals(
+    k: int = Query(default=10, gt=0, le=100, description="Top-K edge candidates"),
+    runtime: Any = Depends(get_runtime),
+) -> dict[str, Any]:
+    """暴露 LiveSignalSnapshot ring buffer 的 top-K 差价候选。
+
+    edge_pp = goalserve_fair_prob - pm_best_ask（正值 = 市场低估赢方 = 入场机会）。
+    数据源：``runtime.signal_snapshot_store`` 内存 ring buffer，每 token 最近 300
+    条 snapshot，约 5 分钟历史窗口。**无 DB 查询**，纯内存读，< 10ms。
+
+    返回字段：
+    - ``store_token_count``：当前 store 内有过 snapshot 记录的 token 数
+    - ``top_k``：按 edge_pp desc 排序的 top-K 候选，每条含完整 snapshot 字段
+
+    R6 注意：当前**无 caller 主动写入** snapshot——estimate_signal 返三元组但调用方
+    选择性记录（CPO Round 2 R6 范围）。endpoint 框架先就位，等 R7+ 接入 caller 后
+    才有真数据。空返回不算 endpoint bug。
+    """
+
+    store = runtime.signal_snapshot_store
+    top = store.top_by_edge(k=k)
+    return {
+        "store_token_count": store.token_count(),
+        "k": k,
+        "top_k": [
+            {
+                "condition_id": snap.condition_id,
+                "token_id": snap.token_id,
+                "pm_best_ask": str(snap.pm_best_ask) if snap.pm_best_ask is not None else None,
+                "pm_best_bid": str(snap.pm_best_bid) if snap.pm_best_bid is not None else None,
+                "goalserve_fair_prob": (
+                    str(snap.goalserve_fair_prob) if snap.goalserve_fair_prob is not None else None
+                ),
+                "math_prob": str(snap.math_prob) if snap.math_prob is not None else None,
+                "microprice": str(snap.microprice) if snap.microprice is not None else None,
+                "final_prob_p": str(snap.final_prob_p),
+                "source_used": snap.source_used,
+                "edge_pp": str(snap.edge_pp) if snap.edge_pp is not None else None,
+                "timestamp": snap.timestamp.isoformat(),
+            }
+            for snap in top
+        ],
+    }
+
+
+@router.get("/edge-signals/{token_id}")
+async def get_edge_signal_history(
+    token_id: str,
+    runtime: Any = Depends(get_runtime),
+) -> dict[str, Any]:
+    """取某 token 的完整 snapshot 历史（按写入顺序，最多 300 条 ≈ 5 分钟）。
+
+    用于 R7 前端 spark / 单条复盘 drawer——operator 可以看到某 condition 的
+    edge 随时间演化（goalserve_fair_prob 在 进球/红牌 后突变？是否被 microprice
+    污染兜底？）。
+    """
+
+    store = runtime.signal_snapshot_store
+    history = store.history_for_token(token_id)
+    return {
+        "token_id": token_id,
+        "count": len(history),
+        "snapshots": [
+            {
+                "pm_best_ask": str(s.pm_best_ask) if s.pm_best_ask is not None else None,
+                "pm_best_bid": str(s.pm_best_bid) if s.pm_best_bid is not None else None,
+                "goalserve_fair_prob": (
+                    str(s.goalserve_fair_prob) if s.goalserve_fair_prob is not None else None
+                ),
+                "math_prob": str(s.math_prob) if s.math_prob is not None else None,
+                "microprice": str(s.microprice) if s.microprice is not None else None,
+                "final_prob_p": str(s.final_prob_p),
+                "source_used": s.source_used,
+                "edge_pp": str(s.edge_pp) if s.edge_pp is not None else None,
+                "timestamp": s.timestamp.isoformat(),
+            }
+            for s in history
+        ],
+    }
+
+
 __all__ = ("router", "DEFAULT_WINDOW_MS", "MAX_WINDOW_MS")

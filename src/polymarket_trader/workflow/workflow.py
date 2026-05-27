@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Mapping
+from typing import Any, Mapping
 
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.sports_live import LiveEvent
@@ -49,6 +49,7 @@ class TradingWorkflow:
         *,
         config: TradingWorkflowConfig,
         ports: RuntimePorts | None = None,
+        signal_snapshot_store: Any = None,
     ) -> None:
         self._config = config
         self._ports = ports or RuntimePorts()
@@ -56,7 +57,11 @@ class TradingWorkflow:
         self._live_event_filter_cache: dict[tuple[tuple[str, ...], str | None], tuple[LiveEvent, ...]] = {}
         self._live_state_no_feasible_source: bool = False
         from polymarket_trader.workflow.quant_decider import QuantDecider
-        self._quant_decider = QuantDecider(config=config, ports=self._ports)
+        self._quant_decider = QuantDecider(
+            config=config,
+            ports=self._ports,
+            signal_snapshot_store=signal_snapshot_store,
+        )
         if self._ports.lifecycle is not None:
             try:
                 self._ports.lifecycle.subscribe(

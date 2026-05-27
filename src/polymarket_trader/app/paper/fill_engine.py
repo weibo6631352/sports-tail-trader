@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -18,6 +19,8 @@ from typing import Literal
 from polymarket_trader.domain.fees import FeeQuote, calculate_trade_fee, resolve_taker_fee_rate_bps
 from polymarket_trader.domain.market import Market
 from polymarket_trader.domain.order import OrderResultStatus, OrderSide, OrderType
+
+logger = logging.getLogger(__name__)
 from polymarket_trader.domain.orderbook import OrderbookSnapshot
 from polymarket_trader.infra.polymarket.order_execution_types import (
     OrderExecutionRequest,
@@ -86,6 +89,20 @@ def _simulate_buy(
 
     match = match_taker_buy(orderbook, amount_usdc, limit_price)
     if not match.is_filled:
+        # 调试 fill_rate=0：DEBUG 级（窄盘口 NO_FILL 高频，WARNING 会刷屏）。
+        # PM 第 3 轮 Part D 排查路径——paper match 需要 orderbook.asks 非空 + 最佳
+        # ask ≤ limit_price，任一不满足都 NO_FILL。Lazy %s 让 logger 跳过 disabled 级别
+        # 时不做字符串化（架构师红线：避免每次 NO_FILL 序列化 8 个字段）。
+        # TODO(R5+)：PaperVirtualLedger 接入 metrics registry 后改成 inc_counter
+        # ("paper_buy_no_liquidity_total", labels={token, reason})，配合 Grafana 看趋势。
+        if logger.isEnabledFor(logging.DEBUG):
+            asks_count = len(orderbook.asks) if (orderbook and orderbook.asks) else 0
+            best_ask = orderbook.asks[0].price if asks_count else None
+            logger.debug(
+                "paper_buy_no_liquidity trace=%s token=%s limit=%s amount=%s asks_count=%d best_ask=%s",
+                request.trace_id, request.token_id, limit_price, amount_usdc,
+                asks_count, best_ask,
+            )
         return SimulationOutcome(
             response=OrderExecutionResponse(
                 status=OrderResultStatus.NO_FILL,

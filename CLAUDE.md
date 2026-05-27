@@ -36,8 +36,8 @@ Polymarket market WS 推送是整个交易系统的决策驱动源——每条 `
 ## 1. 项目速览
 
 - 主包 [src/polymarket_trader](./src/polymarket_trader)：分 `api / app / domain / workflow / pipeline / recovery / infra / observability / runtime / sports`
-- 策略实现 [src/polymarket_trader/workflow](./src/polymarket_trader/workflow)：`TradingWorkflow` 装配 + `QuantDecider` 决策；所有 family 走同一份 Kelly + fair_value 主路径，**无 family 专属子包**
-- 量化信号入口 [workflow/fair_value.py](./src/polymarket_trader/workflow/fair_value.py)：math_lock / goalserve_implied / orderbook microprice 三层 max 融合——接入新信号源在这里扩展
+- 策略实现 [src/polymarket_trader/workflow](./src/polymarket_trader/workflow)：`TradingWorkflow` 装配 + `QuantDecider` 决策；所有 family 走同一份 Kelly + `estimate_signal` 主路径，**无 family 专属子包**
+- 量化信号入口 [workflow/quant_signal.py](./src/polymarket_trader/workflow/quant_signal.py) 的 `estimate_signal`：真概率层（goalserve devig fair_prob + math_prob 取 max）→ 盘口兜底层（orderbook microprice → mid → best_bid 四层链）。接入新信号源在 `estimate_signal` 内扩展（新增 source 加入第 1 层 truth_candidates）
 - 前端管理台 [frontend](./frontend)：Operator UI
 - 长期文档 [docs/](./docs/)：当前状态以代码和 `git log` 为准
 - Python 3.12，`src` layout，FastAPI + asyncpg + SQLAlchemy + py-clob-client-v2 + websockets
@@ -99,7 +99,7 @@ Polymarket market WS 推送是整个交易系统的决策驱动源——每条 `
 
 | 改的东西 | 落到哪里 |
 | --- | --- |
-| 策略规则、阈值、定价、入场/退出 | `strategy_config.toml` + `src/polymarket_trader/workflow/` |
+| 策略规则、阈值、定价、入场/退出 | `src/polymarket_trader/workflow/`（`config.py:TradingWorkflowConfig` dataclass 默认值） |
 | 交易/恢复/管理操作编排 | `src/polymarket_trader/app/` |
 | 数据入口与决策响应 | `src/polymarket_trader/pipeline/` |
 | 周期 reconcile / settlement / orphan 修复 | `src/polymarket_trader/recovery/` |
@@ -136,6 +136,7 @@ runtime → domain
 - 阻塞 I/O 与 CPU 密集任务必须离开交易主事件循环
 - 数据库写入、日志、全量扫描、报表和 Operator 大查询不得反向阻塞 P0 路径
 - P0 热路径（decision → risk → executor）只允许同步执行：风控判定、内存状态读写、订单签名/提交、向 outbox `put_nowait`。日志、DB 写入、metric 上报、payload 序列化落盘必须延迟到事务结束后由 outbox / persistence worker 异步承接；关键锁（`_idempotency_lock` 等）内禁止 IO `await`、日志和大对象序列化
+- **P0 路径的 `logger.info` / `logger.debug` 必须 lazy 守门**（`logger.isEnabledFor(...)` 或走 audit_events 异步通路）。任何 P0 路径下的 `extra={...}` dict alloc 都要先 level check 再构造——构造完才到 filter = GC 压力白干。R16-B 实测 `pipeline/decision/worker.py` 的 `tick_reprice_skip` 占 backend.log 66% 噪声就是反面教材
 - Reconciler 不在批量扫描里长时间持有交易状态写锁
 - 队列必须有容量上限、可观测性和降级路径
 
@@ -196,7 +197,7 @@ runtime → domain
 
 ## 10. 配置、命名与建模
 
-- `.env` 和 `Settings` 只承载框架运行参数；策略参数走 `strategy_config.toml`，不进 env
+- `.env` 和 `Settings` 只承载框架运行参数；策略参数集中在 `workflow/config.py:TradingWorkflowConfig` dataclass 默认值（**无 TOML / env 间接层**，§0 已说明），调阈值改默认值后重启
 - 契约字段命名单义，避免一套对外、一套对内的长期双命名层
 - Domain 内金额/价格用 `Decimal`
 - 策略常量集中在 `TradingWorkflowConfig`，避免散落硬编码
@@ -236,6 +237,7 @@ runtime → domain
 - 让数据库、持久化、日志或报表路径决定交易热路径是否能继续运行
 - 把 `single_game` 当成业务范围限制——只是"可用单场比分源评估"的家族标记
 - 让 resting BUY 长期挂着不修复
+- **`RuntimeComponents` 已是 `@dataclass` 强类型容器，禁止 `runtime: Any` + `getattr(runtime, "field", None)` duck-typing 访问**（R16-E 代码质量评估发现 67 处 `runtime: Any` + 36 处 `getattr` 破坏类型系统——重命名字段不报错、6 个月后新人不知道哪些字段真存在）。API endpoint / aggregator 一律 `runtime: RuntimeComponents` 直接属性访问
 
 ## 15. 量化交易策略方向
 
@@ -251,9 +253,9 @@ runtime → domain
 
 **入场**：有真概率信号（math_lock / goalserve / 用户自定义量化信号源任一）才入场；Kelly sizing 决定金额；无真信号 → `ProbView(prob_p=None)` → Kelly 拒绝。
 
-**持仓后**：当前 `_decide_position_action` 默认 skip——所有买卖决策（SELL / replace / HOLD）由用户在量化信号入口（`workflow/fair_value.py` 或自有信号源）接入后产生。**不预设任何退出规则**（无止盈倍数 / 锁定价 / 止损阈值 / GTC tail-bid 之类的 magic number），让真量化信号驱动。
+**持仓后**：当前 `_decide_position_action` 默认 skip——所有买卖决策（SELL / replace / HOLD）由用户在量化信号入口（`workflow/quant_signal.py:estimate_signal` 或自有信号源）接入后产生。**不预设任何退出规则**（无止盈倍数 / 锁定价 / 止损阈值 / GTC tail-bid 之类的 magic number），让真量化信号驱动。
 
-**信号接入**：要让系统对某类信号做出 BUY/SELL/HOLD 反应，在 `fair_value.math_lock_fair_value` 或 `estimate_fair_value` 里加新的信号源——三层 max 融合会自动让信号反映到 prob_p，Kelly 自然产生决策。
+**信号接入**：要让系统对某类信号做出 BUY/SELL/HOLD 反应，在 `workflow/quant_signal.py:estimate_signal` 第 1 层 truth_candidates 里加新的信号源（goalserve / math 之外）——max 融合会自动让最强信号反映到 prob_p，Kelly 自然产生决策。
 
 **直播源赔率 vs Polymarket 价格差价**（重要机会）：
 
@@ -371,6 +373,11 @@ Goalserve 覆盖面极广，主要联赛/赛事几乎必然有数据。发现 `m
 - **user_account_poll**：和 `market_sync_interval_seconds` 同 cadence（默认 20s），独立 scheduler job
 - **settlement_scanner**：5 分钟
 - 改 cadence 前先回答："这个数据真的会在新 cadence 周期内变化吗？变化但没及时拉到，损失是什么？"
+
+**Endpoint payload 上限**（R16-E 三方协评共识）：
+- 大聚合 endpoint（`/runtime` 类）**单次响应 ≤ 50KB**；超过必须分页 / 按需 `?include=` 拆字段 / 拆出独立子 endpoint
+- 前端 polling cadence 自检：`(payload_size_KB × polling_hz) < 10 KB/s`，否则操盘视图本身在抢 §0 带宽
+- **Operator endpoint 必须 < 2s 返回**；超时即视为 bug（操盘瞎眼 = 不能交易）。R16-A 实测 `/runtime` 8s hang 是反面教材——`gamma_client.get_public_profile timeout_s=2.0` 在 cold cache + RTT 200ms 链路上直接 block，已降到 0.3s
 
 ### 17.10 新增外部 API 客户端前的强制问题清单
 

@@ -15,8 +15,23 @@ from polymarket_trader.domain.decisions import DecisionContext, EntryCandidate
 from polymarket_trader.workflow.allocation import AllocationMarketSnapshot
 from polymarket_trader.workflow.config import TradingWorkflowConfig
 from polymarket_trader.workflow.outcomes import describe_sports_market
-from polymarket_trader.sports import SportsMarketFamily
+from polymarket_trader.sports import LiveGameStatus, SportsMarketFamily
 from polymarket_trader.sports.parsing import live_game_state_from_metadata
+
+
+# 终态拦截集：进入这些状态的比赛不会再有确定性赢方（POSTPONED/CANCELLED/RETIRED
+# 不会结算；DISPUTED 结算结果存疑；UNKNOWN/PAUSED 缺乏定价依据）——直接 skip 入场。
+# **不包括 ENDED**：ENDED 是核心扫尾场景（赢方已确定但 Polymarket 未结算，挂赢方
+# BUY 锁定确定性收益），由 math_prob 对输方返回 0 自然驱动 Kelly 拒败方。
+# 参考：feedback_ended_market_prune_design.md
+_TERMINAL_LIVE_STATUSES_BLOCKING_ENTRY = frozenset(
+    {
+        LiveGameStatus.POSTPONED,
+        LiveGameStatus.CANCELLED,
+        LiveGameStatus.RETIRED,
+        LiveGameStatus.DISPUTED,
+    }
+)
 
 from polymarket_trader.workflow.allocation import _ask_depth_notional
 
@@ -131,8 +146,15 @@ def _allocation_skip_reason(
     if descriptor.market_family == SportsMarketFamily.UNSUPPORTED or descriptor.market_type is None:
         return "unsupported_market_family"
     if descriptor.market_family == SportsMarketFamily.SINGLE_GAME:
-        if live_game_state_from_metadata(context.metadata) is None:
+        game = live_game_state_from_metadata(context.metadata)
+        if game is None:
             return "missing_live_game_state"
+        # 终态比赛入场过滤：POSTPONED/CANCELLED/RETIRED/DISPUTED 没有明确赢方
+        # 且不会正常结算，直接拒入场。**注意**：ENDED 不在此集合内——ENDED 是
+        # 扫尾场景的核心（赢方 token BUY 锁定确定性收益），由 math_prob 对败方
+        # 返回 0 让 Kelly 自然拒败方、放行赢方。
+        if game.status in _TERMINAL_LIVE_STATUSES_BLOCKING_ENTRY:
+            return f"live_game_terminal_{game.status.value}"
     if not snapshot.tradable:
         return "market_not_tradable"
     if not snapshot.market_active:

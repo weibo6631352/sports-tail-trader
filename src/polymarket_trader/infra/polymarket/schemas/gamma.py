@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -222,7 +222,7 @@ class GammaMarketDTO:
             status = TradingStatus.CLOSED
         elif self.archived:
             status = TradingStatus.PAUSED
-        return Market(
+        market = Market(
             condition_id=self.condition_id,
             market_slug=self.market_slug,
             outcomes=self.outcomes,
@@ -246,6 +246,11 @@ class GammaMarketDTO:
             sports_market_type=self.sports_market_type,
             trading_status=status,
         )
+        # 在 adapter 出口处一次性回填 sport——下游 SportResolver / 健康面板 /
+        # subscription_policy 都直接读 market.sport，不再各自从 slug / tags 推。
+        # 这是 R5-C 反冗余收口的核心：单一权威表 + 单一回填点。
+        from polymarket_trader.sports.slug_resolver import resolve_sport_from_market
+        return replace(market, sport=resolve_sport_from_market(market))
 
     def to_raw_market_event(self, *, source: str, trace_id: str | None = None) -> RawMarketEvent:
         return RawMarketEvent(

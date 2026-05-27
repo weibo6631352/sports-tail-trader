@@ -126,8 +126,12 @@ class RuntimeAggregator:
         runtime_status = self._runtime_status_snapshot(supervisor, readiness)
         account = self._account_snapshot(); _t("account", t); t = _time.perf_counter()
         registry = self._registry_snapshot(); _t("registry", t); t = _time.perf_counter()
-        market_sample = [
-            self._serializer().market_view(market)
+        # R16-C (三方协评 Code Q2 + Perf F3 196KB 病根)：原来 market_sample 在
+        # registry.market_sample 和 top-level market_sample 双份序列化（dead field +
+        # MarketView → jsonable 同份数据走两遍 serialize）。前端 grep 0 引用 top-level，
+        # 删 top-level + 内联 jsonable 链路 = payload 直接减半。
+        market_sample_jsonable = [
+            jsonable(self._serializer().market_view(market))
             for market in registry.markets[:_RUNTIME_MARKET_SAMPLE_LIMIT]
         ]; _t("market_sample_view", t); t = _time.perf_counter()
         markets_truncated = len(registry.markets) > _RUNTIME_MARKET_SAMPLE_LIMIT
@@ -136,7 +140,6 @@ class RuntimeAggregator:
         bootstrap_summary = jsonable(self._runtime.bootstrap_summary if self._runtime else {}); _t("bootstrap_summary", t); t = _time.perf_counter()
         market_discovery = self._market_discovery_snapshot(); _t("market_discovery", t); t = _time.perf_counter()
         sports_live_sync = self._sports_live_sync_snapshot(); _t("sports_live_sync", t); t = _time.perf_counter()
-        market_sample_jsonable = [jsonable(market) for market in market_sample]; _t("market_sample_jsonable", t); t = _time.perf_counter()
         account_serialized = self._serializer().account_snapshot(account); _t("account_serialize", t); t = _time.perf_counter()
         event_bus_payload = jsonable(self._event_bus_snapshot()); _t("event_bus_snapshot", t); t = _time.perf_counter()
         persistence_payload = jsonable(self._persistence_snapshot()); _t("persistence_snapshot", t); t = _time.perf_counter()
@@ -160,7 +163,7 @@ class RuntimeAggregator:
             "account": account_serialized,
             "event_bus": event_bus_payload,
             "persistence": persistence_payload,
-            "market_sample": market_sample,
+            # R16-C: 删 top-level "market_sample" (前端 0 引用，registry.market_sample 已含同份数据)
             "portfolio": portfolio_payload,
         }
 
@@ -496,7 +499,12 @@ class RuntimeAggregator:
         if gamma_client is None:
             return None
         try:
-            return await gamma_client.get_public_profile(address, timeout_s=2.0)
+            # R16-A (三方协评 P0)：timeout 2.0s 在中国→代理→US RTT 200ms 链路 + gamma
+            # 上游间歇 500 时让 /runtime 整个 hang 2s（PM 实测 8s, Code 诊断 cold cache
+            # miss 路径主因）。降到 0.3s——上游慢就 timeout 走 cache miss 返 None，
+            # 不阻塞 operator 主响应。get_public_profile 是装饰性 identity 信息（钱包
+            # profile 头像等），失败不影响交易决策，allows graceful degradation。
+            return await gamma_client.get_public_profile(address, timeout_s=0.3)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "polymarket public profile lookup failed",
@@ -607,7 +615,8 @@ class RuntimeAggregator:
         return worker.snapshot(token_id)
 
     def _entry_metadata_store(self) -> Any | None:
-        return getattr(self._runtime, "market_metadata_store", None) if self._runtime else None
+        # R17 (Code Q1): RuntimeComponents 强类型 + 删 getattr。
+        return self._runtime.market_metadata_store if self._runtime is not None else None
 
     def _settings(self) -> Settings | None:
         return self._runtime.settings if self._runtime else None

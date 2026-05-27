@@ -455,10 +455,41 @@ def _basketball_ml_lock(side: SportsMarketSide, game: LiveGameState) -> MathProb
     )
 
 
+# R13 (CPO Round 11 R11-D) NBA Q4 末段 pace_decay 系数。
+# NBA 末段（Q4 last 4 min）节奏放缓——罚球 + 犯规 + 暂停频繁、转换进攻减少——
+# 经验上每秒总得分 variance ~ 整场常态的 0.7×。降低 var_total → 末段 UNDER 锁定
+# 更稳、OVER 突破更难。系数来自 538/Inpredictable 公开 NBA win prob 表对季后赛
+# 末段 pace decay 的经验值。
+# 严门禁（不污染其他 sport/league/quarter）：
+#   - league startswith "NBA"（兼容 "NBA - Finals" / "NBA - Playoffs" 命名）
+#   - current_period == 4（Q4）
+#   - remaining < 240 s（last 4 min）
+# 不针对 WNBA 因为 WNBA 是 10min/Q 总 40min vs NBA 12min/Q 总 48min，pace 模型不同。
+_NBA_Q4_PACE_DECAY_FACTOR = 0.7
+_NBA_Q4_ENDGAME_SECONDS = 240
+
+
+def _is_nba_q4_endgame(game: LiveGameState, remaining: int) -> bool:
+    """R13 NBA Q4 末段 pace_decay 触发门禁——严，错配宁可不 boost。"""
+    league_upper = (game.league or "").upper()
+    if not league_upper.startswith("NBA"):
+        return False
+    if league_upper.startswith("WNBA"):  # WNBA 也 startswith NBA 子串需排除
+        return False
+    bs = game.basketball_state
+    if bs is None or bs.current_period != 4:
+        return False
+    return remaining < _NBA_Q4_ENDGAME_SECONDS
+
+
 def _basketball_totals_lock(
     side: SportsMarketSide, line: Decimal, game: LiveGameState
 ) -> MathProbResult:
-    """NBA Totals：双边总得分 Poisson-normal 近似。"""
+    """NBA Totals：双边总得分 Poisson-normal 近似。
+
+    R13 NBA Q4 末段叠加 pace_decay：仅 NBA league + Q4 + remaining<240s 时
+    var_total × 0.7，让 UNDER 在末段领先时锁定更稳（pace 经验值见 _is_nba_q4_endgame）。
+    """
     if side not in {SportsMarketSide.OVER, SportsMarketSide.UNDER}:
         return MathProbResult(_ZERO, "basketball_totals", "unsupported_side", {})
     total = Decimal(int(game.total_score))
@@ -472,8 +503,13 @@ def _basketball_totals_lock(
     if side == SportsMarketSide.OVER and total > line:
         return MathProbResult(_ONE, "basketball_totals", "already_over_win", {})
     if side == SportsMarketSide.UNDER and total >= line:
+        # 已 lose——返 _ZERO 而非 _ONE+lose（R12 P0 教训：lose 分支必须返概率 0
+        # 让 Kelly 拒，不依赖上层 detail.outcome 检查）。
         return MathProbResult(_ZERO, "basketball_totals", "already_over_lose", {})
     var_total = 2.0 * _BASKETBALL_VAR_PER_SECOND * remaining
+    nba_q4_decay_applied = _is_nba_q4_endgame(game, remaining)
+    if nba_q4_decay_applied:
+        var_total *= _NBA_Q4_PACE_DECAY_FACTOR
     need = float(line) - float(total) + (0.5 if side == SportsMarketSide.OVER else 0.0)
     z = need / math.sqrt(var_total)
     p_break = 0.5 * math.erfc(z / math.sqrt(2.0))
@@ -482,7 +518,8 @@ def _basketball_totals_lock(
     return MathProbResult(
         Decimal(str(round(lock, 4))), "basketball_totals", "live_estimate",
         {"total": str(total), "line": str(line), "remaining_seconds": remaining,
-         "p_break": round(p_break, 4)},
+         "p_break": round(p_break, 4),
+         "nba_q4_pace_decay": nba_q4_decay_applied},
     )
 
 
@@ -1237,11 +1274,14 @@ def evaluate_math_prob(
 
     if game is None:
         return MathProbResult(_ZERO, "no_game", "missing_live_game_state", {})
-    if game.status == LiveGameStatus.ENDED:
-        return MathProbResult(
-            _ONE, "game_ended", "game_already_ended",
-            {"home_score": game.home_score, "away_score": game.away_score},
-        )
+    # 注：曾经在此处对 ENDED 比赛一律返回 prob=1.0。该短路对**所有 token / 所有 side**
+    # 一视同仁，导致败方 token 也被认为 100% 赢 → Kelly 算出巨大 edge → 满仓 BUY 败方 →
+    # 等结算归 0 = 爆仓。修复：让 dispatcher 进入 sport-specific lock，由各 lock 内
+    # `remaining<=0 / n_half<=0` 分支按 (side, score) 派胜负（baseball line 222、
+    # soccer line 535、basketball line 446 等已实现）。无对应 lock 的 sport
+    # (esports/handball/volleyball...) 落入 _UNSUPPORTED(prob=0) → quant_decider
+    # 看 prob=0 不入 candidates → 由 goalserve / microprice 兜底（ENDED 时 inplay
+    # 通常无赔率推送 → 安全拒入场）。
 
     sport = (game.sport or "").strip().lower()
 

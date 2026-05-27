@@ -13,19 +13,32 @@ from polymarket_trader.workflow.config import TradingWorkflowConfig
 
 
 def build_configured_discovery_queries(config: TradingWorkflowConfig) -> tuple[DiscoveryQuery, ...]:
-    """生成 Gamma 粗筛查询——只用 polymarket 官方 ``live=true`` 标志。
+    """生成 Gamma 粗筛查询——宽 query + 下游过滤替代不可靠的 ``live=true`` 信号。
 
-    polymarket 自己标记 ``live=true`` 的事件即"当下真正可交易的直播比赛",
-    实测 30 events / 458 markets 直接覆盖核心目标. 删除旧的 start_time 窗口
-    查询 (旧 12h/8h 窗口拉了大量已结束 + 远期市场, 实测 1500+ markets, 60%+
-    是 stale): 让 discovery 与 polymarket /sports/live 同口径.
+    **架构假设级根因**（CPO R5 + 性能分析师 Round 1 + 架构师 Round 3 协评）：
+    曾用 ``live=true`` 作唯一权威 query 参数，但 polymarket 该 flag 滞后/不可靠
+    ——实测全平台只返 2 events，已开赛 6:48 的 CS2 LiveMix gamma 至今仍返
+    ``live=None``。24h/522 commits 团队一直默认它是金标准，错过 NBA/MLB/NHL/UFC
+    主流体育实时盘口，造成 discovery 死锁（7 个 mlbb 死盘 → WS 0 message →
+    paper fill=0）。
 
-    Trade-offs:
-    - polymarket live 标志可能比赛事真实开赛晚几秒~几分钟标记 → 接受少量延迟
-    - 不再 24h 提前 track 远期 → discovery 会在赛事开打瞬间 (live 标志一打开)
-      立即纳入, 实测延迟可接受
-    - outright/futures (champion/season winner) 由专用 worker 拉, 不依赖
-      sports 类 discovery query
+    新方案：单 query + 宽过滤——
+    - 主 query：``tag_slug=sports`` + ``order=startTime, ascending=true``
+      （``fetch_full_market_discovery_page`` 已自动注入 ``active=True / closed=False``）
+    - 不再带 ``live=true`` —— 让 polymarket 把所有 ``active+!closed`` 的 sports
+      events 都返回，下游 universe / live_state matching / pruning 自己判定哪些
+      真正"正在直播"
+    - 单 query 单路径——架构师否决保留 ``live=true`` 作"补充查询"（§8 禁止双
+      路径长期共存）
+
+    Trade-offs：
+    - events 数量可能从 2 涨到 100+：可接受。``fetch_full_market_discovery_page``
+      按 cursor 分页 + ``_dedupe_discovery_queries`` 去重，带宽可吸收
+    - outright/futures 远期市场会被 active 路径包含：universe / live_source
+      matching 拒绝这些（无 live_state 不交易）
+    - **TODO（如果实测 events 爆炸到 > 500）**：在
+      ``MarketDiscoveryWorker.ingest_source_page`` 加 startDate ± N 小时二次
+      过滤（架构师建议 ±6h），目前先观察实际数量
     """
 
     tag_slugs = tuple(
@@ -34,10 +47,8 @@ def build_configured_discovery_queries(config: TradingWorkflowConfig) -> tuple[D
 
     queries: list[DiscoveryQuery] = []
     for tag_slug in tag_slugs:
-        base = {"tag_slug": tag_slug, "order": "startTime", "ascending": "true"}
-        queries.append(
-            DiscoveryQuery(name=f"sports_live:{tag_slug}", params={**base, "live": "true"})
-        )
+        params = {"tag_slug": tag_slug, "order": "startTime", "ascending": "true"}
+        queries.append(DiscoveryQuery(name=f"sports:{tag_slug}", params=params))
     return tuple(queries)
 
 

@@ -138,7 +138,11 @@ class MarketParseResult:
             or self.min_order_size is None
         ):
             raise ValueError("accepted parse result is missing required market fields")
-        return Market(
+        from dataclasses import replace as _replace
+
+        from polymarket_trader.sports.slug_resolver import resolve_sport_from_market
+
+        market = Market(
             condition_id=self.condition_id,
             market_slug=self.market_slug,
             outcomes=self.outcomes,
@@ -163,6 +167,8 @@ class MarketParseResult:
             matched_keywords=self.matched_keywords,
             trading_status=trading_status,
         )
+        # 与 GammaMarketDTO.to_market 同口径：单一 sport_resolver 回填，下游统一读 market.sport。
+        return _replace(market, sport=resolve_sport_from_market(market))
 
 
 class MarketPayloadParser:

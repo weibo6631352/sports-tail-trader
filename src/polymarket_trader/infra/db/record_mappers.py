@@ -290,7 +290,11 @@ def market_from_record(record: Mapping[str, Any]) -> Market | None:
         _log_skip("market", record, "missing condition_id/market_slug/outcomes")
         return None
     schedule_fee_rate_bps = _fee_rate_units_from_market_payload(raw_market)
-    return Market(
+    from dataclasses import replace as _replace
+
+    from polymarket_trader.sports.slug_resolver import resolve_sport_from_market
+
+    market_obj = Market(
         condition_id=condition_id,
         market_slug=market_slug,
         outcomes=outcomes,
@@ -340,6 +344,8 @@ def market_from_record(record: Mapping[str, Any]) -> Market | None:
         trading_status=_trading_status(record.get("trading_status")),
         reject_reason=_text(record.get("reject_reason")),
     )
+    # 与 gamma adapter / market_payload_parser 同口径：DB 回放路径也走单一 resolver。
+    return _replace(market_obj, sport=resolve_sport_from_market(market_obj))
 
 
 def _market_outcomes(

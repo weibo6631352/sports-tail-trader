@@ -24,8 +24,9 @@ from polymarket_trader.workflow.allocation import (
     ProbView,
     kelly_plan,
 )
+from polymarket_trader.app.signal_snapshot_store import SignalSnapshotStore
 from polymarket_trader.workflow.config import TradingWorkflowConfig
-from polymarket_trader.workflow.quant_signal import goalserve_prob, math_prob
+from polymarket_trader.workflow.quant_signal import estimate_signal
 from polymarket_trader.workflow.trading.allocation import (
     _allocation_skip_reason,
     _candidate_snapshots,
@@ -42,7 +43,11 @@ from polymarket_trader.workflow.allocation import _ask_depth_notional
 logger = logging.getLogger(__name__)
 
 
-def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> EntrySizing:
+def size_entry(
+    config: TradingWorkflowConfig,
+    context: DecisionContext,
+    signal_snapshot_store: SignalSnapshotStore | None = None,
+) -> EntrySizing:
     """为当前 market 计算本轮可用入场预算（Kelly sizing）。
 
     流程：
@@ -82,6 +87,15 @@ def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Entry
     bankroll_usdc = context.bankroll_usdc
     if bankroll_usdc is None:
         bankroll_usdc = portfolio_budget_usdc
+    # R15 (架构师 Round 7) bankroll staleness 归因：决策时刻 last_reconcile_at 与 now
+    # 差距秒数。喂 Kelly 的 bankroll 若超过 market_sync_interval_seconds (20s) + buffer
+    # 就是 stale，决策质量打折扣。account_snapshot 缺时（启动早 / fixture）= None。
+    account_age_s: Decimal | None = None
+    if context.account_snapshot is not None:
+        last_reconcile = context.account_snapshot.last_reconcile_at
+        if last_reconcile is not None:
+            from datetime import datetime as _dt, timezone as _tz
+            account_age_s = Decimal(str((_dt.now(_tz.utc) - last_reconcile).total_seconds()))
     kelly_fraction = context.kelly_fraction
     kelly_max_position_fraction = context.kelly_max_position_fraction
     kelly_min_edge = context.kelly_min_edge if context.kelly_min_edge is not None else Decimal("0")
@@ -123,29 +137,36 @@ def size_entry(config: TradingWorkflowConfig, context: DecisionContext) -> Entry
         eligible_snapshots.append(replace(snapshot, liquidity_usdc=buyable_liquidity_usdc))
 
     def _prob_provider(snap: AllocationMarketSnapshot) -> ProbView:
-        """Kelly probability source — 真概率信号 max 融合 (§15 直播源赔率差价机会).
+        """Kelly probability source —— 走 estimate_signal 单一入口 (R7 CPO Round 3)。
 
-        来源:
-        - math_prob: sport-specific 数学公式 (baseball/soccer/basketball/tennis/hockey/cricket)
-          esports/MMA/电竞细分等无对应公式时返回 None
-        - goalserve_prob: Goalserve inplay 赔率隐含概率 (moneyline/totals/spread)
-          覆盖所有 8 sport,esports 主要靠这个
+        estimate_signal 内部做真概率信号 max 融合（goalserve devig + math_prob）+
+        盘口兜底（microprice / mid / best_bid）四层链 + 同步产 LiveSignalSnapshot
+        写入 store 供 /analytics/edge-signals 暴露。
 
-        两者都缺 → prob_p=None → Kelly 拒绝。任一可用走 max 融合,选更高的真概率
-        信号 (保护我方持仓利润不被 stale 信号砸低 SELL 价)。
+        **策略安全红线**：只有真概率层 (goalserve_implied_prob / math_prob) 才返
+        prob_p ≠ None；盘口兜底层 prob_p=None → Kelly 拒绝（不能用 microprice 当
+        真信号触发下单——会被 best_bid 污染形成自反馈）。
         """
 
-        candidates: list[tuple[Decimal, str]] = []
-        math_p = math_prob(context, snap.token_id)
-        if math_p is not None and math_p > Decimal("0"):
-            candidates.append((math_p, "math_prob"))
-        gs_p = goalserve_prob(context, snap.token_id)
-        if gs_p is not None and gs_p > Decimal("0"):
-            candidates.append((gs_p, "goalserve_implied_prob"))
-        if not candidates:
-            return ProbView(prob_p=None, prob_confidence=Decimal("0"), source="no_real_prob_signal")
-        prob, source = max(candidates, key=lambda x: x[0])
-        return ProbView(prob_p=prob, prob_confidence=Decimal("0.7"), source=source)
+        snap_ob = snap.orderbook
+        if snap_ob is None or snap_ob.best_bid is None:
+            return ProbView(prob_p=None, prob_confidence=Decimal("0"), source="missing_orderbook")
+        focus_context = (
+            context if context.token_id == snap.token_id else replace(context, token_id=snap.token_id)
+        )
+        prob, source, snapshot = estimate_signal(
+            focus_context,
+            token_id=snap.token_id,
+            best_bid=snap_ob.best_bid,
+            best_ask=snap_ob.best_ask,
+            account_age_s=account_age_s,
+        )
+        if signal_snapshot_store is not None:
+            signal_snapshot_store.record(snapshot)
+        # 只有真概率层喂 Kelly；盘口兜底层 → prob_p=None 让 Kelly 拒。
+        if source in {"goalserve_implied_prob", "math_prob"}:
+            return ProbView(prob_p=prob, prob_confidence=Decimal("0.7"), source=source)
+        return ProbView(prob_p=None, prob_confidence=Decimal("0"), source=source)
 
     eligible_plan = kelly_plan(
         trace_id=context.trace_id,
@@ -295,9 +316,13 @@ class QuantDecider:
         *,
         config: TradingWorkflowConfig,
         ports: RuntimePorts | None = None,
+        signal_snapshot_store: SignalSnapshotStore | None = None,
     ) -> None:
         self._config = config
         self._ports = ports
+        # R7 CPO 指令：store 注入是 caller 的责任，QuantDecider 持有 + 传给 size_entry
+        # → _prob_provider 写入。None = 测试 / fixture 路径不强制写入。
+        self._signal_snapshot_store = signal_snapshot_store
 
     # ---- 主入口 -----------------------------------------------------
 
@@ -342,7 +367,7 @@ class QuantDecider:
         if context.market is None or context.orderbook is None:
             return TradingDecision.skip(reason="missing_market_state")
 
-        sizing = size_entry(self._config, context)
+        sizing = size_entry(self._config, context, self._signal_snapshot_store)
         if sizing.allocation is None or sizing.allocation.buy_budget_usdc <= Decimal("0"):
             return TradingDecision.skip(reason=sizing.reason or "no_allocation")
         focus_context = replace(
@@ -358,6 +383,9 @@ class QuantDecider:
 
         所有持仓后的买卖决策（SELL / replace / HOLD）由用户在主量化决策入口
         （quant_signal / Kelly / 自有信号源）后续接入产生；本方法当前 skip。
+
+        注：曾接入三档退场（CPO R5 越界夹带）已按 CPO R2 决议撤回，等专项
+        协评 + backtest 后再单独提议（参 task list R5 夹带处置表）。
         """
 
         return TradingDecision.skip(reason="quant_position_hold")

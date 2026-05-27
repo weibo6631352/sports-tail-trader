@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping
 from uuid import uuid4
 
 from polymarket_trader.domain.account import AccountSnapshot
+from polymarket_trader.infra.polymarket.base_client import PolymarketTransportError
 
 if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents
@@ -261,6 +262,52 @@ async def run_market_discovery_scan(
                 break
         await expand_live_event_market_discovery(runtime)
         await refresh_priority_condition_ids(runtime)
+    except PolymarketTransportError as exc:
+        # 上游 gamma 5xx 单独归类（CPO Round 7 Track B + feedback_aggressive_retry）：
+        # polymarket 服务端 bug（如 keyset cursor 特定值返 500）不应该让我方 worker
+        # 标 unhealthy / consecutive_failures 累加触发指数退避——下一轮 cursor 可能就好。
+        # 处理：reset cursor 让下轮重头拉、不 record_failure、不 mark_worker_error、
+        # 打 INFO log gamma_keyset_upstream_500 便于事后 grep 上游 bug 频率。
+        if exc.status_code is not None and exc.status_code >= 500:
+            state.after_cursor = None
+            state.query_cursors.clear()
+            state.completed_query_names.clear()
+            state.next_query_index = 0
+            state.consecutive_failures = 0  # 不算我方失败
+            runtime.market_discovery_worker.mark_scan_success()  # 不进 worker error 计数
+            logger.info(
+                "gamma_keyset_upstream_500",
+                extra={
+                    "status_code": exc.status_code,
+                    "reason": str(exc),
+                    "next_round_cursor": "reset_to_head",
+                },
+            )
+        else:
+            # 4xx 等其他状态码走原失败路径
+            state.record_failure(str(exc))
+            backoff_seconds = _retry_backoff_seconds(state.consecutive_failures)
+            runtime.market_discovery_worker.record_failure(
+                source="gamma.events_keyset",
+                reason=str(exc),
+                retry_after_seconds=backoff_seconds,
+            )
+            runtime.supervisor.mark_worker_error(
+                "market_discovery",
+                detail=f"discover_failed retry_in={backoff_seconds}s fail_n={state.consecutive_failures}",
+                last_error=str(exc),
+            )
+            logger.warning(
+                "market discovery scan failed",
+                extra={
+                    "reason": str(exc),
+                    "status_code": exc.status_code,
+                    "consecutive_failures": state.consecutive_failures,
+                    "retry_after_seconds": backoff_seconds,
+                },
+            )
+            if state.consecutive_failures > 0:
+                await asyncio.sleep(min(5.0 * (2 ** (state.consecutive_failures - 1)), 60.0))
     except Exception as exc:
         state.record_failure(str(exc))
         backoff_seconds = _retry_backoff_seconds(state.consecutive_failures)
@@ -467,7 +514,10 @@ async def fetch_full_market_discovery_page(
     after_cursor = state.query_cursors.get(query.name) or state.after_cursor
     if after_cursor is not None:
         params["after_cursor"] = after_cursor
-    events, next_cursor = await runtime.gamma_client.list_events_keyset_by_params(params, timeout_s=2.0)
+    # R7 验证发现 timeout=2.0 在中国→代理→US RTT 150-400ms 链路上 6 次连续超时
+    # （curl 直接 5s 内返回 20 events，gamma 上游正常但响应慢）。8s 给 RTT + gamma
+    # 处理 + 解压留足余量；§0 决策 ms 抢占不受影响（discovery 跑 background scheduler）。
+    events, next_cursor = await runtime.gamma_client.list_events_keyset_by_params(params, timeout_s=8.0)
     raw_events: list[Any] = []
     # events 端点返回的 nested markets 已经包含完整 GammaMarketDTO（tick/fee/
     # outcomes/closed/token_ids），顺手写进 gamma_snapshot_store——下游 reconcile

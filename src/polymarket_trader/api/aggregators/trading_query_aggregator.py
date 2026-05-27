@@ -38,12 +38,15 @@ from .timeline_aggregator import TimelineAggregator
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    # R17 (Code Q1) RuntimeComponents 强类型
+    from polymarket_trader.main import RuntimeComponents
+
 
 class TradingQueryAggregator:
     def __init__(
         self,
         *,
-        runtime: Any = None,
+        runtime: "RuntimeComponents | None" = None,
         session_factory: "async_sessionmaker[AsyncSession] | None" = None,
         serializer: ApiSerializer | None = None,
     ) -> None:
@@ -51,7 +54,7 @@ class TradingQueryAggregator:
         self._session_factory = (
             session_factory
             if session_factory is not None
-            else (getattr(runtime, "db_session_factory", None) if runtime else None)
+            else (runtime.db_session_factory if runtime is not None else None)
         )
         self._serializer = serializer or ApiSerializer.from_runtime(runtime)
         self._timeline = TimelineAggregator(
@@ -61,8 +64,9 @@ class TradingQueryAggregator:
         )
 
     def _account_snapshot(self) -> AccountSnapshot:
-        store = getattr(self._runtime, "account_state_store", None) if self._runtime else None
-        return store.snapshot() if store is not None else AccountSnapshot()
+        if self._runtime is None:
+            return AccountSnapshot()
+        return self._runtime.account_state_store.snapshot()
 
     async def list_orders(
         self,
