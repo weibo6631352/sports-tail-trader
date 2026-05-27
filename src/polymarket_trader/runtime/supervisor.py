@@ -98,6 +98,7 @@ class Supervisor:
         entry_signal_to_submit_warn_ms: int = 500,
         outbox_depth_warn: int = 1000,
         reconcile_stale_after_seconds: int = 300,
+        paper_mode: bool = False,
     ) -> None:
         self._event_bus = event_bus
         self._settings_readiness = settings_readiness
@@ -113,6 +114,8 @@ class Supervisor:
         self._entry_signal_to_submit_warn_ms = max(1, entry_signal_to_submit_warn_ms)
         self._outbox_depth_warn = max(1, outbox_depth_warn)
         self._reconcile_stale_after = timedelta(seconds=max(1, reconcile_stale_after_seconds))
+        # paper_mode: user_ws 不需要 (成交走 paper_fill_engine 投影,不依赖链上 user channel)
+        self._paper_mode = bool(paper_mode)
         self._phase = RuntimePhase.CONFIG_LOADING
         self._manual_pause_reason: str | None = None
         self._degraded_reason: str | None = None
@@ -456,7 +459,8 @@ class Supervisor:
             blocking_reasons.append("trading_client_not_ready")
         if not market_ws_connected and not market_ws_idle_no_markets:
             blocking_reasons.append("market_ws_not_connected")
-        if not user_ws_connected:
+        if not user_ws_connected and not self._paper_mode:
+            # paper_mode 下不需要链上 user_ws,成交事件走 paper_fill_engine
             blocking_reasons.append("user_ws_not_connected")
         if not reconcile_fresh:
             blocking_reasons.append("reconcile_not_fresh")

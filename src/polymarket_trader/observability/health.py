@@ -152,6 +152,9 @@ class HealthReporter:
         # user_ws 仅在用户动作(下单/成交/余额变动)时推消息,paper_mode + 无交易期
         # 内长期 idle 是正常态,只看 connected 状态.idle 判断会让 health 长期误判
         # degraded,把真问题(disconnect / 反复重连)淹没.
+        # paper_mode 下 user_ws 整个不需要——成交事件走 paper_fill_engine 内部投影,
+        # 不依赖链上 user channel.connected=false 是预期行为,不应标 degraded.
+        paper_mode = bool(getattr(self._runtime.settings, "paper_trading_mode", False))
         check_idle: dict[str, bool] = {"market_ws": True, "user_ws": False}
         for name, worker in (
             ("market_ws", self._runtime.market_ws_worker),
@@ -167,9 +170,10 @@ class HealthReporter:
                 # user_ws 与订阅无关(用户账户层),不走这个豁免.
                 subscription_count = int(getattr(snap, "subscription_count", 0) or 0)
                 idle_due_to_no_demand = name == "market_ws" and subscription_count == 0
+                paper_user_ws_not_needed = name == "user_ws" and paper_mode
                 status: HealthStatus = "healthy"
-                if idle_due_to_no_demand:
-                    # 没 token 可订阅,无论 connected 与否都视为 idle healthy
+                if idle_due_to_no_demand or paper_user_ws_not_needed:
+                    # 没 token 可订阅 OR paper_mode 不需要 user_ws,无论 connected 与否都 healthy
                     pass
                 elif not connected:
                     status = "degraded"
@@ -182,6 +186,7 @@ class HealthReporter:
                     "idle_seconds": stale_s,
                     "idle_checked": check_idle[name],
                     "idle_due_to_no_demand": idle_due_to_no_demand,
+                    "paper_user_ws_not_needed": paper_user_ws_not_needed,
                     "status": status,
                 }
                 worst = _worst([worst, status])

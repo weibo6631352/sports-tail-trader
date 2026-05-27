@@ -12,9 +12,10 @@ from polymarket_trader.domain.account import AccountSnapshot
 if TYPE_CHECKING:
     from polymarket_trader.main import RuntimeComponents
 
-# /events/keyset 单页大小：之前 50，每次返回 ~500KB raw / ~60KB gzip。我们大多数轮次
-# 只关心新事件，20 足够覆盖 sports 上线节奏；keyset cursor 已经保证不重复拉同一页。
-_MARKET_DISCOVERY_EVENT_PAGE_LIMIT = 20
+# /events/keyset 单页大小:中国→代理→US RTT 200ms,limit=100 实测 gamma 超时,
+# limit=50 是之前验证过的稳态值(gzip ~120KB),冷启动 ~10s 填满 200+ live events.
+# 稳态下 cursor 已经在 head,大单页不浪费——一拿到尾部就回到"无新增"状态.
+_MARKET_DISCOVERY_EVENT_PAGE_LIMIT = 50
 _MARKET_DISCOVERY_MARKET_BUDGET_PER_TICK = 1000
 _MARKET_DISCOVERY_REQUEST_BUDGET_PER_TICK = 2
 _MARKET_DISCOVERY_MAX_RUNTIME_MS = 200.0

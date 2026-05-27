@@ -109,7 +109,11 @@ class GammaMarketDTO:
             "taker_base_fee",
         )
         raw_tags = _first_value(self.raw, "tags")
-        if raw_tags is None and event is not None:
+        # gamma 实际 payload market.tags 多数情况是 [] (空 list, 不是 None);
+        # `is None` 判定漏掉了空 list, 导致 event.tags 上的 soccer/ligue-1 等
+        # 关键 universe token 没传到 market, universe.select_market 全 reject
+        # category_not_matched → registry 空 → ws 0 订阅 → 两个 live 页面空白.
+        if not raw_tags and event is not None:
             raw_tags = _first_value(event, "tags")
         object.__setattr__(self, "condition_id", self.condition_id or _first_text(self.raw, "condition_id", "conditionId", "condition"))
         object.__setattr__(self, "market_slug", self.market_slug or _first_text(self.raw, "market_slug", "marketSlug", "slug"))
@@ -335,8 +339,28 @@ def normalize_gamma_market(payload: Mapping[str, Any]) -> GammaMarketDTO:
 
 def normalize_gamma_event(payload: Mapping[str, Any]) -> GammaEventDTO:
     normalized = _unwrap_mapping(payload)
-    markets = tuple(normalize_gamma_market(item) for item in _iter_mappings(normalized, "markets", "items", "results"))
-    return GammaEventDTO(raw=normalized, markets=markets)
+    # event-level tags/category 必须注入到每个 market.raw 后再 normalize:
+    # gamma /events/keyset 实际返回 markets[i].tags=[] (空 list,不是 None) 而 event.tags
+    # 才含 soccer/ligue-1 等 universe 关键 token. GammaMarketDTO.__post_init__ 找 event
+    # 是从 market.raw["events"] 取——但 markets[i].raw 里没有这个 key.必须在这里把 event
+    # 的 tags/category 写进每个 market.raw, 让 fallback 链路能拿到.
+    event_tags = _first_value(normalized, "tags")
+    event_category = _first_value(normalized, "category")
+    markets_raw = list(_iter_mappings(normalized, "markets", "items", "results"))
+    markets_enriched: list[GammaMarketDTO] = []
+    for m_raw in markets_raw:
+        m_copy = dict(m_raw)
+        if not _first_value(m_copy, "tags") and event_tags is not None:
+            m_copy["tags"] = event_tags
+        if not _first_value(m_copy, "category") and event_category is not None:
+            m_copy["category"] = event_category
+        # 顺便注入 event 元信息让 GammaMarketDTO event_slug/title fallback 拿到
+        if not _first_value(m_copy, "eventSlug", "event_slug"):
+            m_copy["eventSlug"] = _first_value(normalized, "slug", "eventSlug")
+        if not _first_value(m_copy, "eventTitle", "event_title"):
+            m_copy["eventTitle"] = _first_value(normalized, "title", "eventTitle")
+        markets_enriched.append(normalize_gamma_market(m_copy))
+    return GammaEventDTO(raw=normalized, markets=tuple(markets_enriched))
 
 
 def normalize_gamma_public_profile(payload: Mapping[str, Any]) -> GammaPublicProfileDTO:

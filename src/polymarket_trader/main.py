@@ -645,6 +645,7 @@ def build_runtime(settings: Settings | None = None) -> RuntimeComponents:
         entry_signal_to_submit_warn_ms=settings.entry_signal_to_submit_warn_ms,
         outbox_depth_warn=settings.persistence_event_queue_max_size,
         reconcile_stale_after_seconds=max(settings.market_sync_interval_seconds * 2, 60),
+        paper_mode=settings.paper_trading_mode,
     )
     # N13：把 supervisor heartbeat 接到 trading_decision worker；worker 内部不直接持有
     # supervisor 实例，避免 P0 worker 反向耦合 runtime/状态层。
