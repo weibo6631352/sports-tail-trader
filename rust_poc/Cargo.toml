@@ -1,0 +1,21 @@
+[package]
+name = "rss_leak_poc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# rustls 绕开 OpenSSL libcrypto leak (R38 真因之一)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "http2", "gzip"] }
+# tokio async runtime — 心智模型对应 Python asyncio
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+# mimalloc 绕开 macOS libc 不归还 (R36 嫌疑)
+mimalloc = { version = "0.1", default-features = false }
+# JSON parse
+serde_json = "1"
+# WSS client
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
+futures-util = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
