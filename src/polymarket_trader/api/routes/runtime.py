@@ -240,34 +240,47 @@ async def metrics_latency_percentiles(
     )
 
 
-@router.get("/system/tracemalloc-top")
-async def system_tracemalloc_top(limit: int = 20) -> dict[str, Any]:
-    """R34 leak hunt: tracemalloc top stat by file:line, 找 RSS 11.8 GB/h 真凶.
+@router.get("/system/gc-types-top")
+async def system_gc_types_top(limit: int = 30) -> dict[str, Any]:
+    """R37 leak hunt: gc.get_objects() type 计数 + 总字节估算.
 
-    依赖 api/app.py 顶层 tracemalloc.start(25). 返回 top N allocators 按 size 排序.
-    每行: file:line, size_kb, count. 跑 backend 5-10min 后看长期 allocator 累积.
+    heap dump 揭示 565K × 320 字节对象 = 181 MB; tracemalloc 看不到对象 type, 这里
+    用 gc 走 Python heap 全部对象 + collections.Counter 按 type 名称汇总, 找具体
+    哪个类持有大量实例 (Market / Dict / OrderbookSnapshot / ...).
     """
     import asyncio
-    import tracemalloc as _tm
-    if not _tm.is_tracing():
-        return {"error": "tracemalloc not started"}
-    # take_snapshot 是 sync CPU 操作 (dump 数 MB frames), 走 to_thread 避免阻塞 event loop
-    snapshot = await asyncio.to_thread(_tm.take_snapshot)
-    stats = await asyncio.to_thread(
-        lambda: snapshot.statistics("lineno")[:max(1, min(limit, 100))]
-    )
-    return {
-        "total_traced_mb": round(sum(s.size for s in snapshot.statistics("lineno")) / 1024 / 1024, 1),
-        "top": [
-            {
-                "file": str(s.traceback[0].filename),
-                "line": s.traceback[0].lineno,
-                "size_kb": round(s.size / 1024, 1),
-                "count": s.count,
-            }
-            for s in stats
-        ],
-    }
+    import gc as _gc
+    import sys as _sys
+    from collections import Counter
+
+    def _scan() -> dict[str, Any]:
+        objs = _gc.get_objects()
+        type_counts: Counter[str] = Counter()
+        type_size_estimate: dict[str, int] = {}
+        for obj in objs:
+            tname = type(obj).__name__
+            type_counts[tname] += 1
+            # 估 size 用 sys.getsizeof (浅 size 不含递归引用)
+            if tname not in type_size_estimate:
+                try:
+                    type_size_estimate[tname] = _sys.getsizeof(obj)
+                except Exception:
+                    type_size_estimate[tname] = 0
+        top = type_counts.most_common(max(1, min(limit, 100)))
+        return {
+            "total_objects": len(objs),
+            "top": [
+                {
+                    "type": tname,
+                    "count": count,
+                    "avg_size_bytes": type_size_estimate.get(tname, 0),
+                    "estimated_total_mb": round(count * type_size_estimate.get(tname, 0) / 1024 / 1024, 2),
+                }
+                for tname, count in top
+            ],
+        }
+
+    return await asyncio.to_thread(_scan)
 
 
 @router.get("/system")

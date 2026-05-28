@@ -4,13 +4,6 @@ import fcntl
 import logging
 import os
 import sys
-import tracemalloc
-
-# R34: 启动即开 tracemalloc (depth=25), 让 /system/tracemalloc-top endpoint
-# 能 dump top allocators by file:line. RSS 实测 11.8 GB/h 增长但 GC gen2
-# 不触发 = long-lived 对象在累积, 必须 instrument 找源头.
-if not tracemalloc.is_tracing():
-    tracemalloc.start(25)
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
