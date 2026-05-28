@@ -314,17 +314,31 @@ class GammaEventDTO:
         raw_category = _first_value(self.raw, "category")
         raw_events: list[RawMarketEvent] = []
         for market in markets:
-            payload = dict(market.raw)
-            if _first_value(payload, "eventId") is None and self.event_id is not None:
-                payload["eventId"] = self.event_id
-            if _first_value(payload, "eventSlug") is None and self.event_slug is not None:
-                payload["eventSlug"] = self.event_slug
-            if _first_value(payload, "eventTitle") is None and self.event_title is not None:
-                payload["eventTitle"] = self.event_title
-            if _first_value(payload, "tags") is None and raw_tags is not None:
-                payload["tags"] = raw_tags
-            if _first_value(payload, "category") is None and raw_category is not None:
-                payload["category"] = raw_category
+            # R34: market.raw 已是 MappingProxyType (immutable, _unwrap_mapping 保证),
+            # RawMarketEvent.payload: Mapping 协议直接接受. 只在真需要 enrich event-level
+            # 字段时才 dict-copy, 大部分 market 已含 eventId/eventSlug, 跳过 copy.
+            needs_enrich = (
+                (self.event_id is not None and _first_value(market.raw, "eventId") is None)
+                or (self.event_slug is not None and _first_value(market.raw, "eventSlug") is None)
+                or (self.event_title is not None and _first_value(market.raw, "eventTitle") is None)
+                or (raw_tags is not None and _first_value(market.raw, "tags") is None)
+                or (raw_category is not None and _first_value(market.raw, "category") is None)
+            )
+            if needs_enrich:
+                payload: Mapping[str, Any] = dict(market.raw)
+                p = payload  # type: ignore[assignment]
+                if _first_value(p, "eventId") is None and self.event_id is not None:
+                    p["eventId"] = self.event_id  # type: ignore[index]
+                if _first_value(p, "eventSlug") is None and self.event_slug is not None:
+                    p["eventSlug"] = self.event_slug  # type: ignore[index]
+                if _first_value(p, "eventTitle") is None and self.event_title is not None:
+                    p["eventTitle"] = self.event_title  # type: ignore[index]
+                if _first_value(p, "tags") is None and raw_tags is not None:
+                    p["tags"] = raw_tags  # type: ignore[index]
+                if _first_value(p, "category") is None and raw_category is not None:
+                    p["category"] = raw_category  # type: ignore[index]
+            else:
+                payload = market.raw
             raw_events.append(
                 RawMarketEvent(
                     source=source,
@@ -351,20 +365,32 @@ def normalize_gamma_event(payload: Mapping[str, Any]) -> GammaEventDTO:
     # 的 tags/category 写进每个 market.raw, 让 fallback 链路能拿到.
     event_tags = _first_value(normalized, "tags")
     event_category = _first_value(normalized, "category")
+    event_slug_v = _first_value(normalized, "slug", "eventSlug")
+    event_title_v = _first_value(normalized, "title", "eventTitle")
     markets_raw = list(_iter_mappings(normalized, "markets", "items", "results"))
     markets_enriched: list[GammaMarketDTO] = []
     for m_raw in markets_raw:
-        m_copy = dict(m_raw)
-        if not _first_value(m_copy, "tags") and event_tags is not None:
-            m_copy["tags"] = event_tags
-        if not _first_value(m_copy, "category") and event_category is not None:
-            m_copy["category"] = event_category
-        # 顺便注入 event 元信息让 GammaMarketDTO event_slug/title fallback 拿到
-        if not _first_value(m_copy, "eventSlug", "event_slug"):
-            m_copy["eventSlug"] = _first_value(normalized, "slug", "eventSlug")
-        if not _first_value(m_copy, "eventTitle", "event_title"):
-            m_copy["eventTitle"] = _first_value(normalized, "title", "eventTitle")
-        markets_enriched.append(normalize_gamma_market(m_copy))
+        # R34: gamma /events/keyset 实测大部分 market 已含 tags/eventSlug — 跳过 dict-copy
+        # 路径才能让 normalize_gamma_market 直接接 immutable MappingProxyType.
+        needs_enrich = (
+            (event_tags is not None and not _first_value(m_raw, "tags"))
+            or (event_category is not None and not _first_value(m_raw, "category"))
+            or (event_slug_v is not None and not _first_value(m_raw, "eventSlug", "event_slug"))
+            or (event_title_v is not None and not _first_value(m_raw, "eventTitle", "event_title"))
+        )
+        if needs_enrich:
+            m_copy = dict(m_raw)
+            if not _first_value(m_copy, "tags") and event_tags is not None:
+                m_copy["tags"] = event_tags
+            if not _first_value(m_copy, "category") and event_category is not None:
+                m_copy["category"] = event_category
+            if not _first_value(m_copy, "eventSlug", "event_slug"):
+                m_copy["eventSlug"] = event_slug_v
+            if not _first_value(m_copy, "eventTitle", "event_title"):
+                m_copy["eventTitle"] = event_title_v
+            markets_enriched.append(normalize_gamma_market(m_copy))
+        else:
+            markets_enriched.append(normalize_gamma_market(m_raw))
     return GammaEventDTO(raw=normalized, markets=tuple(markets_enriched))
 
 

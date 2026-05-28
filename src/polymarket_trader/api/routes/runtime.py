@@ -240,6 +240,36 @@ async def metrics_latency_percentiles(
     )
 
 
+@router.get("/system/tracemalloc-top")
+async def system_tracemalloc_top(limit: int = 20) -> dict[str, Any]:
+    """R34 leak hunt: tracemalloc top stat by file:line, 找 RSS 11.8 GB/h 真凶.
+
+    依赖 api/app.py 顶层 tracemalloc.start(25). 返回 top N allocators 按 size 排序.
+    每行: file:line, size_kb, count. 跑 backend 5-10min 后看长期 allocator 累积.
+    """
+    import asyncio
+    import tracemalloc as _tm
+    if not _tm.is_tracing():
+        return {"error": "tracemalloc not started"}
+    # take_snapshot 是 sync CPU 操作 (dump 数 MB frames), 走 to_thread 避免阻塞 event loop
+    snapshot = await asyncio.to_thread(_tm.take_snapshot)
+    stats = await asyncio.to_thread(
+        lambda: snapshot.statistics("lineno")[:max(1, min(limit, 100))]
+    )
+    return {
+        "total_traced_mb": round(sum(s.size for s in snapshot.statistics("lineno")) / 1024 / 1024, 1),
+        "top": [
+            {
+                "file": str(s.traceback[0].filename),
+                "line": s.traceback[0].lineno,
+                "size_kb": round(s.size / 1024, 1),
+                "count": s.count,
+            }
+            for s in stats
+        ],
+    }
+
+
 @router.get("/system")
 async def system_perf(runtime: Any = Depends(get_runtime)) -> dict[str, Any]:
     """系统级运行状态——CPU / 内存 / DB pool / 工作流阶段耗时 / 队列水位.
